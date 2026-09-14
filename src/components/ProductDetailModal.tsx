@@ -16,6 +16,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { Product, UserRole, ColorVariation } from '../types';
+import { FormattedText } from './FormattedText';
 
 interface ProductDetailModalProps {
   product: Product | null;
@@ -684,7 +685,13 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
 
               {/* Tab Content */}
               <div className="py-2.5 text-xs text-slate-600 min-h-[60px]">
-                {activeTab === 'details' && <p className="leading-relaxed">{product.description}</p>}
+                {activeTab === 'details' && (
+                  <FormattedText
+                    content={product.description}
+                    fallback={`${product.name} is built with top-tier materials to ensure maximum performance and durability.`}
+                    className="text-xs text-slate-600"
+                  />
+                )}
 
                 {hasSpecifications && activeTab === 'specs' && (
                   <div className="space-y-1">

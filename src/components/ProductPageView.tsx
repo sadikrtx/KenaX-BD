@@ -28,6 +28,7 @@ import {
   AlertCircle,
 } from 'lucide-react';
 import { Product, UserRole, ColorVariation, Order, CustomerRecord } from '../types';
+import { FormattedText } from './FormattedText';
 import { ProductCard } from './ProductCard';
 import { applyProductOpenGraphMeta, restoreStoreOpenGraphMeta } from '../utils/seo';
 
@@ -1115,10 +1116,11 @@ export const ProductPageView: React.FC<ProductPageViewProps> = ({
               <div className="space-y-6">
                 <div>
                   <h3 className="text-lg font-black text-slate-900 mb-3">Product Overview</h3>
-                  <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-line">
-                    {product.description ||
-                      `${product.name} is built with top-tier materials to ensure maximum performance and durability. Tested and verified for high satisfaction.`}
-                  </p>
+                  <FormattedText
+                    content={product.description}
+                    fallback={`${product.name} is built with top-tier materials to ensure maximum performance and durability. Tested and verified for high satisfaction.`}
+                    className="text-sm text-slate-700"
+                  />
                 </div>
 
                 {/* Key Highlights */}

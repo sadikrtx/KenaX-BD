@@ -46,6 +46,7 @@ import {
 } from '../../types';
 import { hasPermission } from '../../lib/permissions';
 import { compressImage } from '../../lib/firebase';
+import { FormattedText } from '../FormattedText';
 
 interface AdminProductsProps {
   products: Product[];
@@ -99,6 +100,7 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
   const [formVideoFile, setFormVideoFile] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
   const [formDescription, setFormDescription] = useState('');
+  const [descMode, setDescMode] = useState<'edit' | 'preview'>('edit');
   const [formType, setFormType] = useState<ProductType>('own');
   const [formSupplierName, setFormSupplierName] = useState('');
   const [formSupplierUrl, setFormSupplierUrl] = useState('');
@@ -1710,18 +1712,100 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                 {/* Description & Specifications Side-by-Side Compact Layout */}
                 <div className="sm:col-span-2 grid grid-cols-1 lg:grid-cols-2 gap-3.5">
                   {/* Left: Product Description */}
-                  <div className="p-3.5 bg-slate-50/80 border border-slate-200 rounded-xl space-y-1.5 flex flex-col">
-                    <label className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
-                      <FileText className="w-3.5 h-3.5 text-sky-600" />
-                      <span>Description</span>
-                    </label>
-                    <textarea
-                      rows={5}
-                      value={formDescription}
-                      onChange={(e) => setFormDescription(e.target.value)}
-                      placeholder="Detailed product highlights, warranty, features..."
-                      className="w-full flex-1 px-3 py-2 rounded-lg border border-slate-300 text-xs text-slate-900 leading-relaxed bg-white focus:ring-2 focus:ring-sky-500"
-                    />
+                  <div className="p-3.5 bg-slate-50/80 border border-slate-200 rounded-xl space-y-2 flex flex-col">
+                    <div className="flex items-center justify-between flex-wrap gap-1.5">
+                      <label className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                        <FileText className="w-3.5 h-3.5 text-sky-600" />
+                        <span>Description (ফরম্যাটিং সাপোর্টেড)</span>
+                      </label>
+                      <div className="flex items-center gap-1 bg-slate-200/70 p-0.5 rounded-lg text-[10px] font-bold">
+                        <button
+                          type="button"
+                          onClick={() => setDescMode('edit')}
+                          className={`px-2 py-0.5 rounded-md transition-colors cursor-pointer ${
+                            descMode === 'edit'
+                              ? 'bg-white text-sky-700 shadow-xs'
+                              : 'text-slate-600 hover:text-slate-900'
+                          }`}
+                        >
+                          ✏️ Edit
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setDescMode('preview')}
+                          className={`px-2 py-0.5 rounded-md transition-colors cursor-pointer ${
+                            descMode === 'preview'
+                              ? 'bg-white text-sky-700 shadow-xs'
+                              : 'text-slate-600 hover:text-slate-900'
+                          }`}
+                        >
+                          👁️ Live Preview
+                        </button>
+                      </div>
+                    </div>
+
+                    {descMode === 'edit' ? (
+                      <>
+                        {/* Format helper buttons */}
+                        <div className="flex items-center gap-1.5 flex-wrap text-[10px]">
+                          <span className="text-slate-500 font-medium">ফরম্যাট:</span>
+                          <button
+                            type="button"
+                            onClick={() => setFormDescription((prev) => prev + ' **বোল্ড টেক্সট** ')}
+                            className="px-1.5 py-0.5 bg-white border border-slate-300 rounded hover:bg-sky-50 hover:border-sky-300 text-slate-800 font-extrabold cursor-pointer"
+                          >
+                            **B** Bold
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setFormDescription((prev) => prev + ' *ইটালিক টেক্সট* ')}
+                            className="px-1.5 py-0.5 bg-white border border-slate-300 rounded hover:bg-sky-50 hover:border-sky-300 text-slate-800 italic cursor-pointer"
+                          >
+                            *I* Italic
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setFormDescription((prev) => prev + '\n# হেডিং ১\n')}
+                            className="px-1.5 py-0.5 bg-white border border-slate-300 rounded hover:bg-sky-50 hover:border-sky-300 text-slate-800 font-black cursor-pointer"
+                          >
+                            # H1
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setFormDescription((prev) => prev + '\n## হেডিং ২\n')}
+                            className="px-1.5 py-0.5 bg-white border border-slate-300 rounded hover:bg-sky-50 hover:border-sky-300 text-slate-800 font-bold cursor-pointer"
+                          >
+                            ## H2
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setFormDescription((prev) => prev + '\n- পয়েন্ট ১\n- পয়েন্ট ২\n')}
+                            className="px-1.5 py-0.5 bg-white border border-slate-300 rounded hover:bg-sky-50 hover:border-sky-300 text-slate-800 font-semibold cursor-pointer"
+                          >
+                            • List
+                          </button>
+                        </div>
+
+                        <textarea
+                          rows={6}
+                          value={formDescription}
+                          onChange={(e) => setFormDescription(e.target.value)}
+                          placeholder="উদাহরণ: **প্রোডাক্ট ফিচার্স:**\n- ১০০% অরিজিনাল ব্র্যান্ড প্রোডাক্ট\n- ১ বছরের ওয়ারেন্টি\n# মূল বৈশিষ্ট্যসমূহ"
+                          className="w-full flex-1 px-3 py-2 rounded-lg border border-slate-300 text-xs text-slate-900 leading-relaxed bg-white focus:ring-2 focus:ring-sky-500 font-sans"
+                        />
+                        <p className="text-[10px] text-slate-500 italic">
+                          💡 টেক্সটের দুই পাশে <code className="bg-slate-200 px-1 py-0.5 rounded text-slate-800 font-mono">**</code> দিলে বোল্ড হবে, <code className="bg-slate-200 px-1 py-0.5 rounded text-slate-800 font-mono">#</code> দিলে বড় শিরোনাম হবে এবং <code className="bg-slate-200 px-1 py-0.5 rounded text-slate-800 font-mono">-</code> দিলে বুলেট পয়েন্ট হবে।
+                        </p>
+                      </>
+                    ) : (
+                      <div className="p-3 bg-white border border-slate-200 rounded-lg min-h-[140px] max-h-[220px] overflow-y-auto text-xs">
+                        {formDescription.trim() ? (
+                          <FormattedText content={formDescription} className="text-xs text-slate-800" />
+                        ) : (
+                          <span className="text-slate-400 italic">কোনো ডেসক্রিপশন লেখা হয়নি। "Edit" ট্যাবে গিয়ে লিখুন।</span>
+                        )}
+                      </div>
+                    )}
                   </div>
 
                   {/* Right: Product Specifications */}
