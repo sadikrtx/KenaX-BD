@@ -1,0 +1,136 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <!-- Deep Navy & Obsidian Radial Background -->
+    <radialGradient id="bgGrad" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#071326" />
+      <stop offset="65%" stop-color="#030814" />
+      <stop offset="100%" stop-color="#010308" />
+    </radialGradient>
+
+    <!-- Electric Neon Cyan-Blue Ring Gradient -->
+    <linearGradient id="neonRingGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0066FF" />
+      <stop offset="25%" stop-color="#00C8FF" />
+      <stop offset="70%" stop-color="#0077FF" />
+      <stop offset="100%" stop-color="#00F0FF" />
+    </linearGradient>
+
+    <!-- Metallic Silver-White Gradient for KENA & BD -->
+    <linearGradient id="chromeGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#FFFFFF" />
+      <stop offset="40%" stop-color="#F2F7FC" />
+      <stop offset="70%" stop-color="#D6E5F3" />
+      <stop offset="100%" stop-color="#A8C8E6" />
+    </linearGradient>
+
+    <!-- Electric Cyan Gradient for X -->
+    <linearGradient id="xBlueGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0077FF" />
+      <stop offset="45%" stop-color="#00BFFF" />
+      <stop offset="100%" stop-color="#00F5FF" />
+    </linearGradient>
+
+    <!-- Aerodynamic Luminous Swoosh Gradient -->
+    <linearGradient id="swooshGrad" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#00D2FF" />
+      <stop offset="50%" stop-color="#80E8FF" />
+      <stop offset="100%" stop-color="#FFFFFF" />
+    </linearGradient>
+
+    <!-- Speed Lines Cyan Gradient -->
+    <linearGradient id="cyanGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#0055FF" />
+      <stop offset="100%" stop-color="#00F0FF" />
+    </linearGradient>
+
+    <!-- Wheel Glow Radial Gradient -->
+    <radialGradient id="wheelGrad" cx="35%" cy="35%" r="65%">
+      <stop offset="0%" stop-color="#A5F3FC" />
+      <stop offset="50%" stop-color="#00B4FF" />
+      <stop offset="100%" stop-color="#0052CC" />
+    </radialGradient>
+  </defs>
+
+  <!-- 1. BASE OBSIDIAN/NAVY CIRCLE -->
+  <circle cx="256" cy="256" r="252" fill="url(#bgGrad)" />
+
+  <!-- 2. HIGH-DEFINITION NEON RING BORDERS -->
+  <circle cx="256" cy="256" r="236" fill="none" stroke="url(#neonRingGrad)" stroke-width="12" />
+  <circle cx="256" cy="256" r="226" fill="none" stroke="#FFFFFF" stroke-width="2" opacity="0.6" />
+
+  <!-- 3. SHOPPING CART ICON WITH SPEED TRAILS -->
+  <g id="cart-group" transform="translate(18, -10)">
+    <!-- Speed motion trails (Cyan gradient) -->
+    <path d="M106 132 L198 132 Q204 132 198 138 L106 138 Q100 135 106 132 Z" fill="url(#cyanGrad)" />
+    <path d="M125 152 L208 152 Q214 152 208 159 L125 159 Q119 155 125 152 Z" fill="url(#cyanGrad)" />
+    <path d="M150 173 L216 173 Q220 173 216 180 L150 180 Q145 176 150 173 Z" fill="url(#cyanGrad)" />
+
+    <!-- Main Crisp White Basket Frame -->
+    <path d="M172 108 L212 108 L235 178 L320 178 L342 122 L215 122" 
+          fill="none" 
+          stroke="#FFFFFF" 
+          stroke-width="13" 
+          stroke-linecap="round" 
+          stroke-linejoin="round" />
+    
+    <!-- Basket Middle Divider Bar -->
+    <line x1="228" y1="147" x2="330" y2="147" stroke="#FFFFFF" stroke-width="8" stroke-linecap="round" />
+
+    <!-- 2 Neon Blue Glowing Wheels -->
+    <circle cx="240" cy="196" r="15" fill="url(#wheelGrad)" stroke="#FFFFFF" stroke-width="3" />
+    <circle cx="290" cy="196" r="15" fill="url(#wheelGrad)" stroke="#FFFFFF" stroke-width="3" />
+  </g>
+
+  <!-- 4. CENTER BRAND WORDMARK: "Kena" (Metallic Chrome White) + "X" (Electric Cyan-Blue) -->
+  <g id="wordmark">
+    <!-- "Kena" bold italic wordmark -->
+    <text x="46" y="324" 
+          font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Montserrat', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" 
+          font-size="120" 
+          font-weight="900" 
+          font-style="italic" 
+          letter-spacing="-3" 
+          fill="url(#chromeGrad)">
+      Kena
+    </text>
+
+    <!-- Stylized "X" letter with dynamic swoosh -->
+    <g transform="translate(305, 214)">
+      <!-- Main body of X -->
+      <path d="M16 14 L46 14 L76 62 L106 14 L136 14 L92 70 L142 110 L112 110 L76 78 L40 110 L10 110 L60 64 Z" 
+            fill="url(#xBlueGrad)" />
+      
+      <!-- Top highlight on X -->
+      <path d="M16 14 L46 14 L76 62 L60 64 L10 110 L10 102 L48 60 Z" 
+            fill="#FFFFFF" 
+            opacity="0.35" />
+
+      <!-- Sharp aerodynamic cyan-to-white swoosh cutting across X -->
+      <path d="M-22 76 C15 76 38 64 82 37 C118 15 148 -1 165 -11 C142 6 95 39 65 55 C40 68 15 74 -22 76 Z" 
+            fill="url(#swooshGrad)" />
+      <path d="M-12 75 C25 75 55 60 100 30 C135 9 155 -3 162 -8 C145 3 108 30 80 48 C50 65 20 73 -12 75 Z" 
+            fill="#FFFFFF" 
+            opacity="0.95" />
+    </g>
+  </g>
+
+  <!-- 5. BOTTOM ACCENT: "— BD —" -->
+  <g id="bd-section" transform="translate(0, 360)">
+    <!-- Left Neon Line -->
+    <line x1="120" y1="-8" x2="208" y2="-8" stroke="#00A8FF" stroke-width="6" stroke-linecap="round" />
+
+    <!-- "BD" Letters in bold Chrome -->
+    <text x="256" y="5" 
+          text-anchor="middle" 
+          font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Montserrat', 'Segoe UI', Arial, sans-serif" 
+          font-size="46" 
+          font-weight="900" 
+          letter-spacing="4" 
+          fill="url(#chromeGrad)">
+      BD
+    </text>
+
+    <!-- Right Neon Line -->
+    <line x1="304" y1="-8" x2="392" y2="-8" stroke="#00A8FF" stroke-width="6" stroke-linecap="round" />
+  </g>
+</svg>

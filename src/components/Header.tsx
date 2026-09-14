@@ -1,0 +1,1382 @@
+import React, { useState, useRef, useEffect } from 'react';
+import {
+  Search,
+  Heart,
+  ShoppingCart,
+  User,
+  Menu,
+  X,
+  ChevronDown,
+  ChevronRight,
+  Truck,
+  ShieldCheck,
+  CreditCard,
+  PhoneCall,
+  Sparkles,
+  LayoutDashboard,
+  LogOut,
+  MapPin,
+  CheckCircle,
+  Smartphone,
+  Shirt,
+  Armchair,
+  Dumbbell,
+  Baby,
+  Car,
+  HeartPulse,
+  Headphones,
+  Grid,
+  Flame,
+  Home,
+  Info,
+  Layers,
+  ArrowRight,
+  Tag,
+  Zap,
+} from 'lucide-react';
+import { KenaXLogo } from './KenaXLogo';
+import { UserRole, CustomerRecord, StaffUser, Category, SubCategoryItem, Product, WebsiteSettings } from '../types';
+import { getEffectiveNavItems } from '../data/defaultNavItems';
+
+interface HeaderProps {
+  cartCount: number;
+  wishlistCount: number;
+  currentRole: UserRole;
+  currentView: string;
+  currentCustomer?: CustomerRecord | null;
+  onOpenCustomerAuth?: (tab?: 'login' | 'register') => void;
+  onCustomerLogout?: () => void;
+  currentStaff?: StaffUser | null;
+  onOpenStaffLogin?: () => void;
+  onStaffLogout?: () => void;
+  onNavigate: (view: string) => void;
+  onOpenCart: () => void;
+  onOpenWishlist: () => void;
+  onOpenAIAssistant: () => void;
+  onRoleChange: (role: UserRole) => void;
+  searchQuery: string;
+  setSearchQuery: (query: string) => void;
+  selectedCategory: string;
+  onSelectCategory: (cat: string, subcategory?: string, subSubcategory?: string) => void;
+  categories: Category[];
+  products?: Product[];
+  customLogoUrl?: string;
+  siteName?: string;
+  siteSettings?: WebsiteSettings;
+}
+
+export const Header: React.FC<HeaderProps> = ({
+  cartCount,
+  wishlistCount,
+  currentRole,
+  currentView,
+  currentCustomer,
+  onOpenCustomerAuth,
+  onCustomerLogout,
+  currentStaff,
+  onOpenStaffLogin,
+  onStaffLogout,
+  onNavigate,
+  onOpenCart,
+  onOpenWishlist,
+  onOpenAIAssistant,
+  onRoleChange,
+  searchQuery,
+  setSearchQuery,
+  selectedCategory,
+  onSelectCategory,
+  categories,
+  products = [],
+  customLogoUrl,
+  siteName,
+  siteSettings,
+}) => {
+  const [isCategoryMenuOpen, setIsCategoryMenuOpen] = useState(false);
+  const [isAccountDropdownOpen, setIsAccountDropdownOpen] = useState(false);
+  const [isMobileAccountOpen, setIsMobileAccountOpen] = useState(false);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [isHeaderVisible, setIsHeaderVisible] = useState(true);
+  const [mobileActiveTab, setMobileActiveTab] = useState<'categories' | 'menu'>('categories');
+  const [hoveredCatId, setHoveredCatId] = useState<string | null>(null);
+  const [mobileExpandedCatIds, setMobileExpandedCatIds] = useState<Record<string, boolean>>({});
+  const [mobileExpandedSubKeys, setMobileExpandedSubKeys] = useState<Record<string, boolean>>({});
+
+  // Scroll tracking refs for smart mobile header hide/reveal with intentional delays
+  const lastScrollY = useRef(0);
+  const hideTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const revealTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const idleScrollTimer = useRef<NodeJS.Timeout | null>(null);
+  const isHeaderVisibleRef = useRef(true);
+
+  // Sync ref with state
+  useEffect(() => {
+    isHeaderVisibleRef.current = isHeaderVisible;
+  }, [isHeaderVisible]);
+
+  // Extract custom admin tags from products to dynamically display in top navigation
+  const dynamicCustomTags = React.useMemo(() => {
+    if (!products || products.length === 0) return [];
+    const tagSet = new Set<string>();
+    const standardSet = new Set(['shop', 'flash sale', 'new arrivals', 'deals', 'hot deals', 'best seller', 'trending', 'featured', 'none']);
+    products.forEach((p) => {
+      if (p.tags && Array.isArray(p.tags)) {
+        p.tags.forEach((t) => {
+          const cleaned = (t || '').trim();
+          if (cleaned && !standardSet.has(cleaned.toLowerCase())) {
+            tagSet.add(cleaned);
+          }
+        });
+      }
+    });
+    return Array.from(tagSet).slice(0, 5);
+  }, [products]);
+
+  // Effective header navigation items sorted by priority
+  const navItems = React.useMemo(() => {
+    return getEffectiveNavItems(siteSettings?.navigationItems).filter((item) => item.enabled !== false);
+  }, [siteSettings?.navigationItems]);
+
+  // Refs for click outside & hover management
+  const categoryMenuRef = useRef<HTMLDivElement>(null);
+  const accountDropdownRef = useRef<HTMLDivElement>(null);
+  const mobileAccountRef = useRef<HTMLDivElement>(null);
+  const mobileMenuRef = useRef<HTMLDivElement>(null);
+  const categoryHoverTimer = useRef<NodeJS.Timeout | null>(null);
+  const accountHoverTimer = useRef<NodeJS.Timeout | null>(null);
+
+  // All categories displayed cleanly without omissions
+  const displayedCategories = [...categories].sort((a, b) => (a.priority ?? 0) - (b.priority ?? 0));
+
+  const normalizeSubs = (subs?: (string | SubCategoryItem)[]): SubCategoryItem[] => {
+    if (!subs) return [];
+    return subs.map((s, idx) => {
+      if (typeof s === 'string') {
+        return {
+          id: `sub-${idx}-${s}`,
+          name: s,
+          icon: 'Layers',
+          subSubcategories: [],
+        };
+      }
+      return {
+        id: s.id || `sub-${idx}-${s.name}`,
+        name: s.name,
+        icon: s.icon || 'Layers',
+        subSubcategories: s.subSubcategories || [],
+      };
+    });
+  };
+
+  const activeHoveredCat = displayedCategories.find((c) => c.id === hoveredCatId) || displayedCategories[0];
+
+  // Category Icon helper
+  const getCategoryIcon = (slug?: string, name?: string) => {
+    const s = `${slug || ''} ${name || ''}`.toLowerCase();
+    if (s.includes('electronic') || s.includes('gadget') || s.includes('phone')) {
+      return <Smartphone className="w-4 h-4 text-sky-600" />;
+    }
+    if (s.includes('fashion') || s.includes('cloth') || s.includes('wear') || s.includes('dress')) {
+      return <Shirt className="w-4 h-4 text-rose-500" />;
+    }
+    if (s.includes('home') || s.includes('living') || s.includes('furniture')) {
+      return <Armchair className="w-4 h-4 text-emerald-600" />;
+    }
+    if (s.includes('beauty') || s.includes('care') || s.includes('cosmetic')) {
+      return <Sparkles className="w-4 h-4 text-purple-500" />;
+    }
+    if (s.includes('sport') || s.includes('fitness') || s.includes('gym')) {
+      return <Dumbbell className="w-4 h-4 text-blue-600" />;
+    }
+    if (s.includes('toy') || s.includes('kid') || s.includes('baby')) {
+      return <Baby className="w-4 h-4 text-amber-500" />;
+    }
+    if (s.includes('auto') || s.includes('car') || s.includes('motor')) {
+      return <Car className="w-4 h-4 text-sky-700" />;
+    }
+    if (s.includes('health') || s.includes('wellness') || s.includes('medical')) {
+      return <HeartPulse className="w-4 h-4 text-red-500" />;
+    }
+    if (s.includes('headphone') || s.includes('audio') || s.includes('accessori')) {
+      return <Headphones className="w-4 h-4 text-indigo-600" />;
+    }
+    return <Grid className="w-4 h-4 text-slate-600" />;
+  };
+
+  // Category menu hover handlers
+  const handleCategoryMouseEnter = () => {
+    if (categoryHoverTimer.current) {
+      clearTimeout(categoryHoverTimer.current);
+      categoryHoverTimer.current = null;
+    }
+    setIsCategoryMenuOpen(true);
+  };
+
+  const handleCategoryMouseLeave = () => {
+    if (categoryHoverTimer.current) clearTimeout(categoryHoverTimer.current);
+    categoryHoverTimer.current = setTimeout(() => {
+      setIsCategoryMenuOpen(false);
+    }, 180);
+  };
+
+  // Account dropdown hover handlers
+  const handleAccountMouseEnter = () => {
+    if (accountHoverTimer.current) {
+      clearTimeout(accountHoverTimer.current);
+      accountHoverTimer.current = null;
+    }
+  };
+
+  const handleAccountMouseLeave = () => {
+    if (accountHoverTimer.current) clearTimeout(accountHoverTimer.current);
+    accountHoverTimer.current = setTimeout(() => {
+      setIsAccountDropdownOpen(false);
+    }, 220);
+  };
+
+  // Global click outside & keydown listener
+  useEffect(() => {
+    const handleGlobalClick = (event: MouseEvent | TouchEvent) => {
+      const target = event.target as Node;
+      if (categoryMenuRef.current && !categoryMenuRef.current.contains(target)) {
+        setIsCategoryMenuOpen(false);
+      }
+      if (accountDropdownRef.current && !accountDropdownRef.current.contains(target)) {
+        setIsAccountDropdownOpen(false);
+      }
+      if (mobileAccountRef.current && !mobileAccountRef.current.contains(target)) {
+        setIsMobileAccountOpen(false);
+      }
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setIsCategoryMenuOpen(false);
+        setIsAccountDropdownOpen(false);
+        setIsMobileAccountOpen(false);
+        setIsMobileMenuOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleGlobalClick);
+    document.addEventListener('touchstart', handleGlobalClick);
+    document.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      document.removeEventListener('mousedown', handleGlobalClick);
+      document.removeEventListener('touchstart', handleGlobalClick);
+      document.removeEventListener('keydown', handleKeyDown);
+      if (categoryHoverTimer.current) clearTimeout(categoryHoverTimer.current);
+      if (accountHoverTimer.current) clearTimeout(accountHoverTimer.current);
+    };
+  }, []);
+
+  // Mobile scroll behavior with user-configured timing:
+  // - Scroll down: waits 2 seconds of downward motion before sliding up/hiding
+  // - Scroll up: does not pop in immediately; waits 1.5 seconds of upward scrolling before descending
+  // - Reaching the very top (<= 25px): instantly shows header without waiting
+  // - Idle for 5.5 seconds: auto-reveals header
+  useEffect(() => {
+    const clearAllTimers = () => {
+      if (hideTimerRef.current) {
+        clearTimeout(hideTimerRef.current);
+        hideTimerRef.current = null;
+      }
+      if (revealTimerRef.current) {
+        clearTimeout(revealTimerRef.current);
+        revealTimerRef.current = null;
+      }
+      if (idleScrollTimer.current) {
+        clearTimeout(idleScrollTimer.current);
+        idleScrollTimer.current = null;
+      }
+    };
+
+    const resetIdleTimer = () => {
+      if (idleScrollTimer.current) {
+        clearTimeout(idleScrollTimer.current);
+      }
+      idleScrollTimer.current = setTimeout(() => {
+        setIsHeaderVisible(true);
+      }, 5500); // 5.5 seconds idle delay
+    };
+
+    const handleScroll = () => {
+      const currentScrollY = window.scrollY;
+
+      // At top of page, always immediately show header
+      if (currentScrollY <= 25) {
+        clearAllTimers();
+        setIsHeaderVisible(true);
+        lastScrollY.current = currentScrollY;
+        return;
+      }
+
+      const diff = currentScrollY - lastScrollY.current;
+
+      // 1. User scrolling DOWN:
+      // Don't hide instantly. Wait 2 seconds (2000ms) of downward scrolling before hiding header.
+      if (diff > 6) {
+        // If an upward reveal was pending, cancel it
+        if (revealTimerRef.current) {
+          clearTimeout(revealTimerRef.current);
+          revealTimerRef.current = null;
+        }
+
+        // Start 2-second hide timer if header is currently visible and not already counting down
+        if (isHeaderVisibleRef.current && !hideTimerRef.current) {
+          hideTimerRef.current = setTimeout(() => {
+            setIsHeaderVisible(false);
+            setIsMobileAccountOpen(false); // Close mobile account popup when scrolling away
+            hideTimerRef.current = null;
+            resetIdleTimer();
+          }, 2000); // 2 seconds delay
+        }
+      }
+      // 2. User scrolling UP:
+      // Don't reveal immediately. Require 1.5 seconds of upward scrolling before sliding down.
+      else if (diff < -6) {
+        // If a downward hide was pending, cancel it
+        if (hideTimerRef.current) {
+          clearTimeout(hideTimerRef.current);
+          hideTimerRef.current = null;
+        }
+
+        // Start 1.5-second reveal timer if header is currently hidden and not already counting down
+        if (!isHeaderVisibleRef.current && !revealTimerRef.current) {
+          revealTimerRef.current = setTimeout(() => {
+            setIsHeaderVisible(true);
+            revealTimerRef.current = null;
+          }, 1500); // 1.5 seconds delay
+        }
+      }
+
+      lastScrollY.current = currentScrollY;
+    };
+
+    window.addEventListener('scroll', handleScroll, { passive: true });
+
+    return () => {
+      window.removeEventListener('scroll', handleScroll);
+      clearAllTimers();
+    };
+  }, []);
+
+  const handleSearchSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    onNavigate('shop');
+  };
+
+  return (
+    <header
+      className={`sticky top-0 z-40 bg-white border-b border-slate-200 shadow-xs transition-transform duration-300 ease-in-out ${
+        isHeaderVisible ? 'translate-y-0' : '-translate-y-full md:translate-y-0'
+      }`}
+    >
+      {/* Main Header Bar */}
+      <div className="max-w-[1536px] mx-auto px-3 sm:px-6 lg:px-8 py-2.5 sm:py-3 flex items-center justify-between gap-3 sm:gap-4">
+        {/* Logo at the far left corner */}
+        <div
+          onClick={() => {
+            onNavigate('home');
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+          }}
+          className="cursor-pointer transition-transform active:scale-95 shrink-0 py-0.5 sm:py-1"
+        >
+          <KenaXLogo size="md" customLogoUrl={customLogoUrl} siteName={siteName} />
+        </div>
+
+        {/* Desktop Search Bar with Search Button */}
+        <form
+          onSubmit={handleSearchSubmit}
+          className="flex-1 max-w-2xl hidden md:flex items-center relative"
+        >
+          <div className="relative w-full flex items-center">
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search for products, brands and more..."
+              className="w-full pl-4 pr-12 py-2.5 rounded-l-xl border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-sky-500 focus:border-sky-500 text-sm text-slate-800 placeholder-slate-400 shadow-xs"
+            />
+            <button
+              type="submit"
+              className="bg-sky-600 hover:bg-sky-700 active:bg-sky-800 text-white px-6 py-2.5 rounded-r-xl font-medium text-sm transition-colors flex items-center justify-center shrink-0 cursor-pointer shadow-xs"
+            >
+              <Search className="w-4 h-4 mr-1.5" />
+              <span>Search</span>
+            </button>
+          </div>
+        </form>
+
+        {/* Desktop Right Actions: Account, Wishlist, Cart */}
+        <div className="hidden md:flex items-center gap-2 sm:gap-3">
+          {/* Customer Account or Login / Register for Visitors */}
+          {currentCustomer ? (
+            <div
+              ref={accountDropdownRef}
+              onMouseEnter={handleAccountMouseEnter}
+              onMouseLeave={handleAccountMouseLeave}
+              className="relative"
+            >
+              <button
+                onClick={() => setIsAccountDropdownOpen((prev) => !prev)}
+                className="flex items-center gap-2 p-1.5 sm:px-3 sm:py-2 rounded-xl hover:bg-slate-100 transition-colors text-slate-700 text-xs font-medium cursor-pointer"
+                aria-expanded={isAccountDropdownOpen}
+              >
+                <div className="w-8 h-8 rounded-full bg-sky-600 text-white flex items-center justify-center font-bold text-xs shadow-2xs">
+                  {currentCustomer.name.charAt(0).toUpperCase()}
+                </div>
+                <div className="hidden sm:flex flex-col text-left leading-tight">
+                  <span className="text-[10px] text-slate-500">
+                    {currentStaff ? 'Staff Account' : 'Customer Account'}
+                  </span>
+                  <span className="text-xs font-semibold text-slate-800 flex items-center">
+                    {currentCustomer.name.split(' ')[0]}
+                    <ChevronDown className={`w-3 h-3 ml-0.5 text-slate-400 transition-transform duration-200 ${isAccountDropdownOpen ? 'rotate-180' : ''}`} />
+                  </span>
+                </div>
+              </button>
+
+              {/* Dropdown Menu */}
+              {isAccountDropdownOpen && (
+                <div
+                  className="absolute right-0 mt-2 w-60 bg-white rounded-2xl shadow-xl border border-slate-200 py-2 z-50 text-slate-800 animate-in fade-in zoom-in-95 duration-100"
+                  onMouseEnter={handleAccountMouseEnter}
+                  onMouseLeave={handleAccountMouseLeave}
+                >
+                  <div className="px-4 py-2 border-b border-slate-100">
+                    <p className="text-xs text-slate-500">Signed in as</p>
+                    <p className="text-sm font-bold text-slate-900 truncate">{currentCustomer.name}</p>
+                    <p className="text-[11px] text-sky-600 font-mono truncate">{currentCustomer.email}</p>
+                  </div>
+
+                  <div className="py-1">
+                    {currentStaff && (
+                      <button
+                        onClick={() => {
+                          onNavigate('admin-dashboard');
+                          setIsAccountDropdownOpen(false);
+                        }}
+                        className="w-full text-left px-4 py-2.5 text-xs font-bold text-sky-700 bg-sky-50 hover:bg-sky-100 flex items-center gap-2 cursor-pointer border-b border-sky-100 mb-1"
+                      >
+                        <ShieldCheck className="w-4 h-4 text-sky-600" />
+                        <span>Admin Dashboard</span>
+                      </button>
+                    )}
+                    <button
+                      onClick={() => {
+                        onNavigate('customer-dashboard');
+                        setIsAccountDropdownOpen(false);
+                      }}
+                      className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-sky-50 hover:text-sky-700 flex items-center gap-2 cursor-pointer font-medium"
+                    >
+                      <User className="w-4 h-4 text-sky-600" /> My Account & Orders
+                    </button>
+                    <button
+                      onClick={() => {
+                        onNavigate('cart-items');
+                        setIsAccountDropdownOpen(false);
+                      }}
+                      className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-sky-50 hover:text-sky-700 flex items-center gap-2 cursor-pointer font-medium"
+                    >
+                      <ShoppingCart className="w-4 h-4 text-sky-600" /> My Cart Items
+                    </button>
+                    <button
+                      onClick={() => {
+                        onNavigate('saved-addresses');
+                        setIsAccountDropdownOpen(false);
+                      }}
+                      className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-sky-50 hover:text-sky-700 flex items-center gap-2 cursor-pointer font-medium"
+                    >
+                      <MapPin className="w-4 h-4 text-sky-600" /> Saved Addresses
+                    </button>
+                    <button
+                      onClick={() => {
+                        onOpenWishlist();
+                        setIsAccountDropdownOpen(false);
+                      }}
+                      className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-sky-50 hover:text-sky-700 flex items-center gap-2 cursor-pointer font-medium"
+                    >
+                      <Heart className="w-4 h-4 text-rose-500" /> My Wishlist
+                    </button>
+                    <button
+                      onClick={() => {
+                        onNavigate('track');
+                        setIsAccountDropdownOpen(false);
+                      }}
+                      className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-sky-50 hover:text-sky-700 flex items-center gap-2 cursor-pointer font-medium"
+                    >
+                      <Truck className="w-4 h-4 text-emerald-600" /> Track Live Order
+                    </button>
+                  </div>
+
+                  {onCustomerLogout && (
+                    <div className="pt-1 border-t border-slate-100">
+                      <button
+                        onClick={() => {
+                          onCustomerLogout();
+                          if (onStaffLogout) onStaffLogout();
+                          setIsAccountDropdownOpen(false);
+                        }}
+                        className="w-full text-left px-4 py-2 text-xs font-bold text-rose-600 hover:bg-rose-50 flex items-center gap-2 cursor-pointer"
+                      >
+                        <LogOut className="w-3.5 h-3.5" /> Sign Out
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          ) : (
+            /* Visitor Login / Register Button (Right Beside Cart) */
+            <button
+              onClick={() => onOpenCustomerAuth?.('register')}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-sky-50 hover:bg-sky-100 text-sky-700 font-bold text-xs border border-sky-200 transition-colors cursor-pointer shadow-2xs"
+              title="Sign In or Register New Customer Account"
+            >
+              <User className="w-4 h-4 text-sky-600 shrink-0" />
+              <span>Login / Register</span>
+            </button>
+          )}
+
+          {/* Desktop Wishlist Button */}
+          <button
+            onClick={onOpenWishlist}
+            className="relative p-2 rounded-xl text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
+            aria-label="Wishlist"
+          >
+            <Heart className="w-5 h-5" />
+            {wishlistCount > 0 && (
+              <span className="absolute -top-1 -right-1 bg-sky-600 text-white text-[10px] font-bold rounded-full w-4 h-4 flex items-center justify-center">
+                {wishlistCount}
+              </span>
+            )}
+          </button>
+
+          {/* Desktop Cart Button */}
+          <button
+            onClick={onOpenCart}
+            className="flex items-center gap-2 px-3 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-medium text-xs transition-colors cursor-pointer shadow-xs"
+          >
+            <div className="relative">
+              <ShoppingCart className="w-4 h-4" />
+              {cartCount > 0 && (
+                <span className="absolute -top-2 -right-2 bg-sky-500 text-white text-[10px] font-bold rounded-full w-4 h-4 flex items-center justify-center">
+                  {cartCount}
+                </span>
+              )}
+            </div>
+            <span className="hidden sm:inline font-semibold">Cart</span>
+          </button>
+        </div>
+
+        {/* Mobile View: Right Actions (Track Order, Wishlist, Account Icon Only) */}
+        <div className="md:hidden flex items-center gap-1">
+          {/* 1. Track Order Button (Beside Wishlist) */}
+          <button
+            type="button"
+            onClick={() => {
+              onNavigate('track');
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+            className="p-2 rounded-xl text-slate-700 hover:bg-slate-100 active:scale-90 transition-all cursor-pointer flex items-center justify-center relative"
+            aria-label="Track Your Order"
+            title="Track Your Order"
+          >
+            <Truck className="w-5 h-5 text-sky-600" />
+          </button>
+
+          {/* 2. Wishlist Button */}
+          <button
+            type="button"
+            onClick={onOpenWishlist}
+            className="relative p-2 rounded-xl text-slate-700 hover:bg-slate-100 active:scale-90 transition-all cursor-pointer flex items-center justify-center"
+            aria-label="Wishlist"
+            title="Wishlist"
+          >
+            <Heart className="w-5 h-5 text-rose-500 fill-rose-500/15" />
+            {wishlistCount > 0 && (
+              <span className="absolute -top-0.5 -right-0.5 bg-rose-500 text-white text-[10px] font-black rounded-full min-w-[16px] h-[16px] px-1 flex items-center justify-center shadow-xs">
+                {wishlistCount}
+              </span>
+            )}
+          </button>
+
+          {/* 3. When Logged Out: No profile icon, show 'রেজিস্টার' (Register) button. When Logged In: Customer Avatar & Menu */}
+          {!currentCustomer ? (
+            <button
+              type="button"
+              onClick={() => onOpenCustomerAuth?.('register')}
+              className="px-3 py-1.5 rounded-xl bg-sky-600 hover:bg-sky-700 active:bg-sky-800 text-white font-bold text-xs tracking-tight shadow-xs active:scale-95 transition-all cursor-pointer flex items-center justify-center shrink-0"
+              title="রেজিস্টার করুন"
+            >
+              <span>রেজিস্টার</span>
+            </button>
+          ) : (
+            <div ref={mobileAccountRef} className="relative">
+              <button
+                type="button"
+                onClick={() => setIsMobileAccountOpen((prev) => !prev)}
+                className="p-1.5 rounded-xl hover:bg-slate-100 active:scale-90 transition-all cursor-pointer flex items-center justify-center"
+                aria-label="Account Menu"
+                title="Account"
+              >
+                <div className="w-7 h-7 rounded-full bg-slate-900 text-white flex items-center justify-center font-bold text-xs shadow-2xs">
+                  {currentCustomer.name.charAt(0).toUpperCase()}
+                </div>
+              </button>
+
+              {/* Mobile Account Dropdown Menu */}
+              {isMobileAccountOpen && (
+                <div className="absolute right-0 mt-2 w-56 bg-white rounded-2xl shadow-2xl border border-slate-200 py-2 z-50 text-slate-800 animate-in fade-in zoom-in-95 duration-150">
+                  <div className="px-3.5 py-2 border-b border-slate-100 bg-slate-50/70 rounded-t-2xl">
+                    <p className="text-[10px] text-slate-500">Signed in as</p>
+                    <p className="text-xs font-bold text-slate-900 truncate">{currentCustomer.name}</p>
+                    <p className="text-[10px] text-sky-600 font-mono truncate">{currentCustomer.email}</p>
+                  </div>
+
+                  <div className="py-1">
+                    {/* Super Admin / Staff Link if applicable */}
+                    {currentStaff && (
+                      <button
+                        onClick={() => {
+                          onNavigate('admin-dashboard');
+                          setIsMobileAccountOpen(false);
+                        }}
+                        className="w-full text-left px-3.5 py-2 text-xs font-bold text-sky-700 bg-sky-50 hover:bg-sky-100 flex items-center gap-2 cursor-pointer border-b border-sky-100"
+                      >
+                        <ShieldCheck className="w-4 h-4 text-sky-600 shrink-0" />
+                        <span>Admin Dashboard</span>
+                      </button>
+                    )}
+
+                    {/* 1. Your Account */}
+                    <button
+                      onClick={() => {
+                        onNavigate('customer-dashboard');
+                        setIsMobileAccountOpen(false);
+                      }}
+                      className="w-full text-left px-3.5 py-2 text-xs text-slate-700 hover:bg-sky-50 hover:text-sky-700 flex items-center gap-2.5 cursor-pointer font-semibold"
+                    >
+                      <User className="w-4 h-4 text-sky-600 shrink-0" />
+                      <span>Your Account</span>
+                    </button>
+
+                    {/* 2. Your Orders */}
+                    <button
+                      onClick={() => {
+                        onNavigate('customer-dashboard');
+                        setIsMobileAccountOpen(false);
+                      }}
+                      className="w-full text-left px-3.5 py-2 text-xs text-slate-700 hover:bg-sky-50 hover:text-sky-700 flex items-center gap-2.5 cursor-pointer font-semibold"
+                    >
+                      <Truck className="w-4 h-4 text-emerald-600 shrink-0" />
+                      <span>Your Orders</span>
+                    </button>
+
+                    {/* 3. Your Wishlist */}
+                    <button
+                      onClick={() => {
+                        onOpenWishlist();
+                        setIsMobileAccountOpen(false);
+                      }}
+                      className="w-full text-left px-3.5 py-2 text-xs text-slate-700 hover:bg-sky-50 hover:text-sky-700 flex items-center gap-2.5 cursor-pointer font-semibold"
+                    >
+                      <Heart className="w-4 h-4 text-rose-500 shrink-0" />
+                      <span>Your Wishlist</span>
+                    </button>
+
+                    {/* 4. Your Cart */}
+                    <button
+                      onClick={() => {
+                        onOpenCart();
+                        setIsMobileAccountOpen(false);
+                      }}
+                      className="w-full text-left px-3.5 py-2 text-xs text-slate-700 hover:bg-sky-50 hover:text-sky-700 flex items-center gap-2.5 cursor-pointer font-semibold"
+                    >
+                      <ShoppingCart className="w-4 h-4 text-sky-600 shrink-0" />
+                      <span>Your Cart</span>
+                    </button>
+                  </div>
+
+                  {/* 5. Sign Out */}
+                  <div className="pt-1 border-t border-slate-100">
+                    <button
+                      onClick={() => {
+                        if (onCustomerLogout) onCustomerLogout();
+                        if (onStaffLogout) onStaffLogout();
+                        setIsMobileAccountOpen(false);
+                      }}
+                      className="w-full text-left px-3.5 py-2 text-xs font-bold text-rose-600 hover:bg-rose-50 flex items-center gap-2 cursor-pointer"
+                    >
+                      <LogOut className="w-3.5 h-3.5" />
+                      <span>Sign Out</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Mobile Sub-Navigation Bar: Directly connected to Admin Store Settings -> Header Navigation & Priority */}
+      <div className="md:hidden bg-slate-50 border-t border-slate-200/80 px-3 py-2 overflow-x-auto no-scrollbar scroll-smooth">
+        <div className="flex items-center gap-2 w-max pr-2">
+          {navItems.map((item) => {
+            const isTag = item.targetView.startsWith('tag:');
+            const tagVal = isTag ? item.targetView.replace(/^tag:/, '').trim() : '';
+            const lowerTag = tagVal.toLowerCase();
+            const lowerLabel = item.label.toLowerCase();
+
+            // Determine active state
+            let isActive = false;
+            if (item.targetView === 'home') {
+              isActive = currentView === 'home';
+            } else if (item.targetView === 'shop') {
+              isActive = currentView === 'shop' && selectedCategory === 'All' && !searchQuery;
+            } else if (isTag) {
+              isActive =
+                currentView === item.targetView ||
+                currentView === `tag:${tagVal}` ||
+                currentView === `tag-${tagVal}` ||
+                (currentView === 'flash-sale' && lowerTag.includes('flash')) ||
+                (currentView === 'shop' && searchQuery.toLowerCase() === lowerTag);
+            } else if (item.targetView.startsWith('category:')) {
+              const catName = item.targetView.replace(/^category:/, '');
+              isActive = currentView === 'shop' && selectedCategory.toLowerCase() === catName.toLowerCase();
+            } else {
+              isActive = currentView === item.targetView;
+            }
+
+            // Click handler
+            const handleClick = () => {
+              if (item.targetView === 'home') {
+                onNavigate('home');
+              } else if (item.targetView === 'shop') {
+                setSearchQuery('');
+                onSelectCategory('All', 'All', 'All');
+                onNavigate('shop');
+              } else if (isTag) {
+                if (lowerTag === 'flash sale' || lowerTag === 'flash') {
+                  onNavigate('flash-sale');
+                } else {
+                  onNavigate(item.targetView);
+                }
+              } else {
+                onNavigate(item.targetView);
+              }
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            };
+
+            // Dynamic Icon helper based on label or targetView
+            const renderIcon = () => {
+              if (lowerLabel.includes('flash') || lowerTag.includes('flash') || lowerLabel.includes('hot')) {
+                return <Flame className="w-3.5 h-3.5 text-amber-500 fill-amber-500 shrink-0" />;
+              }
+              if (lowerLabel.includes('trend') || lowerTag.includes('trend')) {
+                return <Zap className="w-3.5 h-3.5 text-amber-500 shrink-0" />;
+              }
+              if (lowerLabel.includes('bestseller') || lowerTag.includes('bestseller') || lowerLabel.includes('best seller')) {
+                return <Sparkles className="w-3.5 h-3.5 text-emerald-500 shrink-0" />;
+              }
+              if (lowerLabel.includes('new') || lowerTag.includes('new') || lowerLabel.includes('arrival')) {
+                return <Sparkles className="w-3.5 h-3.5 text-sky-500 shrink-0" />;
+              }
+              if (lowerLabel.includes('deal') || lowerTag.includes('deal') || lowerLabel.includes('offer')) {
+                return <Tag className="w-3.5 h-3.5 text-emerald-500 shrink-0" />;
+              }
+              if (
+                lowerLabel.includes('mobile') ||
+                lowerLabel.includes('smartphone') ||
+                lowerLabel.includes('phone') ||
+                lowerTag.includes('mobile') ||
+                lowerTag.includes('phone')
+              ) {
+                return <Smartphone className="w-3.5 h-3.5 text-blue-500 shrink-0" />;
+              }
+              if (lowerLabel.includes('xiaomi') || lowerTag.includes('xiaomi')) {
+                return <span className="w-2 h-2 rounded-full bg-orange-500 shrink-0" />;
+              }
+              if (lowerLabel.includes('redmi') || lowerTag.includes('redmi')) {
+                return <span className="w-2 h-2 rounded-full bg-red-500 shrink-0" />;
+              }
+              if (lowerLabel.includes('gadget') || lowerTag.includes('gadget')) {
+                return <Zap className="w-3.5 h-3.5 text-purple-500 shrink-0" />;
+              }
+              if (lowerLabel.includes('all') || lowerLabel.includes('shop')) {
+                return <Grid className="w-3.5 h-3.5 text-indigo-500 shrink-0" />;
+              }
+              if (lowerLabel.includes('home')) {
+                return <Home className="w-3.5 h-3.5 text-slate-500 shrink-0" />;
+              }
+              return <Tag className="w-3.5 h-3.5 text-sky-500 shrink-0" />;
+            };
+
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={handleClick}
+                className={`px-3 py-1.5 rounded-full text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 shrink-0 border select-none active:scale-95 ${
+                  isActive
+                    ? 'bg-sky-600 text-white border-sky-700 shadow-xs'
+                    : 'bg-white text-slate-700 border-slate-200 hover:border-sky-300 hover:text-sky-600'
+                }`}
+              >
+                {renderIcon()}
+                <span>{item.label}</span>
+                {item.isHot && (
+                  <span
+                    className={`${
+                      item.badgeColor || 'bg-red-500'
+                    } text-white text-[9px] font-extrabold px-1.5 py-0.2 rounded-full uppercase shadow-2xs ml-0.5`}
+                  >
+                    {item.badgeText || 'HOT'}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* 3. Desktop Sub-Navigation Bar */}
+      <div className="bg-white border-t border-slate-100 hidden md:block">
+        <div className="max-w-[1536px] mx-auto px-3 sm:px-6 lg:px-8 flex items-center justify-between">
+          <div className="flex items-center gap-1">
+            {/* All Categories Trigger Button */}
+            <div
+              ref={categoryMenuRef}
+              onMouseEnter={handleCategoryMouseEnter}
+              onMouseLeave={handleCategoryMouseLeave}
+              className="relative"
+            >
+              <button
+                type="button"
+                onClick={() => setIsCategoryMenuOpen((prev) => !prev)}
+                className="bg-sky-600 hover:bg-sky-700 active:bg-sky-800 text-white px-5 py-2.5 rounded-t-lg font-bold text-xs uppercase tracking-wider flex items-center gap-2 cursor-pointer transition-colors shadow-xs select-none"
+                aria-expanded={isCategoryMenuOpen}
+              >
+                <Menu className="w-4 h-4" />
+                <span>All Categories</span>
+                <ChevronDown
+                  className={`w-3.5 h-3.5 transition-transform duration-200 ${
+                    isCategoryMenuOpen ? 'rotate-180' : ''
+                  }`}
+                />
+              </button>
+
+              {/* Categories Mega Dropdown */}
+              {isCategoryMenuOpen && (
+                <div
+                  className="absolute left-0 top-full bg-white border border-slate-200 rounded-b-2xl shadow-2xl z-50 animate-in fade-in slide-in-from-top-1 duration-150 flex max-h-[80vh] overflow-hidden"
+                  style={{ width: '780px' }}
+                  onMouseEnter={handleCategoryMouseEnter}
+                  onMouseLeave={handleCategoryMouseLeave}
+                >
+                  {/* Left Column: Category List */}
+                  <div className="w-64 border-r border-slate-100 py-2 bg-slate-50/50 overflow-y-auto scrollbar-thin max-h-[78vh]">
+                    <div className="px-3 py-1.5 text-[10px] font-black text-slate-400 uppercase tracking-wider">
+                      Categories
+                    </div>
+                    {displayedCategories.map((cat) => {
+                      const isHovered = (hoveredCatId || displayedCategories[0]?.id) === cat.id;
+                      const subs = normalizeSubs(cat.subcategories);
+                      return (
+                        <div
+                          key={cat.id}
+                          onMouseEnter={() => setHoveredCatId(cat.id)}
+                          onClick={() => {
+                            onSelectCategory(cat.name, 'All', 'All');
+                            onNavigate('shop');
+                            setIsCategoryMenuOpen(false);
+                          }}
+                          className={`w-full text-left px-3.5 py-2.5 text-xs font-semibold flex items-center justify-between transition-colors cursor-pointer ${
+                            isHovered
+                              ? 'bg-sky-600 text-white shadow-xs'
+                              : 'text-slate-700 hover:bg-slate-100 hover:text-sky-700'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2.5 truncate">
+                            <span className={isHovered ? 'text-white' : ''}>
+                              {getCategoryIcon(cat.slug, cat.name)}
+                            </span>
+                            <span className="truncate">{cat.name}</span>
+                          </div>
+                          {subs.length > 0 && (
+                            <ChevronRight className={`w-3.5 h-3.5 shrink-0 ${isHovered ? 'text-white' : 'text-slate-400'}`} />
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Right Section: Subcategories & 3rd-Tier Child Subcategories */}
+                  <div className="flex-1 p-5 overflow-y-auto max-h-[78vh] bg-white scrollbar-thin">
+                    {activeHoveredCat ? (
+                      <div>
+                        {/* Active Category Header */}
+                        <div className="flex items-center justify-between border-b border-slate-100 pb-3 mb-4">
+                          <div className="flex items-center gap-2">
+                            <div className="p-2 rounded-xl bg-sky-50 text-sky-600">
+                              {getCategoryIcon(activeHoveredCat.slug, activeHoveredCat.name)}
+                            </div>
+                            <div>
+                              <h3 className="text-sm font-black text-slate-900">{activeHoveredCat.name}</h3>
+                              <p className="text-[11px] text-slate-500">
+                                {normalizeSubs(activeHoveredCat.subcategories).length} subcategories available
+                              </p>
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              onSelectCategory(activeHoveredCat.name, 'All', 'All');
+                              onNavigate('shop');
+                              setIsCategoryMenuOpen(false);
+                            }}
+                            className="text-xs font-bold text-sky-600 hover:text-sky-700 hover:underline flex items-center gap-1 cursor-pointer"
+                          >
+                            <span>View All Products</span>
+                            <ArrowRight className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+
+                        {/* Subcategory Grid */}
+                        {normalizeSubs(activeHoveredCat.subcategories).length > 0 ? (
+                          <div className="grid grid-cols-2 gap-4">
+                            {normalizeSubs(activeHoveredCat.subcategories).map((sub) => (
+                              <div
+                                key={sub.id}
+                                className="bg-slate-50/70 hover:bg-sky-50/40 p-3 rounded-xl border border-slate-100 transition-all hover:border-sky-200"
+                              >
+                                {/* Subcategory Title */}
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    onSelectCategory(activeHoveredCat.name, sub.name, 'All');
+                                    onNavigate('shop');
+                                    setIsCategoryMenuOpen(false);
+                                  }}
+                                  className="w-full text-left font-bold text-xs text-slate-900 hover:text-sky-600 flex items-center justify-between group cursor-pointer mb-2"
+                                >
+                                  <span className="group-hover:translate-x-0.5 transition-transform">
+                                    {sub.name}
+                                  </span>
+                                  <ChevronRight className="w-3.5 h-3.5 text-slate-400 group-hover:text-sky-600" />
+                                </button>
+
+                                {/* 3rd-Tier Child Subcategories (Sub-subcategories) */}
+                                {sub.subSubcategories && sub.subSubcategories.length > 0 ? (
+                                  <div className="flex flex-wrap gap-1.5 mt-1.5 pt-1.5 border-t border-slate-200/60">
+                                    {sub.subSubcategories.map((ssName, ssIdx) => (
+                                      <button
+                                        key={ssIdx}
+                                        type="button"
+                                        onClick={() => {
+                                          onSelectCategory(activeHoveredCat.name, sub.name, ssName);
+                                          onNavigate('shop');
+                                          setIsCategoryMenuOpen(false);
+                                        }}
+                                        className="text-[11px] px-2 py-0.5 rounded-lg bg-white border border-slate-200 text-slate-600 hover:bg-sky-600 hover:text-white hover:border-sky-600 transition-colors cursor-pointer"
+                                      >
+                                        {ssName}
+                                      </button>
+                                    ))}
+                                  </div>
+                                ) : (
+                                  <span className="text-[10px] text-slate-400">Direct collection</span>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="py-8 text-center text-xs text-slate-400">
+                            No subcategories listed for this category.
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="py-8 text-center text-xs text-slate-400">
+                        Select a category to view subcategories
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Navigation Links (Priority Configurable by Admin) */}
+            <nav className="flex items-center space-x-1 pl-4 text-xs font-semibold text-slate-700 overflow-x-auto no-scrollbar">
+              {navItems.map((item) => {
+                const isTag = item.targetView.startsWith('tag:');
+                const tagVal = isTag ? item.targetView.replace(/^tag:/, '') : '';
+                const isActive =
+                  currentView === item.targetView ||
+                  (isTag && (currentView === `tag:${tagVal}` || currentView === `tag-${tagVal}`));
+
+                return (
+                  <button
+                    key={item.id}
+                    onClick={() => onNavigate(item.targetView)}
+                    className={`px-3 py-2 rounded-lg transition-colors cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
+                      isActive
+                        ? 'text-sky-600 font-bold bg-sky-50/90'
+                        : 'hover:text-sky-600 text-slate-700'
+                    }`}
+                  >
+                    <span>{item.label}</span>
+                    {item.isHot && (
+                      <span
+                        className={`${
+                          item.badgeColor || 'bg-red-500'
+                        } text-white text-[9px] font-extrabold px-1.5 py-0.2 rounded-full uppercase shadow-xs`}
+                      >
+                        {item.badgeText || 'HOT'}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </nav>
+          </div>
+        </div>
+      </div>
+
+      {/* Mobile Drawer Overlay & All Categories Side Drawer */}
+      {isMobileMenuOpen && (
+        <div className="fixed inset-0 z-50 md:hidden flex">
+          {/* Dark Backdrop */}
+          <div
+            className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs transition-opacity animate-in fade-in duration-200"
+            onClick={() => setIsMobileMenuOpen(false)}
+          />
+
+          {/* Drawer Sidebar */}
+          <div
+            ref={mobileMenuRef}
+            className="relative w-[85%] max-w-sm bg-white h-full shadow-2xl flex flex-col z-10 animate-in slide-in-from-left duration-250 ease-out"
+          >
+            {/* Drawer Top Header */}
+            <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-gradient-to-r from-sky-600 to-blue-700 text-white">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-white/15 flex items-center justify-center text-white">
+                  <Layers className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-black text-sm text-white tracking-wide">All Categories</h3>
+                  <p className="text-[10px] text-sky-100">Explore {displayedCategories.length} product categories</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsMobileMenuOpen(false)}
+                className="w-8 h-8 rounded-full bg-white/15 hover:bg-white/25 flex items-center justify-center text-white transition-colors cursor-pointer"
+                aria-label="Close menu"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Tab Selector: Categories vs Quick Menu */}
+            <div className="flex border-b border-slate-200 bg-slate-50 p-1.5 gap-1.5 text-xs font-bold">
+              <button
+                onClick={() => setMobileActiveTab('categories')}
+                className={`flex-1 py-2 rounded-lg flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                  mobileActiveTab === 'categories'
+                    ? 'bg-white text-sky-700 shadow-xs border border-slate-200/80 font-black'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <Grid className="w-3.5 h-3.5" />
+                <span>Categories ({displayedCategories.length})</span>
+              </button>
+              <button
+                onClick={() => setMobileActiveTab('menu')}
+                className={`flex-1 py-2 rounded-lg flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                  mobileActiveTab === 'menu'
+                    ? 'bg-white text-sky-700 shadow-xs border border-slate-200/80 font-black'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <Menu className="w-3.5 h-3.5" />
+                <span>Navigation</span>
+              </button>
+            </div>
+
+            {/* Drawer Body */}
+            <div className="flex-1 overflow-y-auto p-3 space-y-3">
+              {mobileActiveTab === 'categories' ? (
+                /* 1. All Categories List */
+                <div className="space-y-1.5">
+                  {/* View All / All Products Option */}
+                  <button
+                    onClick={() => {
+                      onSelectCategory('All');
+                      onNavigate('shop');
+                      setIsMobileMenuOpen(false);
+                    }}
+                    className={`w-full p-2.5 rounded-xl border text-left flex items-center justify-between transition-all cursor-pointer ${
+                      selectedCategory === 'All'
+                        ? 'bg-sky-50/80 border-sky-500 text-sky-900 font-bold shadow-2xs'
+                        : 'bg-white border-slate-200 text-slate-800 hover:bg-slate-50'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-8 h-8 rounded-lg bg-sky-100 flex items-center justify-center shrink-0">
+                        <Grid className="w-4 h-4 text-sky-600" />
+                      </div>
+                      <div>
+                        <span className="text-xs font-black block">All Products</span>
+                        <span className="text-[10px] text-slate-400">View entire catalog</span>
+                      </div>
+                    </div>
+                    <ChevronRight className="w-4 h-4 text-slate-400" />
+                  </button>
+
+                  {/* Individual Categories with 3-Tier Drilldown */}
+                  {displayedCategories.map((cat) => {
+                    const isSelected = selectedCategory === cat.name;
+                    const isExpanded = !!mobileExpandedCatIds[cat.id];
+                    const subs = normalizeSubs(cat.subcategories);
+
+                    return (
+                      <div
+                        key={cat.id}
+                        className={`rounded-2xl border transition-all overflow-hidden ${
+                          isSelected
+                            ? 'bg-sky-50/50 border-sky-400'
+                            : 'bg-white border-slate-200'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between p-2.5">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              onSelectCategory(cat.name, 'All', 'All');
+                              onNavigate('shop');
+                              setIsMobileMenuOpen(false);
+                            }}
+                            className="flex items-center gap-2.5 min-w-0 flex-1 text-left cursor-pointer"
+                          >
+                            <div className="w-8 h-8 rounded-lg bg-slate-100 flex items-center justify-center shrink-0">
+                              {getCategoryIcon(cat.slug, cat.name)}
+                            </div>
+                            <div className="min-w-0">
+                              <span className="text-xs font-bold text-slate-800 block truncate">
+                                {cat.name}
+                              </span>
+                              {cat.itemCount !== undefined && (
+                                <span className="text-[10px] text-slate-400 block">
+                                  {cat.itemCount}+ items
+                                </span>
+                              )}
+                            </div>
+                          </button>
+
+                          {subs.length > 0 && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setMobileExpandedCatIds((prev) => ({
+                                  ...prev,
+                                  [cat.id]: !prev[cat.id],
+                                }));
+                              }}
+                              className="p-1.5 rounded-lg text-slate-400 hover:text-sky-600 hover:bg-sky-50 transition-colors ml-1 cursor-pointer"
+                              aria-label="Toggle subcategories"
+                            >
+                              <ChevronDown
+                                className={`w-4 h-4 transition-transform duration-200 ${
+                                  isExpanded ? 'rotate-180 text-sky-600' : ''
+                                }`}
+                              />
+                            </button>
+                          )}
+                        </div>
+
+                        {/* Nested Subcategories (Tier 2 & 3) */}
+                        {isExpanded && subs.length > 0 && (
+                          <div className="bg-slate-50/90 border-t border-slate-100 p-2.5 space-y-2">
+                            {subs.map((sub) => {
+                              const subKey = `${cat.id}_${sub.id}`;
+                              const isSubExpanded = !!mobileExpandedSubKeys[subKey];
+                              const childSubs = sub.subSubcategories || [];
+
+                              return (
+                                <div
+                                  key={sub.id}
+                                  className="bg-white rounded-xl border border-slate-200/80 p-2 shadow-2xs"
+                                >
+                                  <div className="flex items-center justify-between">
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        onSelectCategory(cat.name, sub.name, 'All');
+                                        onNavigate('shop');
+                                        setIsMobileMenuOpen(false);
+                                      }}
+                                      className="text-xs font-bold text-slate-800 hover:text-sky-600 text-left flex-1 py-1 cursor-pointer"
+                                    >
+                                      {sub.name}
+                                    </button>
+
+                                    {childSubs.length > 0 && (
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setMobileExpandedSubKeys((prev) => ({
+                                            ...prev,
+                                            [subKey]: !prev[subKey],
+                                          }));
+                                        }}
+                                        className="text-[10px] text-sky-600 font-bold px-2 py-0.5 rounded-md bg-sky-50 hover:bg-sky-100 cursor-pointer"
+                                      >
+                                        {childSubs.length} sub-items {isSubExpanded ? '▲' : '▼'}
+                                      </button>
+                                    )}
+                                  </div>
+
+                                  {/* 3rd-Tier Child Subcategories (Tier 3) */}
+                                  {(isSubExpanded || childSubs.length <= 3) && childSubs.length > 0 && (
+                                    <div className="flex flex-wrap gap-1.5 mt-2 pt-2 border-t border-slate-100">
+                                      {childSubs.map((ssName, ssIdx) => (
+                                        <button
+                                          key={ssIdx}
+                                          type="button"
+                                          onClick={() => {
+                                            onSelectCategory(cat.name, sub.name, ssName);
+                                            onNavigate('shop');
+                                            setIsMobileMenuOpen(false);
+                                          }}
+                                          className="text-[10px] px-2 py-1 rounded-md bg-slate-100 text-slate-700 hover:bg-sky-600 hover:text-white font-medium transition-colors cursor-pointer"
+                                        >
+                                          {ssName}
+                                        </button>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                /* 2. Navigation Menu Links */
+                <div className="space-y-1">
+                  {navItems.map((item) => {
+                    const isTag = item.targetView.startsWith('tag:');
+                    const tagVal = isTag ? item.targetView.replace(/^tag:/, '') : '';
+                    const isActive =
+                      currentView === item.targetView ||
+                      (isTag && (currentView === `tag:${tagVal}` || currentView === `tag-${tagVal}`));
+
+                    return (
+                      <button
+                        key={`mobile_${item.id}`}
+                        onClick={() => {
+                          onNavigate(item.targetView);
+                          setIsMobileMenuOpen(false);
+                        }}
+                        className={`w-full px-3.5 py-2.5 rounded-xl flex items-center justify-between text-xs font-bold text-left transition-colors cursor-pointer ${
+                          isActive
+                            ? 'bg-sky-50 text-sky-700 font-bold border border-sky-100'
+                            : 'text-slate-700 hover:bg-slate-100'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2.5">
+                          <Tag className="w-3.5 h-3.5 text-sky-600 shrink-0" />
+                          <span>{item.label}</span>
+                        </div>
+                        {item.isHot && (
+                          <span
+                            className={`${
+                              item.badgeColor || 'bg-red-500'
+                            } text-white text-[9px] font-black px-1.5 py-0.5 rounded-full uppercase`}
+                          >
+                            {item.badgeText || 'HOT'}
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+
+                  {currentStaff && (
+                    <button
+                      onClick={() => {
+                        onNavigate('admin-dashboard');
+                        setIsMobileMenuOpen(false);
+                      }}
+                      className="w-full px-3 py-2.5 rounded-xl flex items-center gap-3 text-xs font-black text-left bg-sky-50 text-sky-700 border border-sky-200/60"
+                    >
+                      <ShieldCheck className="w-4 h-4 text-sky-600" />
+                      <span>Admin Dashboard</span>
+                    </button>
+                  )}
+
+                  <button
+                    onClick={() => {
+                      onNavigate('customer-dashboard');
+                      setIsMobileMenuOpen(false);
+                    }}
+                    className={`w-full px-3 py-2.5 rounded-xl flex items-center gap-3 text-xs font-bold text-left transition-colors cursor-pointer ${
+                      currentView === 'customer-dashboard' ? 'bg-sky-50 text-sky-700' : 'text-slate-700 hover:bg-slate-100'
+                    }`}
+                  >
+                    <User className="w-4 h-4 text-sky-600" />
+                    <span>Customer Account / Dashboard</span>
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* Bottom User Profile or Login CTA */}
+            <div className="p-3 border-t border-slate-200 bg-slate-50">
+              {currentCustomer ? (
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <div className="w-8 h-8 rounded-full bg-sky-600 text-white flex items-center justify-center font-bold text-xs shrink-0">
+                      {currentCustomer.name.charAt(0).toUpperCase()}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-xs font-bold text-slate-900 truncate">{currentCustomer.name}</p>
+                      <p className="text-[10px] text-slate-500 truncate">{currentCustomer.email}</p>
+                    </div>
+                  </div>
+                  {onCustomerLogout && (
+                    <button
+                      onClick={() => {
+                        onCustomerLogout();
+                        setIsMobileMenuOpen(false);
+                      }}
+                      className="p-1.5 text-rose-600 hover:bg-rose-50 rounded-lg text-xs font-bold flex items-center gap-1 cursor-pointer"
+                      title="Sign Out"
+                    >
+                      <LogOut className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <button
+                  onClick={() => {
+                    setIsMobileMenuOpen(false);
+                    if (onOpenCustomerAuth) onOpenCustomerAuth();
+                  }}
+                  className="w-full py-2.5 px-3 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-xs cursor-pointer transition-colors"
+                >
+                  <User className="w-4 h-4" />
+                  <span>Sign In / Register</span>
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </header>
+  );
+};

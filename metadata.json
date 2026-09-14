@@ -1,0 +1,6 @@
+{
+  "name": "KenaX BD",
+  "description": "Smart Shopping, Better Living - Bangladesh E-commerce & Dropshipping Platform with real-time order tracking, delivery management, and secure payments.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

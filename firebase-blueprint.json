@@ -1,0 +1,184 @@
+{
+  "entities": {
+    "Product": {
+      "title": "Product",
+      "description": "An e-commerce or dropshipping product on KenaX BD",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "banglaName": { "type": "string" },
+        "category": { "type": "string" },
+        "brand": { "type": "string" },
+        "price": { "type": "number" },
+        "originalPrice": { "type": "number" },
+        "costPrice": { "type": "number" },
+        "discountPercent": { "type": "number" },
+        "stock": { "type": "number" },
+        "sku": { "type": "string" },
+        "images": { "type": "array" },
+        "videoUrl": { "type": "string" },
+        "description": { "type": "string" },
+        "productType": { "type": "string" },
+        "rating": { "type": "number" },
+        "reviewsCount": { "type": "number" },
+        "isBestSeller": { "type": "boolean" },
+        "isNew": { "type": "boolean" },
+        "isHot": { "type": "boolean" }
+      },
+      "required": ["name", "price", "category", "sku"]
+    },
+    "Order": {
+      "title": "Order",
+      "description": "Customer order with immutable delivery snapshot and status history",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "customerName": { "type": "string" },
+        "customerEmail": { "type": "string" },
+        "customerMobile": { "type": "string" },
+        "deliveryName": { "type": "string" },
+        "deliveryMobile": { "type": "string" },
+        "division": { "type": "string" },
+        "district": { "type": "string" },
+        "upazila": { "type": "string" },
+        "area": { "type": "string" },
+        "fullAddress": { "type": "string" },
+        "totalAmount": { "type": "number" },
+        "paymentMethod": { "type": "string" },
+        "paymentStatus": { "type": "string" },
+        "orderStatus": { "type": "string" }
+      },
+      "required": ["customerName", "customerMobile", "division", "district", "upazila", "fullAddress", "totalAmount"]
+    },
+    "CartActivity": {
+      "title": "CartActivity",
+      "description": "Real-time cart session for tracking active and abandoned carts in admin",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "customerName": { "type": "string" },
+        "customerEmail": { "type": "string" },
+        "totalAmount": { "type": "number" },
+        "totalItems": { "type": "number" },
+        "status": { "type": "string" }
+      },
+      "required": ["id", "customerName", "totalAmount"]
+    },
+    "Customer": {
+      "title": "Customer",
+      "description": "Storefront registered customer record with persistent account authentication and order history",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "mobile": { "type": "string" },
+        "password": { "type": "string" },
+        "totalOrders": { "type": "number" },
+        "totalSpent": { "type": "number" },
+        "isBlocked": { "type": "boolean" },
+        "registeredAt": { "type": "string" }
+      },
+      "required": ["id", "name", "email", "mobile"]
+    },
+    "ActivityLog": {
+      "title": "ActivityLog",
+      "description": "Permanent immutable audit trail for actions by Admin, Manager, and Moderator staff",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "staffId": { "type": "string" },
+        "staffName": { "type": "string" },
+        "staffRole": { "type": "string" },
+        "action": { "type": "string" },
+        "module": { "type": "string" },
+        "targetId": { "type": "string" },
+        "details": { "type": "string" },
+        "timestamp": { "type": "string" },
+        "ipAddress": { "type": "string" }
+      },
+      "required": ["id", "staffName", "staffRole", "action", "module", "details", "timestamp"]
+    },
+    "EmailLog": {
+      "title": "EmailLog",
+      "description": "Log of emails sent to customers, staff, and super admin",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "to": { "type": "string" },
+        "recipientRole": { "type": "string" },
+        "type": { "type": "string" },
+        "subject": { "type": "string" },
+        "html": { "type": "string" },
+        "text": { "type": "string" },
+        "status": { "type": "string" },
+        "actorName": { "type": "string" },
+        "actorRole": { "type": "string" },
+        "timestamp": { "type": "string" },
+        "error": { "type": "string" }
+      },
+      "required": ["id", "to", "type", "subject", "status", "timestamp"]
+    },
+    "Expense": {
+      "title": "Expense",
+      "description": "Operational, courier delivery, and custom expenses logged by admin",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "category": { "type": "string" },
+        "title": { "type": "string" },
+        "amount": { "type": "number" },
+        "date": { "type": "string" },
+        "courier": { "type": "string" },
+        "location": { "type": "string" },
+        "orderId": { "type": "string" },
+        "note": { "type": "string" },
+        "paymentMethod": { "type": "string" },
+        "recordedBy": { "type": "string" },
+        "recordedByRole": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "category", "title", "amount", "date", "recordedBy"]
+    }
+  },
+  "firestore": {
+    "/products/{productId}": {
+      "schema": "Product",
+      "description": "Products catalog"
+    },
+    "/orders/{orderId}": {
+      "schema": "Order",
+      "description": "Customer orders with delivery and tracking details"
+    },
+    "/cartActivities/{activityId}": {
+      "schema": "CartActivity",
+      "description": "Live user cart sessions and abandoned cart data"
+    },
+    "/customers/{customerId}": {
+      "schema": "Customer",
+      "description": "Registered shopper user accounts and persistent profiles"
+    },
+    "/activityLogs/{logId}": {
+      "schema": "ActivityLog",
+      "description": "Permanent admin audit logs across all devices and sessions"
+    },
+    "/emailLogs/{logId}": {
+      "schema": "EmailLog",
+      "description": "Automated and transactional email dispatch logs"
+    },
+    "/expenses/{expenseId}": {
+      "schema": "Expense",
+      "description": "Delivery, courier, logistics, and operational expenses"
+    },
+    "/system_settings/{settingId}": {
+      "schema": "EntityDefinition",
+      "description": "WhatsApp and SMS integration settings"
+    },
+    "/sms_logs/{logId}": {
+      "schema": "EntityDefinition",
+      "description": "SMS dispatch logs and status records"
+    }
+  }
+}
