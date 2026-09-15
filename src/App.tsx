@@ -451,7 +451,7 @@ export default function App() {
   const [customerDashboardTab, setCustomerDashboardTab] = useState<'orders' | 'cart' | 'addresses' | 'wishlist'>('orders');
 
   // Centralized Navigation Handler with Automatic Smooth Scroll to Top
-  const handleNavigate = (view: string, tab?: 'orders' | 'addresses' | 'wishlist') => {
+  const handleNavigate = (view: string, tab?: 'orders' | 'cart' | 'addresses' | 'wishlist') => {
     let targetView = view;
     const cleanView = (view || '').trim().toLowerCase();
 
@@ -460,7 +460,13 @@ export default function App() {
       return;
     }
 
-    if (cleanView === 'checkout' || cleanView === 'view:checkout') {
+    if (cleanView === 'cart-items' || cleanView === 'customer-cart') {
+      setCustomerDashboardTab('cart');
+      targetView = 'customer-dashboard';
+    } else if (cleanView === 'saved-addresses' || cleanView === 'addresses') {
+      setCustomerDashboardTab('addresses');
+      targetView = 'customer-dashboard';
+    } else if (cleanView === 'checkout' || cleanView === 'view:checkout') {
       setCheckoutItems(cart.length > 0 ? cart : []);
       setIsCheckoutOpen(true);
       return;
@@ -2410,6 +2416,13 @@ export default function App() {
             onUpdateAddress={handleUpdateAddress}
             onDeleteAddress={handleDeleteAddress}
             wishlist={wishlist}
+            cart={cart}
+            onUpdateCartQuantity={handleUpdateCartQuantity}
+            onRemoveCartItem={handleRemoveCartItem}
+            onOpenCheckout={() => {
+              setCheckoutItems(cart.length > 0 ? cart : []);
+              setIsCheckoutOpen(true);
+            }}
             initialTab={customerDashboardTab}
             onTabChange={setCustomerDashboardTab}
             onTrackOrder={(order) => {
@@ -2421,8 +2434,7 @@ export default function App() {
               if (view === 'customer-dashboard') {
                 setCustomerDashboardTab('orders');
               }
-              setCurrentView(view);
-              window.scrollTo({ top: 0, behavior: 'smooth' });
+              handleNavigate(view);
             }}
             onSelectProduct={(p) => handleOpenProductDetail(p)}
             onAddToCart={(p) => handleAddToCart(p, 1)}

@@ -163,14 +163,6 @@ export const InvoiceModal: React.FC<InvoiceModalProps> = ({ order, settings, onC
               <p className="text-slate-800 font-medium">
                 {order.fullAddress || (typeof order.deliveryAddress === 'object' ? (order.deliveryAddress as any)?.fullAddress : order.deliveryAddress) || `${order.division || order.customerDivision || 'Dhaka'}, Bangladesh`}
               </p>
-              <p className="text-slate-500 mt-1">
-                Courier: <span className="font-semibold text-slate-700">{order.courierName || 'Standard Delivery'}</span>
-              </p>
-              {order.trackingNumber && (
-                <p className="text-slate-500">
-                  Tracking Code: <span className="font-mono font-bold text-sky-700">{order.trackingNumber}</span>
-                </p>
-              )}
             </div>
           </div>
 

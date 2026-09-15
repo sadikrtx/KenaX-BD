@@ -431,8 +431,6 @@ export const generateAndPrintInvoice = (order: Order) => {
           <div class="info-block-title">🚚 Order & Shipment Details</div>
           <p><strong>Order Status:</strong> <span style="color:#0284c7; font-weight:700;">${order.orderStatus}</span></p>
           <p><strong>Payment Method:</strong> ${order.paymentMethod}</p>
-          <p><strong>Courier Partner:</strong> ${order.courierName || 'Steadfast Courier'}</p>
-          <p><strong>Tracking Number:</strong> <code>${order.trackingNumber || 'TRK-' + order.id}</code></p>
           <p><strong>Estimated Delivery:</strong> ${order.estimatedDelivery || '24-48 Hours'}</p>
         </div>
       </div>

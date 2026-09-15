@@ -15,11 +15,9 @@ import {
   CreditCard,
   ShieldCheck,
   Receipt,
-  UserCheck,
 } from 'lucide-react';
 import { Order } from '../types';
 import { generateAndPrintInvoice } from '../utils/invoiceGenerator';
-import { getWhatsAppOrderUrl } from '../lib/smsService';
 
 interface OrderSuccessModalProps {
   isOpen: boolean;
@@ -141,10 +139,6 @@ export const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({
               <span className="font-bold text-amber-950">Verification Call:</span> We will call at{' '}
               <strong className="font-mono font-bold text-amber-950">{phoneToCall}</strong> to confirm.
             </p>
-          </div>
-          <div className="flex items-center gap-1 text-emerald-800 bg-emerald-100/90 px-2 py-0.5 rounded-full font-bold text-[10px] shrink-0 border border-emerald-300/80">
-            <UserCheck className="w-3 h-3 text-emerald-700 shrink-0" />
-            <span>Dedicated Account Activated!</span>
           </div>
         </div>
 
@@ -288,28 +282,6 @@ export const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({
               </div>
             </div>
           </div>
-        </div>
-
-        {/* WhatsApp Direct Order Confirmation Banner */}
-        <div className="px-3 py-2 bg-emerald-50 border-t border-emerald-100 flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2 min-w-0">
-            <div className="w-7 h-7 rounded-lg bg-emerald-600 text-white flex items-center justify-center shrink-0">
-              <Phone className="w-3.5 h-3.5" />
-            </div>
-            <div className="min-w-0">
-              <p className="text-[11px] font-bold text-emerald-950 truncate">WhatsApp-এ ১-ক্লিক অর্ডার কনফার্মেশন</p>
-              <p className="text-[10px] text-emerald-700 truncate">হোয়াটসঅ্যাপে মেসেজ দিয়ে অর্ডার নিশ্চিত করুন</p>
-            </div>
-          </div>
-          <a
-            href={getWhatsAppOrderUrl(order, 'customer')}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold flex items-center gap-1 shrink-0 transition-all shadow-xs cursor-pointer"
-          >
-            <span>WhatsApp Message</span>
-            <ChevronRight className="w-3 h-3" />
-          </a>
         </div>
 
         {/* 4. Action Buttons Footer: 3 English Buttons (Download Receipt, Continue Shopping, Track Order) */}

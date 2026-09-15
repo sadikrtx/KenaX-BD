@@ -27,6 +27,7 @@ import {
 } from 'lucide-react';
 import { Order, DeliveryAddress, Product, CustomerRecord, OrderItem } from '../types';
 import { normalizePhoneNumber, fetchCustomerOrdersFromDB } from '../lib/firebase';
+import { BANGLADESH_LOCATIONS } from '../data/bangladeshData';
 
 interface CustomerDashboardProps {
   orders: Order[];
@@ -101,6 +102,30 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
   const [fullAddress, setFullAddress] = useState('');
   const [isDefaultAddr, setIsDefaultAddr] = useState(false);
 
+  // Derived location dropdown lists
+  const availableDistricts = division && BANGLADESH_LOCATIONS[division]
+    ? Object.keys(BANGLADESH_LOCATIONS[division].districts)
+    : [];
+
+  const availableUpazilas = division && district && BANGLADESH_LOCATIONS[division]?.districts[district]
+    ? BANGLADESH_LOCATIONS[division].districts[district].upazilas
+    : [];
+
+  const handleDivisionChange = (newDiv: string) => {
+    setDivision(newDiv);
+    const districts = BANGLADESH_LOCATIONS[newDiv]?.districts ? Object.keys(BANGLADESH_LOCATIONS[newDiv].districts) : [];
+    const firstDistrict = districts[0] || '';
+    setDistrict(firstDistrict);
+    const upazilas = firstDistrict && BANGLADESH_LOCATIONS[newDiv]?.districts[firstDistrict]?.upazilas ? BANGLADESH_LOCATIONS[newDiv].districts[firstDistrict].upazilas : [];
+    setUpazila(upazilas[0] || '');
+  };
+
+  const handleDistrictChange = (newDist: string) => {
+    setDistrict(newDist);
+    const upazilas = division && BANGLADESH_LOCATIONS[division]?.districts[newDist]?.upazilas ? BANGLADESH_LOCATIONS[division].districts[newDist].upazilas : [];
+    setUpazila(upazilas[0] || '');
+  };
+
   // Close modal on Escape
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -131,9 +156,14 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
     setAddrLabel(addr.label === 'Home' || addr.label === 'Office' || addr.label === 'Other' ? addr.label : 'Home');
     setRecipientName(addr.recipientName || currentCustomer?.name || '');
     setRecipientPhone(addr.recipientPhone || currentCustomer?.mobile || '');
-    setDivision(addr.division || 'Dhaka');
-    setDistrict(addr.district || 'Dhaka');
-    setUpazila(addr.upazila || '');
+    
+    const div = addr.division && BANGLADESH_LOCATIONS[addr.division] ? addr.division : 'Dhaka';
+    const dist = addr.district && BANGLADESH_LOCATIONS[div]?.districts[addr.district] ? addr.district : Object.keys(BANGLADESH_LOCATIONS[div]?.districts || {})[0] || 'Dhaka';
+    const upz = addr.upazila || (BANGLADESH_LOCATIONS[div]?.districts[dist]?.upazilas[0] || 'Dhanmondi');
+
+    setDivision(div);
+    setDistrict(dist);
+    setUpazila(upz);
     setFullAddress(addr.fullAddress || '');
     setIsDefaultAddr(Boolean(addr.isDefault));
     setShowAddressModal(true);
@@ -1079,33 +1109,50 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                     />
                   </div>
 
-                  <div className="grid grid-cols-3 gap-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                     <div>
-                      <label className="font-bold text-slate-700 block mb-1">Division</label>
-                      <input
-                        type="text"
+                      <label className="font-bold text-slate-700 block mb-1">Division *</label>
+                      <select
                         value={division}
-                        onChange={(e) => setDivision(e.target.value)}
-                        className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs"
-                      />
+                        onChange={(e) => handleDivisionChange(e.target.value)}
+                        className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs bg-white focus:outline-hidden focus:ring-2 focus:ring-sky-500 cursor-pointer"
+                        required
+                      >
+                        {Object.keys(BANGLADESH_LOCATIONS).map((div) => (
+                          <option key={div} value={div}>
+                            {div}
+                          </option>
+                        ))}
+                      </select>
                     </div>
                     <div>
-                      <label className="font-bold text-slate-700 block mb-1">District</label>
-                      <input
-                        type="text"
+                      <label className="font-bold text-slate-700 block mb-1">District *</label>
+                      <select
                         value={district}
-                        onChange={(e) => setDistrict(e.target.value)}
-                        className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs"
-                      />
+                        onChange={(e) => handleDistrictChange(e.target.value)}
+                        className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs bg-white focus:outline-hidden focus:ring-2 focus:ring-sky-500 cursor-pointer"
+                        required
+                      >
+                        {availableDistricts.map((dist) => (
+                          <option key={dist} value={dist}>
+                            {dist}
+                          </option>
+                        ))}
+                      </select>
                     </div>
                     <div>
-                      <label className="font-bold text-slate-700 block mb-1">Upazila / Area</label>
-                      <input
-                        type="text"
+                      <label className="font-bold text-slate-700 block mb-1">Thana / Upazila</label>
+                      <select
                         value={upazila}
                         onChange={(e) => setUpazila(e.target.value)}
-                        className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs"
-                      />
+                        className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs bg-white focus:outline-hidden focus:ring-2 focus:ring-sky-500 cursor-pointer"
+                      >
+                        {availableUpazilas.map((upz) => (
+                          <option key={upz} value={upz}>
+                            {upz}
+                          </option>
+                        ))}
+                      </select>
                     </div>
                   </div>
 
