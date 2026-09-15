@@ -5,13 +5,31 @@ import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, ThinkingLevel } from "@google/genai";
 import dotenv from "dotenv";
 import nodemailer from "nodemailer";
-import { getAllProductsFromSQL, saveProductToSQL, deleteProductFromSQL } from "./src/db/products.ts";
+import { getAllProductsFromSQL, saveProductToSQL, deleteProductFromSQL, getDeletedProductIdsFromStore } from "./src/db/products.ts";
+import { getAllOrdersFromStore, saveOrderToStore, updateOrderInStore, getCustomerOrdersFromStore, deleteOrderFromStore } from "./src/db/orders.ts";
+import { getAllCustomersFromStore, saveCustomerToStore, findCustomerInStore, deleteCustomerFromStore } from "./src/db/customers.ts";
+import { getAllStaffFromStore, saveStaffToStore, deleteStaffFromStore } from "./src/db/staff.ts";
+import {
+  syncFirestoreWithServerStore,
+  writeCustomerToFirestore,
+  writeOrderToFirestore,
+  writeStaffToFirestore,
+  deleteStaffFromFirestore,
+  deleteCustomerFromFirestore,
+  writeProductToFirestore,
+  deleteProductFromFirestore,
+} from "./src/db/firestoreSync.ts";
 
 dotenv.config();
 
 async function startServer() {
   const app = express();
   const PORT = 3000;
+
+  // Initialize and synchronize server store with Firestore in the background
+  syncFirestoreWithServerStore().catch((err) => {
+    console.warn("[Server Startup] Firestore sync notice:", err.message);
+  });
 
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
@@ -40,6 +58,9 @@ async function startServer() {
         return res.status(400).json({ error: "Invalid product object, missing id" });
       }
       const saved = await saveProductToSQL(product);
+      writeProductToFirestore(saved).catch((err) => {
+        console.warn("[Firestore Sync] writeProductToFirestore background notice:", err.message);
+      });
       res.json({ success: true, product: saved });
     } catch (err: any) {
       console.error("[Cloud SQL POST /api/products error]:", err);
@@ -54,6 +75,7 @@ async function startServer() {
       for (const item of items) {
         if (item && item.id) {
           await saveProductToSQL(item);
+          writeProductToFirestore(item).catch(() => {});
           count++;
         }
       }
@@ -64,14 +86,175 @@ async function startServer() {
     }
   });
 
+  app.get("/api/products/deleted-ids", (req, res) => {
+    try {
+      const ids = getDeletedProductIdsFromStore();
+      res.json(ids);
+    } catch {
+      res.json([]);
+    }
+  });
+
   app.delete("/api/products/:id", async (req, res) => {
     try {
       const { id } = req.params;
       await deleteProductFromSQL(id);
+      deleteProductFromFirestore(id).catch((err) => {
+        console.warn("[Firestore Sync] deleteProductFromFirestore background notice:", err.message);
+      });
       res.json({ success: true, id });
     } catch (err: any) {
       console.error("[Cloud SQL DELETE /api/products error]:", err);
       res.status(500).json({ error: "Failed to delete product from Cloud SQL database", details: err.message });
+    }
+  });
+
+  // Central Server Orders API (Permanent Cloud Persistence)
+  app.get("/api/orders", (req, res) => {
+    try {
+      const orders = getAllOrdersFromStore();
+      res.json(orders);
+    } catch (err: any) {
+      res.status(500).json({ error: "Failed to read server orders", details: err.message });
+    }
+  });
+
+  app.post("/api/orders", (req, res) => {
+    try {
+      const order = req.body;
+      if (!order || !order.id) {
+        return res.status(400).json({ error: "Invalid order object, missing id" });
+      }
+      const saved = saveOrderToStore(order);
+      // Synchronize to Firestore in background
+      writeOrderToFirestore(saved).catch(() => {});
+      res.json({ success: true, order: saved });
+    } catch (err: any) {
+      res.status(500).json({ error: "Failed to save order on server", details: err.message });
+    }
+  });
+
+  app.put("/api/orders/:id", (req, res) => {
+    try {
+      const { id } = req.params;
+      const updates = req.body;
+      const updated = updateOrderInStore(id, updates);
+      if (updated) {
+        writeOrderToFirestore(updated).catch(() => {});
+        res.json({ success: true, order: updated });
+      } else {
+        // If not found in store yet, save it with the updates
+        const newOrder = saveOrderToStore({ id, ...updates } as any);
+        writeOrderToFirestore(newOrder).catch(() => {});
+        res.json({ success: true, order: newOrder });
+      }
+    } catch (err: any) {
+      res.status(500).json({ error: "Failed to update order on server", details: err.message });
+    }
+  });
+
+  app.get("/api/customer-orders/:identifier", (req, res) => {
+    try {
+      const { identifier } = req.params;
+      const orders = getCustomerOrdersFromStore(identifier);
+      res.json(orders);
+    } catch (err: any) {
+      res.status(500).json({ error: "Failed to retrieve customer orders", details: err.message });
+    }
+  });
+
+  // Central Server Customers API (Permanent Cloud Persistence)
+  app.get("/api/customers", (req, res) => {
+    try {
+      const customers = getAllCustomersFromStore();
+      res.json(customers);
+    } catch (err: any) {
+      res.status(500).json({ error: "Failed to read server customers", details: err.message });
+    }
+  });
+
+  app.post("/api/customers", (req, res) => {
+    try {
+      const customer = req.body;
+      if (!customer || !customer.id) {
+        return res.status(400).json({ error: "Invalid customer object, missing id" });
+      }
+      const saved = saveCustomerToStore(customer);
+      // Synchronize to Firestore in background
+      writeCustomerToFirestore(saved).catch(() => {});
+      res.json({ success: true, customer: saved });
+    } catch (err: any) {
+      res.status(500).json({ error: "Failed to save customer on server", details: err.message });
+    }
+  });
+
+  app.get("/api/customers/:identifier", (req, res) => {
+    try {
+      const { identifier } = req.params;
+      const customer = findCustomerInStore(identifier);
+      if (customer) {
+        res.json({ success: true, customer });
+      } else {
+        res.status(404).json({ success: false, message: "Customer not found" });
+      }
+    } catch (err: any) {
+      res.status(500).json({ error: "Failed to find customer on server", details: err.message });
+    }
+  });
+
+  app.delete("/api/customers/:id", (req, res) => {
+    try {
+      const { id } = req.params;
+      deleteCustomerFromStore(id);
+      deleteCustomerFromFirestore(id).catch(() => {});
+      res.json({ success: true, id });
+    } catch (err: any) {
+      res.status(500).json({ error: "Failed to delete customer on server", details: err.message });
+    }
+  });
+
+  app.delete("/api/orders/:id", (req, res) => {
+    try {
+      const { id } = req.params;
+      deleteOrderFromStore(id);
+      res.json({ success: true, id });
+    } catch (err: any) {
+      res.status(500).json({ error: "Failed to delete order on server", details: err.message });
+    }
+  });
+
+  // Central Server Staff API (Permanent Cloud Persistence)
+  app.get("/api/staff", (req, res) => {
+    try {
+      const staffList = getAllStaffFromStore();
+      res.json(staffList);
+    } catch (err: any) {
+      res.status(500).json({ error: "Failed to read server staff", details: err.message });
+    }
+  });
+
+  app.post("/api/staff", (req, res) => {
+    try {
+      const staff = req.body;
+      if (!staff || !staff.id) {
+        return res.status(400).json({ error: "Invalid staff object, missing id" });
+      }
+      const saved = saveStaffToStore(staff);
+      writeStaffToFirestore(saved).catch(() => {});
+      res.json({ success: true, staff: saved });
+    } catch (err: any) {
+      res.status(500).json({ error: "Failed to save staff on server", details: err.message });
+    }
+  });
+
+  app.delete("/api/staff/:id", (req, res) => {
+    try {
+      const { id } = req.params;
+      deleteStaffFromStore(id);
+      deleteStaffFromFirestore(id).catch(() => {});
+      res.json({ success: true, id });
+    } catch (err: any) {
+      res.status(500).json({ error: "Failed to delete staff on server", details: err.message });
     }
   });
 

@@ -1,0 +1,19 @@
+[
+  {
+    "id": "staff-super-2",
+    "createdAt": "2025-01-01T00:00:00Z",
+    "status": "active",
+    "email": "super@kenaxbd.com",
+    "isActive": true,
+    "password": "sadik@1234",
+    "permissions": [
+      "*"
+    ],
+    "avatar": "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80",
+    "name": "Super Admin",
+    "role": "super_admin",
+    "lastLogin": "2026-09-08T03:00:00Z",
+    "phone": "+880 1700-123456",
+    "createdBy": "System Root"
+  }
+]

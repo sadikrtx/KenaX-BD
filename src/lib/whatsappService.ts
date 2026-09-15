@@ -1,5 +1,5 @@
 import { Order, WhatsAppSettings, WhatsAppTemplate, WhatsAppEventType } from '../types';
-import { db } from './firebase';
+import { db, isQuotaExceededError, markQuotaExceeded, isQuotaExceededFlag } from './firebase';
 import { doc, getDoc, setDoc, onSnapshot } from 'firebase/firestore';
 
 export const DEFAULT_WHATSAPP_TEMPLATES: Record<WhatsAppEventType, WhatsAppTemplate> = {
@@ -226,6 +226,8 @@ export async function saveWhatsAppSettingsToDB(settings: WhatsAppSettings): Prom
     localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(settings));
   } catch {}
 
+  if (isQuotaExceededFlag) return;
+
   try {
     if (db) {
       await setDoc(doc(db, 'system_settings', SETTINGS_DOC_ID), {
@@ -234,13 +236,17 @@ export async function saveWhatsAppSettingsToDB(settings: WhatsAppSettings): Prom
       }, { merge: true });
     }
   } catch (err) {
-    console.warn('[WhatsApp Settings DB Save Error]:', err);
+    if (isQuotaExceededError(err)) {
+      markQuotaExceeded(err);
+    } else {
+      console.warn('[WhatsApp Settings DB Save Error]:', err);
+    }
   }
 }
 
 export function subscribeToWhatsAppSettings(callback: (settings: WhatsAppSettings) => void): () => void {
   try {
-    if (db) {
+    if (db && !isQuotaExceededFlag) {
       const unsubscribe = onSnapshot(
         doc(db, 'system_settings', SETTINGS_DOC_ID),
         (snap) => {
@@ -257,7 +263,11 @@ export function subscribeToWhatsAppSettings(callback: (settings: WhatsAppSetting
           }
         },
         (error) => {
-          console.warn('[WhatsApp Settings onSnapshot warning]:', error);
+          if (isQuotaExceededError(error)) {
+            markQuotaExceeded(error);
+          } else {
+            console.warn('[WhatsApp Settings onSnapshot warning]:', error);
+          }
         }
       );
       return unsubscribe;

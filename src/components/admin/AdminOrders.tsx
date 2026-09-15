@@ -902,9 +902,10 @@ export const AdminOrders: React.FC<AdminOrdersProps> = ({
         </div>
       </div>
 
-      {/* 2. Orders Table */}
+      {/* 2. Orders Table / Mobile Card List */}
       <div className="rounded-2xl bg-white border border-slate-200 shadow-2xs overflow-hidden">
-        <div className="overflow-x-auto">
+        {/* Desktop Table (Unchanged) */}
+        <div className="hidden md:block overflow-x-auto">
           <table className="w-full text-left text-xs border-collapse">
             <thead>
               <tr className="bg-slate-50/80 border-b border-slate-200 text-slate-500 uppercase text-[10px] tracking-wider font-bold">
@@ -1086,6 +1087,135 @@ export const AdminOrders: React.FC<AdminOrdersProps> = ({
             </tbody>
           </table>
         </div>
+
+        {/* Mobile Cards (Zero Horizontal Scrolling, Clean & Compact) */}
+        <div className="md:hidden divide-y divide-slate-100">
+          {filteredOrders.length === 0 ? (
+            <div className="py-12 text-center text-slate-400 text-xs">
+              No orders found matching your search and filter criteria.
+            </div>
+          ) : (
+            filteredOrders.map((order) => {
+              const orderCost = getOrderOriginalCost(order);
+              const profit = order.totalAmount - orderCost;
+              const { time, date } = formatOrderDateTime(order.createdAt);
+              const totalItems = order.items.reduce((s, i) => s + i.quantity, 0);
+
+              return (
+                <div key={order.id} className="p-3.5 space-y-2.5 hover:bg-slate-50/50 transition-colors">
+                  {/* Row 1: Order ID + Status Badge */}
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <button
+                        type="button"
+                        onClick={(e) => handleCopyOrderId(order.id, e)}
+                        className="font-mono font-bold text-sky-700 text-xs flex items-center gap-1 truncate"
+                      >
+                        #{order.id}
+                        {copiedOrderId === order.id && (
+                          <span className="text-[9px] font-bold text-emerald-700 bg-emerald-50 px-1 py-0.2 rounded border border-emerald-200 shrink-0">
+                            Copied!
+                          </span>
+                        )}
+                      </button>
+                      <span className="text-[10px] text-slate-400 shrink-0">
+                        {date} {time}
+                      </span>
+                    </div>
+                    <div className="shrink-0">
+                      {getStatusPill(order.orderStatus)}
+                    </div>
+                  </div>
+
+                  {/* Row 2: Customer & Location Card */}
+                  <div className="bg-slate-50/80 p-2.5 rounded-xl border border-slate-100 space-y-1">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="font-bold text-slate-900 text-xs truncate">{order.customerName}</p>
+                      <span className="text-[11px] text-slate-500 shrink-0">{order.customerDivision || 'Dhaka'}</span>
+                    </div>
+                    <div className="flex items-center justify-between gap-2 text-[11px] text-slate-500">
+                      <span className="font-medium text-slate-700">{order.customerMobile}</span>
+                      <span className="text-[10px] text-slate-400 truncate">
+                        By: <strong className="text-slate-700">{order.createdByStaffName || 'Store'}</strong>
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Row 3: Items, Amount & Payment */}
+                  <div className="flex items-center justify-between gap-2 text-xs">
+                    <div>
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-black text-slate-900 text-sm">৳{order.totalAmount.toLocaleString()}</span>
+                        <span className="text-[10px] text-slate-500 font-medium">({totalItems} items)</span>
+                      </div>
+                      <div className="text-[10px] text-slate-400">
+                        Cost: ৳{orderCost.toLocaleString()}{' '}
+                        <span className={profit >= 0 ? 'text-emerald-600 font-semibold' : 'text-rose-600 font-semibold'}>
+                          ({profit >= 0 ? '+' : ''}৳{profit.toLocaleString()})
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="text-right">
+                      <span className="text-[11px] font-semibold text-slate-800 block">{order.paymentMethod}</span>
+                      <span
+                        className={`inline-block text-[9px] font-bold px-1.5 py-0.2 rounded mt-0.5 ${
+                          order.paymentStatus === 'Verified' || order.paymentStatus === 'Paid'
+                            ? 'bg-emerald-100 text-emerald-800'
+                            : 'bg-amber-100 text-amber-800'
+                        }`}
+                      >
+                        {order.paymentStatus}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Row 4: Action Buttons */}
+                  <div className="flex items-center gap-1.5 pt-1">
+                    <a
+                      href={generateWhatsAppDirectLink(
+                        order.deliveryMobile || order.customerMobile,
+                        formatWhatsAppMessage(
+                          DEFAULT_WHATSAPP_TEMPLATES[
+                            order.orderStatus === 'Shipped'
+                              ? 'order_shipped'
+                              : order.orderStatus === 'Delivered'
+                              ? 'order_delivered'
+                              : order.orderStatus === 'Confirmed'
+                              ? 'order_confirmed'
+                              : 'order_placed'
+                          ].message,
+                          { order }
+                        )
+                      )}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex-1 py-1.5 px-2 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-bold text-xs flex items-center justify-center gap-1 border border-emerald-200"
+                    >
+                      <MessageSquare className="w-3.5 h-3.5 text-emerald-600" />
+                      <span>WhatsApp</span>
+                    </a>
+                    <button
+                      onClick={() => openOrderDetails(order)}
+                      className="flex-1 py-1.5 px-2 rounded-lg bg-sky-50 hover:bg-sky-100 text-sky-700 font-bold text-xs flex items-center justify-center gap-1 border border-sky-100"
+                    >
+                      <Eye className="w-3.5 h-3.5" />
+                      <span>Details</span>
+                    </button>
+                    <button
+                      onClick={() => onPrintInvoice(order)}
+                      className="py-1.5 px-2.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs flex items-center justify-center gap-1"
+                      title="Print Invoice"
+                    >
+                      <Printer className="w-3.5 h-3.5" />
+                      <span>Invoice</span>
+                    </button>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
       </div>
 
       {/* 3. Comprehensive Order Details Modal */}
@@ -1192,63 +1322,108 @@ export const AdminOrders: React.FC<AdminOrdersProps> = ({
                   </span>
                 </div>
                 <div className="border border-slate-200 rounded-xl overflow-hidden">
-                  <table className="w-full text-left text-xs">
-                    <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 font-semibold">
-                      <tr>
-                        <th className="py-2.5 px-3">Item</th>
-                        <th className="py-2.5 px-3 text-right">Selling Price</th>
-                        <th className="py-2.5 px-3 text-right text-amber-800">
-                          Original Cost 🔒
-                        </th>
-                        <th className="py-2.5 px-3 text-center">Qty</th>
-                        <th className="py-2.5 px-3 text-right">Total Selling</th>
-                        <th className="py-2.5 px-3 text-right text-amber-800">Total Cost</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {(selectedOrder.items || []).map((item: any, i: number) => {
-                        const itemCost = getItemOriginalCost(item);
-                        const qty = item.quantity || 1;
-                        const lineSelling = item.price * qty;
-                        const lineCost = itemCost * qty;
-                        const lineMargin = lineSelling - lineCost;
-                        return (
-                          <tr key={i} className="hover:bg-slate-50/50">
-                            <td className="py-2.5 px-3">
-                              <p className="font-bold text-slate-900">
+                  {/* Desktop Table View */}
+                  <div className="hidden sm:block overflow-x-auto">
+                    <table className="w-full text-left text-xs">
+                      <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 font-semibold">
+                        <tr>
+                          <th className="py-2.5 px-3">Item</th>
+                          <th className="py-2.5 px-3 text-right">Selling Price</th>
+                          <th className="py-2.5 px-3 text-right text-amber-800">
+                            Original Cost 🔒
+                          </th>
+                          <th className="py-2.5 px-3 text-center">Qty</th>
+                          <th className="py-2.5 px-3 text-right">Total Selling</th>
+                          <th className="py-2.5 px-3 text-right text-amber-800">Total Cost</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {(selectedOrder.items || []).map((item: any, i: number) => {
+                          const itemCost = getItemOriginalCost(item);
+                          const qty = item.quantity || 1;
+                          const lineSelling = item.price * qty;
+                          const lineCost = itemCost * qty;
+                          const lineMargin = lineSelling - lineCost;
+                          return (
+                            <tr key={i} className="hover:bg-slate-50/50">
+                              <td className="py-2.5 px-3">
+                                <p className="font-bold text-slate-900">
+                                  {item.productName || item.name || 'Item'}
+                                </p>
+                                {item.variantName && (
+                                  <p className="text-[11px] text-slate-400">
+                                    Variant: {item.variantName}
+                                  </p>
+                                )}
+                              </td>
+                              <td className="py-2.5 px-3 text-right">
+                                ৳{item.price.toLocaleString()}
+                              </td>
+                              <td className="py-2.5 px-3 text-right text-amber-800 font-bold">
+                                ৳{itemCost.toLocaleString()}
+                              </td>
+                              <td className="py-2.5 px-3 text-center font-bold">{qty}</td>
+                              <td className="py-2.5 px-3 text-right font-bold text-slate-900">
+                                ৳{lineSelling.toLocaleString()}
+                              </td>
+                              <td className="py-2.5 px-3 text-right font-bold text-amber-800">
+                                <div>৳{lineCost.toLocaleString()}</div>
+                                <span
+                                  className={`text-[10px] block font-semibold ${
+                                    lineMargin >= 0 ? 'text-emerald-600' : 'text-rose-600'
+                                  }`}
+                                >
+                                  {lineMargin >= 0 ? '+' : ''}৳{lineMargin.toLocaleString()}
+                                </span>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* Mobile Compact Cards View */}
+                  <div className="sm:hidden divide-y divide-slate-100 p-2.5 space-y-2">
+                    {(selectedOrder.items || []).map((item: any, i: number) => {
+                      const itemCost = getItemOriginalCost(item);
+                      const qty = item.quantity || 1;
+                      const lineSelling = item.price * qty;
+                      const lineCost = itemCost * qty;
+                      const lineMargin = lineSelling - lineCost;
+                      return (
+                        <div key={i} className="p-2.5 rounded-xl bg-slate-50/80 border border-slate-100 space-y-2 text-xs">
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0">
+                              <p className="font-bold text-slate-900 truncate">
                                 {item.productName || item.name || 'Item'}
                               </p>
                               {item.variantName && (
-                                <p className="text-[11px] text-slate-400">
+                                <p className="text-[11px] text-slate-400 truncate">
                                   Variant: {item.variantName}
                                 </p>
                               )}
-                            </td>
-                            <td className="py-2.5 px-3 text-right">
-                              ৳{item.price.toLocaleString()}
-                            </td>
-                            <td className="py-2.5 px-3 text-right text-amber-800 font-bold">
-                              ৳{itemCost.toLocaleString()}
-                            </td>
-                            <td className="py-2.5 px-3 text-center font-bold">{qty}</td>
-                            <td className="py-2.5 px-3 text-right font-bold text-slate-900">
-                              ৳{lineSelling.toLocaleString()}
-                            </td>
-                            <td className="py-2.5 px-3 text-right font-bold text-amber-800">
-                              <div>৳{lineCost.toLocaleString()}</div>
-                              <span
-                                className={`text-[10px] block font-semibold ${
-                                  lineMargin >= 0 ? 'text-emerald-600' : 'text-rose-600'
-                                }`}
-                              >
-                                {lineMargin >= 0 ? '+' : ''}৳{lineMargin.toLocaleString()}
+                            </div>
+                            <span className="font-bold text-slate-900 bg-white px-2 py-0.5 rounded-lg border border-slate-200 text-xs shrink-0">
+                              Qty: {qty}
+                            </span>
+                          </div>
+                          <div className="grid grid-cols-2 gap-2 text-[11px] pt-1.5 border-t border-slate-200/60">
+                            <div>
+                              <span className="text-slate-500 block">Unit: ৳{item.price.toLocaleString()}</span>
+                              <span className="font-black text-slate-900 block">Total: ৳{lineSelling.toLocaleString()}</span>
+                            </div>
+                            <div className="text-right">
+                              <span className="text-amber-800 font-semibold block">Cost: ৳{lineCost.toLocaleString()}</span>
+                              <span className={`font-bold block ${lineMargin >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
+                                Margin: {lineMargin >= 0 ? '+' : ''}৳{lineMargin.toLocaleString()}
                               </span>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
 
                 {/* Subtotal & Profit Summary */}

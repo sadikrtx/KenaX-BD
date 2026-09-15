@@ -239,11 +239,16 @@ export const AdminCustomers: React.FC<AdminCustomersProps> = ({
   };
 
   // Customer Classification Helpers
+  const isRealCustomer = (c: CustomerRecord): boolean => {
+    return Boolean(c && c.id && !c.id.startsWith('staff-cust-'));
+  };
+
   const isRegisteredCustomer = (c: CustomerRecord): boolean => {
-    return Boolean(c.password || (c.email && c.email.includes('@')) || (c.id && !c.id.includes('guest')));
+    return isRealCustomer(c) && Boolean(c.password || (c.email && c.email.includes('@')) || (c.id && !c.id.includes('guest')));
   };
 
   const isPanelBuyer = (c: CustomerRecord): boolean => {
+    if (!isRealCustomer(c)) return false;
     if (c.isPanelPurchased || (c.panelPurchases && c.panelPurchases.length > 0)) {
       return true;
     }
@@ -268,23 +273,26 @@ export const AdminCustomers: React.FC<AdminCustomersProps> = ({
   };
 
   const isActiveBuyer = (c: CustomerRecord): boolean => {
+    if (!isRealCustomer(c)) return false;
     return c.totalOrders > 0 || getCustomerOrders(c.mobile).length > 0;
   };
 
   const hasWishlist = (c: CustomerRecord): boolean => {
-    return Boolean(c.wishlist && c.wishlist.length > 0);
+    return isRealCustomer(c) && Boolean(c.wishlist && c.wishlist.length > 0);
   };
 
-  // Metrics Calculations
-  const registeredCustomersCount = customers.filter(isRegisteredCustomer).length;
-  const panelBuyersCount = customers.filter(isPanelBuyer).length;
-  const activeBuyersCount = customers.filter(isActiveBuyer).length;
-  const wishlistCustomersCount = customers.filter(hasWishlist).length;
+  const realCustomers = customers.filter(isRealCustomer);
 
-  const totalWishlistItemsCount = customers.reduce((sum, c) => sum + (c.wishlist?.length || 0), 0);
+  // Metrics Calculations
+  const registeredCustomersCount = realCustomers.filter(isRegisteredCustomer).length;
+  const panelBuyersCount = realCustomers.filter(isPanelBuyer).length;
+  const activeBuyersCount = realCustomers.filter(isActiveBuyer).length;
+  const wishlistCustomersCount = realCustomers.filter(hasWishlist).length;
+
+  const totalWishlistItemsCount = realCustomers.reduce((sum, c) => sum + (c.wishlist?.length || 0), 0);
 
   // Filter Customers by Selected Segment and Search Query
-  const filteredCustomers = customers.filter((c) => {
+  const filteredCustomers = realCustomers.filter((c) => {
     const query = searchQuery.toLowerCase().trim();
     const matchesQuery =
       !query ||
@@ -571,9 +579,10 @@ export const AdminCustomers: React.FC<AdminCustomersProps> = ({
         </div>
       </div>
 
-      {/* Customers Table */}
+      {/* Customers Table / Mobile Cards */}
       <div className="rounded-2xl bg-white border border-slate-200 shadow-2xs overflow-hidden">
-        <div className="overflow-x-auto">
+        {/* Desktop View (Unchanged table) */}
+        <div className="hidden md:block overflow-x-auto">
           <table className="w-full text-left text-xs border-collapse">
             <thead>
               <tr className="bg-slate-50/80 border-b border-slate-200 text-slate-500 uppercase text-[10px] tracking-wider font-bold">
@@ -792,6 +801,186 @@ export const AdminCustomers: React.FC<AdminCustomersProps> = ({
               )}
             </tbody>
           </table>
+        </div>
+
+        {/* Mobile View: Clean, Zero Horizontal Scroll Cards */}
+        <div className="md:hidden divide-y divide-slate-100">
+          {filteredCustomers.length === 0 ? (
+            <div className="py-12 text-center text-slate-400 text-xs">
+              <Users className="w-8 h-8 mx-auto mb-2 opacity-30" />
+              <p className="font-bold text-slate-700">No customers found in this section</p>
+              <p className="text-[11px] text-slate-400 mt-1">Try resetting search or switching segments.</p>
+            </div>
+          ) : (
+            filteredCustomers.map((c) => {
+              const customerOrders = getCustomerOrders(c.mobile);
+              const actualOrderCount = customerOrders.length || c.totalOrders;
+              const actualSpent = customerOrders.reduce((s, o) => s + (o.orderStatus !== 'Cancelled' ? o.totalAmount : 0), 0) || c.totalSpent;
+              const isPassVisible = visiblePasswords[c.id];
+              const custPassword = c.password || 'password123';
+              const registered = isRegisteredCustomer(c);
+              const panelUser = isPanelBuyer(c);
+
+              return (
+                <div key={c.id} className="p-3.5 space-y-2.5 hover:bg-slate-50/50 transition-colors">
+                  {/* Top Bar: Customer Name & Badges */}
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <div className="w-8 h-8 rounded-full bg-slate-900 text-white font-black flex items-center justify-center text-xs shrink-0">
+                        {c.name.charAt(0).toUpperCase()}
+                      </div>
+                      <div className="min-w-0">
+                        <p className="font-bold text-slate-900 text-xs flex items-center gap-1 truncate">
+                          <span className="truncate">{c.name}</span>
+                          {registered && (
+                            <BadgeCheck className="w-3.5 h-3.5 text-sky-600 shrink-0" />
+                          )}
+                        </p>
+                        <p className="text-[10px] text-slate-400 font-mono">ID: {c.id}</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1 shrink-0">
+                      {registered ? (
+                        <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-200">
+                          Registered
+                        </span>
+                      ) : (
+                        <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">
+                          Guest
+                        </span>
+                      )}
+                      <span
+                        className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${
+                          c.isBlocked ? 'bg-rose-100 text-rose-800' : 'bg-emerald-100 text-emerald-800'
+                        }`}
+                      >
+                        {c.isBlocked ? 'Blocked' : 'Active'}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Contact Info & Panel Tag */}
+                  <div className="bg-slate-50/70 p-2.5 rounded-xl border border-slate-100 space-y-1 text-xs">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-semibold text-slate-800 flex items-center gap-1 text-xs">
+                        <Phone className="w-3 h-3 text-slate-400" />
+                        <span>{c.mobile}</span>
+                      </span>
+                      {c.wishlist && c.wishlist.length > 0 && (
+                        <button
+                          onClick={() => setSelectedCustomer(c)}
+                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-rose-50 text-rose-700 text-[10px] font-bold border border-rose-200"
+                        >
+                          <Heart className="w-2.5 h-2.5 text-rose-500 fill-rose-500" />
+                          <span>{c.wishlist.length} wishlist</span>
+                        </button>
+                      )}
+                    </div>
+                    {c.email && (
+                      <p className="text-[11px] text-slate-500 flex items-center gap-1">
+                        <Mail className="w-3 h-3 text-slate-400" />
+                        <span className="truncate">{c.email}</span>
+                      </p>
+                    )}
+                    {panelUser && (
+                      <div className="pt-0.5">
+                        <span className="inline-flex items-center gap-1 text-[9px] font-black px-2 py-0.5 rounded bg-purple-100 text-purple-900 border border-purple-200">
+                          <Laptop className="w-3 h-3 text-purple-700" />
+                          <span>Panel Purchaser</span>
+                        </span>
+                        {c.panelPurchases && c.panelPurchases.length > 0 && (
+                          <span className="text-[10px] text-purple-700 font-semibold ml-1.5 truncate">
+                            {c.panelPurchases[0].panelName}
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Orders, Spent & Password Row */}
+                  <div className="flex items-center justify-between gap-2 text-xs">
+                    <div className="flex items-center gap-3">
+                      <div>
+                        <span className="text-[10px] uppercase font-bold text-slate-400 block">Orders</span>
+                        <span className="font-black text-slate-900 text-xs">{actualOrderCount}</span>
+                      </div>
+                      <div>
+                        <span className="text-[10px] uppercase font-bold text-slate-400 block">Total Spent</span>
+                        <span className="font-black text-slate-900 text-xs">৳{actualSpent.toLocaleString()}</span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-1 bg-slate-100 px-2 py-1 rounded-lg">
+                      <span className="font-mono text-[10px] text-slate-700">
+                        {isPassVisible ? custPassword : '••••••'}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => togglePasswordVisibility(c.id)}
+                        className="p-0.5 text-slate-400 hover:text-slate-700"
+                      >
+                        {isPassVisible ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleCopyPassword(custPassword, c.id)}
+                        className="p-0.5 text-slate-400 hover:text-sky-600"
+                      >
+                        {copiedId === c.id ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Action Buttons Toolbar */}
+                  <div className="flex items-center justify-between gap-1.5 pt-1 border-t border-slate-100">
+                    <button
+                      onClick={() => setSelectedCustomer(c)}
+                      className="flex-1 py-1.5 px-2 rounded-lg bg-sky-50 hover:bg-sky-100 text-sky-700 font-bold text-xs flex items-center justify-center gap-1"
+                    >
+                      <Eye className="w-3.5 h-3.5" />
+                      <span>Profile</span>
+                    </button>
+                    <button
+                      onClick={() => handleOpenEditModal(c)}
+                      className="p-1.5 rounded-lg text-blue-600 hover:bg-blue-50 transition-colors"
+                      title="Edit Customer"
+                    >
+                      <Edit className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => handleOpenResetModal(c)}
+                      className="p-1.5 rounded-lg text-amber-600 hover:bg-amber-50 transition-colors"
+                      title="Reset Password"
+                    >
+                      <KeyRound className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => {
+                        if (c.isBlocked) {
+                          onToggleCustomerStatus(c.id);
+                        } else {
+                          setBlockingTarget(c);
+                        }
+                      }}
+                      className={`p-1.5 rounded-lg transition-colors ${
+                        c.isBlocked ? 'text-emerald-600 bg-emerald-50' : 'text-slate-400 hover:text-rose-600'
+                      }`}
+                      title={c.isBlocked ? 'Unblock' : 'Block'}
+                    >
+                      {c.isBlocked ? <ShieldCheck className="w-4 h-4" /> : <ShieldAlert className="w-4 h-4" />}
+                    </button>
+                    <button
+                      onClick={() => handleOpenDeleteModal(c)}
+                      className="p-1.5 rounded-lg text-rose-500 hover:text-rose-700 hover:bg-rose-50 transition-colors"
+                      title="Delete Customer"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              );
+            })
+          )}
         </div>
       </div>
 

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Product, OrderItem } from '../types';
-import { resolveOriginalImageMedia } from '../lib/firebase';
-import { getOptimizedImageUrl } from '../utils/imageOptimizer';
+import { resolveOriginalImageMedia, getSynchronouslyResolvedMedia } from '../lib/firebase';
+import { getOptimizedImageUrl, NEUTRAL_PRODUCT_PLACEHOLDER, markImageLoaded } from '../utils/imageOptimizer';
 
 interface CartItemImageProps {
   item: OrderItem;
@@ -11,8 +11,7 @@ interface CartItemImageProps {
   alt?: string;
 }
 
-const DEFAULT_FALLBACK_IMAGE =
-  'https://images.unsplash.com/photo-1598327105666-5b89351aff97?w=300&auto=format&fit=crop&q=85';
+const DEFAULT_FALLBACK_IMAGE = NEUTRAL_PRODUCT_PLACEHOLDER;
 
 export const CartItemImage: React.FC<CartItemImageProps> = ({
   item,
@@ -50,21 +49,18 @@ export const CartItemImage: React.FC<CartItemImageProps> = ({
 
   const initialCandidate = getCandidateImage();
   const [imgSrc, setImgSrc] = useState<string>(() => {
-    if (initialCandidate.startsWith('media://productImageMedia/')) {
-      const mediaId = initialCandidate.replace('media://productImageMedia/', '');
-      try {
-        const cached = localStorage.getItem(`kenax_img_media_${mediaId}`);
-        if (cached) return cached;
-      } catch {}
+    if (initialCandidate.startsWith('media://')) {
+      const syncVal = getSynchronouslyResolvedMedia(initialCandidate);
+      if (syncVal) return syncVal;
       return initialCandidate;
     }
     return initialCandidate.startsWith('data:') || initialCandidate.startsWith('blob:')
       ? initialCandidate
-      : getOptimizedImageUrl(initialCandidate, 300);
+      : getOptimizedImageUrl(initialCandidate, 200);
   });
 
   const [hasError, setHasError] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(() => initialCandidate.startsWith('media://') && !getSynchronouslyResolvedMedia(initialCandidate));
 
   useEffect(() => {
     let isMounted = true;
@@ -76,30 +72,24 @@ export const CartItemImage: React.FC<CartItemImageProps> = ({
       return;
     }
 
-    if (candidate.startsWith('media://productImageMedia/')) {
-      const mediaId = candidate.replace('media://productImageMedia/', '');
-      try {
-        const cached = localStorage.getItem(`kenax_img_media_${mediaId}`);
-        if (cached) {
-          if (isMounted) {
-            setImgSrc(cached);
-            setIsLoading(false);
-          }
-          return;
-        }
-      } catch {}
+    if (candidate.startsWith('media://')) {
+      const syncVal = getSynchronouslyResolvedMedia(candidate);
+      if (syncVal) {
+        setImgSrc(syncVal);
+        setIsLoading(false);
+        markImageLoaded(syncVal, 200);
+        return;
+      }
 
       resolveOriginalImageMedia(candidate).then((resolved) => {
         if (isMounted) {
           if (resolved && resolved.trim() !== '' && !resolved.startsWith('media://')) {
             setImgSrc(resolved);
-            try {
-              localStorage.setItem(`kenax_img_media_${mediaId}`, resolved);
-            } catch {}
+            markImageLoaded(resolved, 200);
           } else {
             // Try product fallback
             const fb = product?.images?.[0] || DEFAULT_FALLBACK_IMAGE;
-            setImgSrc(fb.startsWith('media://') ? DEFAULT_FALLBACK_IMAGE : fb);
+            setImgSrc(fb.startsWith('media://') ? DEFAULT_FALLBACK_IMAGE : getOptimizedImageUrl(fb, 200));
           }
           setIsLoading(false);
         }
@@ -107,7 +97,7 @@ export const CartItemImage: React.FC<CartItemImageProps> = ({
     } else {
       const optimized = candidate.startsWith('data:') || candidate.startsWith('blob:')
         ? candidate
-        : getOptimizedImageUrl(candidate, 300);
+        : getOptimizedImageUrl(candidate, 200);
       setImgSrc(optimized);
       setIsLoading(false);
     }
@@ -123,7 +113,7 @@ export const CartItemImage: React.FC<CartItemImageProps> = ({
       if (product?.images && product.images.length > 0) {
         const fb = product.images.find((img) => img && img !== imgSrc && !img.startsWith('media://'));
         if (fb) {
-          setImgSrc(fb);
+          setImgSrc(getOptimizedImageUrl(fb, 200));
           return;
         }
       }
@@ -139,11 +129,13 @@ export const CartItemImage: React.FC<CartItemImageProps> = ({
         src={imgSrc}
         alt={alt || item.productName || 'Product Image'}
         onError={handleError}
-        onLoad={() => setIsLoading(false)}
+        onLoad={() => {
+          setIsLoading(false);
+          markImageLoaded(imgSrc, 200);
+        }}
         loading="lazy"
-        className={`w-full h-full object-contain p-1 transition-opacity duration-200 ${
-          isLoading ? 'opacity-40 scale-95' : 'opacity-100 scale-100'
-        }`}
+        decoding="async"
+        className="w-full h-full object-contain p-1"
       />
       {isLoading && (
         <div className="absolute inset-0 bg-slate-100/60 animate-pulse flex items-center justify-center">

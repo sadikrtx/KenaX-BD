@@ -452,7 +452,7 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
     setFormSaleBadge('Trending');
     setFormTags(['Shop', 'Trending']);
     setNewCustomTagInput('');
-    setFormImages(['https://images.unsplash.com/photo-1546868871-7041f2a55e12?w=500']);
+    setFormImages([]);
     setFormImageInput('');
     setFormVideoUrl('');
     setFormVideoFile('');
@@ -706,6 +706,7 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
       rating: editingProduct ? editingProduct.rating : 4.9,
       reviewsCount: editingProduct ? editingProduct.reviewsCount : 1,
       createdAt: editingProduct?.createdAt || new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
     };
 
     if (editingProduct) {
@@ -854,11 +855,10 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
         </div>
       </div>
 
-      {/* Products Table - Desktop-Optimized (Zero horizontal scroll on PC) */}
+      {/* Products Table - Desktop-Optimized (Zero horizontal scroll on PC) / Mobile Cards */}
       <div className="rounded-2xl bg-white border border-slate-200 shadow-2xs overflow-hidden">
-        {/* On Mobile: overflow-x-auto keeps mobile scroll smooth.
-            On Desktop (lg:): overflow-x-hidden ensures no horizontal scrollbar! */}
-        <div className="overflow-x-auto lg:overflow-x-hidden">
+        {/* Desktop View */}
+        <div className="hidden md:block overflow-x-auto lg:overflow-x-hidden">
           <table className="w-full text-left text-xs border-collapse">
             <thead>
               <tr className="bg-slate-50/90 border-b border-slate-200 text-slate-500 uppercase text-[10px] tracking-wider font-bold sticky top-0 z-10 backdrop-blur-xs">
@@ -1111,6 +1111,177 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
               )}
             </tbody>
           </table>
+        </div>
+
+        {/* Mobile View: Clean, Zero Horizontal Scroll Cards */}
+        <div className="md:hidden divide-y divide-slate-100">
+          {paginatedProducts.length === 0 ? (
+            <div className="py-12 text-center text-slate-400 text-xs">
+              <Package className="w-8 h-8 mx-auto text-slate-300 mb-2" />
+              <p className="font-semibold text-sm text-slate-600">No products found</p>
+              <p className="text-xs text-slate-400 mt-0.5">Try adjusting search or category filters.</p>
+            </div>
+          ) : (
+            paginatedProducts.map((product) => {
+              const cost = product.costPrice || Math.round(product.price * 0.75);
+              const margin = product.price - cost;
+              const marginPercent = Math.round((margin / product.price) * 100);
+
+              return (
+                <div key={product.id} className="p-3.5 space-y-2.5 hover:bg-slate-50/50 transition-colors">
+                  {/* Top: Product image + Name + SKU */}
+                  <div className="flex items-start gap-2.5 min-w-0">
+                    <img
+                      src={
+                        (product.images?.[0] && product.images[0].trim() !== '')
+                          ? product.images[0]
+                          : 'https://images.unsplash.com/photo-1546868871-7041f2a55e12?w=80'
+                      }
+                      alt={product.name}
+                      className="w-12 h-12 rounded-xl object-cover bg-slate-100 shrink-0 border border-slate-200"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <p className="font-bold text-slate-900 text-xs leading-snug line-clamp-2">
+                        {product.name}
+                      </p>
+                      <div className="flex items-center gap-1.5 mt-1 flex-wrap text-[10px]">
+                        <span className="font-mono font-bold text-slate-700 bg-slate-100 px-1.5 py-0.2 rounded border border-slate-200">
+                          #{product.sku}
+                        </span>
+                        <span className="text-slate-500 font-medium">
+                          {product.category}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Badges & Stock Row */}
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <div className="flex items-center gap-1 flex-wrap">
+                      {product.saleBadge === 'Trending' || product.isTrending ? (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-extrabold bg-purple-100 text-purple-800">
+                          <Flame className="w-2.5 h-2.5 text-purple-600" />
+                          <span>Trending</span>
+                        </span>
+                      ) : product.saleBadge === 'New' || product.isNew ? (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-extrabold bg-sky-100 text-sky-800">
+                          <Sparkles className="w-2.5 h-2.5 text-sky-600" />
+                          <span>New</span>
+                        </span>
+                      ) : product.saleBadge === 'Best Seller' || product.isBestSeller ? (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-extrabold bg-emerald-100 text-emerald-800">
+                          <Award className="w-2.5 h-2.5 text-emerald-600" />
+                          <span>Best Seller</span>
+                        </span>
+                      ) : product.saleBadge === 'Hot' || product.isHot ? (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-extrabold bg-rose-100 text-rose-800">
+                          <Zap className="w-2.5 h-2.5 text-rose-600" />
+                          <span>Hot Deal</span>
+                        </span>
+                      ) : product.saleBadge === 'Featured' || product.isFeatured ? (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-extrabold bg-amber-100 text-amber-800">
+                          <Star className="w-2.5 h-2.5 text-amber-500 fill-amber-400" />
+                          <span>Featured</span>
+                        </span>
+                      ) : null}
+
+                      {product.supplierUrl ? (
+                        <a
+                          href={product.supplierUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 text-[9px] font-semibold border border-indigo-200"
+                        >
+                          <ExternalLink className="w-2.5 h-2.5 text-indigo-600" />
+                          <span>Source</span>
+                        </a>
+                      ) : (
+                        <span className="text-[9px] font-medium text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">
+                          Own
+                        </span>
+                      )}
+                    </div>
+
+                    <span
+                      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold shrink-0 ${
+                        product.stock > 10
+                          ? 'bg-emerald-100 text-emerald-800'
+                          : product.stock > 0
+                          ? 'bg-amber-100 text-amber-800'
+                          : 'bg-rose-100 text-rose-800'
+                      }`}
+                    >
+                      <span
+                        className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                          product.stock > 10
+                            ? 'bg-emerald-600'
+                            : product.stock > 0
+                            ? 'bg-amber-600'
+                            : 'bg-rose-600'
+                        }`}
+                      />
+                      <span>{product.stock} pcs</span>
+                    </span>
+                  </div>
+
+                  {/* Price & Cost Box */}
+                  <div className="flex items-center justify-between gap-2 bg-slate-50/80 p-2 rounded-xl border border-slate-100 text-xs">
+                    <div>
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-black text-slate-900 text-sm">৳{product.price.toLocaleString('en-BD')}</span>
+                        {product.originalPrice > product.price && (
+                          <span className="text-[10px] text-slate-400 line-through">
+                            ৳{product.originalPrice.toLocaleString('en-BD')}
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-[10px] text-slate-400">
+                        Cost: ৳{cost.toLocaleString('en-BD')}{' '}
+                        <span className="text-emerald-600 font-bold">
+                          (+৳{margin.toLocaleString('en-BD')} / {marginPercent}%)
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Actions Toolbar */}
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => {
+                          const slugOrId = product.slug || product.id;
+                          const fullAdLink = `${window.location.origin}/?product=${encodeURIComponent(slugOrId)}`;
+                          navigator.clipboard.writeText(fullAdLink);
+                          alert(`✅ Product Ad Link Copied!\n\n${fullAdLink}\n\nPaste this link into Facebook / TikTok / Google Ads.`);
+                        }}
+                        className="p-1.5 rounded-lg text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-xs font-bold flex items-center gap-1"
+                        title="Copy Campaign Link"
+                      >
+                        <Copy className="w-3.5 h-3.5" />
+                        <span className="text-[10px]">Ad Link</span>
+                      </button>
+                      {canEdit && (
+                        <button
+                          onClick={() => openEditModal(product)}
+                          className="p-1.5 rounded-lg text-sky-700 bg-sky-50 hover:bg-sky-100 border border-sky-200"
+                          title="Edit"
+                        >
+                          <Edit2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                      {canDelete && (
+                        <button
+                          onClick={() => setProductToDelete(product)}
+                          className="p-1.5 rounded-lg text-rose-600 bg-rose-50 hover:bg-rose-100 border border-rose-200"
+                          title="Delete"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })
+          )}
         </div>
 
         {/* Compact Pagination & Count Footer */}

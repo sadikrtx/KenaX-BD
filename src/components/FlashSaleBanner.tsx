@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Flame, ArrowRight, ShieldCheck, Truck, Sparkles } from 'lucide-react';
 import { FlashSaleBannerSettings } from '../types';
+import { resolveOriginalImageMedia } from '../lib/firebase';
 
 interface FlashSaleBannerProps {
   settings?: FlashSaleBannerSettings;
@@ -23,19 +24,37 @@ export const FlashSaleBanner: React.FC<FlashSaleBannerProps> = ({
     settings?.subtitle ||
     'Grab authentic smartwatches, wireless earbuds, smart accessories, and lifestyle essentials with verified Cash on Delivery nationwide.';
   const buttonText = settings?.buttonText || 'Shop Flash Sale Deals';
-  const bannerImage =
+  const rawBannerImage =
     settings?.image && settings.image.trim() !== ''
       ? settings.image
       : 'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=1400&auto=format&fit=crop&q=85';
+
+  const [resolvedImage, setResolvedImage] = useState<string>(rawBannerImage);
+
+  useEffect(() => {
+    let isMounted = true;
+    if (rawBannerImage.startsWith('media://')) {
+      resolveOriginalImageMedia(rawBannerImage).then((url) => {
+        if (isMounted) {
+          setResolvedImage(url || rawBannerImage);
+        }
+      });
+    } else {
+      setResolvedImage(rawBannerImage);
+    }
+    return () => {
+      isMounted = false;
+    };
+  }, [rawBannerImage]);
 
   return (
     <section className="max-w-[1536px] mx-auto px-3 sm:px-6 lg:px-8 py-8">
       <div className="relative rounded-3xl overflow-hidden border border-slate-800 shadow-xl bg-slate-950 min-h-[320px] sm:min-h-[380px] md:min-h-[440px] flex items-center">
         {/* Large High-Res Background Image with Dual Layer Gradients */}
-        {bannerImage && (
+        {resolvedImage && (
           <div className="absolute inset-0 z-0">
             <img
-              src={bannerImage}
+              src={resolvedImage}
               alt={title}
               className="w-full h-full object-cover object-center opacity-40 scale-105 transition-transform duration-700 hover:scale-100"
               referrerPolicy="no-referrer"

@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { Product, UserRole, ColorVariation } from '../types';
 import { FormattedText } from './FormattedText';
+import { NEUTRAL_PRODUCT_PLACEHOLDER, getOptimizedImageUrl, markImageLoaded, preloadImage } from '../utils/imageOptimizer';
 
 interface ProductDetailModalProps {
   product: Product | null;
@@ -177,7 +178,7 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
   const validImages = (product.images || []).filter((img) => typeof img === 'string' && img.trim() !== '');
   const imagesList = validImages.length > 0
     ? validImages
-    : ['https://images.unsplash.com/photo-1598327105666-5b89351aff97?w=500'];
+    : [NEUTRAL_PRODUCT_PLACEHOLDER];
 
   const currentDisplayImage =
     (matchedVariant?.image && matchedVariant.image.trim() !== '' && !activeColorImage)
@@ -186,7 +187,7 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
       ? activeColorImage
       : imagesList[selectedImageIndex] ||
         imagesList[0] ||
-        'https://images.unsplash.com/photo-1598327105666-5b89351aff97?w=500';
+        NEUTRAL_PRODUCT_PLACEHOLDER;
 
   const handlePrevImage = () => {
     if (imagesList.length <= 1) return;
@@ -235,9 +236,18 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
                   />
                 ) : (
                   <img
-                    src={currentDisplayImage}
+                    src={getOptimizedImageUrl(currentDisplayImage, 800)}
                     alt={product.name}
-                    className="w-full h-full object-contain p-0 sm:p-2.5 mix-blend-multiply transition-all duration-300 transform scale-100 group-hover:scale-105"
+                    loading="eager"
+                    decoding="async"
+                    onLoad={() => markImageLoaded(currentDisplayImage, 800)}
+                    onError={(e) => {
+                      const target = e.currentTarget;
+                      if (target.src !== NEUTRAL_PRODUCT_PLACEHOLDER) {
+                        target.src = NEUTRAL_PRODUCT_PLACEHOLDER;
+                      }
+                    }}
+                    className="w-full h-full object-contain p-0 sm:p-2.5 mix-blend-multiply transition-transform duration-300 transform scale-100 group-hover:scale-105"
                   />
                 )}
 
@@ -318,8 +328,17 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
                     }`}
                   >
                     <img
-                      src={img}
+                      src={getOptimizedImageUrl(img, 150)}
                       alt={`Thumbnail ${idx + 1}`}
+                      loading="lazy"
+                      decoding="async"
+                      onLoad={() => markImageLoaded(img, 150)}
+                      onError={(e) => {
+                        const target = e.currentTarget;
+                        if (target.src !== NEUTRAL_PRODUCT_PLACEHOLDER) {
+                          target.src = NEUTRAL_PRODUCT_PLACEHOLDER;
+                        }
+                      }}
                       className="w-full h-full object-contain"
                     />
                   </button>

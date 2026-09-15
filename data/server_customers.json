@@ -1,0 +1,60 @@
+[
+  {
+    "id": "cust-1789408880177",
+    "ordersCount": 3,
+    "name": "Demo 1",
+    "email": "muktasadik8@gmail.com",
+    "lastOrderDate": "2026-09-14T18:09:04.515Z",
+    "password": "siyam85",
+    "savedAddresses": [
+      {
+        "recipientPhone": "01887700000",
+        "id": "addr-1789409344673",
+        "fullName": "Demo 1",
+        "houseRoad": "",
+        "division": "Dhaka",
+        "fullAddress": "Bangladesh Gazipur",
+        "upazila": "Dhanmondi",
+        "recipientName": "Demo 1",
+        "postalCode": "",
+        "deliveryInstructions": "",
+        "district": "Dhaka",
+        "label": "Home / Delivery",
+        "isDefault": true,
+        "mobileNumber": "01887700000",
+        "area": "Dhanmondi"
+      }
+    ],
+    "isBlocked": false,
+    "addresses": [
+      {
+        "mobileNumber": "01887700000",
+        "area": "Dhanmondi",
+        "fullAddress": "Bangladesh Gazipur",
+        "upazila": "Dhanmondi",
+        "label": "Home / Delivery",
+        "recipientPhone": "01887700000",
+        "deliveryInstructions": "",
+        "houseRoad": "",
+        "district": "Dhaka",
+        "id": "addr-1789409344673",
+        "recipientName": "Demo 1",
+        "division": "Dhaka",
+        "postalCode": "",
+        "isDefault": true,
+        "fullName": "Demo 1"
+      }
+    ],
+    "cart": [],
+    "orderIds": [
+      "KB-506062",
+      "KB-330537"
+    ],
+    "mobile": "01887700000",
+    "registeredAt": "2026-09-14T18:01:20.177Z",
+    "totalSpent": 1640,
+    "totalOrders": 3,
+    "wishlist": [],
+    "isV2Account": true
+  }
+]

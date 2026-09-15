@@ -165,9 +165,10 @@ export const AdminInventory: React.FC<AdminInventoryProps> = ({
             </div>
           </div>
 
-          {/* Table */}
+          {/* Table / Card List */}
           <div className="rounded-2xl bg-white border border-slate-200 shadow-2xs overflow-hidden">
-            <div className="overflow-x-auto">
+            {/* Desktop View (Unchanged table layout) */}
+            <div className="hidden md:block overflow-x-auto">
               <table className="w-full text-left text-xs border-collapse">
                 <thead>
                   <tr className="bg-slate-50/80 border-b border-slate-200 text-slate-500 uppercase text-[10px] tracking-wider font-bold">
@@ -236,12 +237,89 @@ export const AdminInventory: React.FC<AdminInventoryProps> = ({
                 </tbody>
               </table>
             </div>
+
+            {/* Mobile View: Clean, Zero Horizontal Scroll Compact Cards */}
+            <div className="md:hidden divide-y divide-slate-100">
+              {filteredProducts.length === 0 ? (
+                <div className="p-8 text-center text-slate-400 text-xs font-medium">
+                  No products found in inventory.
+                </div>
+              ) : (
+                filteredProducts.map((p) => {
+                  const reserved = p.stock > 0 ? Math.min(3, Math.floor(p.stock * 0.1)) : 0;
+                  const available = Math.max(0, p.stock - reserved);
+
+                  return (
+                    <div key={p.id} className="p-3.5 space-y-2.5 hover:bg-slate-50/50 transition-colors">
+                      {/* Top Row: SKU + Category + Status */}
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <span className="font-mono font-bold text-slate-800 text-xs">#{p.sku}</span>
+                          <span className="px-2 py-0.5 rounded-md text-[10px] font-semibold bg-slate-100 text-slate-600 truncate max-w-[120px]">
+                            {p.category}
+                          </span>
+                        </div>
+                        <span
+                          className={`px-2 py-0.5 rounded-full text-[10px] font-bold shrink-0 ${
+                            p.stock > 10
+                              ? 'bg-emerald-100 text-emerald-800'
+                              : p.stock > 0
+                              ? 'bg-amber-100 text-amber-800'
+                              : 'bg-rose-100 text-rose-800'
+                          }`}
+                        >
+                          {p.stock > 10 ? 'In Stock' : p.stock > 0 ? 'Low Stock' : 'Out of Stock'}
+                        </span>
+                      </div>
+
+                      {/* Product Thumbnail & Name */}
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <img
+                          src={p.images?.[0] || 'https://images.unsplash.com/photo-1546868871-7041f2a55e12?w=80'}
+                          alt={p.name}
+                          className="w-10 h-10 rounded-lg object-cover bg-slate-100 shrink-0 border border-slate-200"
+                        />
+                        <p className="font-bold text-slate-900 text-xs leading-snug line-clamp-2">
+                          {p.name}
+                        </p>
+                      </div>
+
+                      {/* Stock Counts & Adjust Button */}
+                      <div className="flex items-center justify-between gap-3 bg-slate-50/80 p-2.5 rounded-xl border border-slate-100">
+                        <div className="flex items-center gap-4 text-xs">
+                          <div>
+                            <span className="text-[10px] uppercase font-bold text-slate-400 block">Total</span>
+                            <span className="font-extrabold text-slate-900 text-sm">{p.stock}</span>
+                          </div>
+                          <div>
+                            <span className="text-[10px] uppercase font-bold text-slate-400 block">Available</span>
+                            <span className="font-bold text-emerald-700 text-xs">{available}</span>
+                          </div>
+                          <div>
+                            <span className="text-[10px] uppercase font-bold text-slate-400 block">Reserved</span>
+                            <span className="font-medium text-slate-500 text-xs">{reserved}</span>
+                          </div>
+                        </div>
+
+                        <button
+                          onClick={() => handleOpenAdjustModal(p)}
+                          className="px-3 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs transition-colors cursor-pointer shadow-xs shrink-0"
+                        >
+                          <span>Adjust</span>
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
           </div>
         </>
       ) : (
         /* 3. Stock Adjustment Audit Logs */
         <div className="rounded-2xl bg-white border border-slate-200 shadow-2xs overflow-hidden">
-          <div className="overflow-x-auto">
+          {/* Desktop View */}
+          <div className="hidden md:block overflow-x-auto">
             <table className="w-full text-left text-xs border-collapse">
               <thead>
                 <tr className="bg-slate-50/80 border-b border-slate-200 text-slate-500 uppercase text-[10px] tracking-wider font-bold">
@@ -292,6 +370,56 @@ export const AdminInventory: React.FC<AdminInventoryProps> = ({
                 ))}
               </tbody>
             </table>
+          </div>
+
+          {/* Mobile View: Audit Logs Cards */}
+          <div className="md:hidden divide-y divide-slate-100">
+            {stockLogs.length === 0 ? (
+              <div className="p-8 text-center text-slate-400 text-xs font-medium">
+                No audit log entries recorded yet.
+              </div>
+            ) : (
+              stockLogs.map((log) => (
+                <div key={log.id} className="p-3.5 space-y-2 hover:bg-slate-50/50 transition-colors">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <span className="font-mono font-bold text-slate-900 text-xs">#{log.sku}</span>
+                      <span className="text-[10px] text-slate-400 truncate">
+                        {new Date(log.timestamp).toLocaleDateString('en-GB')}
+                      </span>
+                    </div>
+                    <span
+                      className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold shrink-0 ${
+                        log.quantityChanged > 0 ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'
+                      }`}
+                    >
+                      {log.quantityChanged > 0 ? `+${log.quantityChanged}` : log.quantityChanged}
+                    </span>
+                  </div>
+
+                  <p className="font-bold text-slate-900 text-xs truncate">{log.productName}</p>
+
+                  <div className="grid grid-cols-2 gap-2 text-xs bg-slate-50/70 p-2 rounded-lg border border-slate-100">
+                    <div>
+                      <span className="text-[10px] text-slate-400 block">Stock Flow</span>
+                      <span className="font-semibold text-slate-800 text-xs">
+                        {log.previousStock} → <span className="font-black text-slate-900">{log.newStock}</span>
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-slate-400 block">Staff</span>
+                      <span className="font-semibold text-slate-800 text-xs truncate block">{log.staffName}</span>
+                    </div>
+                  </div>
+
+                  {log.reason && (
+                    <p className="text-[11px] text-slate-500 italic bg-white p-1.5 rounded border border-slate-100">
+                      Note: {log.reason}
+                    </p>
+                  )}
+                </div>
+              ))
+            )}
           </div>
         </div>
       )}

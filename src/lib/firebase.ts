@@ -2,6 +2,7 @@ import { initializeApp, getApps, getApp } from 'firebase/app';
 import {
   getFirestore,
   initializeFirestore,
+  setLogLevel,
   doc,
   getDoc,
   getDocFromServer,
@@ -14,6 +15,7 @@ import {
   where,
   onSnapshot,
   Unsubscribe,
+  disableNetwork,
 } from 'firebase/firestore';
 import { getAuth } from 'firebase/auth';
 import { safeSetLocalStorage, safeSetCartActivitiesCache } from './storage';
@@ -48,6 +50,7 @@ import {
   SMSSettings,
   SMSLog,
 } from '../types';
+import { NEUTRAL_PRODUCT_PLACEHOLDER } from '../utils/imageOptimizer';
 
 // Initialize Firebase App
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
@@ -65,15 +68,64 @@ function createFirestoreInstance() {
   }
 }
 export const db = createFirestoreInstance();
+try {
+  setLogLevel('silent');
+} catch {}
 
 export const auth = getAuth(app);
 
+// Quota Exceeded Guard & Fallback Circuit Breaker
+export let isQuotaExceededFlag = false;
+if (typeof window !== 'undefined') {
+  try {
+    if (localStorage.getItem('kenax_quota_exceeded') === 'true') {
+      isQuotaExceededFlag = true;
+      disableNetwork(db).catch(() => {});
+    }
+  } catch {}
+}
+
+export function isQuotaExceededError(err: any): boolean {
+  if (!err) return false;
+  const code = String(err.code || err.name || '');
+  const msg = String(err.message || err.toString?.() || '');
+  return (
+    code === 'resource-exhausted' ||
+    code === '429' ||
+    msg.includes('resource-exhausted') ||
+    msg.includes('Quota limit exceeded') ||
+    msg.includes('Quota exceeded') ||
+    msg.includes('daily write units')
+  );
+}
+
+export function markQuotaExceeded(err?: any) {
+  if (!isQuotaExceededFlag) {
+    isQuotaExceededFlag = true;
+    try {
+      localStorage.setItem('kenax_quota_exceeded', 'true');
+      localStorage.setItem('kenax_seeded_flag', 'true');
+    } catch {}
+    disableNetwork(db).catch(() => {});
+    console.warn(
+      '[KenaX BD] Firestore free daily write quota reached (resource-exhausted). Automatically operating in high-speed LocalStorage fallback mode.'
+    );
+  } else {
+    disableNetwork(db).catch(() => {});
+  }
+}
+
 // Test connection on boot according to skill guidelines
 export async function testConnection() {
+  if (isQuotaExceededFlag) return;
   try {
     await getDocFromServer(doc(db, 'test', 'connection'));
     console.log('[KenaX BD] Connected to Cloud Firestore successfully.');
   } catch (error: any) {
+    if (isQuotaExceededError(error)) {
+      markQuotaExceeded(error);
+      return;
+    }
     if (
       error?.code === 'unavailable' ||
       (error instanceof Error &&
@@ -171,8 +223,9 @@ export function mergeCustomersLists(base: CustomerRecord[] = INITIAL_CUSTOMERS, 
 
   const isLegacyCustomer = (cust: CustomerRecord) => {
     if (!cust) return true;
-    if (!cust.isV2Account) return true;
-    if (cust.email && cust.email.trim().toLowerCase() === 'moderator@kenaxbd.com') return true;
+    if (cust.id && cust.id.startsWith('staff-cust-')) return true;
+    if (cust.email && (cust.email.trim().toLowerCase() === 'moderator@kenaxbd.com' || cust.email.trim().toLowerCase() === 'admin@kenaxbd.com')) return true;
+    if (!cust.isV2Account && (!cust.mobile && !cust.email)) return true;
     return false;
   };
 
@@ -375,15 +428,24 @@ export function compressImage(input: File | string, maxWidth = 1200, maxHeight =
 }
 
 // Helper to merge and deduplicate products safely without losing any products
-export function mergeProductsLists(baseList: Product[] = [], incomingList: Product[] = []): Product[] {
+export function mergeProductsLists(
+  baseList: Product[] = [],
+  incomingList: Product[] = [],
+  explicitDeletedSet?: Set<string>
+): Product[] {
   const map = new Map<string, Product>();
   let deletedIds = new Set<string>();
   try {
     const rawDeleted = localStorage.getItem('kenax_deleted_product_ids');
     if (rawDeleted) {
-      deletedIds = new Set(JSON.parse(rawDeleted));
+      const parsed = JSON.parse(rawDeleted);
+      if (Array.isArray(parsed)) parsed.forEach((id) => deletedIds.add(id));
     }
   } catch {}
+
+  if (explicitDeletedSet) {
+    explicitDeletedSet.forEach((id) => deletedIds.add(id));
+  }
 
   // 1. Add base products (e.g. INITIAL_PRODUCTS) if not explicitly deleted
   (baseList || []).forEach((p) => {
@@ -404,7 +466,7 @@ export function mergeProductsLists(baseList: Product[] = [], incomingList: Produ
         const validPrev = isNaN(prevTime) ? 0 : prevTime;
         const validNext = isNaN(nextTime) ? 0 : nextTime;
 
-        if (validNext >= validPrev) {
+        if (validNext >= validPrev || (!existing.updatedAt && p.updatedAt)) {
           map.set(p.id, { ...existing, ...p });
         } else {
           map.set(p.id, { ...p, ...existing });
@@ -418,6 +480,14 @@ export function mergeProductsLists(baseList: Product[] = [], incomingList: Produ
 
 // Push all default catalog data to Firestore
 export async function seedAllDataToFirestore(force = false): Promise<{ success: boolean; message: string }> {
+  // Always mark seeded flag as true to avoid looping seed calls across renders
+  safeSetLocalStorage('kenax_seeded_flag', 'true');
+
+  if (isQuotaExceededFlag || (typeof window !== 'undefined' && localStorage.getItem('kenax_quota_exceeded') === 'true')) {
+    console.log('[KenaX BD] Quota limit active. Operating seamlessly with local catalog cache.');
+    return { success: true, message: 'Quota active. Operating with local catalog cache.' };
+  }
+
   try {
     // Check if Cloud DB is already initialized in Firestore
     if (!force) {
@@ -425,20 +495,26 @@ export async function seedAllDataToFirestore(force = false): Promise<{ success: 
         const seedDoc = await getDoc(doc(db, 'system', 'seedInfo'));
         if (seedDoc.exists() && seedDoc.data()?.seeded) {
           console.log('[KenaX BD] Cloud database is already seeded. Skipping auto-reseed.');
-          safeSetLocalStorage('kenax_seeded_flag', 'true');
           return { success: true, message: 'Database already seeded.' };
         }
         const settingsSnap = await getDoc(doc(db, 'websiteSettings', INITIAL_WEBSITE_SETTINGS.id));
         if (settingsSnap.exists()) {
           console.log('[KenaX BD] Website settings exist in Cloud Firestore. Marking seeded.');
-          await setDoc(doc(db, 'system', 'seedInfo'), { seeded: true, seededAt: new Date().toISOString() }, { merge: true });
-          safeSetLocalStorage('kenax_seeded_flag', 'true');
+          await setDoc(doc(db, 'system', 'seedInfo'), { seeded: true, seededAt: new Date().toISOString() }, { merge: true }).catch((e) => {
+            if (isQuotaExceededError(e)) markQuotaExceeded(e);
+          });
           return { success: true, message: 'Database already seeded.' };
         }
       } catch (e) {
+        if (isQuotaExceededError(e)) {
+          markQuotaExceeded(e);
+          return { success: true, message: 'Quota limit reached. Using local catalog.' };
+        }
         console.warn('[KenaX BD] Error checking seed status:', e);
       }
     }
+
+    if (isQuotaExceededFlag) return { success: true, message: 'Quota limit reached.' };
 
     console.log('[KenaX BD] Seeding database with initial catalog...');
 
@@ -452,45 +528,101 @@ export async function seedAllDataToFirestore(force = false): Promise<{ success: 
         });
       }
     } catch (e) {
+      if (isQuotaExceededError(e)) {
+        markQuotaExceeded(e);
+        return { success: true, message: 'Quota limit reached.' };
+      }
       console.warn('[KenaX BD] Pre-seed fetch error:', e);
     }
 
-    // 1. Seed Products (merge with any existing)
-    for (const product of INITIAL_PRODUCTS) {
-      await setDoc(doc(db, 'products', product.id), cleanFirestoreData(product), { merge: true });
+    if (isQuotaExceededFlag) return { success: true, message: 'Quota limit reached.' };
+
+    // 1. Seed Products (ONLY if Firestore products collection is completely empty)
+    if (existingFirestoreProds.length === 0) {
+      let deletedSet = new Set<string>();
+      try {
+        const delSnap = await getDocs(collection(db, 'deletedProducts'));
+        delSnap.forEach((d) => deletedSet.add(d.id));
+      } catch {}
+
+      for (const product of INITIAL_PRODUCTS) {
+        if (isQuotaExceededFlag) break;
+        if (deletedSet.has(product.id)) continue;
+        try {
+          await setDoc(doc(db, 'products', product.id), cleanFirestoreData(product), { merge: true });
+        } catch (err) {
+          if (isQuotaExceededError(err)) { markQuotaExceeded(err); break; }
+        }
+      }
     }
 
-    // 2. Seed Categories (ensure ALL initial categories exist)
+    // 2. Seed Categories
     for (const cat of INITIAL_CATEGORIES) {
-      await setDoc(doc(db, 'categories', cat.id), cleanFirestoreData(cat), { merge: true });
+      if (isQuotaExceededFlag) break;
+      try {
+        await setDoc(doc(db, 'categories', cat.id), cleanFirestoreData(cat), { merge: true });
+      } catch (err) {
+        if (isQuotaExceededError(err)) { markQuotaExceeded(err); break; }
+      }
     }
 
     // 3. Seed Website Settings
-    await setDoc(doc(db, 'websiteSettings', INITIAL_WEBSITE_SETTINGS.id), INITIAL_WEBSITE_SETTINGS, { merge: true });
+    if (!isQuotaExceededFlag) {
+      try {
+        await setDoc(doc(db, 'websiteSettings', INITIAL_WEBSITE_SETTINGS.id), INITIAL_WEBSITE_SETTINGS, { merge: true });
+      } catch (err) {
+        if (isQuotaExceededError(err)) markQuotaExceeded(err);
+      }
+    }
 
     // 4. Seed Delivery Zones
     for (const zone of INITIAL_DELIVERY_ZONES) {
-      await setDoc(doc(db, 'deliveryZones', zone.id), zone, { merge: true });
+      if (isQuotaExceededFlag) break;
+      try {
+        await setDoc(doc(db, 'deliveryZones', zone.id), zone, { merge: true });
+      } catch (err) {
+        if (isQuotaExceededError(err)) { markQuotaExceeded(err); break; }
+      }
     }
 
     // 5. Seed Coupons
     for (const coupon of INITIAL_COUPONS) {
-      await setDoc(doc(db, 'coupons', coupon.id), coupon, { merge: true });
+      if (isQuotaExceededFlag) break;
+      try {
+        await setDoc(doc(db, 'coupons', coupon.id), coupon, { merge: true });
+      } catch (err) {
+        if (isQuotaExceededError(err)) { markQuotaExceeded(err); break; }
+      }
     }
 
     // 6. Seed Sample Orders
     for (const order of INITIAL_ORDERS) {
-      await setDoc(doc(db, 'orders', order.id), order, { merge: true });
+      if (isQuotaExceededFlag) break;
+      try {
+        await setDoc(doc(db, 'orders', order.id), order, { merge: true });
+      } catch (err) {
+        if (isQuotaExceededError(err)) { markQuotaExceeded(err); break; }
+      }
     }
 
     // 7. Seed Initial Customers
     for (const customer of INITIAL_CUSTOMERS) {
-      await setDoc(doc(db, 'customers', customer.id), customer, { merge: true });
+      if (isQuotaExceededFlag) break;
+      try {
+        await setDoc(doc(db, 'customers', customer.id), customer, { merge: true });
+      } catch (err) {
+        if (isQuotaExceededError(err)) { markQuotaExceeded(err); break; }
+      }
     }
 
     // 8. Seed Initial Activity Logs
     for (const log of INITIAL_ACTIVITY_LOGS) {
-      await setDoc(doc(db, 'activityLogs', log.id), cleanFirestoreData(log), { merge: true });
+      if (isQuotaExceededFlag) break;
+      try {
+        await setDoc(doc(db, 'activityLogs', log.id), cleanFirestoreData(log), { merge: true });
+      } catch (err) {
+        if (isQuotaExceededError(err)) { markQuotaExceeded(err); break; }
+      }
     }
 
     // Cache locally as well without wiping custom products
@@ -500,17 +632,6 @@ export async function seedAllDataToFirestore(force = false): Promise<{ success: 
       if (rawProds) existingProds = JSON.parse(rawProds);
     } catch {}
     const mergedProds = mergeProductsLists(INITIAL_PRODUCTS, [...existingFirestoreProds, ...existingProds]);
-
-    // Ensure all merged products (including any locally created ones) are stored in Firestore
-    for (const p of mergedProds) {
-      if (p && p.id) {
-        try {
-          await saveProductToDB(p);
-        } catch (err) {
-          console.warn('[KenaX BD] Error syncing product to Firestore during seed:', p.id, err);
-        }
-      }
-    }
 
     let existingCats: Category[] = [];
     try {
@@ -540,15 +661,25 @@ export async function seedAllDataToFirestore(force = false): Promise<{ success: 
     safeSetLocalStorage('kenax_settings_cache', JSON.stringify(INITIAL_WEBSITE_SETTINGS));
     safeSetLocalStorage('kenax_customers_cache', JSON.stringify(mergedCusts));
     safeSetLocalStorage('kenax_activity_logs_cache', JSON.stringify(INITIAL_ACTIVITY_LOGS));
-    await setDoc(doc(db, 'system', 'seedInfo'), { seeded: true, seededAt: new Date().toISOString() }, { merge: true });
-    safeSetLocalStorage('kenax_seeded_flag', 'true');
+
+    if (!isQuotaExceededFlag) {
+      try {
+        await setDoc(doc(db, 'system', 'seedInfo'), { seeded: true, seededAt: new Date().toISOString() }, { merge: true });
+      } catch (err) {
+        if (isQuotaExceededError(err)) markQuotaExceeded(err);
+      }
+    }
 
     return {
       success: true,
       message: `Database successfully populated with ${mergedProds.length} products, ${mergedCats.length} categories, delivery zones, and orders!`,
     };
   } catch (error: any) {
-    console.error('[KenaX BD] Seeding error:', error);
+    if (isQuotaExceededError(error)) {
+      markQuotaExceeded(error);
+    } else {
+      console.error('[KenaX BD] Seeding error:', error);
+    }
     let existingProds: Product[] = [];
     try {
       const rawProds = localStorage.getItem('kenax_products_cache');
@@ -648,10 +779,31 @@ export async function saveOriginalImageMedia(mediaId: string, base64Data: string
   }
 }
 
-// Helper to resolve a media reference e.g. "media://productImageMedia/{mediaId}" or "media://{mediaId}" to 100% original base64
-export async function resolveOriginalImageMedia(mediaUrl: string): Promise<string> {
+const DEFAULT_FALLBACK_PRODUCT_IMAGE = NEUTRAL_PRODUCT_PLACEHOLDER;
+
+// Helper to synchronously get resolved image media if already cached in memory or localStorage
+export function getSynchronouslyResolvedMedia(mediaUrl: string): string | null {
   if (!mediaUrl || typeof mediaUrl !== 'string' || !mediaUrl.startsWith('media://')) {
-    return mediaUrl;
+    return mediaUrl || null;
+  }
+  const mediaId = mediaUrl.replace('media://productImageMedia/', '').replace('media://', '');
+  if (imageMediaMemoryCache.has(mediaId)) {
+    return imageMediaMemoryCache.get(mediaId)!;
+  }
+  try {
+    const cached = localStorage.getItem(`kenax_img_media_${mediaId}`);
+    if (cached) {
+      imageMediaMemoryCache.set(mediaId, cached);
+      return cached;
+    }
+  } catch {}
+  return null;
+}
+
+// Helper to resolve a media reference e.g. "media://productImageMedia/{mediaId}" or "media://{mediaId}" to 100% original base64
+export async function resolveOriginalImageMedia(mediaUrl: string, productId?: string): Promise<string> {
+  if (!mediaUrl || typeof mediaUrl !== 'string' || !mediaUrl.startsWith('media://')) {
+    return mediaUrl || NEUTRAL_PRODUCT_PLACEHOLDER;
   }
 
   const mediaId = mediaUrl.replace('media://productImageMedia/', '').replace('media://', '');
@@ -670,41 +822,44 @@ export async function resolveOriginalImageMedia(mediaUrl: string): Promise<strin
     }
   } catch {}
 
-  // 3. Firestore Cloud Fetch
-  try {
-    const docRef = doc(db, 'productImageMedia', mediaId);
-    const snap = await getDoc(docRef);
-    if (snap.exists()) {
-      const data = snap.data();
-      let fullBase64 = '';
-      if (!data.isChunked) {
-        fullBase64 = data.data || '';
-      } else {
-        const totalChunks = data.totalChunks || 0;
-        const chunks: string[] = [];
-        for (let i = 0; i < totalChunks; i++) {
-          const chunkRef = doc(db, 'productImageMedia', mediaId, 'chunks', `chunk_${i}`);
-          const chunkSnap = await getDoc(chunkRef);
-          if (chunkSnap.exists()) {
-            chunks.push(chunkSnap.data().data || '');
+  // 3. Firestore Cloud Fetch (only if quota not exceeded)
+  if (!isQuotaExceededFlag) {
+    try {
+      const docRef = doc(db, 'productImageMedia', mediaId);
+      const snap = await getDoc(docRef);
+      if (snap.exists()) {
+        const data = snap.data();
+        let fullBase64 = '';
+        if (!data.isChunked) {
+          fullBase64 = data.data || '';
+        } else {
+          const totalChunks = data.totalChunks || 0;
+          const chunks: string[] = [];
+          for (let i = 0; i < totalChunks; i++) {
+            const chunkRef = doc(db, 'productImageMedia', mediaId, 'chunks', `chunk_${i}`);
+            const chunkSnap = await getDoc(chunkRef);
+            if (chunkSnap.exists()) {
+              chunks.push(chunkSnap.data().data || '');
+            }
           }
+          fullBase64 = chunks.join('');
         }
-        fullBase64 = chunks.join('');
-      }
 
-      if (fullBase64) {
-        imageMediaMemoryCache.set(mediaId, fullBase64);
-        try {
-          safeSetLocalStorage(`kenax_img_media_${mediaId}`, fullBase64);
-        } catch {}
-        return fullBase64;
+        if (fullBase64) {
+          imageMediaMemoryCache.set(mediaId, fullBase64);
+          try {
+            safeSetLocalStorage(`kenax_img_media_${mediaId}`, fullBase64);
+          } catch {}
+          return fullBase64;
+        }
       }
+    } catch (err) {
+      console.warn(`[KenaX BD] Failed to fetch image media ${mediaId} from Firestore:`, err);
     }
-  } catch (err) {
-    console.warn(`[KenaX BD] Failed to fetch image media ${mediaId} from Firestore:`, err);
   }
 
-  return mediaUrl;
+  // 4. Ultimate Fallback: Never substitute with another product's image or random Unsplash
+  return NEUTRAL_PRODUCT_PLACEHOLDER;
 }
 
 // Batch resolve all media URLs in a product object
@@ -715,10 +870,10 @@ export async function resolveProductOriginalImages(product: Product): Promise<Pr
   if (Array.isArray(product.images)) {
     resolvedImages = await Promise.all(
       product.images.map(async (img) => {
-        if (typeof img === 'string' && img.startsWith('media://productImageMedia/')) {
-          return await resolveOriginalImageMedia(img);
+        if (typeof img === 'string' && img.startsWith('media://')) {
+          return await resolveOriginalImageMedia(img, product.id);
         }
-        return img;
+        return img || NEUTRAL_PRODUCT_PLACEHOLDER;
       })
     );
   }
@@ -727,8 +882,8 @@ export async function resolveProductOriginalImages(product: Product): Promise<Pr
   if (Array.isArray(product.colors)) {
     resolvedColors = await Promise.all(
       product.colors.map(async (c) => {
-        if (c.imageUrl && c.imageUrl.startsWith('media://productImageMedia/')) {
-          const resolvedUrl = await resolveOriginalImageMedia(c.imageUrl);
+        if (c.imageUrl && c.imageUrl.startsWith('media://')) {
+          const resolvedUrl = await resolveOriginalImageMedia(c.imageUrl, product.id);
           return { ...c, imageUrl: resolvedUrl };
         }
         return c;
@@ -743,54 +898,118 @@ export async function resolveProductOriginalImages(product: Product): Promise<Pr
   };
 }
 
-// Fetch products from Firestore with Firestore as the single authoritative source of truth
+export async function fetchServerProducts(): Promise<Product[]> {
+  try {
+    const res = await fetch('/api/products');
+    if (res.ok) {
+      const serverProducts = await res.json();
+      if (Array.isArray(serverProducts) && serverProducts.length > 0) {
+        return serverProducts;
+      }
+    }
+  } catch (e) {
+    console.warn('[KenaX BD] Could not fetch products from server /api/products:', e);
+  }
+  return [];
+}
+
+export async function fetchServerDeletedIds(): Promise<string[]> {
+  try {
+    const res = await fetch('/api/products/deleted-ids');
+    if (res.ok) {
+      const ids = await res.json();
+      if (Array.isArray(ids)) return ids;
+    }
+  } catch (e) {}
+  return [];
+}
+
+// Fetch products from Firestore & Central Server API
 export async function getProductsFromDB(): Promise<Product[]> {
+  const [serverItems, serverDeletedIds] = await Promise.all([
+    fetchServerProducts(),
+    fetchServerDeletedIds(),
+  ]);
+
+  let cachedItems: Product[] = [];
+  try {
+    const cached = localStorage.getItem('kenax_products_cache');
+    if (cached) {
+      const parsed = JSON.parse(cached);
+      if (Array.isArray(parsed) && parsed.length > 0) cachedItems = parsed;
+    }
+  } catch {}
+
   let firestoreItems: Product[] = [];
   let firestoreDeletedIds: string[] = [];
 
-  try {
-    const deletedSnap = await getDocs(collection(db, 'deletedProducts'));
-    if (!deletedSnap.empty) {
-      deletedSnap.forEach((d) => firestoreDeletedIds.push(d.id));
+  if (!isQuotaExceededFlag) {
+    try {
+      const deletedSnap = await getDocs(collection(db, 'deletedProducts'));
+      if (!deletedSnap.empty) {
+        deletedSnap.forEach((d) => firestoreDeletedIds.push(d.id));
+      }
+    } catch (err) {
+      if (isQuotaExceededError(err)) markQuotaExceeded(err);
+      else console.warn('[KenaX BD] Firestore deletedProducts fetch error:', err);
     }
-  } catch (err) {
-    console.warn('[KenaX BD] Firestore deletedProducts fetch error:', err);
+
+    try {
+      const colRef = collection(db, 'products');
+      const snapshot = await getDocs(colRef);
+      if (!snapshot.empty) {
+        snapshot.forEach((docSnap) => {
+          const data = docSnap.data() as Product;
+          if (data && data.id) {
+            firestoreItems.push(data);
+          }
+        });
+      }
+    } catch (err) {
+      if (isQuotaExceededError(err)) markQuotaExceeded(err);
+      else console.warn('[KenaX BD] Firestore products fetch error:', err);
+    }
   }
 
-  const deletedSet = new Set(firestoreDeletedIds);
-
+  let localDeletedIds: string[] = [];
   try {
-    const colRef = collection(db, 'products');
-    const snapshot = await getDocs(colRef);
-    if (!snapshot.empty) {
-      snapshot.forEach((docSnap) => {
-        const data = docSnap.data() as Product;
-        if (data && data.id && !deletedSet.has(data.id)) {
-          firestoreItems.push(data);
-        }
-      });
-    }
-  } catch (err) {
-    console.warn('[KenaX BD] Firestore products fetch error:', err);
-  }
-
-  // Clear any stale local cache to prevent preview/published product count mismatches
-  try {
-    localStorage.removeItem('kenax_products_cache');
-    localStorage.removeItem('kenax_deleted_product_ids');
+    const rawDel = localStorage.getItem('kenax_deleted_product_ids');
+    if (rawDel) localDeletedIds = JSON.parse(rawDel);
   } catch {}
 
-  // If Firestore has products, that IS our definitive list (exact match between preview & production)
-  let rawMerged: Product[] = [];
+  const allDeletedSet = new Set([
+    ...localDeletedIds,
+    ...firestoreDeletedIds,
+    ...serverDeletedIds,
+  ]);
+
+  // Authoritative merging: If Firestore or server already has products, NEVER inject INITIAL_PRODUCTS
+  let activeSources: Product[] = [];
   if (firestoreItems.length > 0) {
-    rawMerged = firestoreItems;
+    activeSources = [...cachedItems, ...serverItems, ...firestoreItems];
+  } else if (serverItems.length > 0) {
+    activeSources = [...cachedItems, ...serverItems];
+  } else if (cachedItems.length > 0) {
+    activeSources = [...cachedItems];
   } else {
-    // If Firestore is completely empty on fresh setup, fallback to non-deleted INITIAL_PRODUCTS
-    rawMerged = INITIAL_PRODUCTS.filter((p) => !deletedSet.has(p.id));
+    activeSources = [...INITIAL_PRODUCTS];
   }
 
-  // Resolve 100% original high-res images for any product referencing media storage
+  const filteredSources = activeSources.filter((p) => p && p.id && !allDeletedSet.has(p.id));
+  const rawMerged = mergeProductsLists([], filteredSources, allDeletedSet);
+  safeSetLocalStorage('kenax_deleted_product_ids', JSON.stringify(Array.from(allDeletedSet)));
+
+  // Background sync any newly merged items to server storage if missing
+  if (rawMerged.length > serverItems.length) {
+    fetch('/api/products/batch-sync', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ products: rawMerged }),
+    }).catch(() => {});
+  }
+
   const merged = await Promise.all(rawMerged.map((p) => resolveProductOriginalImages(p)));
+  safeSetLocalStorage('kenax_products_cache', JSON.stringify(merged));
 
   return merged;
 }
@@ -799,24 +1018,50 @@ export async function getProductsFromDB(): Promise<Product[]> {
 export async function saveProductToDB(product: Product): Promise<void> {
   const productId = product.id;
 
-  // 1. Secondary background sync to Cloud SQL (non-blocking)
-  fetch('/api/products', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(product),
-  }).catch((err) => {
-    console.warn('[KenaX BD] Cloud SQL saveProductToDB non-blocking error:', err);
-  });
+  // 0. Remove from deleted tombstones if being created or updated
+  try {
+    const rawDel = localStorage.getItem('kenax_deleted_product_ids');
+    if (rawDel) {
+      const delList: string[] = JSON.parse(rawDel);
+      const filtered = delList.filter((id) => id !== productId);
+      safeSetLocalStorage('kenax_deleted_product_ids', JSON.stringify(filtered));
+    }
+  } catch {}
 
-  // 2. Process images to compress base64 and save into productImageMedia / lightweight product doc for Firestore
+  // 1. Immediately update local cache with product as incoming/latest
+  try {
+    const cached = localStorage.getItem('kenax_products_cache');
+    const currentProducts: Product[] = cached ? JSON.parse(cached) : INITIAL_PRODUCTS;
+    const updated = mergeProductsLists(currentProducts, [product]);
+    safeSetLocalStorage('kenax_products_cache', JSON.stringify(updated));
+  } catch (e) {
+    console.error('[KenaX BD] Local cache update error in saveProductToDB:', e);
+  }
+
+  // 2. Sync to central server API (persists 100% full resolution images & enables instant cross-device sync)
+  try {
+    await fetch('/api/products', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(product),
+    });
+  } catch (err) {
+    console.warn('[KenaX BD] Central server saveProductToDB non-blocking error:', err);
+  }
+
+  if (isQuotaExceededFlag) return;
+
+  // 3. Process images: compress base64 and preserve directly in doc if < 350KB, or chunk if large
   let cloudImages = product.images || [];
   if (Array.isArray(product.images)) {
     cloudImages = await Promise.all(
       product.images.map(async (img, idx) => {
         if (!img) return '';
         if (typeof img === 'string' && img.startsWith('data:image')) {
-          // Compress base64 first to guarantee doc size stays well under 1MB for Firestore
-          const compressed = await compressImage(img, 1200, 1200, 0.82);
+          const compressed = await compressImage(img, 900, 900, 0.78);
+          if (compressed.length < 350000) {
+            return compressed;
+          }
           const mediaId = `img_${productId}_${idx}_${Math.random().toString(36).substring(2, 7)}`;
           return await saveOriginalImageMedia(mediaId, compressed);
         }
@@ -830,7 +1075,10 @@ export async function saveProductToDB(product: Product): Promise<void> {
     cloudColors = await Promise.all(
       product.colors.map(async (color, idx) => {
         if (color.imageUrl && color.imageUrl.startsWith('data:image')) {
-          const compressed = await compressImage(color.imageUrl, 1200, 1200, 0.82);
+          const compressed = await compressImage(color.imageUrl, 900, 900, 0.78);
+          if (compressed.length < 350000) {
+            return { ...color, imageUrl: compressed };
+          }
           const mediaId = `img_${productId}_color_${idx}_${Math.random().toString(36).substring(2, 7)}`;
           const mediaUrl = await saveOriginalImageMedia(mediaId, compressed);
           return { ...color, imageUrl: mediaUrl };
@@ -852,42 +1100,91 @@ export async function saveProductToDB(product: Product): Promise<void> {
   try {
     const docRef = doc(db, 'products', cloudProduct.id);
     await setDoc(docRef, cleaned, { merge: true });
-    await deleteDoc(doc(db, 'deletedProducts', cloudProduct.id));
+    await deleteDoc(doc(db, 'deletedProducts', cloudProduct.id)).catch(() => {});
     console.log(`[KenaX BD] Successfully saved product ${cloudProduct.id} to Cloud Firestore.`);
   } catch (err) {
-    console.error('[KenaX BD] Firestore saveProductToDB error:', err);
+    if (isQuotaExceededError(err)) {
+      markQuotaExceeded(err);
+    } else {
+      console.error('[KenaX BD] Firestore saveProductToDB error:', err);
+    }
   }
-
-  // Clear local storage cache
-  try {
-    localStorage.removeItem('kenax_products_cache');
-    localStorage.removeItem('kenax_deleted_product_ids');
-  } catch {}
 }
 
 // Delete Product from DB
 export async function deleteProductFromDB(productId: string): Promise<void> {
-  // Non-blocking delete from Cloud SQL
+  if (!productId) return;
+
+  // 1. Record in local deleted product IDs tombstone
+  try {
+    const rawDel = localStorage.getItem('kenax_deleted_product_ids');
+    const delList: string[] = rawDel ? JSON.parse(rawDel) : [];
+    if (!delList.includes(productId)) {
+      delList.push(productId);
+      safeSetLocalStorage('kenax_deleted_product_ids', JSON.stringify(delList));
+    }
+  } catch {}
+
+  // 2. Local products cache update
+  try {
+    const cached = localStorage.getItem('kenax_products_cache');
+    if (cached) {
+      const currentProducts: Product[] = JSON.parse(cached);
+      const filtered = currentProducts.filter((p) => p && p.id !== productId);
+      safeSetLocalStorage('kenax_products_cache', JSON.stringify(filtered));
+    }
+  } catch {}
+
+  // 3. Remove deleted item from active cart and wishlist if present
+  try {
+    const cartRaw = localStorage.getItem('kenax_cart');
+    if (cartRaw) {
+      const cartItems: any[] = JSON.parse(cartRaw);
+      const filteredCart = cartItems.filter((it) => it && it.productId !== productId);
+      safeSetLocalStorage('kenax_cart', JSON.stringify(filteredCart));
+    }
+  } catch {}
+
+  try {
+    const wishRaw = localStorage.getItem('kenax_wishlist');
+    if (wishRaw) {
+      const wishItems: any[] = JSON.parse(wishRaw);
+      const filteredWish = wishItems.filter((it) => it && (it.id !== productId && it.productId !== productId));
+      safeSetLocalStorage('kenax_wishlist', JSON.stringify(filteredWish));
+    }
+  } catch {}
+
+  // 4. Dispatch instant UI deletion event across components
+  if (typeof window !== 'undefined') {
+    try {
+      window.dispatchEvent(new CustomEvent('kenax_product_deleted', { detail: productId }));
+    } catch {}
+  }
+
+  // 5. Permanent delete from Cloud SQL / Central Server Store
   fetch(`/api/products/${encodeURIComponent(productId)}`, { method: 'DELETE' }).catch((err) => {
     console.warn('[KenaX BD] Cloud SQL deleteProductFromDB non-blocking error:', err);
   });
 
+  if (isQuotaExceededFlag) return;
+
+  // 6. Delete doc from Firestore products & record in deletedProducts collection
   try {
     await deleteDoc(doc(db, 'products', productId));
     await setDoc(doc(db, 'deletedProducts', productId), { id: productId, deletedAt: new Date().toISOString() });
     console.log(`[KenaX BD] Successfully deleted product ${productId} from Cloud Firestore.`);
   } catch (err) {
-    console.warn('[KenaX BD] Firestore deleteProductFromDB error:', err);
+    if (isQuotaExceededError(err)) {
+      markQuotaExceeded(err);
+    } else {
+      console.warn('[KenaX BD] Firestore deleteProductFromDB error:', err);
+    }
   }
-
-  try {
-    localStorage.removeItem('kenax_products_cache');
-    localStorage.removeItem('kenax_deleted_product_ids');
-  } catch {}
 }
 
 // Subscribe to real-time products updates from Cloud Firestore
 export function subscribeToProducts(onProductsChanged: (products: Product[]) => void): Unsubscribe {
+  if (isQuotaExceededFlag) return () => {};
   try {
     const colRef = collection(db, 'products');
     return onSnapshot(
@@ -910,33 +1207,59 @@ export function subscribeToProducts(onProductsChanged: (products: Product[]) => 
           }
         });
 
-        // Use Firestore items directly
-        const rawProducts = firestoreItems.length > 0
-          ? firestoreItems
-          : INITIAL_PRODUCTS.filter((p) => !deletedSet.has(p.id));
-
-        // Immediate emit with cached/partially resolved products
-        const quickResolved = rawProducts.map((p) => {
-          let imgs = p.images;
-          if (Array.isArray(imgs)) {
-            imgs = imgs.map((img) =>
-              typeof img === 'string' && imageMediaMemoryCache.has(img.replace('media://productImageMedia/', ''))
-                ? imageMediaMemoryCache.get(img.replace('media://productImageMedia/', ''))!
-                : img
-            );
+        let cachedItems: Product[] = [];
+        try {
+          const cached = localStorage.getItem('kenax_products_cache');
+          if (cached) {
+            const parsed = JSON.parse(cached);
+            if (Array.isArray(parsed)) cachedItems = parsed;
           }
-          return { ...p, images: imgs };
-        });
-        onProductsChanged(quickResolved);
+        } catch {}
 
-        // Complete full resolution emit asynchronously
+        const serverItems = await fetchServerProducts();
+
+        let localDeletedIds: string[] = [];
+        try {
+          const rawDel = localStorage.getItem('kenax_deleted_product_ids');
+          if (rawDel) localDeletedIds = JSON.parse(rawDel);
+        } catch {}
+
+        const serverDeletedIds = await fetchServerDeletedIds();
+
+        const allDeletedSet = new Set([
+          ...localDeletedIds,
+          ...firestoreDeletedIds,
+          ...serverDeletedIds,
+        ]);
+
+        let activeSources: Product[] = [];
+        if (firestoreItems.length > 0) {
+          activeSources = [...cachedItems, ...serverItems, ...firestoreItems];
+        } else if (serverItems.length > 0) {
+          activeSources = [...cachedItems, ...serverItems];
+        } else if (cachedItems.length > 0) {
+          activeSources = [...cachedItems];
+        } else {
+          activeSources = [...INITIAL_PRODUCTS];
+        }
+
+        const allSources = activeSources.filter((p) => p && p.id && !allDeletedSet.has(p.id));
+
+        const rawProducts = mergeProductsLists([], allSources, allDeletedSet);
+        safeSetLocalStorage('kenax_deleted_product_ids', JSON.stringify(Array.from(allDeletedSet)));
+
         const fullyResolved = await Promise.all(rawProducts.map((p) => resolveProductOriginalImages(p)));
         if (fullyResolved.length > 0) {
+          safeSetLocalStorage('kenax_products_cache', JSON.stringify(fullyResolved));
           onProductsChanged(fullyResolved);
         }
       },
       (error) => {
-        console.warn('[KenaX BD] Products real-time listener error:', error);
+        if (isQuotaExceededError(error)) {
+          markQuotaExceeded(error);
+        } else {
+          console.warn('[KenaX BD] Products real-time listener error:', error);
+        }
       }
     );
   } catch (e) {
@@ -949,7 +1272,19 @@ export function subscribeToProducts(onProductsChanged: (products: Product[]) => 
 // ORDERS OPERATIONS (PERSISTENCE & CLOUD SYNC)
 // ----------------------------------------------------
 
-// Create new Order in Cloud Firestore + Local Persistent Cache + Customer Record Linking
+// Central Server Orders Helper
+export async function fetchServerOrders(): Promise<Order[]> {
+  try {
+    const res = await fetch('/api/orders');
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data)) return data;
+    }
+  } catch (err) {}
+  return [];
+}
+
+// Create new Order in Cloud Firestore + Central Server Storage + Local Persistent Cache + Customer Record Linking
 export async function saveOrderToDB(order: Order): Promise<void> {
   order.isV2Order = true;
   const cleaned = cleanFirestoreData(order);
@@ -972,16 +1307,31 @@ export async function saveOrderToDB(order: Order): Promise<void> {
     console.error('[KenaX BD] Error updating local orders cache:', e);
   }
 
-  // 2. Write to Cloud Firestore Orders Collection with Timeout Protection (1.5s max wait)
-  const timeoutPromise = new Promise((resolve) => setTimeout(resolve, 1500));
+  // 1.1 Persist to Server Storage (Cloud backend persistence across devices)
   try {
-    await Promise.race([
-      setDoc(doc(db, 'orders', order.id), cleaned, { merge: true }),
-      timeoutPromise,
-    ]);
-    console.log(`[KenaX BD] Order #${order.id} permanently saved to Cloud Firestore.`);
-  } catch (err) {
-    console.warn('[KenaX BD] Firestore saveOrderToDB error (cached locally):', err);
+    fetch('/api/orders', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(order),
+    }).catch((e) => console.warn('[KenaX BD] Server order sync error:', e));
+  } catch {}
+
+  // 2. Write to Cloud Firestore Orders Collection with Timeout Protection (1.5s max wait)
+  if (!isQuotaExceededFlag) {
+    const timeoutPromise = new Promise((resolve) => setTimeout(resolve, 1500));
+    try {
+      await Promise.race([
+        setDoc(doc(db, 'orders', order.id), cleaned, { merge: true }),
+        timeoutPromise,
+      ]);
+      console.log(`[KenaX BD] Order #${order.id} permanently saved to Cloud Firestore.`);
+    } catch (err) {
+      if (isQuotaExceededError(err)) {
+        markQuotaExceeded(err);
+      } else {
+        console.warn('[KenaX BD] Firestore saveOrderToDB error (cached locally):', err);
+      }
+    }
   }
 
   // 3. Link Order to Customer Document in Firestore and local customers cache
@@ -1058,27 +1408,30 @@ export async function saveOrderToDB(order: Order): Promise<void> {
   } catch {}
 }
 
-// Fetch all Orders from Cloud Firestore and merge with local cache
+// Fetch all Orders from Cloud Firestore + Central Server and merge with local cache
 export async function getOrdersFromDB(): Promise<Order[]> {
-  try {
-    const colRef = collection(db, 'orders');
-    const snapshot = await getDocs(colRef);
-    if (!snapshot.empty) {
-      const remoteItems: Order[] = [];
-      snapshot.forEach((docSnap) => {
-        const data = docSnap.data() as Order;
-        if (data && data.isV2Order) {
-          remoteItems.push(data);
-        } else {
-          deleteDoc(doc(db, 'orders', docSnap.id)).catch(() => {});
-        }
-      });
-      const merged = mergeOrdersLists([], remoteItems);
-      safeSetLocalStorage('kenax_orders_cache', JSON.stringify(merged));
-      return merged;
+  const serverOrders = await fetchServerOrders();
+
+  let remoteItems: Order[] = [];
+  if (!isQuotaExceededFlag) {
+    try {
+      const colRef = collection(db, 'orders');
+      const snapshot = await getDocs(colRef);
+      if (!snapshot.empty) {
+        snapshot.forEach((docSnap) => {
+          const data = docSnap.data() as Order;
+          if (data && data.isV2Order) {
+            remoteItems.push(data);
+          }
+        });
+      }
+    } catch (err) {
+      if (isQuotaExceededError(err)) {
+        markQuotaExceeded(err);
+      } else {
+        console.warn('[KenaX BD] Firestore getOrdersFromDB fallback:', err);
+      }
     }
-  } catch (err) {
-    console.warn('[KenaX BD] Firestore getOrdersFromDB fallback:', err);
   }
 
   let localOrders: Order[] = [];
@@ -1086,11 +1439,15 @@ export async function getOrdersFromDB(): Promise<Order[]> {
     const cached = localStorage.getItem('kenax_orders_cache');
     if (cached) localOrders = JSON.parse(cached);
   } catch {}
-  return mergeOrdersLists([], localOrders);
+
+  const merged = mergeOrdersLists(localOrders, [...serverOrders, ...remoteItems]);
+  safeSetLocalStorage('kenax_orders_cache', JSON.stringify(merged));
+  return merged;
 }
 
 // Subscribe to real-time order updates from Firestore
 export function subscribeToOrders(onOrdersChanged: (orders: Order[]) => void): Unsubscribe {
+  if (isQuotaExceededFlag) return () => {};
   try {
     const colRef = collection(db, 'orders');
     return onSnapshot(
@@ -1101,8 +1458,6 @@ export function subscribeToOrders(onOrdersChanged: (orders: Order[]) => void): U
           const data = docSnap.data() as Order;
           if (data && data.isV2Order) {
             remoteOrders.push(data);
-          } else {
-            deleteDoc(doc(db, 'orders', docSnap.id)).catch(() => {});
           }
         });
         let localOrders: Order[] = [];
@@ -1115,7 +1470,11 @@ export function subscribeToOrders(onOrdersChanged: (orders: Order[]) => void): U
         onOrdersChanged(merged);
       },
       (error) => {
-        console.warn('[KenaX BD] Orders real-time listener error:', error);
+        if (isQuotaExceededError(error)) {
+          markQuotaExceeded(error);
+        } else {
+          console.warn('[KenaX BD] Orders real-time listener error:', error);
+        }
       }
     );
   } catch (e) {
@@ -1233,22 +1592,36 @@ export async function fetchSingleOrderFromDB(orderIdOrQuery: string): Promise<Or
   return null;
 }
 
-// Update Order status and tracking in Cloud Firestore & Local Cache
+// Update Order status and tracking in Cloud Firestore & Central Server & Local Cache
 export async function updateOrderInDB(orderId: string, updates: Partial<Order>): Promise<void> {
+  const payload = {
+    ...updates,
+    updatedAt: new Date().toISOString(),
+    isV2Order: true,
+  };
+
+  // 1. Sync to central server store (Cloud persistence across devices)
+  fetch(`/api/orders/${encodeURIComponent(orderId)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  }).catch((err) => console.warn('[KenaX BD] Server updateOrderInDB error:', err));
+
+  // 2. Sync to Cloud Firestore
   try {
     await updateDoc(doc(db, 'orders', orderId), {
-      ...updates,
-      updatedAt: new Date().toISOString(),
+      ...payload,
     });
   } catch (err) {
     console.warn('[KenaX BD] Firestore updateOrderInDB fallback:', err);
   }
 
+  // 3. Update local orders cache
   const cached = localStorage.getItem('kenax_orders_cache');
-  let orders: Order[] = cached ? JSON.parse(cached) : INITIAL_ORDERS;
+  let orders: Order[] = cached ? JSON.parse(cached) : [];
   const idx = orders.findIndex((o) => o.id === orderId);
   if (idx >= 0) {
-    orders[idx] = { ...orders[idx], ...updates, updatedAt: new Date().toISOString() };
+    orders[idx] = { ...orders[idx], ...payload };
     safeSetLocalStorage('kenax_orders_cache', JSON.stringify(orders));
   }
 }
@@ -1409,6 +1782,13 @@ export async function saveStaffToDB(staff: StaffUser): Promise<void> {
     console.warn('[KenaX BD] Firestore saveStaffToDB fallback:', err);
   }
 
+  // Sync to central server store
+  fetch('/api/staff', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(staff),
+  }).catch(() => {});
+
   const cached = localStorage.getItem('kenax_staff_cache');
   let list: StaffUser[] = cached ? JSON.parse(cached) : INITIAL_STAFF;
   const idx = list.findIndex((s) => s.id === staff.id);
@@ -1421,7 +1801,12 @@ export async function saveStaffToDB(staff: StaffUser): Promise<void> {
 }
 
 export async function deleteStaffFromDB(staffId: string, staffEmail?: string): Promise<void> {
-  // 1. Delete from Firestore staff collection
+  // 1. Delete from central server store
+  fetch(`/api/staff/${encodeURIComponent(staffId)}`, {
+    method: 'DELETE',
+  }).catch(() => {});
+
+  // 2. Delete from Firestore staff collection
   try {
     await deleteDoc(doc(db, 'staff', staffId));
   } catch (err) {
@@ -1510,6 +1895,18 @@ export async function fetchCustomerRecordFromDB(customerId: string): Promise<Cus
   return allCusts.find((c) => c.id === customerId) || null;
 }
 
+// Central Server Customers Helper
+export async function fetchServerCustomers(): Promise<CustomerRecord[]> {
+  try {
+    const res = await fetch('/api/customers');
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data)) return data;
+    }
+  } catch (err) {}
+  return [];
+}
+
 export async function getCustomersFromDB(): Promise<CustomerRecord[]> {
   // 1. Gather deleted customers tombstone set
   const deletedCustomerIds = new Set<string>();
@@ -1529,7 +1926,10 @@ export async function getCustomersFromDB(): Promise<CustomerRecord[]> {
     }
   } catch {}
 
-  // 2. Read local cached customers and purge any deleted items
+  // 2. Fetch customers from central server
+  const serverCustomers = await fetchServerCustomers();
+
+  // 3. Read local cached customers and purge any deleted items
   let localCache: CustomerRecord[] = [];
   try {
     const cached = localStorage.getItem('kenax_customers_cache');
@@ -1560,17 +1960,17 @@ export async function getCustomersFromDB(): Promise<CustomerRecord[]> {
       });
 
       const cleanLocal = localCache.filter((c) => c && c.id && !deletedCustomerIds.has(c.id));
-      const cleanDb = dbItems.filter((c) => c && c.id && !deletedCustomerIds.has(c.id));
+      const cleanDb = [...dbItems, ...serverCustomers].filter((c) => c && c.id && !deletedCustomerIds.has(c.id));
       const merged = mergeCustomersLists(cleanLocal, cleanDb).filter((c) => c && c.id && !deletedCustomerIds.has(c.id));
       safeSetLocalStorage('kenax_customers_cache', JSON.stringify(merged));
 
       return merged;
     }
   } catch (err) {
-    console.warn('[KenaX BD] Firestore getCustomersFromDB fallback to local cache:', err);
+    console.warn('[KenaX BD] Firestore getCustomersFromDB fallback to local/server cache:', err);
   }
 
-  const cleanList = localCache.filter((c) => c && c.id && !deletedCustomerIds.has(c.id));
+  const cleanList = mergeCustomersLists(localCache, serverCustomers).filter((c) => c && c.id && !deletedCustomerIds.has(c.id));
   safeSetLocalStorage('kenax_customers_cache', JSON.stringify(cleanList));
   return cleanList;
 }
@@ -1579,6 +1979,28 @@ export async function updateCustomerInDB(
   customerId: string,
   updates: Partial<CustomerRecord>
 ): Promise<void> {
+  if (!customerId) return;
+  if (customerId.startsWith('staff-cust-')) {
+    // For staff preview, only update local active customer session if active
+    const activeCustomerRaw = localStorage.getItem('kenax_current_customer');
+    if (activeCustomerRaw) {
+      try {
+        const activeCust: CustomerRecord = JSON.parse(activeCustomerRaw);
+        if (activeCust.id === customerId) {
+          safeSetLocalStorage('kenax_current_customer', JSON.stringify({ ...activeCust, ...updates }));
+        }
+      } catch {}
+    }
+    return;
+  }
+
+  // Sync to central server store
+  fetch('/api/customers', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id: customerId, ...updates, isV2Account: true }),
+  }).catch((err) => console.warn('[KenaX BD] Server update customer error:', err));
+
   try {
     await setDoc(doc(db, 'customers', customerId), updates, { merge: true });
   } catch (err) {
@@ -1612,7 +2034,12 @@ export async function updateCustomerInDB(
 }
 
 export async function deleteCustomerFromDB(customerId: string): Promise<void> {
-  // 1. Add to local deleted tombstones set immediately
+  // 1. Delete from central server store immediately
+  fetch(`/api/customers/${encodeURIComponent(customerId)}`, {
+    method: 'DELETE',
+  }).catch((err) => console.warn('[KenaX BD] Server deleteCustomerFromDB error:', err));
+
+  // 2. Add to local deleted tombstones set immediately
   try {
     const cachedDeleted = localStorage.getItem('kenax_deleted_customers_cache');
     const deletedIds: string[] = cachedDeleted ? JSON.parse(cachedDeleted) : [];
@@ -1622,7 +2049,7 @@ export async function deleteCustomerFromDB(customerId: string): Promise<void> {
     }
   } catch {}
 
-  // 2. Remove from local customer cache
+  // 3. Remove from local customer cache
   try {
     const cached = localStorage.getItem('kenax_customers_cache');
     if (cached) {
@@ -1632,7 +2059,7 @@ export async function deleteCustomerFromDB(customerId: string): Promise<void> {
     }
   } catch {}
 
-  // 3. Clear active customer session if it matches
+  // 4. Clear active customer session if it matches
   try {
     const activeRaw = localStorage.getItem('kenax_current_customer');
     if (activeRaw) {
@@ -1643,14 +2070,14 @@ export async function deleteCustomerFromDB(customerId: string): Promise<void> {
     }
   } catch {}
 
-  // 4. Delete document from Firestore customers collection
+  // 5. Delete document from Firestore customers collection
   try {
     await deleteDoc(doc(db, 'customers', customerId));
   } catch (err) {
     console.warn('[KenaX BD] Firestore deleteCustomerFromDB fallback:', err);
   }
 
-  // 5. Add tombstone to Firestore deletedCustomers collection
+  // 6. Add tombstone to Firestore deletedCustomers collection
   try {
     await setDoc(doc(db, 'deletedCustomers', customerId), {
       id: customerId,
@@ -1665,11 +2092,28 @@ export async function deleteCustomerFromDB(customerId: string): Promise<void> {
 }
 
 export async function saveCustomerToDB(customer: CustomerRecord): Promise<void> {
+  if (!customer || !customer.id) return;
+  if (customer.id.startsWith('staff-cust-')) {
+    // Never persist staff storefront preview sessions to database
+    try {
+      safeSetLocalStorage('kenax_current_customer', JSON.stringify(customer));
+    } catch {}
+    return;
+  }
+
   const customerWithV2: CustomerRecord = {
     ...customer,
     isV2Account: true,
   };
-  const cleaned = cleanFirestoreData(customerWithV2);
+  const cleaned: any = cleanFirestoreData(customerWithV2);
+
+  // Strip excessive base64 images from cart items to avoid Firestore size limit and performance degradation
+  if (cleaned && Array.isArray(cleaned.cart)) {
+    cleaned.cart = cleaned.cart.map((item: any) => ({
+      ...item,
+      productImage: item.productImage && item.productImage.startsWith('data:') ? '' : item.productImage,
+    }));
+  }
 
   // If newly registering or recreating, remove this customer ID from deleted tombstones
   try {
@@ -1712,6 +2156,13 @@ export async function saveCustomerToDB(customer: CustomerRecord): Promise<void> 
   } catch (err) {
     console.warn('[KenaX BD] Firestore saveCustomerToDB fallback:', err);
   }
+
+  // 4. Save to central server store for cross-device cloud persistence
+  fetch('/api/customers', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(cleaned),
+  }).catch((err) => console.warn('[KenaX BD] Server saveCustomerToDB fallback:', err));
 }
 
 // Helper to clean object for Firestore to avoid "Unsupported field value: undefined" errors
@@ -2469,10 +2920,8 @@ export function subscribeToCustomers(onCustomersChanged: (customers: CustomerRec
           const data = docSnap.data() as CustomerRecord;
           if (deletedCustomerIds.has(docSnap.id) || (data && data.id && deletedCustomerIds.has(data.id))) {
             deleteDoc(doc(db, 'customers', docSnap.id)).catch(() => {});
-          } else if (data && data.isV2Account) {
+          } else if (data && data.id) {
             dbItems.push(data);
-          } else {
-            deleteDoc(doc(db, 'customers', docSnap.id)).catch(() => {});
           }
         });
 

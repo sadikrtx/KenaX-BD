@@ -162,9 +162,10 @@ export const AdminStaff: React.FC<AdminStaffProps> = ({
         </div>
       </div>
 
-      {/* Active Staff Table */}
+      {/* Active Staff Table / Cards */}
       <div className="rounded-2xl bg-white border border-slate-200 shadow-2xs overflow-hidden">
-        <div className="overflow-x-auto">
+        {/* Desktop View */}
+        <div className="hidden md:block overflow-x-auto">
           <table className="w-full text-left text-xs border-collapse">
             <thead>
               <tr className="bg-slate-50/80 border-b border-slate-200 text-slate-500 uppercase text-[10px] tracking-wider font-bold">
@@ -256,6 +257,91 @@ export const AdminStaff: React.FC<AdminStaffProps> = ({
             </tbody>
           </table>
         </div>
+
+        {/* Mobile View: Clean, Zero Horizontal Scroll Cards */}
+        <div className="md:hidden divide-y divide-slate-100">
+          {activeStaff.length === 0 ? (
+            <div className="p-8 text-center text-slate-400 text-xs font-medium">
+              No active staff members found.
+            </div>
+          ) : (
+            activeStaff.map((s) => (
+              <div key={s.id} className="p-3.5 space-y-2.5 hover:bg-slate-50/50 transition-colors">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="w-8 h-8 rounded-full bg-slate-900 text-white font-bold flex items-center justify-center text-xs shrink-0">
+                      {s.name.charAt(0).toUpperCase()}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="font-bold text-slate-900 text-xs truncate">{s.name}</p>
+                      <p className="text-[11px] text-slate-400 truncate">{s.email}</p>
+                    </div>
+                  </div>
+                  <div className="shrink-0 flex items-center gap-1.5">
+                    {getRoleBadge(s.role)}
+                    <span
+                      className={`px-2 py-0.5 rounded-full text-[9px] font-bold ${
+                        s.isActive ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'
+                      }`}
+                    >
+                      {s.isActive ? 'Active' : 'Suspended'}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2 text-xs bg-slate-50/70 p-2.5 rounded-xl border border-slate-100">
+                  <div className="min-w-0">
+                    <span className="text-[10px] uppercase font-bold text-slate-400 block">Phone</span>
+                    <p className="font-medium text-slate-800 truncate text-xs">{s.phone || 'N/A'}</p>
+                  </div>
+                  <div className="min-w-0">
+                    <span className="text-[10px] uppercase font-bold text-slate-400 block">Permissions</span>
+                    <p className="font-medium text-slate-800 truncate text-xs">
+                      {s.role === 'super_admin' ? 'Full Access' : `${s.permissions?.length || 0} granted`}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between gap-2 pt-0.5">
+                  <span className="text-[10px] text-slate-400">
+                    Login: {s.lastLogin ? new Date(s.lastLogin).toLocaleDateString('en-GB') : 'Active'}
+                  </span>
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={() => openEditModal(s)}
+                      className="px-2.5 py-1 rounded-lg bg-sky-50 text-sky-700 font-bold text-xs flex items-center gap-1"
+                    >
+                      <Edit2 className="w-3 h-3" />
+                      <span>Edit</span>
+                    </button>
+                    <button
+                      onClick={() => onToggleStaffStatus(s.id)}
+                      className={`p-1.5 rounded-lg text-xs font-bold ${
+                        s.isActive ? 'text-amber-600 bg-amber-50' : 'text-emerald-600 bg-emerald-50'
+                      }`}
+                      title={s.isActive ? 'Suspend' : 'Activate'}
+                    >
+                      {s.isActive ? <ShieldAlert className="w-3.5 h-3.5" /> : <ShieldCheck className="w-3.5 h-3.5" />}
+                    </button>
+                    {s.email.toLowerCase() !== 'super@kenaxbd.com' && (
+                      <button
+                        onClick={() => {
+                          if (window.confirm(`Permanently delete staff member ${s.name}?`)) {
+                            onDeleteStaff(s.id);
+                          }
+                        }}
+                        className="p-1.5 rounded-lg text-rose-600 bg-rose-50"
+                        title="Delete"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
       </div>
 
       {/* Deleted Staff List Section */}
@@ -280,7 +366,8 @@ export const AdminStaff: React.FC<AdminStaffProps> = ({
             </div>
           </div>
 
-          <div className="overflow-x-auto">
+          {/* Desktop View */}
+          <div className="hidden md:block overflow-x-auto">
             <table className="w-full text-left text-xs border-collapse">
               <thead>
                 <tr className="bg-slate-50/60 border-b border-slate-200 text-slate-500 uppercase text-[10px] tracking-wider font-bold">
@@ -338,6 +425,43 @@ export const AdminStaff: React.FC<AdminStaffProps> = ({
                 ))}
               </tbody>
             </table>
+          </div>
+
+          {/* Mobile View */}
+          <div className="md:hidden divide-y divide-rose-100">
+            {deletedStaff.map((staff) => (
+              <div key={staff.id} className="p-3.5 space-y-2 bg-rose-50/20">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <div className="w-7 h-7 rounded-full bg-slate-200 text-slate-600 font-bold flex items-center justify-center text-xs shrink-0">
+                      {staff.name.charAt(0).toUpperCase()}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="font-bold text-slate-900 text-xs truncate">{staff.name}</p>
+                      <p className="text-[11px] text-slate-400 truncate">{staff.email}</p>
+                    </div>
+                  </div>
+                  <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-rose-100 text-rose-800 shrink-0 capitalize">
+                    {staff.role.replace('_', ' ')}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between text-xs pt-1">
+                  <span className="text-[11px] text-slate-500">
+                    Removed: {staff.removedAt ? new Date(staff.removedAt).toLocaleDateString('en-GB') : 'Recently'}
+                  </span>
+                  {onRestoreStaff && currentRole === 'super_admin' && (
+                    <button
+                      type="button"
+                      onClick={() => onRestoreStaff(staff.id)}
+                      className="px-2.5 py-1 rounded-lg bg-sky-50 text-sky-700 border border-sky-200 text-xs font-bold inline-flex items-center gap-1"
+                    >
+                      <UserCheck className="w-3 h-3" />
+                      <span>Restore</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
           </div>
         </div>
       )}
@@ -498,43 +622,45 @@ export const AdminStaff: React.FC<AdminStaffProps> = ({
                 Comparison of standard capabilities granted to each administrative tier:
               </p>
 
-              <table className="w-full text-left text-xs border-collapse border border-slate-200">
-                <thead>
-                  <tr className="bg-slate-100 text-slate-700 font-bold">
-                    <th className="py-2.5 px-3 border border-slate-200">Permission Action</th>
-                    <th className="py-2.5 px-3 border border-slate-200 text-center">Moderator</th>
-                    <th className="py-2.5 px-3 border border-slate-200 text-center">Manager</th>
-                    <th className="py-2.5 px-3 border border-slate-200 text-center">Super Admin</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-200">
-                  {ALL_PERMISSIONS.map((perm) => (
-                    <tr key={perm.id} className="hover:bg-slate-50">
-                      <td className="py-2 px-3 border border-slate-200">
-                        <span className="font-semibold text-slate-800">{perm.name}</span>
-                        <span className="text-[10px] text-slate-400 block">{perm.id}</span>
-                      </td>
-                      <td className="py-2 px-3 border border-slate-200 text-center">
-                        {DEFAULT_ROLE_PERMISSIONS['moderator'].includes(perm.id) ? (
-                          <CheckCircle className="w-4 h-4 text-emerald-600 inline-block" />
-                        ) : (
-                          <XCircle className="w-4 h-4 text-slate-300 inline-block" />
-                        )}
-                      </td>
-                      <td className="py-2 px-3 border border-slate-200 text-center">
-                        {DEFAULT_ROLE_PERMISSIONS['manager'].includes(perm.id) ? (
-                          <CheckCircle className="w-4 h-4 text-emerald-600 inline-block" />
-                        ) : (
-                          <XCircle className="w-4 h-4 text-slate-300 inline-block" />
-                        )}
-                      </td>
-                      <td className="py-2 px-3 border border-slate-200 text-center bg-purple-50/50">
-                        <CheckCircle className="w-4 h-4 text-purple-700 inline-block" />
-                      </td>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs border-collapse border border-slate-200">
+                  <thead>
+                    <tr className="bg-slate-100 text-slate-700 font-bold">
+                      <th className="py-2.5 px-3 border border-slate-200">Permission Action</th>
+                      <th className="py-2.5 px-3 border border-slate-200 text-center">Moderator</th>
+                      <th className="py-2.5 px-3 border border-slate-200 text-center">Manager</th>
+                      <th className="py-2.5 px-3 border border-slate-200 text-center">Super Admin</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody className="divide-y divide-slate-200">
+                    {ALL_PERMISSIONS.map((perm) => (
+                      <tr key={perm.id} className="hover:bg-slate-50">
+                        <td className="py-2 px-3 border border-slate-200">
+                          <span className="font-semibold text-slate-800">{perm.name}</span>
+                          <span className="text-[10px] text-slate-400 block">{perm.id}</span>
+                        </td>
+                        <td className="py-2 px-3 border border-slate-200 text-center">
+                          {DEFAULT_ROLE_PERMISSIONS['moderator'].includes(perm.id) ? (
+                            <CheckCircle className="w-4 h-4 text-emerald-600 inline-block" />
+                          ) : (
+                            <XCircle className="w-4 h-4 text-slate-300 inline-block" />
+                          )}
+                        </td>
+                        <td className="py-2 px-3 border border-slate-200 text-center">
+                          {DEFAULT_ROLE_PERMISSIONS['manager'].includes(perm.id) ? (
+                            <CheckCircle className="w-4 h-4 text-emerald-600 inline-block" />
+                          ) : (
+                            <XCircle className="w-4 h-4 text-slate-300 inline-block" />
+                          )}
+                        </td>
+                        <td className="py-2 px-3 border border-slate-200 text-center bg-purple-50/50">
+                          <CheckCircle className="w-4 h-4 text-purple-700 inline-block" />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
         </div>

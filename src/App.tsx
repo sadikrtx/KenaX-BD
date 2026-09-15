@@ -115,11 +115,7 @@ export default function App() {
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        if (parsed) {
-          if (!parsed.isV2Account) {
-            localStorage.removeItem('kenax_current_customer');
-            return null;
-          }
+        if (parsed && (parsed.id || parsed.email)) {
           return parsed;
         }
       } catch (e) {}
@@ -134,20 +130,13 @@ export default function App() {
     setIsCustomerAuthOpen(true);
   };
 
-  // Staff Authentication state (Super Admin only, removing demo staff)
+  // Staff Authentication state
   const [currentStaff, setCurrentStaff] = useState<StaffUser | null>(() => {
     const saved = localStorage.getItem('kenax_current_staff') || localStorage.getItem('kenax_authenticated_staff');
     if (saved) {
       try {
         const parsed: StaffUser = JSON.parse(saved);
-        if (parsed) {
-          const DEMO_STAFF_EMAILS = new Set(['admin@kenaxbd.com', 'manager@kenaxbd.com', 'moderator@kenaxbd.com', 'sadikrtx3060@gmail.com']);
-          if ((parsed.email && DEMO_STAFF_EMAILS.has(parsed.email.trim().toLowerCase())) || parsed.role === 'moderator') {
-            localStorage.removeItem('kenax_current_staff');
-            localStorage.removeItem('kenax_authenticated_staff');
-            localStorage.removeItem('kenax_authenticated_role');
-            return null;
-          }
+        if (parsed && (parsed.id || parsed.email)) {
           return parsed;
         }
       } catch (e) {}
@@ -186,12 +175,20 @@ export default function App() {
 
   // Database Data States
   const [products, setProducts] = useState<Product[]>(() => {
-    // Clear stale product cache as requested: no local storage dependency, Firestore is the single truth
     try {
-      localStorage.removeItem('kenax_products_cache');
-      localStorage.removeItem('kenax_deleted_product_ids');
-    } catch {}
-    return INITIAL_PRODUCTS;
+      const rawDeleted = localStorage.getItem('kenax_deleted_product_ids');
+      const deletedSet = new Set<string>(rawDeleted ? JSON.parse(rawDeleted) : []);
+      const cached = localStorage.getItem('kenax_products_cache');
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed.filter((p: Product) => p && p.id && !deletedSet.has(p.id));
+        }
+      }
+      return INITIAL_PRODUCTS.filter((p) => !deletedSet.has(p.id));
+    } catch {
+      return INITIAL_PRODUCTS;
+    }
   });
   const [orders, setOrders] = useState<Order[]>(() => {
     try {
@@ -805,7 +802,34 @@ export default function App() {
 
     initDB();
 
+    const handleSyncOnNetworkOrPoll = async () => {
+      try {
+        const freshProducts = await getProductsFromDB();
+        if (freshProducts && freshProducts.length > 0) {
+          setProducts(freshProducts);
+        }
+        const freshOrders = await getOrdersFromDB();
+        if (freshOrders && freshOrders.length > 0) {
+          setOrders(freshOrders);
+        }
+      } catch (e) {}
+    };
+
+    const handleProductDeletedEvent = (e: any) => {
+      const deletedId = e.detail;
+      if (deletedId) {
+        setProducts((prev) => prev.filter((p) => p.id !== deletedId));
+      }
+    };
+
+    window.addEventListener('online', handleSyncOnNetworkOrPoll);
+    window.addEventListener('kenax_product_deleted', handleProductDeletedEvent);
+    const syncInterval = setInterval(handleSyncOnNetworkOrPoll, 10000);
+
     return () => {
+      window.removeEventListener('online', handleSyncOnNetworkOrPoll);
+      window.removeEventListener('kenax_product_deleted', handleProductDeletedEvent);
+      clearInterval(syncInterval);
       if (unsubscribeOrders) unsubscribeOrders();
       if (unsubscribeProducts) unsubscribeProducts();
       if (unsubscribeSettings) unsubscribeSettings();

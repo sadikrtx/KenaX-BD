@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { ShoppingCart, Star, Heart, Eye, Zap, ExternalLink, User, Package } from 'lucide-react';
 import { Product, UserRole } from '../types';
-import { getOptimizedImageUrl, isImagePreloaded, markImageLoaded } from '../utils/imageOptimizer';
-import { resolveOriginalImageMedia } from '../lib/firebase';
+import { getOptimizedImageUrl, isImagePreloaded, markImageLoaded, NEUTRAL_PRODUCT_PLACEHOLDER } from '../utils/imageOptimizer';
+import { resolveOriginalImageMedia, getSynchronouslyResolvedMedia } from '../lib/firebase';
 
 interface ProductCardProps {
   product: Product;
@@ -29,34 +29,50 @@ export const ProductCard: React.FC<ProductCardProps> = ({
 }) => {
   const rawImage = (product.images?.[0] && product.images[0].trim() !== '')
     ? product.images[0]
-    : 'https://images.unsplash.com/photo-1598327105666-5b89351aff97?w=600&auto=format&fit=crop&q=85';
-  const initialOptimized = rawImage.startsWith('media://')
-    ? rawImage
-    : getOptimizedImageUrl(rawImage);
+    : NEUTRAL_PRODUCT_PLACEHOLDER;
+
+  // Synchronously resolve media reference if already in memory/localStorage cache
+  const syncMedia = rawImage.startsWith('media://') ? getSynchronouslyResolvedMedia(rawImage) : null;
+  const effectiveRaw = syncMedia || rawImage;
+  const initialOptimized = effectiveRaw.startsWith('media://')
+    ? effectiveRaw
+    : getOptimizedImageUrl(effectiveRaw, 400);
 
   const [displayImage, setDisplayImage] = useState<string>(initialOptimized);
-  const [isLoaded, setIsLoaded] = useState<boolean>(() => !rawImage.startsWith('media://') && isImagePreloaded(initialOptimized));
+  const [isLoaded, setIsLoaded] = useState<boolean>(() => {
+    if (initialOptimized.startsWith('media://')) return false;
+    return isImagePreloaded(initialOptimized, 400) || !initialOptimized.startsWith('media://');
+  });
 
   useEffect(() => {
     let isMounted = true;
-    if (rawImage.startsWith('media://productImageMedia/')) {
-      resolveOriginalImageMedia(rawImage).then((url) => {
-        if (isMounted) {
-          setDisplayImage(url);
-          setIsLoaded(true);
-        }
-      });
+    if (rawImage.startsWith('media://')) {
+      const syncVal = getSynchronouslyResolvedMedia(rawImage);
+      if (syncVal) {
+        setDisplayImage(syncVal);
+        setIsLoaded(true);
+        markImageLoaded(syncVal, 400);
+      } else {
+        resolveOriginalImageMedia(rawImage, product.id).then((url) => {
+          if (isMounted) {
+            const validUrl = (url && !url.startsWith('media://')) ? url : NEUTRAL_PRODUCT_PLACEHOLDER;
+            setDisplayImage(validUrl);
+            setIsLoaded(true);
+            markImageLoaded(validUrl, 400);
+          }
+        });
+      }
     } else {
-      const optimized = getOptimizedImageUrl(rawImage);
+      const optimized = getOptimizedImageUrl(rawImage, 400);
       setDisplayImage(optimized);
-      if (isImagePreloaded(optimized)) {
+      if (isImagePreloaded(optimized, 400)) {
         setIsLoaded(true);
       }
     }
     return () => {
       isMounted = false;
     };
-  }, [rawImage]);
+  }, [rawImage, product.id]);
 
   const isStaff = !!currentRole && ['super_admin', 'admin', 'manager', 'moderator'].includes(currentRole);
   const getBadge = () => {
@@ -158,29 +174,23 @@ export const ProductCard: React.FC<ProductCardProps> = ({
           <Heart className={`w-4 h-4 ${isWishlisted ? 'fill-rose-600' : ''}`} />
         </button>
 
-        {/* Shimmer skeleton backdrop while image finishes loading */}
-        {!isLoaded && (
-          <div className="absolute inset-0 bg-slate-100 flex items-center justify-center animate-pulse">
-            <Package className="w-8 h-8 text-slate-300 opacity-60" />
-          </div>
-        )}
-
         {/* Product Image */}
         <img
           src={displayImage}
           alt={product.name}
-          className={`w-full h-full object-contain mix-blend-multiply group-hover:scale-105 transition-all duration-200 ${
-            isLoaded ? 'opacity-100' : 'opacity-0'
-          }`}
-          loading="eager"
+          className="w-full h-full object-contain mix-blend-multiply group-hover:scale-105 transition-transform duration-200"
+          loading="lazy"
           decoding="async"
-          fetchPriority="high"
           onLoad={() => {
             setIsLoaded(true);
-            markImageLoaded(displayImage);
+            markImageLoaded(displayImage, 400);
           }}
-          onError={() => {
+          onError={(e) => {
             setIsLoaded(true);
+            const target = e.currentTarget;
+            if (target.src !== NEUTRAL_PRODUCT_PLACEHOLDER) {
+              target.src = NEUTRAL_PRODUCT_PLACEHOLDER;
+            }
           }}
         />
 

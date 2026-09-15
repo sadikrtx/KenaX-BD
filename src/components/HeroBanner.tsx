@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { Category, HeroBannerItem, HeroFeatureTag, HeroSideBannerSettings } from '../types';
 import { DEFAULT_HERO_FEATURES } from '../data/initialSettings';
+import { resolveOriginalImageMedia } from '../lib/firebase';
 
 interface HeroBannerProps {
   categories: Category[];
@@ -72,6 +73,35 @@ export const HeroBanner: React.FC<HeroBannerProps> = ({
   const [activeSlide, setActiveSlide] = useState(0);
   const slides = heroBanners && heroBanners.length > 0 ? heroBanners : DEFAULT_SLIDES;
   const currentSlide = slides[activeSlide] || slides[0];
+
+  const [resolvedSlideImage, setResolvedSlideImage] = useState<string>('');
+  const [resolvedMobileSlideImage, setResolvedMobileSlideImage] = useState<string>('');
+
+  useEffect(() => {
+    let isMounted = true;
+    const rawImg = currentSlide?.image || '';
+    const rawMobImg = currentSlide?.mobileImage || '';
+
+    if (rawImg.startsWith('media://')) {
+      resolveOriginalImageMedia(rawImg).then((url) => {
+        if (isMounted) setResolvedSlideImage(url || rawImg);
+      });
+    } else {
+      setResolvedSlideImage(rawImg);
+    }
+
+    if (rawMobImg.startsWith('media://')) {
+      resolveOriginalImageMedia(rawMobImg).then((url) => {
+        if (isMounted) setResolvedMobileSlideImage(url || rawMobImg);
+      });
+    } else {
+      setResolvedMobileSlideImage(rawMobImg);
+    }
+
+    return () => {
+      isMounted = false;
+    };
+  }, [currentSlide?.image, currentSlide?.mobileImage]);
 
   const isSideBannerEnabled = heroSideBanner ? heroSideBanner.enabled !== false : true;
 
@@ -395,14 +425,16 @@ export const HeroBanner: React.FC<HeroBannerProps> = ({
 
             {/* Default to Image */}
             if (currentSlide.image || currentSlide.mobileImage) {
+              const displayImg = resolvedSlideImage || currentSlide.image || currentSlide.mobileImage;
+              const displayMobImg = resolvedMobileSlideImage || currentSlide.mobileImage || displayImg;
               return (
                 <div className="absolute inset-0 z-0">
                   <picture className="w-full h-full block">
-                    {currentSlide.mobileImage && (
-                      <source media="(max-width: 767px)" srcSet={currentSlide.mobileImage} />
+                    {displayMobImg && (
+                      <source media="(max-width: 767px)" srcSet={displayMobImg} />
                     )}
                     <img
-                      src={currentSlide.image || currentSlide.mobileImage}
+                      src={displayImg}
                       alt={currentSlide.title || 'Hero Slide'}
                       className="w-full h-full object-cover object-center transform scale-100 group-hover:scale-105 transition-transform duration-1000"
                     />

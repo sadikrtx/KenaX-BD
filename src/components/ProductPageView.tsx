@@ -31,6 +31,8 @@ import { Product, UserRole, ColorVariation, Order, CustomerRecord } from '../typ
 import { FormattedText } from './FormattedText';
 import { ProductCard } from './ProductCard';
 import { applyProductOpenGraphMeta, restoreStoreOpenGraphMeta } from '../utils/seo';
+import { getOptimizedImageUrl, NEUTRAL_PRODUCT_PLACEHOLDER, markImageLoaded, preloadImage } from '../utils/imageOptimizer';
+import { resolveOriginalImageMedia, getSynchronouslyResolvedMedia } from '../lib/firebase';
 
 export interface CustomerReview {
   id: string;
@@ -560,9 +562,18 @@ export const ProductPageView: React.FC<ProductPageViewProps> = ({
                   ) : (
                     <img
                       key={currentDisplayImage}
-                      src={currentDisplayImage}
+                      src={getOptimizedImageUrl(currentDisplayImage, 800)}
                       alt={product.name}
-                      className="w-full h-full object-contain p-0 sm:p-2 mix-blend-multiply group-hover:scale-105 transition-all duration-500 animate-in fade-in"
+                      loading="eager"
+                      decoding="async"
+                      onLoad={() => markImageLoaded(currentDisplayImage, 800)}
+                      onError={(e) => {
+                        const target = e.currentTarget;
+                        if (target.src !== NEUTRAL_PRODUCT_PLACEHOLDER) {
+                          target.src = NEUTRAL_PRODUCT_PLACEHOLDER;
+                        }
+                      }}
+                      className="w-full h-full object-contain p-0 sm:p-2 mix-blend-multiply group-hover:scale-105 transition-transform duration-300"
                     />
                   )}
 
@@ -678,8 +689,17 @@ export const ProductPageView: React.FC<ProductPageViewProps> = ({
                       }`}
                     >
                       <img
-                        src={img}
+                        src={getOptimizedImageUrl(img, 160)}
                         alt={`${product.name} Thumbnail ${idx + 1}`}
+                        loading="lazy"
+                        decoding="async"
+                        onLoad={() => markImageLoaded(img, 160)}
+                        onError={(e) => {
+                          const target = e.currentTarget;
+                          if (target.src !== NEUTRAL_PRODUCT_PLACEHOLDER) {
+                            target.src = NEUTRAL_PRODUCT_PLACEHOLDER;
+                          }
+                        }}
                         className="w-full h-full object-contain"
                       />
                     </button>
