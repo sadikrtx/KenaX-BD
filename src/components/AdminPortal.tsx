@@ -87,6 +87,7 @@ import {
   saveOrderToDB,
   updateOrderInDB,
   getCartActivitiesFromDB,
+  subscribeToCartActivities,
   updateCartActivityStatusInDB,
   deleteCartActivityFromDB,
   saveCategoryToDB,
@@ -181,11 +182,19 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
 
   const loadCartActivities = async () => {
     const items = await getCartActivitiesFromDB();
-    setInternalCartActivities((items || []).filter((c) => c && c.isV2Activity));
+    setInternalCartActivities(items || []);
   };
 
   useEffect(() => {
     loadCartActivities();
+    const unsub = subscribeToCartActivities((liveCarts) => {
+      if (liveCarts) {
+        setInternalCartActivities(liveCarts);
+      }
+    });
+    return () => {
+      unsub();
+    };
   }, []);
 
   const rawCartsList = cartActivities && cartActivities.length > 0 ? cartActivities : internalCartActivities;
@@ -1266,6 +1275,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
           {currentTab === 'cart-activities' && (
             <AdminCartActivities
               cartActivities={activeCartsList}
+              products={products}
               currentRole={activeRole}
               currentStaff={currentStaff}
               onRefresh={handleRefreshCartActivities}

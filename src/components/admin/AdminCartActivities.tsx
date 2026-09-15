@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   ShoppingCart,
   Clock,
@@ -39,10 +39,131 @@ import {
   Flame,
   ArrowRight,
 } from 'lucide-react';
-import { CartActivity, CartActivityItem, UserRole, StaffUser } from '../../types';
+import { CartActivity, CartActivityItem, UserRole, StaffUser, Product } from '../../types';
+import { resolveOriginalImageMedia, getSynchronouslyResolvedMedia } from '../../lib/firebase';
+import { getOptimizedImageUrl, NEUTRAL_PRODUCT_PLACEHOLDER } from '../../utils/imageOptimizer';
+
+interface CartActivityProductImageProps {
+  item: CartActivityItem;
+  products?: Product[];
+  className?: string;
+  sizeClassName?: string;
+}
+
+const CartActivityProductImage: React.FC<CartActivityProductImageProps> = ({
+  item,
+  products = [],
+  className = '',
+  sizeClassName = 'w-8 h-8 rounded-lg',
+}) => {
+  // Find matched product in products list
+  const matchedProd = useMemo(() => {
+    return products.find(
+      (p) =>
+        p.id === item.productId ||
+        (p.sku && item.sku && p.sku.toLowerCase() === item.sku.toLowerCase()) ||
+        (p.name && item.name && p.name.trim().toLowerCase() === item.name.trim().toLowerCase())
+    );
+  }, [products, item.productId, item.sku, item.name]);
+
+  const rawCandidate = useMemo(() => {
+    // 1. If item has valid image and not the hardcoded unsplash fallback
+    if (
+      item.image &&
+      typeof item.image === 'string' &&
+      item.image.trim() !== '' &&
+      !item.image.includes('photo-1598327105666-5b89351aff97')
+    ) {
+      return item.image;
+    }
+    // 2. Matched product image
+    if (matchedProd) {
+      if (matchedProd.images && matchedProd.images.length > 0) {
+        const valid = matchedProd.images.find((img) => typeof img === 'string' && img.trim() !== '');
+        if (valid) return valid;
+      }
+      if (matchedProd.colors && matchedProd.colors.length > 0) {
+        const colorImg = matchedProd.colors.find((c) => c.imageUrl && c.imageUrl.trim() !== '')?.imageUrl;
+        if (colorImg) return colorImg;
+      }
+    }
+    return item.image || NEUTRAL_PRODUCT_PLACEHOLDER;
+  }, [item.image, matchedProd]);
+
+  const [resolvedSrc, setResolvedSrc] = useState<string>(() => {
+    if (rawCandidate.startsWith('media://')) {
+      const syncVal = getSynchronouslyResolvedMedia(rawCandidate);
+      if (syncVal) return syncVal;
+      return rawCandidate;
+    }
+    return rawCandidate.startsWith('data:') || rawCandidate.startsWith('blob:')
+      ? rawCandidate
+      : getOptimizedImageUrl(rawCandidate, 150);
+  });
+
+  const [hasError, setHasError] = useState(false);
+
+  useEffect(() => {
+    let isMounted = true;
+    setHasError(false);
+
+    if (!rawCandidate || rawCandidate.trim() === '') {
+      setResolvedSrc(NEUTRAL_PRODUCT_PLACEHOLDER);
+      return;
+    }
+
+    if (rawCandidate.startsWith('media://')) {
+      const syncVal = getSynchronouslyResolvedMedia(rawCandidate);
+      if (syncVal) {
+        setResolvedSrc(syncVal);
+        return;
+      }
+      resolveOriginalImageMedia(rawCandidate, matchedProd?.id || item.productId).then((res) => {
+        if (isMounted) {
+          if (res && res.trim() !== '' && !res.startsWith('media://')) {
+            setResolvedSrc(res);
+          } else {
+            const fallback = matchedProd?.images?.[0] || NEUTRAL_PRODUCT_PLACEHOLDER;
+            setResolvedSrc(fallback.startsWith('media://') ? NEUTRAL_PRODUCT_PLACEHOLDER : getOptimizedImageUrl(fallback, 150));
+          }
+        }
+      });
+    } else {
+      const optimized = rawCandidate.startsWith('data:') || rawCandidate.startsWith('blob:')
+        ? rawCandidate
+        : getOptimizedImageUrl(rawCandidate, 150);
+      setResolvedSrc(optimized);
+    }
+
+    return () => {
+      isMounted = false;
+    };
+  }, [rawCandidate, matchedProd, item.productId]);
+
+  if (hasError || !resolvedSrc) {
+    return (
+      <div
+        className={`${sizeClassName} bg-slate-100 flex items-center justify-center border border-slate-200 text-slate-400 shrink-0 ${className}`}
+      >
+        <Package className="w-1/2 h-1/2 text-slate-400" />
+      </div>
+    );
+  }
+
+  return (
+    <img
+      src={resolvedSrc}
+      alt={item.name}
+      loading="lazy"
+      onError={() => setHasError(true)}
+      className={`${sizeClassName} object-cover bg-white shrink-0 border border-slate-200 ${className}`}
+    />
+  );
+};
 
 interface AdminCartActivitiesProps {
   cartActivities: CartActivity[];
+  products?: Product[];
   currentRole: UserRole;
   currentStaff?: StaffUser | null;
   onRefresh?: () => void;
@@ -65,6 +186,7 @@ interface AdminCartActivitiesProps {
 
 export const AdminCartActivities: React.FC<AdminCartActivitiesProps> = ({
   cartActivities = [],
+  products = [],
   currentRole,
   currentStaff,
   onRefresh,
@@ -734,10 +856,10 @@ export const AdminCartActivities: React.FC<AdminCartActivitiesProps> = ({
                                       #{idx + 1}
                                     </span>
                                   )}
-                                  <img
-                                    src={item.image || 'https://images.unsplash.com/photo-1598327105666-5b89351aff97?w=100'}
-                                    alt={item.name}
-                                    className="w-8 h-8 rounded-lg object-cover bg-white shrink-0 border border-slate-200"
+                                  <CartActivityProductImage
+                                    item={item}
+                                    products={products}
+                                    className="w-8 h-8 rounded-lg"
                                   />
                                   <div className="min-w-0 flex-1">
                                     <p className="font-bold text-slate-900 truncate text-[11px]" title={item.name}>
@@ -1043,10 +1165,11 @@ export const AdminCartActivities: React.FC<AdminCartActivitiesProps> = ({
                                 #{idx + 1}
                               </span>
                             )}
-                            <img
-                              src={item.image || 'https://images.unsplash.com/photo-1598327105666-5b89351aff97?w=100'}
-                              alt={item.name}
-                              className="w-9 h-9 rounded-md object-cover bg-slate-50 border border-slate-200 shrink-0"
+                            <CartActivityProductImage
+                              item={item}
+                              products={products}
+                              className="w-9 h-9 rounded-md"
+                              sizeClassName="w-9 h-9 rounded-md"
                             />
                             <div className="min-w-0 flex-1">
                               <p className="font-bold text-slate-900 text-xs truncate" title={item.name}>{item.name}</p>
@@ -1248,10 +1371,11 @@ export const AdminCartActivities: React.FC<AdminCartActivitiesProps> = ({
                       className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 rounded-2xl bg-white border border-slate-200 shadow-2xs hover:border-sky-200 transition-colors"
                     >
                       <div className="flex items-center gap-3 min-w-0 flex-1">
-                        <img
-                          src={item.image || 'https://images.unsplash.com/photo-1598327105666-5b89351aff97?w=100'}
-                          alt={item.name}
-                          className="w-12 h-12 rounded-xl object-cover bg-slate-50 border border-slate-100 shrink-0"
+                        <CartActivityProductImage
+                          item={item}
+                          products={products}
+                          className="w-12 h-12 rounded-xl"
+                          sizeClassName="w-12 h-12 rounded-xl"
                         />
                         <div className="min-w-0 flex-1">
                           <h5 className="font-black text-slate-900 text-xs truncate" title={item.name}>

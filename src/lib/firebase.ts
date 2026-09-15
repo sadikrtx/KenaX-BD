@@ -2423,13 +2423,11 @@ export async function getCartActivitiesFromDB(): Promise<import('../types').Cart
       const items: import('../types').CartActivity[] = [];
       snapshot.forEach((docSnap) => {
         const data = docSnap.data() as import('../types').CartActivity;
-        if (data && data.isV2Activity) {
+        if (data && data.items && data.items.length > 0) {
           items.push(data);
-        } else {
-          deleteDoc(doc(db, 'cartActivities', docSnap.id)).catch(() => {});
         }
       });
-      items.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+      items.sort((a, b) => new Date(b.updatedAt || b.createdAt).getTime() - new Date(a.updatedAt || a.createdAt).getTime());
       safeSetCartActivitiesCache(items);
       return items;
     }
@@ -2441,10 +2439,46 @@ export async function getCartActivitiesFromDB(): Promise<import('../types').Cart
   if (cached) {
     try {
       const list: import('../types').CartActivity[] = JSON.parse(cached);
-      return list.filter((c) => c && c.isV2Activity);
+      return list.filter((c) => c && c.items && c.items.length > 0);
     } catch {}
   }
   return [];
+}
+
+export function subscribeToCartActivities(
+  onData: (items: import('../types').CartActivity[]) => void,
+  onError?: (err: any) => void
+): () => void {
+  try {
+    const colRef = collection(db, 'cartActivities');
+    const unsub = onSnapshot(
+      colRef,
+      (snapshot) => {
+        const items: import('../types').CartActivity[] = [];
+        snapshot.forEach((docSnap) => {
+          const data = docSnap.data() as import('../types').CartActivity;
+          if (data && data.items && data.items.length > 0) {
+            items.push(data);
+          }
+        });
+        items.sort(
+          (a, b) =>
+            new Date(b.updatedAt || b.createdAt).getTime() -
+            new Date(a.updatedAt || a.createdAt).getTime()
+        );
+        safeSetCartActivitiesCache(items);
+        onData(items);
+      },
+      (error) => {
+        console.warn('[KenaX BD] subscribeToCartActivities onSnapshot error:', error);
+        if (onError) onError(error);
+      }
+    );
+    return unsub;
+  } catch (err) {
+    console.warn('[KenaX BD] subscribeToCartActivities init error:', err);
+    return () => {};
+  }
 }
 
 export async function saveCartActivityToDB(cart: import('../types').CartActivity): Promise<void> {

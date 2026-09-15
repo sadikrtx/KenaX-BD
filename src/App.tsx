@@ -71,6 +71,7 @@ import {
   subscribeToProducts,
   updateOrderInDB,
   getCartActivitiesFromDB,
+  subscribeToCartActivities,
   saveCartActivityToDB,
   updateCartActivityStatusInDB,
   subscribeToOrders,
@@ -721,12 +722,13 @@ export default function App() {
     }
   };
 
-  // Initial database fetch & seed with real-time listeners (Products, Orders, Settings, Categories)
+  // Initial database fetch & seed with real-time listeners (Products, Orders, Settings, Categories, Cart Activities)
   useEffect(() => {
     let unsubscribeOrders: (() => void) | null = null;
     let unsubscribeProducts: (() => void) | null = null;
     let unsubscribeSettings: (() => void) | null = null;
     let unsubscribeCategories: (() => void) | null = null;
+    let unsubscribeCartActivities: (() => void) | null = null;
 
     async function initDB() {
       // Seed if not done yet
@@ -804,6 +806,12 @@ export default function App() {
 
       const dbCartActivities = await getCartActivitiesFromDB();
       setCartActivities(dbCartActivities || []);
+
+      unsubscribeCartActivities = subscribeToCartActivities((liveCartActivities) => {
+        if (liveCartActivities) {
+          setCartActivities(liveCartActivities);
+        }
+      });
     }
 
     initDB();
@@ -840,6 +848,7 @@ export default function App() {
       if (unsubscribeProducts) unsubscribeProducts();
       if (unsubscribeSettings) unsubscribeSettings();
       if (unsubscribeCategories) unsubscribeCategories();
+      if (unsubscribeCartActivities) unsubscribeCartActivities();
     };
   }, []);
 
