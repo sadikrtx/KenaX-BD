@@ -99,3 +99,97 @@ export function safeSetCartActivitiesCache(activities: any[]): void {
   }
 }
 
+// ----------------------------------------------------
+// INDEXEDDB MULTI-GIGABYTE MEDIA & IMAGE STORE
+// ----------------------------------------------------
+const IDB_NAME = 'kenax_db_store';
+const IDB_VERSION = 1;
+const IDB_STORE_NAME = 'media_keyval';
+
+let idbPromise: Promise<IDBDatabase | null> | null = null;
+
+function getIDB(): Promise<IDBDatabase | null> {
+  if (typeof window === 'undefined' || !window.indexedDB) {
+    return Promise.resolve(null);
+  }
+  if (!idbPromise) {
+    idbPromise = new Promise((resolve) => {
+      try {
+        const req = window.indexedDB.open(IDB_NAME, IDB_VERSION);
+        req.onupgradeneeded = (e: any) => {
+          const db = e.target?.result as IDBDatabase;
+          if (db && !db.objectStoreNames.contains(IDB_STORE_NAME)) {
+            db.createObjectStore(IDB_STORE_NAME);
+          }
+        };
+        req.onsuccess = (e: any) => {
+          resolve(e.target?.result as IDBDatabase);
+        };
+        req.onerror = () => {
+          resolve(null);
+        };
+      } catch {
+        resolve(null);
+      }
+    });
+  }
+  return idbPromise;
+}
+
+export async function getIdbItem(key: string): Promise<string | null> {
+  try {
+    const db = await getIDB();
+    if (!db) return null;
+    return new Promise((resolve) => {
+      try {
+        const tx = db.transaction(IDB_STORE_NAME, 'readonly');
+        const store = tx.objectStore(IDB_STORE_NAME);
+        const req = store.get(key);
+        req.onsuccess = () => resolve((req.result as string) || null);
+        req.onerror = () => resolve(null);
+      } catch {
+        resolve(null);
+      }
+    });
+  } catch {
+    return null;
+  }
+}
+
+export async function setIdbItem(key: string, value: string): Promise<void> {
+  try {
+    const db = await getIDB();
+    if (!db) return;
+    return new Promise((resolve) => {
+      try {
+        const tx = db.transaction(IDB_STORE_NAME, 'readwrite');
+        const store = tx.objectStore(IDB_STORE_NAME);
+        const req = store.put(value, key);
+        req.onsuccess = () => resolve();
+        req.onerror = () => resolve();
+      } catch {
+        resolve();
+      }
+    });
+  } catch {}
+}
+
+export async function removeIdbItem(key: string): Promise<void> {
+  try {
+    const db = await getIDB();
+    if (!db) return;
+    return new Promise((resolve) => {
+      try {
+        const tx = db.transaction(IDB_STORE_NAME, 'readwrite');
+        const store = tx.objectStore(IDB_STORE_NAME);
+        const req = store.delete(key);
+        req.onsuccess = () => resolve();
+        req.onerror = () => resolve();
+      } catch {
+        resolve();
+      }
+    });
+  } catch {}
+}
+
+

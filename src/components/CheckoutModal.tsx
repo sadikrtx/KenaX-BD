@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   X,
   ShieldCheck,
@@ -24,6 +24,9 @@ import {
   Building,
   User,
   Palette,
+  ShoppingCart,
+  Plus,
+  ShoppingBag,
 } from 'lucide-react';
 import {
   Order,
@@ -48,6 +51,7 @@ interface CheckoutModalProps {
   isOpen: boolean;
   onClose: () => void;
   cartItems: OrderItem[];
+  fullCart?: OrderItem[];
   discountAmount: number;
   couponCode?: string;
   onOrderPlaced: (order: Order) => void;
@@ -99,6 +103,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   isOpen,
   onClose,
   cartItems,
+  fullCart = [],
   discountAmount,
   couponCode,
   onOrderPlaced,
@@ -125,7 +130,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
       const prod = (products || []).find((p) => p.id === item.productId);
       let selectedColor = item.selectedColor;
       let selectedColorImage = item.selectedColorImage;
-      let productImage = item.productImage && item.productImage.trim() !== '' 
+      let productImage = item.productImage && item.productImage.trim() !== '' && !item.productImage.startsWith('media://')
         ? item.productImage 
         : (prod?.images?.[0] || prod?.colors?.[0]?.imageUrl || '');
       let selectedSize = item.selectedSize;
@@ -151,25 +156,24 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
         productImage: productImage,
         selectedSize: selectedSize || item.selectedSize,
         variant: variantStr || item.variant,
+        total: item.price * item.quantity,
       };
     });
   });
 
-  useEffect(() => {
-    setItemsList((prevItems) => {
-      return cartItems.map((item) => {
-        const existing = prevItems.find((pi) => pi.productId === item.productId);
-        const prod = (products || []).find((p) => p.id === item.productId);
+  const prevIsOpenRef = useRef(false);
 
-        let selectedColor = item.selectedColor || existing?.selectedColor;
-        let selectedColorImage = item.selectedColorImage || existing?.selectedColorImage;
-        // Strictly preserve the item's original selected product image
-        let productImage = (item.productImage && item.productImage.trim() !== '')
+  // Initialize itemsList ONLY when the checkout modal transitions from closed to open
+  useEffect(() => {
+    if (isOpen && !prevIsOpenRef.current) {
+      const initial = cartItems.map((item) => {
+        const prod = (products || []).find((p) => p.id === item.productId);
+        let selectedColor = item.selectedColor;
+        let selectedColorImage = item.selectedColorImage;
+        let productImage = item.productImage && item.productImage.trim() !== '' && !item.productImage.startsWith('media://')
           ? item.productImage
-          : (existing?.productImage && existing.productImage.trim() !== '')
-          ? existing.productImage
           : (prod?.images?.[0] || prod?.colors?.[0]?.imageUrl || '');
-        let selectedSize = item.selectedSize || existing?.selectedSize;
+        let selectedSize = item.selectedSize;
 
         if (prod?.colors && prod.colors.length > 0 && !selectedColor) {
           selectedColor = prod.colors[0].name;
@@ -192,69 +196,227 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
           productImage: productImage,
           selectedSize: selectedSize || item.selectedSize,
           variant: variantStr || item.variant,
+          total: item.price * item.quantity,
         };
       });
+      setItemsList(initial);
+    }
+    prevIsOpenRef.current = isOpen;
+  }, [isOpen, cartItems, products]);
+
+  // Non-destructive enricher for product images while modal is open
+  useEffect(() => {
+    if (isOpen && products && products.length > 0) {
+      setItemsList((prevItems) => {
+        if (prevItems.length === 0) return prevItems;
+        let changed = false;
+        const updated = prevItems.map((item) => {
+          const prod = products.find((p) => p.id === item.productId);
+          if (!prod) return item;
+          let productImage = item.productImage;
+          if (!productImage || productImage.trim() === '' || productImage.startsWith('media://')) {
+            productImage = prod.images?.[0] || prod.colors?.[0]?.imageUrl || item.productImage;
+            changed = true;
+          }
+          return {
+            ...item,
+            productImage,
+          };
+        });
+        return changed ? updated : prevItems;
+      });
+    }
+  }, [products, isOpen]);
+
+  // Calculate items in user's full cart that are not currently in this checkout order
+  const otherCartItems = useMemo(() => {
+    if (!fullCart || fullCart.length === 0) return [];
+    return fullCart.filter(
+      (cItem) =>
+        !itemsList.some(
+          (lItem) =>
+            lItem.productId === cItem.productId &&
+            (lItem.variant || '') === (cItem.variant || '')
+        )
+    );
+  }, [fullCart, itemsList]);
+
+  const otherCartItemsTotal = useMemo(() => {
+    return otherCartItems.reduce((acc, item) => acc + item.price * item.quantity, 0);
+  }, [otherCartItems]);
+
+  const handleAddAllCartItemsToCheckout = () => {
+    if (otherCartItems.length === 0) return;
+    setItemsList((prev) => {
+      const combined = [...prev];
+      for (const cItem of otherCartItems) {
+        const idx = combined.findIndex(
+          (ci) => ci.productId === cItem.productId && (ci.variant || '') === (cItem.variant || '')
+        );
+        if (idx >= 0) {
+          combined[idx] = {
+            ...combined[idx],
+            quantity: combined[idx].quantity + cItem.quantity,
+            total: (combined[idx].quantity + cItem.quantity) * combined[idx].price,
+          };
+        } else {
+          const prod = (products || []).find((p) => p.id === cItem.productId);
+          let selectedColor = cItem.selectedColor;
+          let selectedColorImage = cItem.selectedColorImage;
+          let selectedSize = cItem.selectedSize;
+          let itemImg = cItem.productImage && cItem.productImage.trim() !== '' && !cItem.productImage.startsWith('media://')
+            ? cItem.productImage
+            : (prod?.images?.[0] || prod?.colors?.[0]?.imageUrl || '');
+
+          if (prod?.colors && prod.colors.length > 0 && !selectedColor) {
+            selectedColor = prod.colors[0].name;
+            if (prod.colors[0].imageUrl && (!itemImg || itemImg.trim() === '')) {
+              selectedColorImage = prod.colors[0].imageUrl;
+              itemImg = prod.colors[0].imageUrl;
+            }
+          }
+          if (prod?.sizes && prod.sizes.length > 0 && !selectedSize) {
+            selectedSize = prod.sizes[0];
+          }
+          const variantStr = [selectedColor, selectedSize].filter(Boolean).join(' / ');
+
+          combined.push({
+            ...cItem,
+            selectedColor: selectedColor || cItem.selectedColor,
+            selectedColorImage: selectedColorImage || cItem.selectedColorImage,
+            selectedSize: selectedSize || cItem.selectedSize,
+            variant: variantStr || cItem.variant,
+            productImage: itemImg,
+            total: cItem.price * cItem.quantity,
+          });
+        }
+      }
+      return combined;
     });
-  }, [cartItems, products]);
+  };
 
-  const handleSelectColorForProduct = (productId: string, color: ColorVariation) => {
+  const handleAddSingleCartItemToCheckout = (cItem: OrderItem) => {
+    setItemsList((prev) => {
+      const idx = prev.findIndex(
+        (ci) => ci.productId === cItem.productId && (ci.variant || '') === (cItem.variant || '')
+      );
+      if (idx >= 0) {
+        return prev.map((item, i) =>
+          i === idx
+            ? {
+                ...item,
+                quantity: item.quantity + cItem.quantity,
+                total: (item.quantity + cItem.quantity) * item.price,
+              }
+            : item
+        );
+      }
+      const prod = (products || []).find((p) => p.id === cItem.productId);
+      let selectedColor = cItem.selectedColor;
+      let selectedColorImage = cItem.selectedColorImage;
+      let selectedSize = cItem.selectedSize;
+      let itemImg = cItem.productImage && cItem.productImage.trim() !== '' && !cItem.productImage.startsWith('media://')
+        ? cItem.productImage
+        : (prod?.images?.[0] || prod?.colors?.[0]?.imageUrl || '');
+
+      if (prod?.colors && prod.colors.length > 0 && !selectedColor) {
+        selectedColor = prod.colors[0].name;
+        if (prod.colors[0].imageUrl && (!itemImg || itemImg.trim() === '')) {
+          selectedColorImage = prod.colors[0].imageUrl;
+          itemImg = prod.colors[0].imageUrl;
+        }
+      }
+      if (prod?.sizes && prod.sizes.length > 0 && !selectedSize) {
+        selectedSize = prod.sizes[0];
+      }
+      const variantStr = [selectedColor, selectedSize].filter(Boolean).join(' / ');
+
+      return [
+        ...prev,
+        {
+          ...cItem,
+          selectedColor: selectedColor || cItem.selectedColor,
+          selectedColorImage: selectedColorImage || cItem.selectedColorImage,
+          selectedSize: selectedSize || cItem.selectedSize,
+          variant: variantStr || cItem.variant,
+          productImage: itemImg,
+          total: cItem.price * cItem.quantity,
+        },
+      ];
+    });
+  };
+
+  const handleSelectColorForProduct = (productId: string, color: ColorVariation, itemIndex?: number) => {
     const prod = (products || []).find((p) => p.id === productId);
-    const currentItem = itemsList.find((i) => i.productId === productId);
-    const defaultImage = prod?.images?.[0] || currentItem?.productImage || '';
-    const newImage = color.imageUrl || defaultImage;
-
-    const variantStr = [color.name, currentItem?.selectedSize].filter(Boolean).join(' / ');
-    const updates = {
-      selectedColor: color.name,
-      selectedColorImage: color.imageUrl,
-      productImage: newImage,
-      variant: variantStr || currentItem?.variant,
-    };
-
     setItemsList((prev) =>
-      prev.map((item) => (item.productId === productId ? { ...item, ...updates } : item))
+      prev.map((item, idx) => {
+        if (itemIndex !== undefined ? idx === itemIndex : item.productId === productId) {
+          const defaultImage = prod?.images?.[0] || item.productImage || '';
+          const newImage = color.imageUrl || defaultImage;
+          const variantStr = [color.name, item.selectedSize].filter(Boolean).join(' / ');
+          const updates = {
+            ...item,
+            selectedColor: color.name,
+            selectedColorImage: color.imageUrl,
+            productImage: newImage,
+            variant: variantStr || item.variant,
+          };
+          if (onUpdateCartItem) {
+            onUpdateCartItem(item.productId, updates);
+          }
+          return updates;
+        }
+        return item;
+      })
     );
-
-    if (onUpdateCartItem) {
-      onUpdateCartItem(productId, updates);
-    }
   };
 
-  const handleSelectSizeForProduct = (productId: string, size: string) => {
-    const currentItem = itemsList.find((i) => i.productId === productId);
-    const variantStr = [currentItem?.selectedColor, size].filter(Boolean).join(' / ');
-    const updates = {
-      selectedSize: size,
-      variant: variantStr || currentItem?.variant,
-    };
-
+  const handleSelectSizeForProduct = (productId: string, size: string, itemIndex?: number) => {
     setItemsList((prev) =>
-      prev.map((item) => (item.productId === productId ? { ...item, ...updates } : item))
+      prev.map((item, idx) => {
+        if (itemIndex !== undefined ? idx === itemIndex : item.productId === productId) {
+          const variantStr = [item.selectedColor, size].filter(Boolean).join(' / ');
+          const updates = {
+            ...item,
+            selectedSize: size,
+            variant: variantStr || item.variant,
+          };
+          if (onUpdateCartItem) {
+            onUpdateCartItem(item.productId, updates);
+          }
+          return updates;
+        }
+        return item;
+      })
     );
-
-    if (onUpdateCartItem) {
-      onUpdateCartItem(productId, updates);
-    }
   };
 
-  const handleUpdateItemQuantity = (productId: string, newQty: number) => {
+  const handleUpdateItemQuantity = (productId: string, newQty: number, itemIndex?: number) => {
     if (newQty < 1) return;
-    const currentItem = itemsList.find((i) => i.productId === productId);
-    const newTotal = currentItem ? currentItem.price * newQty : 0;
-    const updates = { quantity: newQty, total: newTotal };
-
     setItemsList((prev) =>
-      prev.map((item) => (item.productId === productId ? { ...item, ...updates } : item))
+      prev.map((item, idx) => {
+        if (itemIndex !== undefined ? idx === itemIndex : item.productId === productId) {
+          const newTotal = item.price * newQty;
+          const updates = {
+            ...item,
+            quantity: newQty,
+            total: newTotal,
+          };
+          if (onUpdateCartItem) {
+            onUpdateCartItem(item.productId, updates);
+          }
+          return updates;
+        }
+        return item;
+      })
     );
-
-    if (onUpdateCartItem) {
-      onUpdateCartItem(productId, updates);
-    }
   };
 
-  const handleRemoveProductItem = (productId: string) => {
+  const handleRemoveProductItem = (productId: string, itemIndex?: number) => {
     if (itemsList.length <= 1) return;
-    setItemsList((prev) => prev.filter((item) => item.productId !== productId));
+    setItemsList((prev) =>
+      prev.filter((item, idx) => (itemIndex !== undefined ? idx !== itemIndex : item.productId !== productId))
+    );
     if (onRemoveItem) {
       onRemoveItem(productId);
     }
@@ -465,7 +627,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
       return;
     }
 
-    if (cartItems.length === 0) {
+    if (itemsList.length === 0) {
       setErrors({ general: 'Cart is empty. Please add items to checkout.' });
       return;
     }
@@ -1233,150 +1395,224 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                   </div>
 
                   <div className="space-y-3">
-                    {itemsList
-                      .filter((item) => {
-                        const p = (products || []).find((pr) => pr.id === item.productId);
-                        return (p?.colors && p.colors.length > 0) || (p?.sizes && p.sizes.length > 0);
-                      })
-                      .map((item, idx) => {
-                        const prod = (products || []).find((p) => p.id === item.productId);
-                        const availableColors = prod?.colors && prod.colors.length > 0 ? prod.colors : [];
-                        const availableSizes = prod?.sizes && prod.sizes.length > 0 ? prod.sizes : [];
+                    {itemsList.map((item, originalIndex) => {
+                      const prod = (products || []).find((p) => p.id === item.productId);
+                      const availableColors = prod?.colors && prod.colors.length > 0 ? prod.colors : [];
+                      const availableSizes = prod?.sizes && prod.sizes.length > 0 ? prod.sizes : [];
 
-                        return (
-                          <div
-                            key={`${item.productId}_${item.selectedColor || ''}_${item.selectedSize || ''}_${idx}`}
-                            className="p-2.5 rounded-xl bg-slate-50/80 border border-slate-200/80 space-y-2"
-                          >
-                            <div className="flex items-center gap-2">
-                              <CartItemImage
-                                item={item}
-                                product={prod}
-                                sizeClassName="w-10 h-10 rounded-lg shrink-0"
-                              />
-                              <div className="min-w-0 flex-1">
-                                <p className="text-xs font-bold text-slate-800 truncate" title={item.productName}>
-                                  {item.productName}
-                                </p>
-                                <div className="flex items-center gap-1.5 text-[10px] text-slate-500 mt-0.5 flex-wrap">
-                                  {item.selectedColor && (
-                                    <span className="font-semibold text-sky-700 bg-sky-50 px-1.5 py-0.2 rounded border border-sky-200">
-                                      Color: {item.selectedColor}
-                                    </span>
-                                  )}
-                                  {item.selectedSize && (
-                                    <span className="font-semibold text-indigo-700 bg-indigo-50 px-1.5 py-0.2 rounded border border-indigo-200">
-                                      Size: {item.selectedSize}
-                                    </span>
-                                  )}
-                                </div>
-                              </div>
-                            </div>
+                      if (availableColors.length === 0 && availableSizes.length === 0) return null;
 
-                            {/* Color Selector */}
-                            {availableColors.length > 0 && (
-                              <div className="space-y-1">
-                                <div className="flex items-center justify-between text-[10px]">
-                                  <span className="font-bold text-slate-700">
-                                    Color:{' '}
-                                    <b className="text-sky-600 font-extrabold">{item.selectedColor || 'Choose Color'}</b>
+                      return (
+                        <div
+                          key={`${item.productId}_${item.variant || ''}_${originalIndex}`}
+                          className="p-2.5 rounded-xl bg-slate-50/80 border border-slate-200/80 space-y-2"
+                        >
+                          <div className="flex items-center gap-2">
+                            <CartItemImage
+                              item={item}
+                              product={prod}
+                              sizeClassName="w-10 h-10 rounded-lg shrink-0"
+                            />
+                            <div className="min-w-0 flex-1">
+                              <p className="text-xs font-bold text-slate-800 truncate" title={item.productName}>
+                                {item.productName}
+                              </p>
+                              <div className="flex items-center gap-1.5 text-[10px] text-slate-500 mt-0.5 flex-wrap">
+                                {item.selectedColor && (
+                                  <span className="font-semibold text-sky-700 bg-sky-50 px-1.5 py-0.2 rounded border border-sky-200">
+                                    Color: {item.selectedColor}
                                   </span>
-                                </div>
-                                <div className="flex flex-wrap gap-1.5">
-                                  {availableColors.map((col) => {
-                                    const isSelected = item.selectedColor === col.name;
-                                    return (
-                                      <button
-                                        key={col.name}
-                                        type="button"
-                                        onClick={() => handleSelectColorForProduct(item.productId, col)}
-                                        className={`flex items-center gap-1.5 px-2 py-1 rounded-lg border text-[11px] font-bold transition-all cursor-pointer ${
-                                          isSelected
-                                            ? 'border-sky-600 bg-sky-50 text-sky-900 ring-2 ring-sky-500/25 shadow-2xs'
-                                            : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-100'
-                                        }`}
-                                      >
-                                        {col.imageUrl && col.imageUrl.trim() !== '' ? (
-                                          <img
-                                            src={col.imageUrl}
-                                            alt={col.name}
-                                            className="w-3.5 h-3.5 rounded-sm object-cover border border-slate-300 shrink-0"
-                                          />
-                                        ) : (
-                                          <span
-                                            className="w-2.5 h-2.5 rounded-full border border-slate-300 shrink-0"
-                                            style={{ backgroundColor: col.hexCode || col.colorCode || '#94a3b8' }}
-                                          />
-                                        )}
-                                        <span>{col.name}</span>
-                                        {isSelected && <Check className="w-3 h-3 text-sky-600 shrink-0" />}
-                                      </button>
-                                    );
-                                  })}
-                                </div>
-                              </div>
-                            )}
-
-                            {/* Size Selector */}
-                            {availableSizes.length > 0 && (
-                              <div className="space-y-1">
-                                <span className="text-[10px] font-bold text-slate-700 block">
-                                  Size:{' '}
-                                  <b className="text-indigo-600 font-extrabold">{item.selectedSize || 'Choose Size'}</b>
+                                )}
+                                {item.selectedSize && (
+                                  <span className="font-semibold text-indigo-700 bg-indigo-50 px-1.5 py-0.2 rounded border border-indigo-200">
+                                    Size: {item.selectedSize}
+                                  </span>
+                                )}
+                                <span className="font-bold text-slate-700">
+                                  ৳{item.price.toLocaleString('en-BD')}
                                 </span>
-                                <div className="flex flex-wrap gap-1.5">
-                                  {availableSizes.map((sz) => {
-                                    const isSelected = item.selectedSize === sz;
-                                    return (
-                                      <button
-                                        key={sz}
-                                        type="button"
-                                        onClick={() => handleSelectSizeForProduct(item.productId, sz)}
-                                        className={`min-w-[32px] px-2 py-0.5 rounded-lg border text-[11px] font-bold transition-all text-center cursor-pointer ${
-                                          isSelected
-                                            ? 'border-indigo-600 bg-indigo-600 text-white shadow-2xs'
-                                            : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-100'
-                                        }`}
-                                      >
-                                        {sz}
-                                      </button>
-                                    );
-                                  })}
-                                </div>
-                              </div>
-                            )}
-
-                            {/* Quantity Selector under Size */}
-                            <div className="pt-2 mt-1 border-t border-slate-200/70 flex items-center justify-between">
-                              <span className="text-[10px] font-bold text-slate-700">
-                                Quantity:
-                              </span>
-                              <div className="flex items-center border border-slate-300 rounded-lg bg-white h-7 px-1 shadow-2xs">
-                                <button
-                                  type="button"
-                                  onClick={() => handleUpdateItemQuantity(item.productId, Math.max(1, item.quantity - 1))}
-                                  disabled={item.quantity <= 1}
-                                  className="w-5 h-5 flex items-center justify-center text-slate-600 hover:bg-slate-100 active:bg-slate-200 disabled:opacity-40 rounded font-black text-xs transition-colors cursor-pointer"
-                                  aria-label="Decrease quantity"
-                                >
-                                  -
-                                </button>
-                                <span className="text-xs font-black text-slate-900 px-2 select-none min-w-[20px] text-center">
-                                  {item.quantity}
-                                </span>
-                                <button
-                                  type="button"
-                                  onClick={() => handleUpdateItemQuantity(item.productId, item.quantity + 1)}
-                                  className="w-5 h-5 flex items-center justify-center text-slate-600 hover:bg-slate-100 active:bg-slate-200 rounded font-black text-xs transition-colors cursor-pointer"
-                                  aria-label="Increase quantity"
-                                >
-                                  +
-                                </button>
                               </div>
                             </div>
                           </div>
-                        );
-                      })}
+
+                          {/* Color Selector */}
+                          {availableColors.length > 0 && (
+                            <div className="space-y-1">
+                              <div className="flex items-center justify-between text-[10px]">
+                                <span className="font-bold text-slate-700">
+                                  Color:{' '}
+                                  <b className="text-sky-600 font-extrabold">{item.selectedColor || 'Choose Color'}</b>
+                                </span>
+                              </div>
+                              <div className="flex flex-wrap gap-1.5">
+                                {availableColors.map((col) => {
+                                  const isSelected = item.selectedColor === col.name;
+                                  return (
+                                    <button
+                                      key={col.name}
+                                      type="button"
+                                      onClick={() => handleSelectColorForProduct(item.productId, col, originalIndex)}
+                                      className={`flex items-center gap-1.5 px-2 py-1 rounded-lg border text-[11px] font-bold transition-all cursor-pointer ${
+                                        isSelected
+                                          ? 'border-sky-600 bg-sky-50 text-sky-900 ring-2 ring-sky-500/25 shadow-2xs'
+                                          : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-100'
+                                      }`}
+                                    >
+                                      {col.imageUrl && col.imageUrl.trim() !== '' ? (
+                                        <img
+                                          src={col.imageUrl}
+                                          alt={col.name}
+                                          className="w-3.5 h-3.5 rounded-sm object-cover border border-slate-300 shrink-0"
+                                        />
+                                      ) : (
+                                        <span
+                                          className="w-2.5 h-2.5 rounded-full border border-slate-300 shrink-0"
+                                          style={{ backgroundColor: col.hexCode || col.colorCode || '#94a3b8' }}
+                                        />
+                                      )}
+                                      <span>{col.name}</span>
+                                      {isSelected && <Check className="w-3 h-3 text-sky-600 shrink-0" />}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Size Selector */}
+                          {availableSizes.length > 0 && (
+                            <div className="space-y-1">
+                              <span className="text-[10px] font-bold text-slate-700 block">
+                                Size:{' '}
+                                <b className="text-indigo-600 font-extrabold">{item.selectedSize || 'Choose Size'}</b>
+                              </span>
+                              <div className="flex flex-wrap gap-1.5">
+                                {availableSizes.map((sz) => {
+                                  const isSelected = item.selectedSize === sz;
+                                  return (
+                                    <button
+                                      key={sz}
+                                      type="button"
+                                      onClick={() => handleSelectSizeForProduct(item.productId, sz, originalIndex)}
+                                      className={`min-w-[32px] px-2 py-0.5 rounded-lg border text-[11px] font-bold transition-all text-center cursor-pointer ${
+                                        isSelected
+                                          ? 'border-indigo-600 bg-indigo-600 text-white shadow-2xs'
+                                          : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-100'
+                                      }`}
+                                    >
+                                      {sz}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Quantity Selector under Size */}
+                          <div className="pt-2 mt-1 border-t border-slate-200/70 flex items-center justify-between">
+                            <span className="text-[10px] font-bold text-slate-700">
+                              Quantity:
+                            </span>
+                            <div className="flex items-center border border-slate-300 rounded-lg bg-white h-7 px-1 shadow-2xs">
+                              <button
+                                type="button"
+                                onClick={() => handleUpdateItemQuantity(item.productId, Math.max(1, item.quantity - 1), originalIndex)}
+                                disabled={item.quantity <= 1}
+                                className="w-5 h-5 flex items-center justify-center text-slate-600 hover:bg-slate-100 active:bg-slate-200 disabled:opacity-40 rounded font-black text-xs transition-colors cursor-pointer"
+                                aria-label="Decrease quantity"
+                              >
+                                -
+                              </button>
+                              <span className="text-xs font-black text-slate-900 px-2 select-none min-w-[20px] text-center">
+                                {item.quantity}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => handleUpdateItemQuantity(item.productId, item.quantity + 1, originalIndex)}
+                                className="w-5 h-5 flex items-center justify-center text-slate-600 hover:bg-slate-100 active:bg-slate-200 rounded font-black text-xs transition-colors cursor-pointer"
+                                aria-label="Increase quantity"
+                              >
+                                +
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Cart Items Confirmation / Inclusion Card */}
+              {otherCartItems.length > 0 && (
+                <div className="mb-4 p-3 sm:p-3.5 bg-gradient-to-br from-indigo-50/90 via-slate-50 to-sky-50/80 border border-indigo-200/90 rounded-2xl shadow-xs space-y-2.5 transition-all">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="w-6 h-6 rounded-lg bg-indigo-600 text-white flex items-center justify-center shrink-0 shadow-2xs text-xs font-bold">
+                        <ShoppingCart className="w-3.5 h-3.5" />
+                      </span>
+                      <div className="min-w-0">
+                        <h4 className="text-xs sm:text-[13px] font-black text-slate-900 leading-none truncate">
+                          Items in Your Cart ({otherCartItems.length})
+                        </h4>
+                        <p className="text-[10px] sm:text-[11px] text-slate-500 font-medium mt-0.5">
+                          Combine and checkout together
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleAddAllCartItemsToCheckout}
+                      className="px-2.5 py-1 sm:px-3 sm:py-1.5 bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white rounded-xl text-[11px] font-bold transition-all shadow-2xs flex items-center gap-1 shrink-0 cursor-pointer"
+                    >
+                      <Plus className="w-3 h-3 stroke-[2.5]" />
+                      <span>Add All (+৳{otherCartItemsTotal.toLocaleString('en-BD')})</span>
+                    </button>
+                  </div>
+
+                  {/* List of other cart items */}
+                  <div className="space-y-1.5 max-h-36 sm:max-h-44 overflow-y-auto pr-1">
+                    {otherCartItems.map((cItem, idx) => {
+                      const p = (products || []).find((pr) => pr.id === cItem.productId);
+                      return (
+                        <div
+                          key={cItem.productId + (cItem.variant || '') + idx}
+                          className="flex items-center justify-between gap-2 p-2 bg-white rounded-xl border border-slate-200/90 shadow-2xs hover:border-indigo-200 transition-colors"
+                        >
+                          <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                            <CartItemImage
+                              item={cItem}
+                              product={p}
+                              sizeClassName="w-9 h-9 rounded-lg shrink-0"
+                            />
+                            <div className="min-w-0 flex-1">
+                              <p className="text-xs font-bold text-slate-900 truncate leading-snug" title={cItem.productName}>
+                                {cItem.productName}
+                              </p>
+                              <div className="flex items-center gap-1.5 text-[11px] text-slate-500 mt-0.5">
+                                <span className="font-bold text-slate-800">
+                                  ৳{cItem.price.toLocaleString('en-BD')}
+                                </span>
+                                <span className="text-[10px] text-slate-400">× {cItem.quantity}</span>
+                                {cItem.variant && (
+                                  <span className="text-indigo-700 bg-indigo-50 px-1.5 py-0.2 rounded text-[10px] font-semibold border border-indigo-100">
+                                    {cItem.variant}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handleAddSingleCartItemToCheckout(cItem)}
+                            className="px-2.5 py-1 bg-slate-100 hover:bg-indigo-50 hover:text-indigo-600 active:bg-indigo-100 text-slate-700 rounded-lg text-[11px] font-bold shrink-0 transition-all border border-slate-200 hover:border-indigo-200 flex items-center gap-1 cursor-pointer"
+                          >
+                            <Plus className="w-3 h-3 stroke-[2.5]" />
+                            <span>Add</span>
+                          </button>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               )}
@@ -1440,7 +1676,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                           <div className="flex items-center border border-slate-200 rounded-md bg-white h-5 px-0.5 shadow-2xs">
                             <button
                               type="button"
-                              onClick={() => handleUpdateItemQuantity(item.productId, Math.max(1, item.quantity - 1))}
+                              onClick={() => handleUpdateItemQuantity(item.productId, Math.max(1, item.quantity - 1), index)}
                               disabled={item.quantity <= 1}
                               className="w-4 h-4 flex items-center justify-center text-slate-600 hover:bg-slate-100 disabled:opacity-30 rounded text-[10px] font-bold cursor-pointer"
                               aria-label="Decrease quantity"
@@ -1452,7 +1688,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                             </span>
                             <button
                               type="button"
-                              onClick={() => handleUpdateItemQuantity(item.productId, item.quantity + 1)}
+                              onClick={() => handleUpdateItemQuantity(item.productId, item.quantity + 1, index)}
                               className="w-4 h-4 flex items-center justify-center text-slate-600 hover:bg-slate-100 rounded text-[10px] font-bold cursor-pointer"
                               aria-label="Increase quantity"
                             >
@@ -1470,10 +1706,10 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                           ৳{(item.price * item.quantity).toLocaleString('en-BD')}
                         </span>
                         {/* Remove item button - ONLY allowed if there are strictly more than 1 item */}
-                        {onRemoveItem && itemsList.length > 1 && (
+                        {itemsList.length > 1 && (
                           <button
                             type="button"
-                            onClick={() => handleRemoveProductItem(item.productId)}
+                            onClick={() => handleRemoveProductItem(item.productId, index)}
                             className="p-1 rounded-lg text-slate-300 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
                             title="Remove item"
                           >

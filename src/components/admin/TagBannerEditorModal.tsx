@@ -33,7 +33,7 @@ import {
 } from 'lucide-react';
 import { TagCollectionSlide, TagCollectionButton, WebsiteSettings } from '../../types';
 import { getDefaultTagSlides, getTagSlides } from '../../utils/tagBannerDefaults';
-import { saveOriginalImageMedia, resolveOriginalImageMedia } from '../../lib/firebase';
+import { saveOriginalImageMedia, resolveOriginalImageMedia, compressImage, getSynchronouslyResolvedMedia } from '../../lib/firebase';
 
 interface TagBannerEditorModalProps {
   isOpen: boolean;
@@ -186,20 +186,22 @@ export const TagBannerEditorModal: React.FC<TagBannerEditorModalProps> = ({
     const file = e.target.files?.[0];
     if (!file) return;
 
-    const reader = new FileReader();
-    reader.onload = async (event) => {
-      const base64Data = event.target?.result as string;
-      if (base64Data) {
-        // Save to chunked media store for 100% high-res permanent preservation
-        const mediaId = `tag_bg_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-        const mediaRef = await saveOriginalImageMedia(mediaId, base64Data);
+    try {
+      // High-efficiency web compression (1920x1080 for desktop, 1080x1080 for mobile)
+      const compressedBase64 = await compressImage(file, isMobile ? 1080 : 1920, isMobile ? 1080 : 1080, 0.85);
+      if (compressedBase64) {
+        const mediaId = `tag_bg_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+        const mediaRef = await saveOriginalImageMedia(mediaId, compressedBase64);
+        
         if (isMobile) {
+          setResolvedMobileImg(compressedBase64);
           updateCurrentSlide({
             mobileBackgroundImage: mediaRef,
             gradientTheme: 'none',
             backgroundMode: 'image',
           });
         } else {
+          setResolvedDesktopImg(compressedBase64);
           updateCurrentSlide({
             backgroundImage: mediaRef,
             gradientTheme: 'none',
@@ -207,8 +209,9 @@ export const TagBannerEditorModal: React.FC<TagBannerEditorModalProps> = ({
           });
         }
       }
-    };
-    reader.readAsDataURL(file);
+    } catch (err) {
+      console.error('Error handling banner image upload:', err);
+    }
   };
 
   const handleSave = async () => {

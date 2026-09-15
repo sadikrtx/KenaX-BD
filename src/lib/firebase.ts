@@ -18,7 +18,7 @@ import {
   disableNetwork,
 } from 'firebase/firestore';
 import { getAuth } from 'firebase/auth';
-import { safeSetLocalStorage, safeSetCartActivitiesCache } from './storage';
+import { safeSetLocalStorage, safeSetCartActivitiesCache, getIdbItem, setIdbItem } from './storage';
 import firebaseConfig from '../../firebase-applet-config.json';
 import { Product, Order, Category, WebsiteSettings, DeliveryZone, Coupon, OrderItem, HeroBannerItem } from '../types';
 import { INITIAL_PRODUCTS } from '../data/initialProducts';
@@ -55,22 +55,45 @@ import { NEUTRAL_PRODUCT_PLACEHOLDER } from '../utils/imageOptimizer';
 // Initialize Firebase App
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 
+// Set Firestore log level to silent early to prevent benign grpc/stream timeout noise
+try {
+  setLogLevel('silent');
+} catch {}
+
+// Filter benign internal Firestore idle stream recycling logs from polluting console
+if (typeof window !== 'undefined') {
+  const originalConsoleError = console.error;
+  console.error = function (...args: any[]) {
+    const msg = args.map((a) => (typeof a === 'object' ? JSON.stringify(a) : String(a))).join(' ');
+    if (
+      msg.includes('Disconnecting idle stream') ||
+      msg.includes('Timed out waiting for new targets') ||
+      msg.includes("RPC 'Listen' stream")
+    ) {
+      return;
+    }
+    originalConsoleError.apply(console, args);
+  };
+}
+
 // Initialize Firestore with specific Database ID & robust long polling settings
 const dbId = (firebaseConfig as { firestoreDatabaseId?: string }).firestoreDatabaseId;
 function createFirestoreInstance() {
   try {
+    const firestoreSettings = {
+      experimentalForceLongPolling: true,
+      experimentalAutoDetectLongPolling: true,
+      useFetchStreams: false,
+    };
     if (dbId) {
-      return initializeFirestore(app, { experimentalForceLongPolling: true }, dbId);
+      return initializeFirestore(app, firestoreSettings, dbId);
     }
-    return initializeFirestore(app, { experimentalForceLongPolling: true });
+    return initializeFirestore(app, firestoreSettings);
   } catch {
     return dbId ? getFirestore(app, dbId) : getFirestore(app);
   }
 }
 export const db = createFirestoreInstance();
-try {
-  setLogLevel('silent');
-} catch {}
 
 export const auth = getAuth(app);
 
@@ -724,17 +747,41 @@ export async function seedAllDataToFirestore(force = false): Promise<{ success: 
 // Memory cache for resolved image media strings
 const imageMediaMemoryCache = new Map<string, string>();
 
+// Preload any key media into memory cache asynchronously from IndexedDB
+if (typeof window !== 'undefined') {
+  try {
+    // Also warm up imageMediaMemoryCache from localStorage keys
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith('kenax_img_media_')) {
+        const id = k.replace('kenax_img_media_', '');
+        const val = localStorage.getItem(k);
+        if (val && val.startsWith('data:image')) {
+          imageMediaMemoryCache.set(id, val);
+        }
+      }
+    }
+  } catch {}
+}
+
 // Helper to save 100% original base64 image data to Firestore (chunked into 600KB pieces if >600KB)
 export async function saveOriginalImageMedia(mediaId: string, base64Data: string): Promise<string> {
   if (!base64Data || !base64Data.startsWith('data:image')) {
     return base64Data;
   }
 
-  // Cache locally in localStorage for fast retrieval on same client
+  // 1. In-memory cache
+  imageMediaMemoryCache.set(mediaId, base64Data);
+
+  // 2. High-capacity IndexedDB storage (Multi-GB capability, unaffected by localStorage quotas)
+  try {
+    await setIdbItem(`kenax_img_media_${mediaId}`, base64Data);
+  } catch {}
+
+  // 3. LocalStorage for synchronous instant access if space allows
   try {
     safeSetLocalStorage(`kenax_img_media_${mediaId}`, base64Data);
   } catch {}
-  imageMediaMemoryCache.set(mediaId, base64Data);
 
   const CHUNK_SIZE = 600000; // ~600KB
   if (base64Data.length <= CHUNK_SIZE) {
@@ -748,7 +795,7 @@ export async function saveOriginalImageMedia(mediaId: string, base64Data: string
       return `media://productImageMedia/${mediaId}`;
     } catch (err) {
       console.warn('[KenaX BD] Error saving image media to Firestore:', err);
-      return base64Data;
+      return `media://productImageMedia/${mediaId}`;
     }
   }
 
@@ -775,7 +822,7 @@ export async function saveOriginalImageMedia(mediaId: string, base64Data: string
     return `media://productImageMedia/${mediaId}`;
   } catch (err) {
     console.warn('[KenaX BD] Error saving chunked image media to Firestore:', err);
-    return base64Data;
+    return `media://productImageMedia/${mediaId}`;
   }
 }
 
@@ -816,13 +863,25 @@ export async function resolveOriginalImageMedia(mediaUrl: string, productId?: st
   // 2. LocalStorage Cache
   try {
     const cached = localStorage.getItem(`kenax_img_media_${mediaId}`);
-    if (cached) {
+    if (cached && cached.startsWith('data:image')) {
       imageMediaMemoryCache.set(mediaId, cached);
       return cached;
     }
   } catch {}
 
-  // 3. Firestore Cloud Fetch (only if quota not exceeded)
+  // 3. IndexedDB Cache (High capacity client-side storage)
+  try {
+    const idbCached = await getIdbItem(`kenax_img_media_${mediaId}`);
+    if (idbCached && idbCached.startsWith('data:image')) {
+      imageMediaMemoryCache.set(mediaId, idbCached);
+      try {
+        safeSetLocalStorage(`kenax_img_media_${mediaId}`, idbCached);
+      } catch {}
+      return idbCached;
+    }
+  } catch {}
+
+  // 4. Firestore Cloud Fetch
   if (!isQuotaExceededFlag) {
     try {
       const docRef = doc(db, 'productImageMedia', mediaId);
@@ -848,6 +907,7 @@ export async function resolveOriginalImageMedia(mediaUrl: string, productId?: st
         if (fullBase64) {
           imageMediaMemoryCache.set(mediaId, fullBase64);
           try {
+            setIdbItem(`kenax_img_media_${mediaId}`, fullBase64);
             safeSetLocalStorage(`kenax_img_media_${mediaId}`, fullBase64);
           } catch {}
           return fullBase64;
@@ -858,7 +918,7 @@ export async function resolveOriginalImageMedia(mediaUrl: string, productId?: st
     }
   }
 
-  // 4. Ultimate Fallback: Never substitute with another product's image or random Unsplash
+  // 5. Ultimate Fallback: return neutral placeholder
   return NEUTRAL_PRODUCT_PLACEHOLDER;
 }
 
@@ -2675,13 +2735,24 @@ export async function getSettingsFromDB(): Promise<WebsiteSettings> {
       let data = snap.data() as WebsiteSettings;
       data = await hydrateHeroVideosInSettings(data);
       safeSetLocalStorage('kenax_settings_cache', JSON.stringify(data));
+      safeSetLocalStorage('kenax_site_settings', JSON.stringify(data));
+      try {
+        await setIdbItem('kenax_settings_backup', JSON.stringify(data));
+      } catch {}
       return data;
     }
   } catch (err) {
     console.warn('[KenaX BD] Firestore getSettingsFromDB fallback:', err);
   }
 
-  const cached = localStorage.getItem('kenax_settings_cache');
+  try {
+    const idbData = await getIdbItem('kenax_settings_backup');
+    if (idbData) {
+      return JSON.parse(idbData);
+    }
+  } catch {}
+
+  const cached = localStorage.getItem('kenax_settings_cache') || localStorage.getItem('kenax_site_settings');
   if (cached) {
     try {
       return JSON.parse(cached);
@@ -2691,8 +2762,21 @@ export async function getSettingsFromDB(): Promise<WebsiteSettings> {
 }
 
 export async function saveSettingsToDB(settings: any): Promise<void> {
+  let fullMergedSettings = settings;
   try {
-    const settingsToSave = JSON.parse(JSON.stringify(settings));
+    // Merge with existing settings from DB/cache so partial updates never wipe other fields
+    const currentSettings = await getSettingsFromDB().catch(() => INITIAL_WEBSITE_SETTINGS);
+    fullMergedSettings = {
+      ...currentSettings,
+      ...settings,
+      id: settings.id || currentSettings.id || INITIAL_WEBSITE_SETTINGS.id,
+      tagCollectionBanners: {
+        ...(currentSettings.tagCollectionBanners || {}),
+        ...(settings.tagCollectionBanners || {}),
+      },
+    };
+
+    const settingsToSave = JSON.parse(JSON.stringify(fullMergedSettings));
 
     // If hero banners contain device video data URLs, save video data in chunked Firestore collection
     if (settingsToSave.heroBanners && Array.isArray(settingsToSave.heroBanners)) {
@@ -2712,8 +2796,12 @@ export async function saveSettingsToDB(settings: any): Promise<void> {
   } catch (err) {
     console.warn('[KenaX BD] Firestore saveSettingsToDB fallback:', err);
   }
-  safeSetLocalStorage('kenax_settings_cache', JSON.stringify(settings));
-  safeSetLocalStorage('kenax_site_settings', JSON.stringify(settings));
+
+  safeSetLocalStorage('kenax_settings_cache', JSON.stringify(fullMergedSettings));
+  safeSetLocalStorage('kenax_site_settings', JSON.stringify(fullMergedSettings));
+  try {
+    await setIdbItem('kenax_settings_backup', JSON.stringify(fullMergedSettings));
+  } catch {}
 }
 
 export async function saveHeroBannersToDB(heroBanners: HeroBannerItem[]): Promise<void> {

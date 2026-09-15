@@ -272,18 +272,19 @@ export default function App() {
 
   const handleUpdateSettings = async (newSettings: SiteSettings) => {
     const sanitized = { ...newSettings, customLogo: undefined };
+    let fullMerged: SiteSettings = { ...siteSettings, ...sanitized };
     setSiteSettings((prev) => {
-      const merged = { ...prev, ...sanitized };
+      fullMerged = { ...prev, ...sanitized };
       try {
-        safeSetLocalStorage('kenax_site_settings', JSON.stringify(merged));
-        safeSetLocalStorage('kenax_settings_cache', JSON.stringify(merged));
+        safeSetLocalStorage('kenax_site_settings', JSON.stringify(fullMerged));
+        safeSetLocalStorage('kenax_settings_cache', JSON.stringify(fullMerged));
         localStorage.removeItem('kenax_custom_logo');
       } catch (e) {
         console.error('Failed to persist siteSettings', e);
       }
-      return merged;
+      return fullMerged;
     });
-    await saveSettingsToDB(sanitized);
+    await saveSettingsToDB(fullMerged);
   };
 
   // Filters & Search
@@ -1215,13 +1216,13 @@ export default function App() {
 
     setOrders((prev) => [newOrder, ...prev]);
 
-    // If order was placed from direct Buy Now, remove only that product from cart if present
-    if (checkoutItems.length > 0) {
-      const checkedOutIds = checkoutItems.map((i) => i.productId);
-      setCart((prev) => prev.filter((i) => !checkedOutIds.includes(i.productId)));
-    } else {
-      setCart([]);
-    }
+    // Clean up ordered items from cart (whether direct Buy Now or combined with cart items)
+    const orderedProductIds = (newOrder.items || []).map((i) => i.productId);
+    setCart((prev) => {
+      const remaining = prev.filter((i) => !orderedProductIds.includes(i.productId));
+      syncCartActivity(remaining);
+      return remaining;
+    });
     setCheckoutItems([]);
     setAppliedCoupon(null);
     setDiscountAmount(0);
@@ -2538,6 +2539,7 @@ export default function App() {
           setCheckoutItems([]);
         }}
         cartItems={checkoutItems.length > 0 ? checkoutItems : cart}
+        fullCart={cart}
         discountAmount={discountAmount}
         couponCode={appliedCoupon || undefined}
         onOrderPlaced={handleOrderPlaced}

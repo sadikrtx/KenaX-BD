@@ -19,7 +19,7 @@ import { Product, UserRole, SiteSettings, TagCollectionSlide } from '../types';
 import { ProductCard } from './ProductCard';
 import { getTagSlides } from '../utils/tagBannerDefaults';
 import { TagBannerEditorModal } from './admin/TagBannerEditorModal';
-import { resolveOriginalImageMedia } from '../lib/firebase';
+import { resolveOriginalImageMedia, getSynchronouslyResolvedMedia } from '../lib/firebase';
 import { getOptimizedImageUrl } from '../utils/imageOptimizer';
 
 interface TagProductsViewProps {
@@ -153,20 +153,33 @@ export const TagProductsView: React.FC<TagProductsViewProps> = ({
 
   const activeSlide = slides[currentSlideIndex] || slides[0];
 
-  const [resolvedBgImage, setResolvedBgImage] = useState<string | undefined>(
-    activeSlide?.backgroundImage && activeSlide.backgroundImage.trim() !== '' ? activeSlide.backgroundImage : undefined
-  );
-  const [resolvedMobileBgImage, setResolvedMobileBgImage] = useState<string | undefined>(
-    activeSlide?.mobileBackgroundImage && activeSlide.mobileBackgroundImage.trim() !== '' ? activeSlide.mobileBackgroundImage : undefined
-  );
+  const [resolvedBgImage, setResolvedBgImage] = useState<string | undefined>(() => {
+    if (!activeSlide?.backgroundImage || activeSlide.backgroundImage.trim() === '') return undefined;
+    if (activeSlide.backgroundImage.startsWith('media://')) {
+      return getSynchronouslyResolvedMedia(activeSlide.backgroundImage) || undefined;
+    }
+    return getOptimizedImageUrl(activeSlide.backgroundImage, 1400);
+  });
+  const [resolvedMobileBgImage, setResolvedMobileBgImage] = useState<string | undefined>(() => {
+    if (!activeSlide?.mobileBackgroundImage || activeSlide.mobileBackgroundImage.trim() === '') return undefined;
+    if (activeSlide.mobileBackgroundImage.startsWith('media://')) {
+      return getSynchronouslyResolvedMedia(activeSlide.mobileBackgroundImage) || undefined;
+    }
+    return getOptimizedImageUrl(activeSlide.mobileBackgroundImage, 800);
+  });
 
   useEffect(() => {
     let isMounted = true;
     if (activeSlide?.backgroundImage && activeSlide.backgroundImage.trim() !== '') {
       if (activeSlide.backgroundImage.startsWith('media://')) {
-        resolveOriginalImageMedia(activeSlide.backgroundImage).then((url) => {
-          if (isMounted) setResolvedBgImage(url && url.trim() !== '' ? url : undefined);
-        });
+        const cached = getSynchronouslyResolvedMedia(activeSlide.backgroundImage);
+        if (cached) {
+          setResolvedBgImage(cached);
+        } else {
+          resolveOriginalImageMedia(activeSlide.backgroundImage).then((url) => {
+            if (isMounted) setResolvedBgImage(url && url.trim() !== '' && !url.startsWith('media://') ? url : undefined);
+          });
+        }
       } else {
         setResolvedBgImage(getOptimizedImageUrl(activeSlide.backgroundImage, 1400));
       }
@@ -176,9 +189,14 @@ export const TagProductsView: React.FC<TagProductsViewProps> = ({
 
     if (activeSlide?.mobileBackgroundImage && activeSlide.mobileBackgroundImage.trim() !== '') {
       if (activeSlide.mobileBackgroundImage.startsWith('media://')) {
-        resolveOriginalImageMedia(activeSlide.mobileBackgroundImage).then((url) => {
-          if (isMounted) setResolvedMobileBgImage(url && url.trim() !== '' ? url : undefined);
-        });
+        const cachedMobile = getSynchronouslyResolvedMedia(activeSlide.mobileBackgroundImage);
+        if (cachedMobile) {
+          setResolvedMobileBgImage(cachedMobile);
+        } else {
+          resolveOriginalImageMedia(activeSlide.mobileBackgroundImage).then((url) => {
+            if (isMounted) setResolvedMobileBgImage(url && url.trim() !== '' && !url.startsWith('media://') ? url : undefined);
+          });
+        }
       } else {
         setResolvedMobileBgImage(getOptimizedImageUrl(activeSlide.mobileBackgroundImage, 800));
       }

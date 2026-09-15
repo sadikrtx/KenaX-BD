@@ -23,7 +23,7 @@ import {
 import { NavItem, TagCollectionSlide, WebsiteSettings } from '../../types';
 import { TagBannerEditorModal } from './TagBannerEditorModal';
 import { getTagSlides } from '../../utils/tagBannerDefaults';
-import { resolveOriginalImageMedia } from '../../lib/firebase';
+import { resolveOriginalImageMedia, getSynchronouslyResolvedMedia } from '../../lib/firebase';
 import { getOptimizedImageUrl } from '../../utils/imageOptimizer';
 import { getEffectiveNavItems } from '../../data/defaultNavItems';
 
@@ -51,8 +51,20 @@ const TagBannerCard: React.FC<TagBannerCardProps> = ({
   onOpenEditor,
 }) => {
   const activeSlide = slides[0];
-  const [resolvedDesktopImg, setResolvedDesktopImg] = useState<string | undefined>();
-  const [resolvedMobileImg, setResolvedMobileImg] = useState<string | undefined>();
+  const [resolvedDesktopImg, setResolvedDesktopImg] = useState<string | undefined>(() => {
+    if (!activeSlide?.backgroundImage || activeSlide.backgroundImage.trim() === '') return undefined;
+    if (activeSlide.backgroundImage.startsWith('media://')) {
+      return getSynchronouslyResolvedMedia(activeSlide.backgroundImage) || undefined;
+    }
+    return getOptimizedImageUrl(activeSlide.backgroundImage, 1000);
+  });
+  const [resolvedMobileImg, setResolvedMobileImg] = useState<string | undefined>(() => {
+    if (!activeSlide?.mobileBackgroundImage || activeSlide.mobileBackgroundImage.trim() === '') return undefined;
+    if (activeSlide.mobileBackgroundImage.startsWith('media://')) {
+      return getSynchronouslyResolvedMedia(activeSlide.mobileBackgroundImage) || undefined;
+    }
+    return getOptimizedImageUrl(activeSlide.mobileBackgroundImage, 600);
+  });
   const [localDevice, setLocalDevice] = useState<'desktop' | 'mobile'>(previewDevice);
 
   // Sync with parent toggle if changed
@@ -65,9 +77,14 @@ const TagBannerCard: React.FC<TagBannerCardProps> = ({
     let isMounted = true;
     if (activeSlide?.backgroundImage && activeSlide.backgroundImage.trim() !== '') {
       if (activeSlide.backgroundImage.startsWith('media://')) {
-        resolveOriginalImageMedia(activeSlide.backgroundImage).then((url) => {
-          if (isMounted) setResolvedDesktopImg(url && url.trim() !== '' ? url : undefined);
-        });
+        const cached = getSynchronouslyResolvedMedia(activeSlide.backgroundImage);
+        if (cached) {
+          setResolvedDesktopImg(cached);
+        } else {
+          resolveOriginalImageMedia(activeSlide.backgroundImage).then((url) => {
+            if (isMounted) setResolvedDesktopImg(url && url.trim() !== '' && !url.startsWith('media://') ? url : undefined);
+          });
+        }
       } else {
         setResolvedDesktopImg(getOptimizedImageUrl(activeSlide.backgroundImage, 1000));
       }
@@ -77,9 +94,14 @@ const TagBannerCard: React.FC<TagBannerCardProps> = ({
 
     if (activeSlide?.mobileBackgroundImage && activeSlide.mobileBackgroundImage.trim() !== '') {
       if (activeSlide.mobileBackgroundImage.startsWith('media://')) {
-        resolveOriginalImageMedia(activeSlide.mobileBackgroundImage).then((url) => {
-          if (isMounted) setResolvedMobileImg(url && url.trim() !== '' ? url : undefined);
-        });
+        const cachedMobile = getSynchronouslyResolvedMedia(activeSlide.mobileBackgroundImage);
+        if (cachedMobile) {
+          setResolvedMobileImg(cachedMobile);
+        } else {
+          resolveOriginalImageMedia(activeSlide.mobileBackgroundImage).then((url) => {
+            if (isMounted) setResolvedMobileImg(url && url.trim() !== '' && !url.startsWith('media://') ? url : undefined);
+          });
+        }
       } else {
         setResolvedMobileImg(getOptimizedImageUrl(activeSlide.mobileBackgroundImage, 600));
       }
