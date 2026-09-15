@@ -5,6 +5,50 @@ const pendingPreloads = new Map<string, Promise<void>>();
 export const NEUTRAL_PRODUCT_PLACEHOLDER =
   "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='400' height='400' viewBox='0 0 400 400'%3E%3Crect width='100%25' height='100%25' fill='%23f1f5f9'/%3E%3Cg fill='none' stroke='%2394a3b8' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round' transform='translate(170, 160)'%3E%3Crect width='60' height='60' rx='8'/%3E%3Ccircle cx='20' cy='20' r='6'/%3E%3Cpath d='M60 42l-18-18-24 24'/%3E%3C/g%3E%3Ctext x='200' y='245' text-anchor='middle' font-family='system-ui, -apple-system, sans-serif' font-size='13' font-weight='600' fill='%2394a3b8'%3ENo Image%3C/text%3E%3C/svg%3E";
 
+export function extractGoogleDriveFileId(url?: string): string | null {
+  if (!url || typeof url !== 'string' || !url.trim()) return null;
+  const trimmed = url.trim();
+  const match =
+    trimmed.match(/\/file\/d\/([a-zA-Z0-9_-]+)/) ||
+    trimmed.match(/[?&]id=([a-zA-Z0-9_-]+)/) ||
+    trimmed.match(/\/d\/([a-zA-Z0-9_-]+)/) ||
+    trimmed.match(/\/open\?id=([a-zA-Z0-9_-]+)/) ||
+    trimmed.match(/\/uc\?.*id=([a-zA-Z0-9_-]+)/);
+  return match && match[1] ? match[1] : null;
+}
+
+/**
+ * Fallback error handler for img tags to gracefully retry alternative Google Drive CDN endpoints or neutral placeholder
+ */
+export function handleImageError(
+  e: React.SyntheticEvent<HTMLImageElement, Event>,
+  originalUrl?: string
+) {
+  const target = e.currentTarget;
+  if (!target) return;
+  const currentSrc = target.src || '';
+
+  const fileId = extractGoogleDriveFileId(originalUrl || currentSrc);
+  if (fileId) {
+    if (!currentSrc.includes(`lh3.googleusercontent.com/d/${fileId}`)) {
+      target.src = `https://lh3.googleusercontent.com/d/${fileId}`;
+      return;
+    }
+    if (!currentSrc.includes(`drive.google.com/thumbnail?id=${fileId}`)) {
+      target.src = `https://drive.google.com/thumbnail?id=${fileId}&sz=w800`;
+      return;
+    }
+    if (!currentSrc.includes(`drive.google.com/uc?export=view`)) {
+      target.src = `https://drive.google.com/uc?export=view&id=${fileId}`;
+      return;
+    }
+  }
+
+  if (target.src !== NEUTRAL_PRODUCT_PLACEHOLDER) {
+    target.src = NEUTRAL_PRODUCT_PLACEHOLDER;
+  }
+}
+
 /**
  * Optimizes an image URL for lightning-fast delivery while preserving crystal-clear sharpness
  */
@@ -13,9 +57,29 @@ export function getOptimizedImageUrl(url?: string, width = 400): string {
     return NEUTRAL_PRODUCT_PLACEHOLDER;
   }
 
+  const trimmed = url.trim();
+
   // Preserve Base64, Blob, and internal media:// references
-  if (url.startsWith('data:') || url.startsWith('blob:') || url.startsWith('media://')) {
-    return url;
+  if (trimmed.startsWith('data:') || trimmed.startsWith('blob:') || trimmed.startsWith('media://')) {
+    return trimmed;
+  }
+
+  // Convert Google Drive sharing links to fast direct-CDN thumbnail streaming URLs
+  if (
+    trimmed.includes('drive.google.com') ||
+    trimmed.includes('docs.google.com') ||
+    trimmed.includes('googleusercontent.com')
+  ) {
+    const fileId = extractGoogleDriveFileId(trimmed);
+    if (fileId) {
+      const targetWidth = Math.max(width, 800);
+      return `https://drive.google.com/thumbnail?id=${fileId}&sz=w${targetWidth}`;
+    }
+  }
+
+  // Convert Dropbox share links to raw direct file streams
+  if (url.includes('dropbox.com')) {
+    return url.replace('dl=0', 'raw=1').replace('?dl=1', '?raw=1');
   }
 
   // Unsplash images: deliver next-gen WebP/AVIF format with 75% quality and exact screen-responsive width

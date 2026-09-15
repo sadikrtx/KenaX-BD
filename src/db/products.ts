@@ -4,7 +4,7 @@ import { eq } from 'drizzle-orm';
 import { Product } from '../types/index.ts';
 import fs from 'fs';
 import path from 'path';
-import { INITIAL_PRODUCTS } from '../data/initialProducts.ts';
+import { INITIAL_PRODUCTS, DEMO_PRODUCT_IDS } from '../data/initialProducts.ts';
 
 const SERVER_STORE_DIR = path.join(process.cwd(), 'data');
 const SERVER_STORE_FILE = path.join(SERVER_STORE_DIR, 'server_products.json');
@@ -12,11 +12,17 @@ const SERVER_DELETED_FILE = path.join(SERVER_STORE_DIR, 'deleted_products.json')
 
 export function getDeletedProductIdsFromStore(): string[] {
   try {
+    const list: string[] = [];
     if (fs.existsSync(SERVER_DELETED_FILE)) {
       const content = fs.readFileSync(SERVER_DELETED_FILE, 'utf-8');
       const parsed = JSON.parse(content);
-      if (Array.isArray(parsed)) return parsed;
+      if (Array.isArray(parsed)) {
+        parsed.forEach((id) => {
+          if (id && !list.includes(id)) list.push(id);
+        });
+      }
     }
+    return list;
   } catch {}
   return [];
 }
@@ -44,8 +50,12 @@ function ensureStoreFile(): Product[] {
     }
     const content = fs.readFileSync(SERVER_STORE_FILE, 'utf-8');
     const parsed = JSON.parse(content);
-    if (Array.isArray(parsed) && parsed.length > 0) {
-      return parsed.filter(p => p && p.id && !deletedSet.has(p.id));
+    if (Array.isArray(parsed)) {
+      const filtered = parsed.filter(p => p && p.id && !deletedSet.has(p.id));
+      if (filtered.length !== parsed.length) {
+        fs.writeFileSync(SERVER_STORE_FILE, JSON.stringify(filtered, null, 2), 'utf-8');
+      }
+      return filtered;
     }
   } catch (err) {
     console.warn('[Server Store] Error reading server_products.json:', err);

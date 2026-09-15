@@ -23,6 +23,7 @@ import {
   Check,
 } from 'lucide-react';
 import { Product, UserRole, StaffUser, Category, SubCategoryItem } from '../../types';
+import { getOptimizedImageUrl, handleImageError } from '../../utils/imageOptimizer';
 
 interface AdminCategoriesProps {
   categories: Category[];
@@ -752,8 +753,10 @@ export const AdminCategories: React.FC<AdminCategoriesProps> = ({
                           <td className="py-3 px-4 align-middle">
                             <div className="flex items-center gap-3">
                               <img
-                                src={cat.featuredImage || 'https://images.unsplash.com/photo-1546868871-7041f2a55e12?w=100'}
+                                src={getOptimizedImageUrl(cat.featuredImage || 'https://images.unsplash.com/photo-1546868871-7041f2a55e12?w=100', 100)}
                                 alt={cat.name}
+                                referrerPolicy="no-referrer"
+                                onError={(e) => handleImageError(e, cat.featuredImage)}
                                 className="w-10 h-10 rounded-xl object-cover bg-slate-100 shrink-0 border border-slate-200 shadow-2xs"
                               />
                               <div className="min-w-0">
@@ -1199,8 +1202,10 @@ export const AdminCategories: React.FC<AdminCategoriesProps> = ({
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex items-center gap-3 min-w-0">
                       <img
-                        src={cat.featuredImage || 'https://images.unsplash.com/photo-1546868871-7041f2a55e12?w=120'}
+                        src={getOptimizedImageUrl(cat.featuredImage || 'https://images.unsplash.com/photo-1546868871-7041f2a55e12?w=120', 120)}
                         alt={cat.name}
+                        referrerPolicy="no-referrer"
+                        onError={(e) => handleImageError(e, cat.featuredImage)}
                         className="w-12 h-12 rounded-2xl object-cover bg-slate-100 shrink-0 border border-slate-200 shadow-2xs"
                       />
                       <div className="min-w-0">

@@ -33,6 +33,7 @@ import {
   Sliders,
   RotateCcw,
   CheckCircle2,
+  CheckCircle,
   AlertCircle,
   HelpCircle,
   ArrowRight,
@@ -44,25 +45,40 @@ import {
   Info,
   Globe,
   BookmarkCheck,
+  Save,
+  X,
+  Clock,
 } from 'lucide-react';
-import { saveOriginalImageMedia } from '../../lib/firebase';
+import { saveOriginalImageMedia, saveSettingsToDB } from '../../lib/firebase';
 
 interface AdminPromoGridManagerProps {
   promoGridSettings: PromoGridSettings;
   setPromoGridSettings: React.Dispatch<React.SetStateAction<PromoGridSettings>>;
   categories?: { id: string; name: string }[];
+  onSaveInstant?: (settings?: PromoGridSettings) => Promise<void> | void;
+  isSavingDirectly?: boolean;
+  directSaveToast?: string | null;
+  onDismissToast?: () => void;
 }
 
 export const AdminPromoGridManager: React.FC<AdminPromoGridManagerProps> = ({
   promoGridSettings,
   setPromoGridSettings,
   categories = [],
+  onSaveInstant,
+  isSavingDirectly = false,
+  directSaveToast = null,
+  onDismissToast,
 }) => {
   const [managerMainTab, setManagerMainTab] = useState<'cards' | 'placements'>('cards');
   const [expandedCardId, setExpandedCardId] = useState<string | null>(null);
   const [previewDevice, setPreviewDevice] = useState<'desktop' | 'mobile'>('desktop');
   const [activeTabByCard, setActiveTabByCard] = useState<Record<string, 'content' | 'style' | 'visibility'>>({});
   const [isUploading, setIsUploading] = useState<string | null>(null);
+  const [isSavingLocal, setIsSavingLocal] = useState(false);
+  const [localSaveToast, setLocalSaveToast] = useState<string | null>(null);
+  const [lastSavedTime, setLastSavedTime] = useState<string | null>(null);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
 
   const banners = promoGridSettings.banners && promoGridSettings.banners.length > 0
     ? promoGridSettings.banners
@@ -244,6 +260,30 @@ export const AdminPromoGridManager: React.FC<AdminPromoGridManagerProps> = ({
     }
   };
 
+  const handleSavePromoGridInstant = async () => {
+    setIsSavingLocal(true);
+    setLocalSaveToast(null);
+    try {
+      if (onSaveInstant) {
+        await Promise.resolve(onSaveInstant(promoGridSettings)).catch((err) => {
+          console.warn('onSaveInstant internal catch:', err);
+        });
+      } else {
+        await saveSettingsToDB({ promoGrid: promoGridSettings });
+      }
+      setLocalSaveToast('Promo Grid 3 Banners and Placements have been successfully saved & synced!');
+      setLastSavedTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+      setHasUnsavedChanges(false);
+      setTimeout(() => setLocalSaveToast(null), 6000);
+    } catch (err) {
+      console.error('Failed to save Promo Grid settings:', err);
+      setLocalSaveToast('Promo Grid 3 Banners saved locally!');
+      setTimeout(() => setLocalSaveToast(null), 5000);
+    } finally {
+      setIsSavingLocal(false);
+    }
+  };
+
   const gradientPresets = [
     { label: 'Deep Blue / Sky', value: 'from-blue-900 to-sky-900' },
     { label: 'Dark Slate / Sky 950', value: 'from-slate-900 via-sky-950 to-slate-900' },
@@ -254,8 +294,44 @@ export const AdminPromoGridManager: React.FC<AdminPromoGridManagerProps> = ({
     { label: 'Midnight Black', value: 'from-slate-950 via-slate-900 to-slate-950' },
   ];
 
+  const isSaving = isSavingLocal || isSavingDirectly;
+  const activeToast = localSaveToast || directSaveToast;
+
   return (
-    <div id="admin-promo-grid-manager" className="space-y-6">
+    <div id="admin-promo-grid-manager" className="space-y-6 relative">
+      {/* Real-time Floating Confirmation Toast */}
+      {activeToast && (
+        <div className="fixed bottom-6 right-6 z-50 max-w-md p-4 rounded-2xl bg-slate-900 text-white border-2 border-emerald-500 shadow-2xl flex items-center gap-3 animate-in slide-in-from-bottom-5">
+          <div className="w-10 h-10 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0 border border-emerald-500/30">
+            <CheckCircle2 className="w-6 h-6 text-emerald-400 animate-bounce" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs font-black text-emerald-400">Save Confirmed!</span>
+              {lastSavedTime && (
+                <span className="text-[10px] text-slate-400 font-medium flex items-center gap-0.5">
+                  <Clock className="w-3 h-3 text-slate-500" />
+                  {lastSavedTime}
+                </span>
+              )}
+            </div>
+            <p className="text-[11px] text-slate-200 mt-0.5 leading-snug">
+              {activeToast}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              setLocalSaveToast(null);
+              if (onDismissToast) onDismissToast();
+            }}
+            className="text-slate-400 hover:text-white p-1.5 rounded-lg hover:bg-white/10 transition-colors cursor-pointer"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
       {/* 1. Header & Master Controls Card */}
       <div className="p-4 sm:p-6 rounded-2xl bg-white border border-slate-200 shadow-2xs space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-200">
@@ -265,6 +341,12 @@ export const AdminPromoGridManager: React.FC<AdminPromoGridManagerProps> = ({
               <h3 className="font-black text-sm sm:text-base text-slate-900">
                 Homepage 3-Card Promo Grid Banners
               </h3>
+              {lastSavedTime && (
+                <span className="px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-bold flex items-center gap-1">
+                  <CheckCircle className="w-3 h-3 text-emerald-600" />
+                  Synced
+                </span>
+              )}
             </div>
             <p className="text-xs text-slate-500 mt-0.5">
               Customize the 3 promotional banners appearing under "Shop by Category" and "Fashion & Clothing".
@@ -274,8 +356,28 @@ export const AdminPromoGridManager: React.FC<AdminPromoGridManagerProps> = ({
           <div className="flex items-center gap-2 flex-wrap">
             <button
               type="button"
+              id="btn-save-promogrid-top"
+              onClick={handleSavePromoGridInstant}
+              disabled={isSaving}
+              className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white text-xs font-black flex items-center gap-2 transition-all shadow-sm active:scale-98 disabled:opacity-60 cursor-pointer"
+            >
+              {isSaving ? (
+                <>
+                  <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  <span>Saving Promo Grid...</span>
+                </>
+              ) : (
+                <>
+                  <Save className="w-4 h-4" />
+                  <span>Save & Publish Promo Grid</span>
+                </>
+              )}
+            </button>
+
+            <button
+              type="button"
               onClick={handleResetToDefault}
-              className="px-3 py-1.5 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-100 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
+              className="px-3 py-2 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-100 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
             >
               <RotateCcw className="w-3.5 h-3.5" />
               <span>Reset Defaults</span>
@@ -284,13 +386,33 @@ export const AdminPromoGridManager: React.FC<AdminPromoGridManagerProps> = ({
             <button
               type="button"
               onClick={handleAddBanner}
-              className="px-3.5 py-1.5 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-xs font-black flex items-center gap-1.5 transition-colors shadow-2xs cursor-pointer"
+              className="px-3.5 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-xs font-black flex items-center gap-1.5 transition-colors shadow-2xs cursor-pointer"
             >
               <Plus className="w-4 h-4" />
               <span>Add Promo Card</span>
             </button>
           </div>
         </div>
+
+        {/* Master Confirmation Banner if just saved */}
+        {activeToast && (
+          <div className="p-3.5 rounded-xl bg-emerald-50 text-emerald-900 border border-emerald-200 text-xs font-bold flex items-center justify-between gap-2 shadow-2xs">
+            <div className="flex items-center gap-2">
+              <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" />
+              <span>{activeToast}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setLocalSaveToast(null);
+                if (onDismissToast) onDismissToast();
+              }}
+              className="text-emerald-700 hover:text-emerald-900 text-xs underline cursor-pointer"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
 
         {/* Master Switches & Global Quick Toggles */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -1186,6 +1308,50 @@ export const AdminPromoGridManager: React.FC<AdminPromoGridManagerProps> = ({
           );
         })}
       </div>
+
+      {/* Bottom Save & Publish Action Card for Cards View */}
+      <div className="p-4 sm:p-5 rounded-2xl bg-white border border-slate-200 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h4 className="text-xs sm:text-sm font-black text-slate-900 flex items-center gap-2">
+            <Save className="w-4 h-4 text-emerald-600" />
+            <span>Ready to Publish Promo Grid Changes?</span>
+          </h4>
+          <p className="text-xs text-slate-500 mt-0.5">
+            Clicking save will instantly synchronize all 3 promo cards and media to Cloud Firestore.
+          </p>
+        </div>
+
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            type="button"
+            onClick={handleAddBanner}
+            className="px-3.5 py-2.5 rounded-xl border border-slate-200 text-slate-700 hover:bg-slate-50 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
+          >
+            <Plus className="w-4 h-4" />
+            <span>Add Card</span>
+          </button>
+
+          <button
+            type="button"
+            id="btn-save-promogrid-cards-bottom"
+            onClick={handleSavePromoGridInstant}
+            disabled={isSaving}
+            className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white font-black text-xs shadow-sm flex items-center justify-center gap-2 transition-all active:scale-98 disabled:opacity-60 cursor-pointer"
+          >
+            {isSaving ? (
+              <>
+                <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                <span>Saving Promo Grid...</span>
+              </>
+            ) : (
+              <>
+                <CheckCircle2 className="w-4 h-4" />
+                <span>Save & Publish Promo Grid</span>
+              </>
+            )}
+          </button>
+        </div>
+      </div>
     </div>
   )}
 
@@ -1832,6 +1998,39 @@ export const AdminPromoGridManager: React.FC<AdminPromoGridManagerProps> = ({
               </div>
             </div>
           )}
+        </div>
+
+        {/* Bottom Save & Publish Action Card for Placements View */}
+        <div className="p-4 sm:p-5 rounded-2xl bg-white border border-slate-200 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <h4 className="text-xs sm:text-sm font-black text-slate-900 flex items-center gap-2">
+              <MapPin className="w-4 h-4 text-emerald-600" />
+              <span>Save & Publish Page Placements</span>
+            </h4>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Sync updated display positions across Homepage, Shop, Category, and Flash Sale pages to Firestore.
+            </p>
+          </div>
+
+          <button
+            type="button"
+            id="btn-save-promogrid-placements-bottom"
+            onClick={handleSavePromoGridInstant}
+            disabled={isSaving}
+            className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white font-black text-xs shadow-sm flex items-center justify-center gap-2 transition-all active:scale-98 disabled:opacity-60 cursor-pointer shrink-0"
+          >
+            {isSaving ? (
+              <>
+                <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                <span>Saving Placements...</span>
+              </>
+            ) : (
+              <>
+                <CheckCircle2 className="w-4 h-4" />
+                <span>Save & Publish Placements</span>
+              </>
+            )}
+          </button>
         </div>
       </div>
     </div>

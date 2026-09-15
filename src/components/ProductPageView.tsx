@@ -412,7 +412,7 @@ export const ProductPageView: React.FC<ProductPageViewProps> = ({
 
   const handleReviewSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    const reviewerName = (newReviewName.trim() || currentCustomer?.name || 'Verified Buyer').trim();
+    const reviewerName = (newReviewName.trim() || currentCustomer?.name || 'Valued Customer').trim();
     if (!reviewerName || !newReviewComment.trim()) return;
 
     const newRev: CustomerReview = {
@@ -431,7 +431,7 @@ export const ProductPageView: React.FC<ProductPageViewProps> = ({
     setNewReviewPhotos([]);
     setPhotoInputUrl('');
     setReviewSubmitted(true);
-    setTimeout(() => setReviewSubmitted(false), 3500);
+    setTimeout(() => setReviewSubmitted(false), 5000);
   };
 
   // Calculate dynamically ranked Similar Products (matching subcategory, category, brand, and relevance)
@@ -1269,7 +1269,7 @@ export const ProductPageView: React.FC<ProductPageViewProps> = ({
                   {reviewSubmitted ? (
                     <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold flex items-center gap-2">
                       <CheckCircle className="w-5 h-5 text-emerald-600 shrink-0" />
-                      <span>Thank you! Your verified review has been submitted and posted.</span>
+                      <span>আপনার রিভিউটির জন্য ধন্যবাদ! এটি অ্যাডমিন কর্তৃক পর্যালোচনার পর প্রকাশিত হবে।</span>
                     </div>
                   ) : hasPurchasedAndDelivered ? (
                     <form onSubmit={handleReviewSubmit} className="space-y-4">

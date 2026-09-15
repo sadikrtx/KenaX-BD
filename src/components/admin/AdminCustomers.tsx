@@ -33,6 +33,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import { CustomerRecord, Order, UserRole, StaffUser } from '../../types';
+import { getOptimizedImageUrl, handleImageError } from '../../utils/imageOptimizer';
 
 interface AdminCustomersProps {
   customers: CustomerRecord[];
@@ -1213,8 +1214,10 @@ export const AdminCustomers: React.FC<AdminCustomersProps> = ({
                         className="p-3 rounded-xl border border-rose-100 bg-rose-50/30 hover:bg-rose-50/60 flex items-center gap-3 transition-colors"
                       >
                         <img
-                          src={prod.images?.[0] || 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=200'}
+                          src={getOptimizedImageUrl(prod.images?.[0] || 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=200', 100)}
                           alt={prod.name}
+                          referrerPolicy="no-referrer"
+                          onError={(e) => handleImageError(e, prod.images?.[0])}
                           className="w-12 h-12 rounded-lg object-cover border border-slate-200 shrink-0 bg-white"
                         />
                         <div className="flex-1 min-w-0 text-xs">

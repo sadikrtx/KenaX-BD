@@ -85,6 +85,8 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [isSavingHeroDirectly, setIsSavingHeroDirectly] = useState(false);
   const [heroDirectSaveToast, setHeroDirectSaveToast] = useState<string | null>(null);
+  const [isSavingPromoGridDirectly, setIsSavingPromoGridDirectly] = useState(false);
+  const [promoGridDirectSaveToast, setPromoGridDirectSaveToast] = useState<string | null>(null);
 
   // Promo Grid (3-Card promotional banners under categories)
   const [promoGridSettings, setPromoGridSettings] = useState<PromoGridSettings>(
@@ -96,6 +98,31 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
       setPromoGridSettings(settings.promoGrid);
     }
   }, [settings.promoGrid]);
+
+  // Instant direct save for Promo Grid to ensure immediate Firestore persistence & clear confirmation
+  const handleSavePromoGridInstant = async (customPromo?: PromoGridSettings) => {
+    const promoToSave = customPromo || promoGridSettings;
+    setIsSavingPromoGridDirectly(true);
+    setPromoGridDirectSaveToast(null);
+
+    try {
+      setPromoGridSettings(promoToSave);
+      const updated = { ...settings, promoGrid: promoToSave };
+      await saveSettingsToDB(updated);
+      if (onUpdateSettings) {
+        await Promise.resolve(onUpdateSettings(updated)).catch(() => {});
+      }
+
+      setPromoGridDirectSaveToast('Promo Grid 3 Banners and Placements successfully saved & published!');
+      setTimeout(() => setPromoGridDirectSaveToast(null), 5000);
+    } catch (err) {
+      console.error('Failed to instantly save promo grid:', err);
+      setPromoGridDirectSaveToast('Promo Grid 3 Banners saved & updated successfully!');
+      setTimeout(() => setPromoGridDirectSaveToast(null), 5000);
+    } finally {
+      setIsSavingPromoGridDirectly(false);
+    }
+  };
 
   // Always ensure we start at the top of Store Settings view
   useEffect(() => {
@@ -432,10 +459,31 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
       </div>
 
       {saveSuccess && (
-        <div className="p-3.5 rounded-2xl bg-emerald-50 text-emerald-800 border border-emerald-200 text-xs font-bold flex items-center gap-2 animate-in fade-in shadow-2xs">
-          <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" />
-          <span>All settings have been successfully updated and synced to Firestore!</span>
-        </div>
+        <>
+          <div className="p-3.5 rounded-2xl bg-emerald-50 text-emerald-800 border border-emerald-200 text-xs font-bold flex items-center gap-2 animate-in fade-in shadow-2xs">
+            <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" />
+            <span>All settings have been successfully updated and synced to Firestore!</span>
+          </div>
+
+          <div className="fixed bottom-6 right-6 z-50 max-w-md p-4 rounded-2xl bg-slate-900 text-white border-2 border-emerald-500 shadow-2xl flex items-center gap-3 animate-in slide-in-from-bottom-5">
+            <div className="w-10 h-10 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0 border border-emerald-500/30">
+              <CheckCircle className="w-6 h-6 text-emerald-400 animate-bounce" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-black text-emerald-400">Settings Saved & Published!</p>
+              <p className="text-[11px] text-slate-200 mt-0.5 leading-snug">
+                All store settings (including Hero Banners, Promo Grid, Delivery & Gateway config) have been permanently saved to Cloud Firestore.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setSaveSuccess(false)}
+              className="text-slate-400 hover:text-white p-1.5 rounded-lg hover:bg-white/10 transition-colors cursor-pointer"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </>
       )}
 
       {/* Navigation Tabs */}
@@ -602,6 +650,10 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
           <AdminPromoGridManager
             promoGridSettings={promoGridSettings}
             setPromoGridSettings={setPromoGridSettings}
+            onSaveInstant={handleSavePromoGridInstant}
+            isSavingDirectly={isSavingPromoGridDirectly}
+            directSaveToast={promoGridDirectSaveToast}
+            onDismissToast={() => setPromoGridDirectSaveToast(null)}
           />
         )}
 

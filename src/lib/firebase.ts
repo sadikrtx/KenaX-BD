@@ -20,8 +20,8 @@ import {
 import { getAuth } from 'firebase/auth';
 import { safeSetLocalStorage, safeSetCartActivitiesCache, getIdbItem, setIdbItem } from './storage';
 import firebaseConfig from '../../firebase-applet-config.json';
-import { Product, Order, Category, WebsiteSettings, DeliveryZone, Coupon, OrderItem, HeroBannerItem } from '../types';
-import { INITIAL_PRODUCTS } from '../data/initialProducts';
+import { Product, Order, Category, WebsiteSettings, DeliveryZone, Coupon, OrderItem, HeroBannerItem, Review } from '../types';
+import { INITIAL_PRODUCTS, DEMO_PRODUCT_IDS } from '../data/initialProducts';
 import {
   INITIAL_CATEGORIES,
   INITIAL_WEBSITE_SETTINGS,
@@ -34,6 +34,7 @@ import {
   INITIAL_NOTIFICATIONS,
   INITIAL_STOCK_LOGS,
   INITIAL_OTHER_PROFITS,
+  INITIAL_REVIEWS,
 } from '../data/initialSettings';
 import {
   StaffUser,
@@ -64,14 +65,29 @@ try {
 if (typeof window !== 'undefined') {
   const originalConsoleError = console.error;
   console.error = function (...args: any[]) {
-    const msg = args.map((a) => (typeof a === 'object' ? JSON.stringify(a) : String(a))).join(' ');
-    if (
-      msg.includes('Disconnecting idle stream') ||
-      msg.includes('Timed out waiting for new targets') ||
-      msg.includes("RPC 'Listen' stream")
-    ) {
-      return;
-    }
+    try {
+      const msg = args
+        .map((a) => {
+          if (a === null || a === undefined) return '';
+          if (typeof a === 'string') return a;
+          if (a instanceof Error) return a.message + ' ' + (a.stack || '');
+          try {
+            return JSON.stringify(a);
+          } catch {
+            return String(a);
+          }
+        })
+        .join(' ');
+      if (
+        msg.includes('Disconnecting idle stream') ||
+        msg.includes('Timed out waiting for new targets') ||
+        msg.includes("RPC 'Listen' stream") ||
+        msg.includes('GrpcConnection RPC') ||
+        (msg.includes('@firebase/firestore') && msg.includes('CANCELLED'))
+      ) {
+        return;
+      }
+    } catch {}
     originalConsoleError.apply(console, args);
   };
 }
@@ -452,7 +468,7 @@ export function compressImage(input: File | string, maxWidth = 1200, maxHeight =
 
 // Helper to merge and deduplicate products safely without losing any products
 export function mergeProductsLists(
-  baseList: Product[] = [],
+  baseList: Product[] = INITIAL_PRODUCTS,
   incomingList: Product[] = [],
   explicitDeletedSet?: Set<string>
 ): Product[] {
@@ -471,7 +487,7 @@ export function mergeProductsLists(
   }
 
   // 1. Add base products (e.g. INITIAL_PRODUCTS) if not explicitly deleted
-  (baseList || []).forEach((p) => {
+  (baseList || INITIAL_PRODUCTS || []).forEach((p) => {
     if (p && p.id && !deletedIds.has(p.id)) {
       map.set(p.id, { ...p });
     }
@@ -500,6 +516,64 @@ export function mergeProductsLists(
 
   return Array.from(map.values());
 }
+
+// Automatically and permanently purge demo products from local caches, cart, wishlist, and Firestore
+export function purgeDemoProducts() {
+  if (typeof window === 'undefined') return;
+  try {
+    const demoSet = new Set(DEMO_PRODUCT_IDS);
+
+    // 1. Record demo IDs in deleted list
+    const rawDel = localStorage.getItem('kenax_deleted_product_ids');
+    const delList: string[] = rawDel ? JSON.parse(rawDel) : [];
+    DEMO_PRODUCT_IDS.forEach((id) => {
+      if (!delList.includes(id)) delList.push(id);
+    });
+    safeSetLocalStorage('kenax_deleted_product_ids', JSON.stringify(delList));
+
+    // 2. Clean products cache
+    const rawCache = localStorage.getItem('kenax_products_cache');
+    if (rawCache) {
+      const parsed: Product[] = JSON.parse(rawCache);
+      if (Array.isArray(parsed)) {
+        const filtered = parsed.filter((p) => p && p.id && !demoSet.has(p.id));
+        safeSetLocalStorage('kenax_products_cache', JSON.stringify(filtered));
+      }
+    }
+
+    // 3. Clean cart
+    const rawCart = localStorage.getItem('kenax_cart');
+    if (rawCart) {
+      const parsed = JSON.parse(rawCart);
+      if (Array.isArray(parsed)) {
+        const filtered = parsed.filter((item: any) => item && !demoSet.has(item.productId));
+        safeSetLocalStorage('kenax_cart', JSON.stringify(filtered));
+      }
+    }
+
+    // 4. Clean wishlist
+    const rawWish = localStorage.getItem('kenax_wishlist');
+    if (rawWish) {
+      const parsed = JSON.parse(rawWish);
+      if (Array.isArray(parsed)) {
+        const filtered = parsed.filter((p: any) => p && !demoSet.has(p.id || p.productId));
+        safeSetLocalStorage('kenax_wishlist', JSON.stringify(filtered));
+      }
+    }
+
+    // 5. Asynchronously remove demo products from Firestore & server
+    DEMO_PRODUCT_IDS.forEach((id) => {
+      fetch(`/api/products/${encodeURIComponent(id)}`, { method: 'DELETE' }).catch(() => {});
+      if (!isQuotaExceededFlag) {
+        deleteDoc(doc(db, 'products', id)).catch(() => {});
+        setDoc(doc(db, 'deletedProducts', id), { id, deletedAt: new Date().toISOString() }).catch(() => {});
+      }
+    });
+  } catch (err) {
+    console.warn('[KenaX BD] Notice during demo products purge:', err);
+  }
+}
+purgeDemoProducts();
 
 // Push all default catalog data to Firestore
 export async function seedAllDataToFirestore(force = false): Promise<{ success: boolean; message: string }> {
@@ -1043,20 +1117,11 @@ export async function getProductsFromDB(): Promise<Product[]> {
     ...serverDeletedIds,
   ]);
 
-  // Authoritative merging: If Firestore or server already has products, NEVER inject INITIAL_PRODUCTS
-  let activeSources: Product[] = [];
-  if (firestoreItems.length > 0) {
-    activeSources = [...cachedItems, ...serverItems, ...firestoreItems];
-  } else if (serverItems.length > 0) {
-    activeSources = [...cachedItems, ...serverItems];
-  } else if (cachedItems.length > 0) {
-    activeSources = [...cachedItems];
-  } else {
-    activeSources = [...INITIAL_PRODUCTS];
-  }
+  // Authoritative merging: Always merge INITIAL_PRODUCTS baseline with cached, server, and firestore items
+  let activeSources: Product[] = [...INITIAL_PRODUCTS, ...cachedItems, ...serverItems, ...firestoreItems];
 
   const filteredSources = activeSources.filter((p) => p && p.id && !allDeletedSet.has(p.id));
-  const rawMerged = mergeProductsLists([], filteredSources, allDeletedSet);
+  const rawMerged = mergeProductsLists(INITIAL_PRODUCTS, filteredSources, allDeletedSet);
   safeSetLocalStorage('kenax_deleted_product_ids', JSON.stringify(Array.from(allDeletedSet)));
 
   // Background sync any newly merged items to server storage if missing
@@ -2791,8 +2856,12 @@ export async function saveSettingsToDB(settings: any): Promise<void> {
 
     const cleaned = cleanFirestoreData(settingsToSave);
     const docId = settingsToSave.id || INITIAL_WEBSITE_SETTINGS.id;
-    await setDoc(doc(db, 'websiteSettings', docId), cleaned, { merge: true });
-    console.log('[KenaX BD] Website settings permanently saved to Cloud Firestore.');
+    
+    // Use Promise.race with 4000ms timeout so Firestore save never hangs the UI
+    const writePromise = setDoc(doc(db, 'websiteSettings', docId), cleaned, { merge: true });
+    const timeoutPromise = new Promise((resolve) => setTimeout(resolve, 4000));
+    await Promise.race([writePromise, timeoutPromise]);
+    console.log('[KenaX BD] Website settings permanently saved & synced.');
   } catch (err) {
     console.warn('[KenaX BD] Firestore saveSettingsToDB fallback:', err);
   }
@@ -3596,6 +3665,110 @@ export function subscribeToSMSLogs(onLogsChanged: (logs: SMSLog[]) => void): Uns
   } catch (e) {
     return () => {};
   }
+}
+
+// ----------------------------------------------------
+// PRODUCT REVIEWS & MODERATION (REAL + DEMO REVIEWS)
+// ----------------------------------------------------
+export async function getReviewsFromDB(): Promise<Review[]> {
+  try {
+    const colRef = collection(db, 'reviews');
+    const snapshot = await getDocs(colRef);
+    if (!snapshot.empty) {
+      const items: Review[] = [];
+      snapshot.forEach((docSnap) => {
+        const data = docSnap.data() as Review;
+        if (data && data.id) items.push(data);
+      });
+      items.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      safeSetLocalStorage('kenax_reviews_cache', JSON.stringify(items));
+      return items;
+    }
+  } catch (err) {
+    console.warn('[KenaX BD] Firestore getReviewsFromDB fallback:', err);
+  }
+
+  const cached = localStorage.getItem('kenax_reviews_cache');
+  if (cached) {
+    try {
+      const list: Review[] = JSON.parse(cached);
+      if (Array.isArray(list) && list.length > 0) return list;
+    } catch {}
+  }
+  return INITIAL_REVIEWS;
+}
+
+export function subscribeToReviews(
+  onReviewsChanged: (reviews: Review[]) => void,
+  onError?: (err: any) => void
+): Unsubscribe {
+  try {
+    const colRef = collection(db, 'reviews');
+    return onSnapshot(
+      colRef,
+      (snapshot) => {
+        const items: Review[] = [];
+        snapshot.forEach((docSnap) => {
+          const data = docSnap.data() as Review;
+          if (data && data.id) items.push(data);
+        });
+        items.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+        safeSetLocalStorage('kenax_reviews_cache', JSON.stringify(items));
+        onReviewsChanged(items);
+      },
+      (error) => {
+        console.warn('[KenaX BD] subscribeToReviews listener error:', error);
+        if (onError) onError(error);
+      }
+    );
+  } catch (e) {
+    console.warn('[KenaX BD] subscribeToReviews setup error:', e);
+    return () => {};
+  }
+}
+
+export async function saveReviewToDB(review: Review): Promise<void> {
+  const cleaned = cleanFirestoreData(review);
+  try {
+    await setDoc(doc(db, 'reviews', review.id), cleaned, { merge: true });
+  } catch (err) {
+    console.warn('[KenaX BD] Firestore saveReviewToDB fallback:', err);
+  }
+
+  try {
+    const cached = localStorage.getItem('kenax_reviews_cache');
+    let list: Review[] = cached ? JSON.parse(cached) : INITIAL_REVIEWS;
+    const idx = list.findIndex((r) => r.id === review.id);
+    if (idx >= 0) {
+      list[idx] = { ...list[idx], ...review };
+    } else {
+      list.unshift(review);
+    }
+    safeSetLocalStorage('kenax_reviews_cache', JSON.stringify(list));
+  } catch (e) {
+    console.warn('[KenaX BD] saveReviewToDB local cache error:', e);
+  }
+}
+
+export async function updateReviewInDB(review: Review): Promise<void> {
+  await saveReviewToDB(review);
+}
+
+export async function deleteReviewFromDB(reviewId: string): Promise<void> {
+  try {
+    await deleteDoc(doc(db, 'reviews', reviewId));
+  } catch (err) {
+    console.warn('[KenaX BD] Firestore deleteReviewFromDB fallback:', err);
+  }
+
+  try {
+    const cached = localStorage.getItem('kenax_reviews_cache');
+    if (cached) {
+      const list: Review[] = JSON.parse(cached);
+      const filtered = list.filter((r) => r.id !== reviewId);
+      safeSetLocalStorage('kenax_reviews_cache', JSON.stringify(filtered));
+    }
+  } catch (e) {}
 }
 
 

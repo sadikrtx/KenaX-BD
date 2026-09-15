@@ -348,77 +348,98 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 
   const handleSelectColorForProduct = (productId: string, color: ColorVariation, itemIndex?: number) => {
     const prod = (products || []).find((p) => p.id === productId);
+    let targetProductId = productId;
+    let targetUpdates: Partial<OrderItem> | null = null;
+
     setItemsList((prev) =>
       prev.map((item, idx) => {
         if (itemIndex !== undefined ? idx === itemIndex : item.productId === productId) {
           const defaultImage = prod?.images?.[0] || item.productImage || '';
           const newImage = color.imageUrl || defaultImage;
           const variantStr = [color.name, item.selectedSize].filter(Boolean).join(' / ');
-          const updates = {
+          const updates: OrderItem = {
             ...item,
             selectedColor: color.name,
             selectedColorImage: color.imageUrl,
             productImage: newImage,
             variant: variantStr || item.variant,
           };
-          if (onUpdateCartItem) {
-            onUpdateCartItem(item.productId, updates);
-          }
+          targetProductId = item.productId;
+          targetUpdates = updates;
           return updates;
         }
         return item;
       })
     );
+
+    if (onUpdateCartItem && targetUpdates) {
+      onUpdateCartItem(targetProductId, targetUpdates);
+    }
   };
 
   const handleSelectSizeForProduct = (productId: string, size: string, itemIndex?: number) => {
+    let targetProductId = productId;
+    let targetUpdates: Partial<OrderItem> | null = null;
+
     setItemsList((prev) =>
       prev.map((item, idx) => {
         if (itemIndex !== undefined ? idx === itemIndex : item.productId === productId) {
           const variantStr = [item.selectedColor, size].filter(Boolean).join(' / ');
-          const updates = {
+          const updates: OrderItem = {
             ...item,
             selectedSize: size,
             variant: variantStr || item.variant,
           };
-          if (onUpdateCartItem) {
-            onUpdateCartItem(item.productId, updates);
-          }
+          targetProductId = item.productId;
+          targetUpdates = updates;
           return updates;
         }
         return item;
       })
     );
+
+    if (onUpdateCartItem && targetUpdates) {
+      onUpdateCartItem(targetProductId, targetUpdates);
+    }
   };
 
   const handleUpdateItemQuantity = (productId: string, newQty: number, itemIndex?: number) => {
     if (newQty < 1) return;
+    let targetProductId = productId;
+    let targetUpdates: Partial<OrderItem> | null = null;
+
     setItemsList((prev) =>
       prev.map((item, idx) => {
         if (itemIndex !== undefined ? idx === itemIndex : item.productId === productId) {
           const newTotal = item.price * newQty;
-          const updates = {
+          const updates: OrderItem = {
             ...item,
             quantity: newQty,
             total: newTotal,
           };
-          if (onUpdateCartItem) {
-            onUpdateCartItem(item.productId, updates);
-          }
+          targetProductId = item.productId;
+          targetUpdates = updates;
           return updates;
         }
         return item;
       })
     );
+
+    if (onUpdateCartItem && targetUpdates) {
+      onUpdateCartItem(targetProductId, targetUpdates);
+    }
   };
 
   const handleRemoveProductItem = (productId: string, itemIndex?: number) => {
     if (itemsList.length <= 1) return;
-    setItemsList((prev) =>
-      prev.filter((item, idx) => (itemIndex !== undefined ? idx !== itemIndex : item.productId !== productId))
-    );
+    let removedId = productId;
+    setItemsList((prev) => {
+      const targetItem = itemIndex !== undefined ? prev[itemIndex] : prev.find((item) => item.productId === productId);
+      if (targetItem) removedId = targetItem.productId;
+      return prev.filter((item, idx) => (itemIndex !== undefined ? idx !== itemIndex : item.productId !== productId));
+    });
     if (onRemoveItem) {
-      onRemoveItem(productId);
+      onRemoveItem(removedId);
     }
   };
 

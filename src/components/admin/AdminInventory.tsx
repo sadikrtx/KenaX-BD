@@ -14,6 +14,7 @@ import {
   X,
 } from 'lucide-react';
 import { Product, StockLog, UserRole, StaffUser } from '../../types';
+import { getOptimizedImageUrl, handleImageError } from '../../utils/imageOptimizer';
 
 interface AdminInventoryProps {
   products: Product[];
@@ -194,8 +195,10 @@ export const AdminInventory: React.FC<AdminInventoryProps> = ({
                         <td className="py-3.5 px-4">
                           <div className="flex items-center gap-2.5">
                             <img
-                              src={p.images?.[0] || 'https://images.unsplash.com/photo-1546868871-7041f2a55e12?w=80'}
+                              src={getOptimizedImageUrl(p.images?.[0] || 'https://images.unsplash.com/photo-1546868871-7041f2a55e12?w=80', 100)}
                               alt={p.name}
+                              referrerPolicy="no-referrer"
+                              onError={(e) => handleImageError(e, p.images?.[0])}
                               className="w-8 h-8 rounded-lg object-cover bg-slate-100 shrink-0"
                             />
                             <span className="font-bold text-slate-900 truncate max-w-xs">{p.name}</span>
@@ -275,8 +278,10 @@ export const AdminInventory: React.FC<AdminInventoryProps> = ({
                       {/* Product Thumbnail & Name */}
                       <div className="flex items-center gap-2.5 min-w-0">
                         <img
-                          src={p.images?.[0] || 'https://images.unsplash.com/photo-1546868871-7041f2a55e12?w=80'}
+                          src={getOptimizedImageUrl(p.images?.[0] || 'https://images.unsplash.com/photo-1546868871-7041f2a55e12?w=80', 100)}
                           alt={p.name}
+                          referrerPolicy="no-referrer"
+                          onError={(e) => handleImageError(e, p.images?.[0])}
                           className="w-10 h-10 rounded-lg object-cover bg-slate-100 shrink-0 border border-slate-200"
                         />
                         <p className="font-bold text-slate-900 text-xs leading-snug line-clamp-2">

@@ -278,13 +278,14 @@ export interface Review {
   productName?: string;
   customerName: string;
   userName?: string;
-  customerEmail: string;
+  customerEmail?: string;
   rating: number;
   comment: string;
   photos?: string[];
   verifiedPurchase: boolean;
   status: 'approved' | 'pending' | 'rejected' | 'hidden';
   createdAt: string;
+  isDemo?: boolean;
 }
 
 export type EmailTemplateType =

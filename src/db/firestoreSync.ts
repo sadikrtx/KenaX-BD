@@ -1,5 +1,9 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
-import { getFirestore, collection, doc, getDocs, setDoc, deleteDoc } from 'firebase/firestore';
+import { getFirestore, setLogLevel, collection, doc, getDocs, setDoc, deleteDoc } from 'firebase/firestore';
+
+try {
+  setLogLevel('silent');
+} catch {}
 import fs from 'fs';
 import path from 'path';
 import { saveCustomerToStore, getAllCustomersFromStore, deleteCustomerFromStore } from './customers.ts';

@@ -100,6 +100,8 @@ import {
   saveOtherProfitToDB,
   deleteOtherProfitFromDB,
   subscribeToOtherProfits,
+  saveReviewToDB,
+  deleteReviewFromDB,
 } from '../lib/firebase';
 
 interface AdminPortalProps {
@@ -1449,25 +1451,39 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
           {currentTab === 'reviews' && (
             <AdminReviews
               reviews={reviews}
-              onApproveReview={(id) => {
-                setReviews((prev) =>
-                  prev.map((r) => (r.id === id ? { ...r, status: 'approved' } : r))
-                );
+              products={products}
+              onApproveReview={async (id) => {
+                const target = reviews.find((r) => r.id === id);
+                if (target) {
+                  const updated = { ...target, status: 'approved' as const };
+                  setReviews((prev) => prev.map((r) => (r.id === id ? updated : r)));
+                  await saveReviewToDB(updated);
+                }
                 recordAuditLog('Review Approved', 'reviews', id, `Approved public display for review #${id}`);
               }}
-              onHideReview={(id) => {
-                setReviews((prev) =>
-                  prev.map((r) => (r.id === id ? { ...r, status: 'hidden' } : r))
-                );
+              onHideReview={async (id) => {
+                const target = reviews.find((r) => r.id === id);
+                if (target) {
+                  const updated = { ...target, status: 'hidden' as const };
+                  setReviews((prev) => prev.map((r) => (r.id === id ? updated : r)));
+                  await saveReviewToDB(updated);
+                }
                 recordAuditLog('Review Hidden', 'reviews', id, `Hidden review #${id}`);
               }}
-              onDeleteReview={(id) => {
+              onDeleteReview={async (id) => {
                 setReviews((prev) => prev.filter((r) => r.id !== id));
+                await deleteReviewFromDB(id);
                 recordAuditLog('Review Deleted', 'reviews', id, `Permanently removed review #${id}`);
               }}
-              onUpdateReview={(updated) => {
+              onUpdateReview={async (updated) => {
                 setReviews((prev) => prev.map((r) => (r.id === updated.id ? updated : r)));
+                await saveReviewToDB(updated);
                 recordAuditLog('Review Edited', 'reviews', updated.id, `Edited review content/rating/photos for #${updated.id}`);
+              }}
+              onAddDemoReview={async (newDemo) => {
+                setReviews((prev) => [newDemo, ...prev]);
+                await saveReviewToDB(newDemo);
+                recordAuditLog('Demo Review Created', 'reviews', newDemo.id, `Added demo review for ${newDemo.productName}`);
               }}
               currentRole={activeRole}
               currentStaff={currentStaff}

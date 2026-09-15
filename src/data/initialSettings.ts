@@ -1,4 +1,4 @@
-import { Category, WebsiteSettings, DeliveryZone, Coupon, EmailTemplate, Order, HeroFeatureTag, DEFAULT_HERO_BANNERS, DEFAULT_HERO_SIDE_BANNER, CustomerRecord, ExpenseRecord, OtherProfitRecord } from '../types';
+import { Category, WebsiteSettings, DeliveryZone, Coupon, EmailTemplate, Order, HeroFeatureTag, DEFAULT_HERO_BANNERS, DEFAULT_HERO_SIDE_BANNER, CustomerRecord, ExpenseRecord, OtherProfitRecord, Review } from '../types';
 import { DEFAULT_PROMO_GRID_SETTINGS } from './defaultPromoBanners';
 
 export const DEFAULT_HERO_FEATURES: HeroFeatureTag[] = [
@@ -664,6 +664,51 @@ export const INITIAL_STOCK_LOGS = [
 export const INITIAL_EXPENSES: ExpenseRecord[] = [];
 
 export const INITIAL_OTHER_PROFITS: OtherProfitRecord[] = [];
+
+export const INITIAL_REVIEWS: Review[] = [
+  {
+    id: 'rev-01',
+    productId: 'prod-xiaomi-buds-5',
+    productName: 'Xiaomi Redmi Buds 5',
+    customerName: 'Tanvir Hossain',
+    customerEmail: 'tanvir@gmail.com',
+    rating: 5,
+    comment: 'পণ্যটি অরিজিনাল এবং কোয়ালিটি অত্যন্ত প্রিমিয়াম। প্যাকেজিং চমৎকার ছিল এবং ২ দিনের মধ্যেই ডেলিভারি পেয়েছি।',
+    photos: ['https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=400'],
+    verifiedPurchase: true,
+    status: 'approved',
+    createdAt: '2025-02-14T10:00:00Z',
+    isDemo: false,
+  },
+  {
+    id: 'rev-02',
+    productId: 'prod-redmi-note-13',
+    productName: 'Redmi Note 13',
+    customerName: 'Sadia Rahman',
+    customerEmail: 'sadia@gmail.com',
+    rating: 5,
+    comment: 'Authentic item as described. The color matches the picture perfectly. Highly recommended KenaX BD!',
+    photos: [],
+    verifiedPurchase: true,
+    status: 'approved',
+    createdAt: '2025-02-12T14:00:00Z',
+    isDemo: true,
+  },
+  {
+    id: 'rev-03',
+    productId: 'prod-haylou-rs4-plus',
+    productName: 'Haylou RS4 Plus Smartwatch',
+    customerName: 'Mahmudul Hasan',
+    customerEmail: 'mahmudul@gmail.com',
+    rating: 4,
+    comment: 'Great value for money. Cash on delivery was hassle-free. Customer support was very responsive.',
+    photos: [],
+    verifiedPurchase: true,
+    status: 'pending',
+    createdAt: '2025-02-11T09:00:00Z',
+    isDemo: false,
+  },
+];
 
 
 

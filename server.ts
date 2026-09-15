@@ -5,6 +5,64 @@ import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, ThinkingLevel } from "@google/genai";
 import dotenv from "dotenv";
 import nodemailer from "nodemailer";
+
+// Suppress benign internal Firestore idle stream noise in Node server logs
+const originalServerErr = console.error;
+console.error = function (...args: any[]) {
+  try {
+    const msg = args
+      .map((a) => {
+        if (a === null || a === undefined) return '';
+        if (typeof a === 'string') return a;
+        if (a instanceof Error) return a.message + ' ' + (a.stack || '');
+        try {
+          return JSON.stringify(a);
+        } catch {
+          return String(a);
+        }
+      })
+      .join(' ');
+    if (
+      msg.includes('Disconnecting idle stream') ||
+      msg.includes('Timed out waiting for new targets') ||
+      msg.includes("RPC 'Listen' stream") ||
+      msg.includes('GrpcConnection RPC') ||
+      (msg.includes('@firebase/firestore') && msg.includes('CANCELLED'))
+    ) {
+      return;
+    }
+  } catch {}
+  originalServerErr.apply(console, args);
+};
+
+const originalServerWarn = console.warn;
+console.warn = function (...args: any[]) {
+  try {
+    const msg = args
+      .map((a) => {
+        if (a === null || a === undefined) return '';
+        if (typeof a === 'string') return a;
+        if (a instanceof Error) return a.message + ' ' + (a.stack || '');
+        try {
+          return JSON.stringify(a);
+        } catch {
+          return String(a);
+        }
+      })
+      .join(' ');
+    if (
+      msg.includes('Disconnecting idle stream') ||
+      msg.includes('Timed out waiting for new targets') ||
+      msg.includes("RPC 'Listen' stream") ||
+      msg.includes('GrpcConnection RPC') ||
+      (msg.includes('@firebase/firestore') && msg.includes('CANCELLED'))
+    ) {
+      return;
+    }
+  } catch {}
+  originalServerWarn.apply(console, args);
+};
+
 import { getAllProductsFromSQL, saveProductToSQL, deleteProductFromSQL, getDeletedProductIdsFromStore } from "./src/db/products.ts";
 import { getAllOrdersFromStore, saveOrderToStore, updateOrderInStore, getCustomerOrdersFromStore, deleteOrderFromStore } from "./src/db/orders.ts";
 import { getAllCustomersFromStore, saveCustomerToStore, findCustomerInStore, deleteCustomerFromStore } from "./src/db/customers.ts";

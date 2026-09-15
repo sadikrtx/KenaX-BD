@@ -53,7 +53,7 @@ import {
   CartActivityItem,
   DEFAULT_HERO_SIDE_BANNER,
 } from './types';
-import { INITIAL_PRODUCTS } from './data/initialProducts';
+import { INITIAL_PRODUCTS, DEMO_PRODUCT_IDS } from './data/initialProducts';
 import {
   INITIAL_CATEGORIES,
   INITIAL_WEBSITE_SETTINGS,
@@ -180,13 +180,13 @@ export default function App() {
       const rawDeleted = localStorage.getItem('kenax_deleted_product_ids');
       const deletedSet = new Set<string>(rawDeleted ? JSON.parse(rawDeleted) : []);
       const cached = localStorage.getItem('kenax_products_cache');
+      let cachedList: Product[] = [];
       if (cached) {
         const parsed = JSON.parse(cached);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed.filter((p: Product) => p && p.id && !deletedSet.has(p.id));
-        }
+        if (Array.isArray(parsed)) cachedList = parsed;
       }
-      return INITIAL_PRODUCTS.filter((p) => !deletedSet.has(p.id));
+      const merged = mergeProductsLists(INITIAL_PRODUCTS, cachedList, deletedSet);
+      return merged.filter((p: Product) => p && p.id && !deletedSet.has(p.id));
     } catch {
       return INITIAL_PRODUCTS;
     }
@@ -686,9 +686,22 @@ export default function App() {
       } catch (e) {}
     };
 
-    handleUrlProductCheck();
-    window.addEventListener('popstate', handleUrlProductCheck);
-    return () => window.removeEventListener('popstate', handleUrlProductCheck);
+    // When products array is refreshed from DB/subscription, update selectedProductForDetail with latest product object if set
+    if (selectedProductForDetail && products.length > 0) {
+      const freshCurrentProduct = products.find((p) => p.id === selectedProductForDetail.id);
+      if (freshCurrentProduct) {
+        setSelectedProductForDetail(freshCurrentProduct);
+      }
+    } else {
+      handleUrlProductCheck();
+    }
+
+    const onPopState = () => {
+      handleUrlProductCheck();
+    };
+
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
   }, [products]);
 
   // Ensure any view change instantly resets the scroll position to top for clean entrance animation
@@ -2371,10 +2384,7 @@ export default function App() {
           <ProductPageView
             product={selectedProductForDetail || products[0]}
             allProducts={products}
-            onSelectProduct={(p) => {
-              setSelectedProductForDetail(p);
-              window.scrollTo({ top: 0, behavior: 'smooth' });
-            }}
+            onSelectProduct={(p) => handleOpenProductDetail(p)}
             onAddToCart={(p, qty, variant, customImg) => handleAddToCart(p, qty, variant, customImg)}
             onBuyNow={(p, qty, variant, customImg) => handleBuyNow(p, qty, variant, customImg)}
             onToggleWishlist={handleToggleWishlist}

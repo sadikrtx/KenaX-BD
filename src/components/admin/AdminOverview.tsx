@@ -47,6 +47,7 @@ import {
   isDemoOtherProfit,
 } from '../../types';
 import { AdminTab } from './AdminSidebar';
+import { getOptimizedImageUrl, handleImageError } from '../../utils/imageOptimizer';
 
 interface AdminOverviewProps {
   orders: Order[];
@@ -2123,8 +2124,10 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
             {topProductsDisplay.map((item, idx) => (
               <div key={idx} className="flex items-center gap-3 p-2 rounded-xl hover:bg-slate-50 transition-colors">
                 <img
-                  src={item.product.images?.[0] || 'https://images.unsplash.com/photo-1546868871-7041f2a55e12?w=100'}
+                  src={getOptimizedImageUrl(item.product.images?.[0] || 'https://images.unsplash.com/photo-1546868871-7041f2a55e12?w=100', 100)}
                   alt={item.product.name}
+                  referrerPolicy="no-referrer"
+                  onError={(e) => handleImageError(e, item.product.images?.[0])}
                   className="w-12 h-12 rounded-xl object-cover bg-slate-100 shrink-0"
                 />
                 <div className="flex-1 min-w-0">

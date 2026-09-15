@@ -3,6 +3,60 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <script>
+      (function() {
+        function isBenignFirestoreMsg(args) {
+          if (!args || !args.length) return false;
+          try {
+            var full = Array.prototype.slice.call(args).map(function(item) {
+              if (item === null || item === undefined) return '';
+              if (typeof item === 'string') return item;
+              if (item instanceof Error) return item.message + ' ' + (item.stack || '');
+              try { return JSON.stringify(item); } catch (e) { return String(item); }
+            }).join(' ');
+            return (
+              full.indexOf('Disconnecting idle stream') !== -1 ||
+              full.indexOf('Timed out waiting for new targets') !== -1 ||
+              full.indexOf("RPC 'Listen' stream") !== -1 ||
+              full.indexOf('GrpcConnection RPC') !== -1 ||
+              full.indexOf('@firebase/firestore') !== -1 && full.indexOf('CANCELLED') !== -1
+            );
+          } catch (err) {
+            return false;
+          }
+        }
+
+        var origErr = console.error;
+        console.error = function() {
+          if (isBenignFirestoreMsg(arguments)) return;
+          origErr.apply(console, arguments);
+        };
+
+        var origWarn = console.warn;
+        console.warn = function() {
+          if (isBenignFirestoreMsg(arguments)) return;
+          origWarn.apply(console, arguments);
+        };
+
+        var origLog = console.log;
+        console.log = function() {
+          if (isBenignFirestoreMsg(arguments)) return;
+          origLog.apply(console, arguments);
+        };
+
+        var origInfo = console.info;
+        console.info = function() {
+          if (isBenignFirestoreMsg(arguments)) return;
+          origInfo.apply(console, arguments);
+        };
+
+        window.addEventListener('unhandledrejection', function(event) {
+          if (event && event.reason && isBenignFirestoreMsg([event.reason])) {
+            event.preventDefault();
+          }
+        });
+      })();
+    </script>
     <!-- Google Tag Manager -->
     <script>(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':
     new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],

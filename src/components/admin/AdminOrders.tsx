@@ -27,6 +27,7 @@ import {
   MessageSquare,
 } from 'lucide-react';
 import { Order, OrderStatus, UserRole, StaffUser, Product, OrderItem } from '../../types';
+import { getOptimizedImageUrl, handleImageError } from '../../utils/imageOptimizer';
 import {
   generateWhatsAppDirectLink,
   formatWhatsAppMessage,
@@ -1799,8 +1800,10 @@ export const AdminOrders: React.FC<AdminOrdersProps> = ({
                             >
                               <div className="flex items-center gap-2.5">
                                 <img
-                                  src={p.images?.[0] || 'https://images.unsplash.com/photo-1523275335684-37898b6baf30'}
+                                  src={getOptimizedImageUrl(p.images?.[0] || 'https://images.unsplash.com/photo-1523275335684-37898b6baf30', 100)}
                                   alt={p.name}
+                                  referrerPolicy="no-referrer"
+                                  onError={(e) => handleImageError(e, p.images?.[0])}
                                   className="w-8 h-8 rounded-lg object-cover border border-slate-200"
                                 />
                                 <div>
@@ -1850,8 +1853,10 @@ export const AdminOrders: React.FC<AdminOrdersProps> = ({
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
                           <img
-                            src={activeSelectedProduct.images?.[0] || 'https://images.unsplash.com/photo-1523275335684-37898b6baf30'}
+                            src={getOptimizedImageUrl(activeSelectedProduct.images?.[0] || 'https://images.unsplash.com/photo-1523275335684-37898b6baf30', 100)}
                             alt={activeSelectedProduct.name}
+                            referrerPolicy="no-referrer"
+                            onError={(e) => handleImageError(e, activeSelectedProduct.images?.[0])}
                             className="w-7 h-7 rounded-lg object-cover border border-sky-300 shrink-0"
                           />
                           <p className="text-xs font-bold text-sky-950 truncate max-w-[280px]">
@@ -1941,7 +1946,13 @@ export const AdminOrders: React.FC<AdminOrdersProps> = ({
                         {orderItems.map((item, idx) => (
                           <div key={idx} className="py-2 flex items-center justify-between text-xs">
                             <div className="flex items-center gap-2.5">
-                              <img src={item.image} alt={item.name} className="w-8 h-8 rounded-lg object-cover border border-slate-200" />
+                              <img
+                                src={getOptimizedImageUrl(item.image, 100)}
+                                alt={item.name}
+                                referrerPolicy="no-referrer"
+                                onError={(e) => handleImageError(e, item.image)}
+                                className="w-8 h-8 rounded-lg object-cover border border-slate-200"
+                              />
                               <div>
                                 <p className="font-bold text-slate-900">{item.name}</p>
                                 <div className="flex items-center gap-2 flex-wrap text-[10px] text-slate-500">

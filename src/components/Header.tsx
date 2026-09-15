@@ -270,11 +270,11 @@ export const Header: React.FC<HeaderProps> = ({
     };
   }, []);
 
-  // Mobile scroll behavior with user-configured timing:
-  // - Scroll down: waits 2 seconds of downward motion before sliding up/hiding
-  // - Scroll up: does not pop in immediately; waits 1.5 seconds of upward scrolling before descending
-  // - Reaching the very top (<= 25px): instantly shows header without waiting
-  // - Idle for 5.5 seconds: auto-reveals header
+  // Mobile scroll behavior configured per user specification:
+  // - Scroll down: waits 1 second (1000ms) of downward scrolling before hiding header
+  // - Scroll up: waits 2 seconds (2000ms) of upward scrolling before revealing header
+  // - Reaching the very top (<= 25px): instantly reveals header without waiting
+  // - Idle / stationary for 4 seconds (4000ms): auto-reveals header
   useEffect(() => {
     const clearAllTimers = () => {
       if (hideTimerRef.current) {
@@ -297,7 +297,8 @@ export const Header: React.FC<HeaderProps> = ({
       }
       idleScrollTimer.current = setTimeout(() => {
         setIsHeaderVisible(true);
-      }, 5500); // 5.5 seconds idle delay
+        idleScrollTimer.current = null;
+      }, 4000); // 4 seconds idle delay
     };
 
     const handleScroll = () => {
@@ -314,40 +315,46 @@ export const Header: React.FC<HeaderProps> = ({
       const diff = currentScrollY - lastScrollY.current;
 
       // 1. User scrolling DOWN:
-      // Don't hide instantly. Wait 2 seconds (2000ms) of downward scrolling before hiding header.
-      if (diff > 6) {
+      // Wait 1 second (1000ms) of downward scrolling before sliding up/hiding
+      if (diff > 5) {
         // If an upward reveal was pending, cancel it
         if (revealTimerRef.current) {
           clearTimeout(revealTimerRef.current);
           revealTimerRef.current = null;
         }
 
-        // Start 2-second hide timer if header is currently visible and not already counting down
+        // Start 1-second hide timer if header is currently visible and not already counting down
         if (isHeaderVisibleRef.current && !hideTimerRef.current) {
           hideTimerRef.current = setTimeout(() => {
             setIsHeaderVisible(false);
             setIsMobileAccountOpen(false); // Close mobile account popup when scrolling away
             hideTimerRef.current = null;
             resetIdleTimer();
-          }, 2000); // 2 seconds delay
+          }, 1000); // 1 second delay
         }
+
+        // Reset the 4-second idle reveal timer on every scroll
+        resetIdleTimer();
       }
       // 2. User scrolling UP:
-      // Don't reveal immediately. Require 1.5 seconds of upward scrolling before sliding down.
-      else if (diff < -6) {
+      // Wait 2 seconds (2000ms) of upward scrolling before sliding down/revealing
+      else if (diff < -5) {
         // If a downward hide was pending, cancel it
         if (hideTimerRef.current) {
           clearTimeout(hideTimerRef.current);
           hideTimerRef.current = null;
         }
 
-        // Start 1.5-second reveal timer if header is currently hidden and not already counting down
+        // Start 2-second reveal timer if header is currently hidden and not already counting down
         if (!isHeaderVisibleRef.current && !revealTimerRef.current) {
           revealTimerRef.current = setTimeout(() => {
             setIsHeaderVisible(true);
             revealTimerRef.current = null;
-          }, 1500); // 1.5 seconds delay
+          }, 2000); // 2 seconds delay
         }
+
+        // Reset the 4-second idle reveal timer on every scroll
+        resetIdleTimer();
       }
 
       lastScrollY.current = currentScrollY;

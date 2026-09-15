@@ -21,6 +21,7 @@ import {
   ArrowUpRight,
 } from 'lucide-react';
 import { CustomerRecord, Product, UserRole } from '../../types';
+import { getOptimizedImageUrl, handleImageError } from '../../utils/imageOptimizer';
 
 interface AdminWishlistActivitiesProps {
   customers: CustomerRecord[];
@@ -312,11 +313,14 @@ export const AdminWishlistActivities: React.FC<AdminWishlistActivitiesProps> = (
                               className="flex items-center gap-2.5 p-2 bg-slate-50/80 rounded-xl border border-slate-200/80 hover:border-slate-300 transition-colors"
                             >
                               <img
-                                src={
+                                src={getOptimizedImageUrl(
                                   prod.images?.[0] ||
-                                  'https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=100'
-                                }
+                                  'https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=100',
+                                  100
+                                )}
                                 alt={prod.name}
+                                referrerPolicy="no-referrer"
+                                onError={(e) => handleImageError(e, prod.images?.[0])}
                                 className="w-10 h-10 rounded-lg object-cover bg-white shrink-0 border border-slate-200"
                               />
                               <div className="min-w-0 flex-1">
@@ -419,8 +423,10 @@ export const AdminWishlistActivities: React.FC<AdminWishlistActivitiesProps> = (
 
             <div className="flex items-center gap-3">
               <img
-                src={selectedProduct.images?.[0] || 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=200'}
+                src={getOptimizedImageUrl(selectedProduct.images?.[0] || 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=200', 200)}
                 alt={selectedProduct.name}
+                referrerPolicy="no-referrer"
+                onError={(e) => handleImageError(e, selectedProduct.images?.[0])}
                 className="w-16 h-16 rounded-xl object-cover bg-slate-50 border border-slate-200 shrink-0"
               />
               <div className="min-w-0 flex-1">

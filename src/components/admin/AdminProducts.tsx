@@ -47,6 +47,7 @@ import {
 import { hasPermission } from '../../lib/permissions';
 import { compressImage } from '../../lib/firebase';
 import { FormattedText } from '../FormattedText';
+import { getOptimizedImageUrl, handleImageError } from '../../utils/imageOptimizer';
 
 interface AdminProductsProps {
   products: Product[];
@@ -165,7 +166,7 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
     const colorObj: ColorVariation = {
       name: newColorName.trim(),
       hexCode: newColorHex,
-      imageUrl: newColorImage.trim() || undefined,
+      imageUrl: newColorImage.trim() ? getOptimizedImageUrl(newColorImage.trim()) : undefined,
     };
     setFormColors((prev) => [...prev, colorObj]);
     setNewColorName('');
@@ -587,7 +588,7 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
 
   const handleAddImageUrl = () => {
     if (formImageInput.trim()) {
-      setFormImages((prev) => [...prev, formImageInput.trim()]);
+      setFormImages((prev) => [...prev, getOptimizedImageUrl(formImageInput.trim())]);
       setFormImageInput('');
       setFormError(null);
     }
@@ -636,9 +637,9 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
     if (!formName.trim()) return;
 
     // Check Photo Requirement
-    const finalImages = [...formImages];
+    const finalImages = formImages.map((img) => getOptimizedImageUrl(img));
     if (formImageInput.trim()) {
-      finalImages.push(formImageInput.trim());
+      finalImages.push(getOptimizedImageUrl(formImageInput.trim()));
     }
 
     if (finalImages.length === 0) {
@@ -904,12 +905,15 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                       <td className="py-2.5 px-3">
                         <div className="flex items-center gap-2.5 min-w-0">
                           <img
-                            src={
+                            src={getOptimizedImageUrl(
                               (product.images?.[0] && product.images[0].trim() !== '')
                                 ? product.images[0]
-                                : 'https://images.unsplash.com/photo-1546868871-7041f2a55e12?w=80'
-                            }
+                                : 'https://images.unsplash.com/photo-1546868871-7041f2a55e12?w=80',
+                              100
+                            )}
                             alt={product.name}
+                            referrerPolicy="no-referrer"
+                            onError={(e) => handleImageError(e, product.images?.[0])}
                             className="w-9 h-9 rounded-lg object-cover bg-slate-100 shrink-0 border border-slate-200/80 shadow-2xs"
                           />
                           <div className="min-w-0 flex-1">
@@ -1132,12 +1136,15 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                   {/* Top: Product image + Name + SKU */}
                   <div className="flex items-start gap-2.5 min-w-0">
                     <img
-                      src={
+                      src={getOptimizedImageUrl(
                         (product.images?.[0] && product.images[0].trim() !== '')
                           ? product.images[0]
-                          : 'https://images.unsplash.com/photo-1546868871-7041f2a55e12?w=80'
-                      }
+                          : 'https://images.unsplash.com/photo-1546868871-7041f2a55e12?w=80',
+                        200
+                      )}
                       alt={product.name}
+                      referrerPolicy="no-referrer"
+                      onError={(e) => handleImageError(e, product.images?.[0])}
                       className="w-12 h-12 rounded-xl object-cover bg-slate-100 shrink-0 border border-slate-200"
                     />
                     <div className="min-w-0 flex-1">
@@ -2129,8 +2136,13 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                               >
                                 <div className="relative aspect-square rounded overflow-hidden bg-slate-50">
                                   <img
-                                    src={(imgUrl && imgUrl.trim() !== '') ? imgUrl : 'https://images.unsplash.com/photo-1546868871-7041f2a55e12?w=120'}
+                                    src={getOptimizedImageUrl(
+                                      (imgUrl && imgUrl.trim() !== '') ? imgUrl : 'https://images.unsplash.com/photo-1546868871-7041f2a55e12?w=120',
+                                      200
+                                    )}
                                     alt={`Product ${index + 1}`}
+                                    referrerPolicy="no-referrer"
+                                    onError={(e) => handleImageError(e, imgUrl)}
                                     className="w-full h-full object-contain p-0.5"
                                   />
                                   <button
@@ -2364,7 +2376,13 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                                     }`}
                                     title={`Match image ${idx + 1}`}
                                   >
-                                    <img src={img} alt={`Product ${idx + 1}`} className="w-full h-full object-contain" />
+                                    <img
+                                      src={getOptimizedImageUrl(img, 120)}
+                                      alt={`Product ${idx + 1}`}
+                                      referrerPolicy="no-referrer"
+                                      onError={(e) => handleImageError(e, img)}
+                                      className="w-full h-full object-contain"
+                                    />
                                     {isSelected && (
                                       <div className="absolute inset-0 bg-sky-600/30 flex items-center justify-center">
                                         <span className="bg-sky-600 text-white rounded-full w-4 h-4 text-[10px] font-black flex items-center justify-center">
@@ -2380,7 +2398,13 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
 
                           {newColorImage && newColorImage.trim() !== '' && (
                             <div className="flex items-center gap-1.5 px-2 py-1 bg-emerald-50 border border-emerald-200 rounded-md w-fit">
-                              <img src={newColorImage} alt="Color" className="w-5 h-5 rounded object-cover" />
+                              <img
+                                src={getOptimizedImageUrl(newColorImage, 100)}
+                                alt="Color"
+                                referrerPolicy="no-referrer"
+                                onError={(e) => handleImageError(e, newColorImage)}
+                                className="w-5 h-5 rounded object-cover"
+                              />
                               <span className="text-[10px] text-emerald-700 font-bold">Photo Attached to this Color</span>
                               <button
                                 type="button"
@@ -2408,7 +2432,13 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                                   />
                                   <span className="text-xs font-bold text-slate-900 truncate">{col.name}</span>
                                   {col.imageUrl && col.imageUrl.trim() !== '' && (
-                                    <img src={col.imageUrl} alt={col.name} className="w-5 h-5 rounded object-cover border" />
+                                    <img
+                                      src={getOptimizedImageUrl(col.imageUrl, 100)}
+                                      alt={col.name}
+                                      referrerPolicy="no-referrer"
+                                      onError={(e) => handleImageError(e, col.imageUrl)}
+                                      className="w-5 h-5 rounded object-cover border"
+                                    />
                                   )}
                                 </div>
                                 <div className="flex items-center gap-1">
@@ -2424,7 +2454,13 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                                           }`}
                                           title="Set or switch photo"
                                         >
-                                          <img src={img} alt="" className="w-full h-full object-cover" />
+                                          <img
+                                            src={getOptimizedImageUrl(img, 80)}
+                                            alt=""
+                                            referrerPolicy="no-referrer"
+                                            onError={(e) => handleImageError(e, img)}
+                                            className="w-full h-full object-cover"
+                                          />
                                         </button>
                                       ))}
                                     </div>
