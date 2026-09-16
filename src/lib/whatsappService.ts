@@ -1,6 +1,6 @@
-import { Order, WhatsAppSettings, WhatsAppTemplate, WhatsAppEventType } from '../types';
+import { Order, WhatsAppSettings, WhatsAppTemplate, WhatsAppEventType, WhatsAppMessageRecord, WhatsAppConversation } from '../types';
 import { db, isQuotaExceededError, markQuotaExceeded, isQuotaExceededFlag } from './firebase';
-import { doc, getDoc, setDoc, onSnapshot } from 'firebase/firestore';
+import { doc, getDoc, setDoc, onSnapshot, collection, query, orderBy, limit } from 'firebase/firestore';
 
 export const DEFAULT_WHATSAPP_TEMPLATES: Record<WhatsAppEventType, WhatsAppTemplate> = {
   order_placed: {
@@ -423,3 +423,279 @@ export async function triggerWhatsAppDispatch(
     return { success: false, method: 'error' };
   }
 }
+
+/**
+ * Normalizes phone numbers to standard format (e.g. "88017XXXXXXXX" or local "017XXXXXXXX")
+ */
+export function normalizePhoneNumber(rawPhone: string): string {
+  const digits = (rawPhone || '').replace(/[^0-9]/g, '');
+  if (digits.startsWith('880') && digits.length === 13) {
+    return digits;
+  }
+  if (digits.startsWith('0') && digits.length === 11) {
+    return `88${digits}`;
+  }
+  if (digits.length === 10) {
+    return `880${digits}`;
+  }
+  return digits;
+}
+
+export function formatPhoneDisplay(phone: string): string {
+  const clean = (phone || '').replace(/[^0-9]/g, '');
+  if (clean.startsWith('8801') && clean.length === 13) {
+    return `+880 ${clean.substring(3, 7)}-${clean.substring(7)}`;
+  }
+  if (clean.startsWith('01') && clean.length === 11) {
+    return `${clean.substring(0, 5)}-${clean.substring(5)}`;
+  }
+  return phone;
+}
+
+/**
+ * Calculates WhatsApp 24-hour Customer Service Window status for a conversation thread.
+ * Under Meta Cloud API rules, free-form text replies are permitted within 24 hours of the customer's last message.
+ */
+export function get24hCustomerServiceWindow(messages: WhatsAppMessageRecord[]): {
+  isActive: boolean;
+  remainingMs: number;
+  remainingHours: number;
+  remainingMinutes: number;
+  lastIncomingTime: string | null;
+  formattedRemaining: string;
+} {
+  const incomingMessages = messages
+    .filter((m) => m.direction === 'incoming')
+    .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+
+  if (incomingMessages.length === 0) {
+    return {
+      isActive: false,
+      remainingMs: 0,
+      remainingHours: 0,
+      remainingMinutes: 0,
+      lastIncomingTime: null,
+      formattedRemaining: 'No customer message received yet',
+    };
+  }
+
+  const lastIncoming = incomingMessages[0];
+  const lastTime = new Date(lastIncoming.timestamp).getTime();
+  const now = Date.now();
+  const elapsedMs = now - lastTime;
+  const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
+  const remainingMs = Math.max(0, TWENTY_FOUR_HOURS_MS - elapsedMs);
+
+  const isActive = remainingMs > 0;
+  const remainingHours = Math.floor(remainingMs / (1000 * 60 * 60));
+  const remainingMinutes = Math.floor((remainingMs % (1000 * 60 * 60)) / (1000 * 60));
+
+  let formattedRemaining = '';
+  if (isActive) {
+    if (remainingHours > 0) {
+      formattedRemaining = `${remainingHours}h ${remainingMinutes}m remaining`;
+    } else {
+      formattedRemaining = `${remainingMinutes}m remaining`;
+    }
+  } else {
+    formattedRemaining = 'Expired (Template required)';
+  }
+
+  return {
+    isActive,
+    remainingMs,
+    remainingHours,
+    remainingMinutes,
+    lastIncomingTime: lastIncoming.timestamp,
+    formattedRemaining,
+  };
+}
+
+/**
+ * Groups a flat list of WhatsApp message records into threaded customer conversations.
+ */
+export function groupMessagesIntoConversations(messages: WhatsAppMessageRecord[]): WhatsAppConversation[] {
+  const conversationMap = new Map<string, WhatsAppConversation>();
+
+  // Process messages sorted chronologically
+  const sorted = [...messages].sort(
+    (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+  );
+
+  for (const msg of sorted) {
+    // Determine customer phone number (if incoming -> 'from', if outgoing -> 'to')
+    const customerPhone = msg.direction === 'incoming' ? msg.from : msg.to || msg.from;
+    if (!customerPhone) continue;
+
+    const normalizedKey = normalizePhoneNumber(customerPhone);
+    let conv = conversationMap.get(normalizedKey);
+
+    if (!conv) {
+      conv = {
+        phoneNumber: customerPhone,
+        customerName: msg.senderName || undefined,
+        unreadCount: 0,
+        totalMessages: 0,
+        is24hWindowActive: false,
+        messages: [],
+      };
+      conversationMap.set(normalizedKey, conv);
+    }
+
+    if (msg.senderName && !conv.customerName) {
+      conv.customerName = msg.senderName;
+    }
+
+    conv.messages.push(msg);
+    conv.totalMessages++;
+    conv.lastMessage = msg;
+
+    if (msg.direction === 'incoming' && msg.status !== 'read') {
+      conv.unreadCount++;
+    }
+  }
+
+  const result = Array.from(conversationMap.values()).map((conv) => {
+    const windowStatus = get24hCustomerServiceWindow(conv.messages);
+    return {
+      ...conv,
+      is24hWindowActive: windowStatus.isActive,
+      windowExpiresAt: windowStatus.lastIncomingTime
+        ? new Date(new Date(windowStatus.lastIncomingTime).getTime() + 24 * 60 * 60 * 1000).toISOString()
+        : undefined,
+    };
+  });
+
+  // Sort conversations by latest message timestamp descending
+  return result.sort((a, b) => {
+    const timeA = a.lastMessage ? new Date(a.lastMessage.timestamp).getTime() : 0;
+    const timeB = b.lastMessage ? new Date(b.lastMessage.timestamp).getTime() : 0;
+    return timeB - timeA;
+  });
+}
+
+/**
+ * Send a reply message to customer via backend Meta Cloud API endpoint
+ */
+export async function sendWhatsAppReply(params: {
+  to: string;
+  text: string;
+  orderId?: string;
+  staffMember?: string;
+  staffId?: string;
+  staffRole?: string;
+}): Promise<{
+  success: boolean;
+  messageId?: string;
+  message?: WhatsAppMessageRecord;
+  error?: string;
+  isWindowExpired?: boolean;
+}> {
+  try {
+    const response = await fetch('/api/whatsapp/send', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        to: params.to,
+        type: 'text',
+        text: params.text,
+        orderId: params.orderId,
+        staffMember: params.staffMember,
+        staffId: params.staffId,
+        staffRole: params.staffRole,
+      }),
+    });
+
+    const data = await response.json();
+
+    if (!response.ok || !data.success) {
+      return {
+        success: false,
+        error: data.error || 'Failed to send WhatsApp message',
+        isWindowExpired: Boolean(data.isWindowExpired),
+      };
+    }
+
+    return {
+      success: true,
+      messageId: data.messageId,
+      message: data.message,
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      error: err.message || 'Network communication error',
+    };
+  }
+}
+
+/**
+ * Subscribe to live WhatsApp messages with Firestore real-time listener + HTTP polling fallback
+ */
+export function subscribeToWhatsAppMessages(
+  callback: (messages: WhatsAppMessageRecord[], webhooks?: any[], configStatus?: any) => void
+): () => void {
+  let isSubscribed = true;
+
+  // Initial HTTP fetch
+  const fetchMessagesHttp = async () => {
+    try {
+      const res = await fetch('/api/whatsapp/messages');
+      if (res.ok && isSubscribed) {
+        const data = await res.json();
+        callback(data.messages || [], data.webhooks || [], data.configStatus || null);
+      }
+    } catch (err) {
+      console.warn('HTTP fetch WhatsApp messages error:', err);
+    }
+  };
+
+  fetchMessagesHttp();
+
+  // Firestore Realtime Subscription (if available)
+  let firestoreUnsub: (() => void) | null = null;
+  if (db && !isQuotaExceededFlag) {
+    try {
+      const messagesRef = collection(db, 'whatsapp_messages');
+      const q = query(messagesRef, orderBy('timestamp', 'desc'), limit(100));
+      firestoreUnsub = onSnapshot(
+        q,
+        (snapshot) => {
+          if (!isSubscribed) return;
+          const firestoreMsgs: WhatsAppMessageRecord[] = [];
+          snapshot.forEach((docSnap) => {
+            firestoreMsgs.push(docSnap.data() as WhatsAppMessageRecord);
+          });
+          if (firestoreMsgs.length > 0) {
+            callback(firestoreMsgs);
+          }
+        },
+        (error) => {
+          if (isQuotaExceededError(error)) {
+            markQuotaExceeded();
+          }
+        }
+      );
+    } catch {
+      // Fallback to polling
+    }
+  }
+
+  // Polling interval (every 5 seconds)
+  const pollInterval = setInterval(() => {
+    if (isSubscribed) {
+      fetchMessagesHttp();
+    }
+  }, 5000);
+
+  return () => {
+    isSubscribed = false;
+    clearInterval(pollInterval);
+    if (firestoreUnsub) {
+      firestoreUnsub();
+    }
+  };
+}
+

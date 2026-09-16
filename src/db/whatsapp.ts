@@ -12,10 +12,13 @@ export interface WhatsAppMessageRecord {
   text?: string;
   messageType: 'text' | 'interactive' | 'template' | 'image' | 'button' | 'location' | 'document' | 'other';
   rawPayload?: any;
-  status?: 'sent' | 'delivered' | 'read' | 'failed' | 'received';
+  status?: 'sending' | 'sent' | 'delivered' | 'read' | 'failed' | 'received';
   timestamp: string;
   orderId?: string;
   error?: string;
+  staffMember?: string;
+  staffId?: string;
+  staffRole?: string;
 }
 
 export interface WhatsAppWebhookLog {

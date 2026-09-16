@@ -1150,6 +1150,35 @@ export const isDemoOtherProfit = (p: any): boolean => {
   );
 };
 
+export interface WhatsAppMessageRecord {
+  id: string; // Meta message ID (wamid) or generated ID
+  direction: 'incoming' | 'outgoing';
+  from: string;
+  to?: string;
+  senderName?: string;
+  text?: string;
+  messageType: 'text' | 'interactive' | 'template' | 'image' | 'button' | 'location' | 'document' | 'other';
+  rawPayload?: any;
+  status?: 'sending' | 'sent' | 'delivered' | 'read' | 'failed' | 'received';
+  timestamp: string;
+  orderId?: string;
+  error?: string;
+  staffMember?: string;
+  staffId?: string;
+  staffRole?: string;
+}
+
+export interface WhatsAppConversation {
+  phoneNumber: string;
+  customerName?: string;
+  lastMessage?: WhatsAppMessageRecord;
+  unreadCount: number;
+  totalMessages: number;
+  is24hWindowActive: boolean;
+  windowExpiresAt?: string;
+  messages: WhatsAppMessageRecord[];
+}
+
 export type WhatsAppEventType =
   | 'order_placed'
   | 'order_confirmed'

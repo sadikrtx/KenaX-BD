@@ -809,10 +809,15 @@ Tone: Friendly, helpful, professional, fluent in both Bengali and English (Bangl
                 const messageId = st.id;
                 const statusName = st.status as "sent" | "delivered" | "read" | "failed";
                 const recipientId = st.recipient_id;
-                const errStr = st.errors ? JSON.stringify(st.errors) : undefined;
+                let errStr: string | undefined = undefined;
+                if (st.errors && Array.isArray(st.errors) && st.errors.length > 0) {
+                  const firstErr = st.errors[0];
+                  errStr = `Error ${firstErr.code}: ${firstErr.title || firstErr.message || firstErr.error_data?.details || "Delivery failed"}`;
+                }
 
+                const maskedRecipient = recipientId ? `...${String(recipientId).slice(-4)}` : "unknown";
                 console.log(
-                  `[WhatsApp Status Receipt] ID: ${messageId} | Status: ${statusName} | Recipient: ${recipientId}`
+                  `[WhatsApp Status Receipt] ID: ${messageId} | Status: ${statusName} | Recipient: ${maskedRecipient} ${errStr ? `| Error: ${errStr}` : ""}`
                 );
                 updateWhatsAppMessageStatus(messageId, statusName, errStr);
               }
@@ -836,7 +841,7 @@ Tone: Friendly, helpful, professional, fluent in both Bengali and English (Bangl
   // 3. Official Meta WhatsApp Cloud API Message Dispatch (Server-Side Proxy)
   app.post("/api/whatsapp/send", async (req, res) => {
     try {
-      const { to, type = "text", text, template, orderId } = req.body;
+      const { to, type = "text", text, template, orderId, staffMember, staffId, staffRole } = req.body;
       if (!to) {
         return res.status(400).json({ error: "Missing recipient phone number 'to'" });
       }
@@ -846,20 +851,42 @@ Tone: Friendly, helpful, professional, fluent in both Bengali and English (Bangl
         process.env.META_WHATSAPP_TOKEN ||
         ""
       ).trim();
-      const phoneNumberId = (process.env.WHATSAPP_PHONE_NUMBER_ID || "").trim();
+
+      // Resolve Phone Number ID:
+      // Real registered 'x panel' WhatsApp number: 1282711991587859 (+8801719143897)
+      // Meta sandbox test number: 1210741798791176 (+15556539379)
+      const REGISTERED_PANEL_PHONE_ID = "1282711991587859";
+      const rawEnvPhoneId = (process.env.WHATSAPP_PHONE_NUMBER_ID || "").trim();
+
+      let phoneNumberId = (req.body.phoneNumberId || "").trim();
+      if (!phoneNumberId) {
+        if (!rawEnvPhoneId || rawEnvPhoneId === "1210741798791176") {
+          // Default to live verified 'x panel' phone number ID
+          phoneNumberId = REGISTERED_PANEL_PHONE_ID;
+        } else {
+          phoneNumberId = rawEnvPhoneId;
+        }
+      }
 
       const cleanTo = String(to).replace(/[^0-9]/g, "");
-      const formattedPhone = cleanTo.startsWith("88") ? cleanTo : `88${cleanTo}`;
+      let formattedPhone = cleanTo;
+      if (cleanTo.startsWith("8801") && cleanTo.length === 13) {
+        formattedPhone = cleanTo;
+      } else if (cleanTo.startsWith("01") && cleanTo.length === 11) {
+        formattedPhone = `88${cleanTo}`;
+      } else if (cleanTo.startsWith("1") && cleanTo.length === 10) {
+        formattedPhone = `880${cleanTo}`;
+      } else if (!cleanTo.startsWith("88")) {
+        formattedPhone = `88${cleanTo}`;
+      }
 
-      if (!accessToken || !phoneNumberId) {
+      const maskedTo = formattedPhone.length > 4 ? `...${formattedPhone.slice(-4)}` : formattedPhone;
+
+      if (!accessToken) {
         return res.status(400).json({
           success: false,
-          error: "Meta WhatsApp Cloud API credentials not configured in server environment.",
-          missing: [
-            !accessToken ? "WHATSAPP_ACCESS_TOKEN" : null,
-            !phoneNumberId ? "WHATSAPP_PHONE_NUMBER_ID" : null,
-          ].filter(Boolean),
-          note: "Set WHATSAPP_ACCESS_TOKEN and WHATSAPP_PHONE_NUMBER_ID in your environment secrets.",
+          error: "WHATSAPP_ACCESS_TOKEN secret is not configured in the server environment.",
+          missing: ["WHATSAPP_ACCESS_TOKEN"],
         });
       }
 
@@ -875,13 +902,13 @@ Tone: Friendly, helpful, professional, fluent in both Bengali and English (Bangl
       } else {
         payload.type = "text";
         payload.text = {
-          preview_url: true,
+          preview_url: false,
           body: text || "Greetings from KenaX BD!",
         };
       }
 
       const metaUrl = `https://graph.facebook.com/v21.0/${phoneNumberId}/messages`;
-      console.log(`[Meta Cloud API Dispatch] To: ${formattedPhone} | Type: ${payload.type}`);
+      console.log(`[Meta Cloud API Dispatch] To: ${maskedTo} | PhoneId: ${phoneNumberId} | Type: ${payload.type} | By: ${staffMember || 'Staff'}`);
 
       const response = await fetch(metaUrl, {
         method: "POST",
@@ -895,26 +922,56 @@ Tone: Friendly, helpful, professional, fluent in both Bengali and English (Bangl
       const resData: any = await response.json();
 
       if (!response.ok) {
-        console.error("[Meta Cloud API Send Error]:", resData);
+        const metaError = resData?.error || {};
+        const errorCode = metaError.code;
+        const errorSubcode = metaError.error_subcode;
+        const errorMsg = metaError.message || "Meta WhatsApp Cloud API rejected request";
+
+        console.warn(`[Meta Cloud API Error] HTTP ${response.status} | Code: ${errorCode} | Subcode: ${errorSubcode} | Msg: ${errorMsg}`);
+
+        let friendlyError = errorMsg;
+        let isWindowExpired = false;
+
+        if (errorCode === 131047 || errorSubcode === 2388083 || errorMsg.toLowerCase().includes("re-engagement") || errorMsg.toLowerCase().includes("24 hour")) {
+          isWindowExpired = true;
+          friendlyError = "The 24-hour customer service window has expired. Meta policy requires an approved message template or an incoming customer message to send messages.";
+        } else if (errorCode === 131026) {
+          friendlyError = "Message undeliverable. This phone number may not have an active WhatsApp account or privacy restrictions prevent delivery.";
+        } else if (errorCode === 190) {
+          friendlyError = "WhatsApp Access Token has expired or is invalid. Please refresh the token in your Meta App Dashboard.";
+        }
+
         return res.status(response.status).json({
           success: false,
-          error: "Meta WhatsApp Cloud API rejected request",
-          details: resData,
+          error: friendlyError,
+          code: errorCode,
+          subcode: errorSubcode,
+          isWindowExpired,
+          metaDetails: {
+            code: errorCode,
+            type: metaError.type,
+            fbtrace_id: metaError.fbtrace_id,
+          },
         });
       }
 
       const messageId = resData.messages?.[0]?.id || `wamid.${Date.now()}`;
+      console.log(`[Meta Cloud API Success] HTTP 200 | wamid: ${messageId} | Recipient: ${maskedTo}`);
+
       const record: WhatsAppMessageRecord = {
         id: messageId,
         direction: "outgoing",
         from: phoneNumberId,
         to: formattedPhone,
-        text: text || `[Template: ${template?.name}]`,
+        text: text || `[Template: ${template?.name || 'Custom'}]`,
         messageType: type === "template" ? "template" : "text",
         rawPayload: resData,
         status: "sent",
         timestamp: new Date().toISOString(),
         orderId,
+        staffMember: staffMember || undefined,
+        staffId: staffId || undefined,
+        staffRole: staffRole || undefined,
       };
 
       saveWhatsAppMessage(record);
@@ -923,11 +980,12 @@ Tone: Friendly, helpful, professional, fluent in both Bengali and English (Bangl
       return res.json({
         success: true,
         messageId,
+        message: record,
         data: resData,
       });
     } catch (err: any) {
       console.error("[WhatsApp Send API Error]:", err);
-      return res.status(500).json({ success: false, error: err.message });
+      return res.status(500).json({ success: false, error: err.message || "Internal server error" });
     }
   });
 
@@ -936,14 +994,18 @@ Tone: Friendly, helpful, professional, fluent in both Bengali and English (Bangl
     try {
       const messages = getAllWhatsAppMessages();
       const webhooks = getAllWhatsAppWebhookLogs();
+      const registeredPhoneId = "1282711991587859";
+      const currentPhoneId = (process.env.WHATSAPP_PHONE_NUMBER_ID || "").trim() || registeredPhoneId;
 
       res.json({
         messages,
         webhooks,
         configStatus: {
-          isConfigured: !!(process.env.WHATSAPP_ACCESS_TOKEN && process.env.WHATSAPP_PHONE_NUMBER_ID),
+          isConfigured: !!(process.env.WHATSAPP_ACCESS_TOKEN && (process.env.WHATSAPP_PHONE_NUMBER_ID || registeredPhoneId)),
           hasAccessToken: !!process.env.WHATSAPP_ACCESS_TOKEN,
-          hasPhoneNumberId: !!process.env.WHATSAPP_PHONE_NUMBER_ID,
+          hasPhoneNumberId: true,
+          activePhoneNumberId: currentPhoneId,
+          registeredPhoneName: "x panel (+8801719143897)",
           hasAppSecret: !!process.env.WHATSAPP_APP_SECRET,
           hasVerifyToken: !!process.env.WHATSAPP_VERIFY_TOKEN,
           endpointUrl: "/api/whatsapp/webhook",
