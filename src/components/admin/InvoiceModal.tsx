@@ -1,17 +1,19 @@
 import React, { useState, useRef } from 'react';
 import { Printer, X, Download, FileText, Check, Loader2, Image as ImageIcon } from 'lucide-react';
 import html2canvas from 'html2canvas';
-import { Order, SiteSettings } from '../../types';
+import { Order, SiteSettings, Product } from '../../types';
 import { KenaXLogo } from '../KenaXLogo';
 import { KenaXOfficialSeal } from '../KenaXOfficialSeal';
+import { CartItemImage } from '../CartItemImage';
 
 interface InvoiceModalProps {
   order: Order | null;
+  products?: Product[];
   settings: SiteSettings;
   onClose: () => void;
 }
 
-export const InvoiceModal: React.FC<InvoiceModalProps> = ({ order, settings, onClose }) => {
+export const InvoiceModal: React.FC<InvoiceModalProps> = ({ order, products = [], settings, onClose }) => {
   const [isGeneratingImage, setIsGeneratingImage] = useState(false);
   const [isDownloaded, setIsDownloaded] = useState(false);
   const invoiceRef = useRef<HTMLDivElement>(null);
@@ -183,10 +185,30 @@ export const InvoiceModal: React.FC<InvoiceModalProps> = ({ order, settings, onC
                   <tr key={idx}>
                     <td className="py-3 px-2 text-slate-400 font-mono">{idx + 1}</td>
                     <td className="py-3 px-2">
-                      <p className="font-bold text-slate-900">{item.productName || item.name || 'Item'}</p>
-                      {item.variantName && (
-                        <p className="text-[11px] text-slate-500">Variant: {item.variantName}</p>
-                      )}
+                      <div className="flex items-center gap-2.5">
+                        <CartItemImage
+                          item={item}
+                          product={products?.find((p) => p.id === item.productId)}
+                          sizeClassName="w-10 h-10 rounded-lg shrink-0"
+                        />
+                        <div className="min-w-0">
+                          <p className="font-bold text-slate-900 leading-snug">{item.productName || item.name || 'Item'}</p>
+                          {(item.variant || item.variantName || item.selectedColor || item.selectedSize) && (
+                            <div className="flex items-center gap-1.5 flex-wrap text-[11px] text-slate-500 mt-0.5">
+                              {item.selectedColor && (
+                                <span>Color: <strong className="text-slate-700">{item.selectedColor}</strong></span>
+                              )}
+                              {item.selectedColor && item.selectedSize && <span>•</span>}
+                              {item.selectedSize && (
+                                <span>Size: <strong className="text-slate-700">{item.selectedSize}</strong></span>
+                              )}
+                              {!item.selectedColor && !item.selectedSize && (item.variant || item.variantName) && (
+                                <span>Variant: <strong className="text-slate-700">{item.variant || item.variantName}</strong></span>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </div>
                     </td>
                     <td className="py-3 px-2 text-right font-medium">৳{item.price.toLocaleString()}</td>
                     <td className="py-3 px-2 text-center font-bold">{item.quantity}</td>

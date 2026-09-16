@@ -15,6 +15,7 @@ import {
 import { PromoBannerItem, PromoGridSettings } from '../types';
 import { getCleanPromoGridSettings } from '../data/defaultPromoBanners';
 import { resolveOriginalImageMedia } from '../lib/firebase';
+import { getOptimizedImageUrl } from '../utils/imageOptimizer';
 
 interface PromoGridProps {
   promoGridSettings?: PromoGridSettings;
@@ -181,10 +182,10 @@ const PromoCardItem: React.FC<PromoCardItemProps> = ({
     if (banner.backgroundImage && banner.backgroundImage.trim() !== '') {
       if (banner.backgroundImage.startsWith('media://')) {
         resolveOriginalImageMedia(banner.backgroundImage).then((url) => {
-          if (isMounted) setResolvedDesktopImg(url || undefined);
+          if (isMounted) setResolvedDesktopImg(url ? getOptimizedImageUrl(url, 1200) : undefined);
         });
       } else {
-        setResolvedDesktopImg(banner.backgroundImage);
+        setResolvedDesktopImg(getOptimizedImageUrl(banner.backgroundImage, 1200));
       }
     } else {
       setResolvedDesktopImg(undefined);
@@ -193,10 +194,10 @@ const PromoCardItem: React.FC<PromoCardItemProps> = ({
     if (banner.mobileBackgroundImage && banner.mobileBackgroundImage.trim() !== '') {
       if (banner.mobileBackgroundImage.startsWith('media://')) {
         resolveOriginalImageMedia(banner.mobileBackgroundImage).then((url) => {
-          if (isMounted) setResolvedMobileImg(url || undefined);
+          if (isMounted) setResolvedMobileImg(url ? getOptimizedImageUrl(url, 800) : undefined);
         });
       } else {
-        setResolvedMobileImg(banner.mobileBackgroundImage);
+        setResolvedMobileImg(getOptimizedImageUrl(banner.mobileBackgroundImage, 800));
       }
     } else {
       setResolvedMobileImg(undefined);

@@ -28,6 +28,8 @@ import {
   TrendingDown,
   Globe,
   MessageSquare,
+  Bot,
+  Building2,
 } from 'lucide-react';
 import { UserRole, StaffUser } from '../../types';
 import { KenaXLogo } from '../KenaXLogo';
@@ -42,6 +44,7 @@ export type AdminTab =
   | 'wishlist-activities'
   | 'products'
   | 'categories'
+  | 'dropshipping'
   | 'costs'
   | 'inventory'
   | 'customers'
@@ -54,6 +57,7 @@ export type AdminTab =
   | 'roles'
   | 'reports'
   | 'logs'
+  | 'telegram-bot'
   | 'whatsapp-automation'
   | 'sms-gateway'
   | 'gmail-alerts'
@@ -224,6 +228,17 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({
       ],
     },
     {
+      title: 'DROPSHIPPING',
+      items: [
+        {
+          id: 'dropshipping',
+          label: 'Suppliers',
+          icon: Building2,
+          requiredPermission: 'products.view',
+        },
+      ],
+    },
+    {
       title: 'CUSTOMERS',
       items: [
         {
@@ -269,8 +284,16 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({
       ],
     },
     {
-      title: 'SYSTEM',
+      title: 'CHAT BOT',
       items: [
+        {
+          id: 'telegram-bot',
+          label: 'Telegram Bot',
+          icon: Bot,
+          badge: 'Live Bot',
+          badgeColor: 'bg-sky-500 text-white',
+          requiredPermission: 'settings.view',
+        },
         {
           id: 'whatsapp-automation',
           label: 'WhatsApp Automation',
@@ -288,17 +311,22 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({
           requiredPermission: 'settings.view',
         },
         {
+          id: 'gmail-alerts',
+          label: 'Gmail Alerts & Templates',
+          icon: Mail,
+          requiredPermission: 'settings.view',
+        },
+      ],
+    },
+    {
+      title: 'SYSTEM',
+      items: [
+        {
           id: 'seo-settings',
           label: 'SEO & Meta Tags',
           icon: Globe,
           badge: 'SEO',
           badgeColor: 'bg-indigo-600 text-white',
-          requiredPermission: 'settings.view',
-        },
-        {
-          id: 'gmail-alerts',
-          label: 'Gmail Alerts & Templates',
-          icon: Mail,
           requiredPermission: 'settings.view',
         },
         {

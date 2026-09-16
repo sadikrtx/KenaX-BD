@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Header } from './components/Header';
@@ -29,6 +29,7 @@ import { MaintenanceModal } from './components/MaintenanceModal';
 import { TagProductsView } from './components/TagProductsView';
 import { safeSetLocalStorage } from './lib/storage';
 import { applySEOMetaTags } from './utils/seo';
+import { sortProductsByPagePriority } from './utils/productPriorityUtils';
 import { getCleanPromoGridSettings } from './data/defaultPromoBanners';
 import {
   DEFAULT_FLASH_SALE_BANNER,
@@ -103,12 +104,15 @@ import {
   triggerOrderStatusSMS,
   triggerOrderEmailNotification,
 } from './lib/smsService';
+import { triggerTelegramNewOrder } from './lib/telegramBotService';
 
 export default function App() {
   // Navigation View State
   const [currentView, setCurrentView] = useState<string>('home');
   const [selectedTrackOrder, setSelectedTrackOrder] = useState<Order | null>(null);
   const [currentRole, setCurrentRole] = useState<UserRole>('customer');
+  const [adminInitialTab, setAdminInitialTab] = useState<any>('overview');
+  const [adminInitialSettingsSubTab, setAdminInitialSettingsSubTab] = useState<any>('hero');
 
   // Customer Authentication state
   const [currentCustomer, setCurrentCustomer] = useState<CustomerRecord | null>(() => {
@@ -302,7 +306,7 @@ export default function App() {
     setSelectedSubSubcategory(subSubcategory);
     setSearchQuery(''); // Clear search query on category selection so category products display properly
     setCurrentView('shop');
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    window.scrollTo({ top: 0, behavior: 'instant' });
   };
 
   const handleSelectSubcategory = (subName: string) => {
@@ -660,10 +664,8 @@ export default function App() {
       window.history.pushState({ productId: product.id }, '', url.pathname + '?' + url.searchParams.toString());
     } catch (e) {}
 
-    if (currentView === 'product') {
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-    } else {
-      window.scrollTo({ top: 0, behavior: 'instant' });
+    window.scrollTo({ top: 0, behavior: 'instant' });
+    if (currentView !== 'product') {
       setCurrentView('product');
     }
   };
@@ -1009,6 +1011,27 @@ export default function App() {
           (product.colors && product.colors.find((c) => c.imageUrl && c.imageUrl.trim() !== '')?.imageUrl) ||
           '';
 
+    // Extract selected color and selectedColorImage if available
+    let detectedColor: string | undefined = undefined;
+    let detectedColorImage: string | undefined = undefined;
+    if (product.colors && product.colors.length > 0) {
+      if (customImage) {
+        const matchByImg = product.colors.find((c) => c.imageUrl && c.imageUrl === customImage);
+        if (matchByImg) {
+          detectedColor = matchByImg.name;
+          detectedColorImage = matchByImg.imageUrl;
+        }
+      }
+      if (!detectedColor && variant) {
+        const firstPart = variant.split('/')[0]?.trim().toLowerCase();
+        const matchByName = product.colors.find((c) => (c.name || '').trim().toLowerCase() === firstPart);
+        if (matchByName) {
+          detectedColor = matchByName.name;
+          detectedColorImage = matchByName.imageUrl;
+        }
+      }
+    }
+
     // If exactImage is a media:// reference, trigger async resolution and cache into cart/localStorage
     if (exactImage && exactImage.startsWith('media://productImageMedia/')) {
       resolveOriginalImageMedia(exactImage).then((resolved) => {
@@ -1016,7 +1039,7 @@ export default function App() {
           setCart((prev) =>
             prev.map((item) =>
               item.productId === product.id && item.variant === variant
-                ? { ...item, productImage: resolved }
+                ? { ...item, productImage: resolved, selectedColorImage: detectedColorImage || resolved }
                 : item
             )
           );
@@ -1034,9 +1057,11 @@ export default function App() {
                 ...item,
                 quantity: item.quantity + quantity,
                 total: (item.quantity + quantity) * item.price,
-                productImage: item.productImage && item.productImage.trim() !== '' && !item.productImage.startsWith('media://')
+                selectedColor: detectedColor || item.selectedColor,
+                selectedColorImage: detectedColorImage || (customImage && customImage.trim() !== '' ? customImage : item.selectedColorImage),
+                productImage: customImage || detectedColorImage || (item.productImage && item.productImage.trim() !== '' && !item.productImage.startsWith('media://')
                   ? item.productImage
-                  : exactImage,
+                  : exactImage),
               }
             : item
         );
@@ -1046,7 +1071,9 @@ export default function App() {
           {
             productId: product.id,
             productName: product.name,
-            productImage: exactImage,
+            productImage: customImage || detectedColorImage || exactImage,
+            selectedColor: detectedColor,
+            selectedColorImage: detectedColorImage || (customImage && customImage.trim() !== '' ? customImage : undefined),
             quantity,
             price: product.price,
             total: product.price * quantity,
@@ -1069,20 +1096,40 @@ export default function App() {
           (product.colors && product.colors.find((c) => c.imageUrl && c.imageUrl.trim() !== '')?.imageUrl) ||
           '';
 
+    let detectedColor: string | undefined = undefined;
+    let detectedColorImage: string | undefined = undefined;
+    if (product.colors && product.colors.length > 0) {
+      if (customImage) {
+        const matchByImg = product.colors.find((c) => c.imageUrl && c.imageUrl === customImage);
+        if (matchByImg) {
+          detectedColor = matchByImg.name;
+          detectedColorImage = matchByImg.imageUrl;
+        }
+      }
+      if (!detectedColor && variant) {
+        const firstPart = variant.split('/')[0]?.trim().toLowerCase();
+        const matchByName = product.colors.find((c) => (c.name || '').trim().toLowerCase() === firstPart);
+        if (matchByName) {
+          detectedColor = matchByName.name;
+          detectedColorImage = matchByName.imageUrl;
+        }
+      }
+    }
+
     if (exactImage && exactImage.startsWith('media://productImageMedia/')) {
       resolveOriginalImageMedia(exactImage).then((resolved) => {
         if (resolved && !resolved.startsWith('media://')) {
           setCart((prev) =>
             prev.map((item) =>
               item.productId === product.id && item.variant === variant
-                ? { ...item, productImage: resolved }
+                ? { ...item, productImage: resolved, selectedColorImage: detectedColorImage || resolved }
                 : item
             )
           );
           setCheckoutItems((prev) =>
             prev.map((item) =>
               item.productId === product.id && item.variant === variant
-                ? { ...item, productImage: resolved }
+                ? { ...item, productImage: resolved, selectedColorImage: detectedColorImage || resolved }
                 : item
             )
           );
@@ -1093,7 +1140,9 @@ export default function App() {
     const singleItem: OrderItem = {
       productId: product.id,
       productName: product.name,
-      productImage: exactImage,
+      productImage: customImage || detectedColorImage || exactImage,
+      selectedColor: detectedColor,
+      selectedColorImage: detectedColorImage || (customImage && customImage.trim() !== '' ? customImage : undefined),
       quantity,
       price: product.price,
       total: product.price * quantity,
@@ -1111,9 +1160,11 @@ export default function App() {
                 ...item,
                 quantity: item.quantity + quantity,
                 total: (item.quantity + quantity) * item.price,
-                productImage: item.productImage && item.productImage.trim() !== '' && !item.productImage.startsWith('media://')
+                selectedColor: detectedColor || item.selectedColor,
+                selectedColorImage: detectedColorImage || (customImage && customImage.trim() !== '' ? customImage : item.selectedColorImage),
+                productImage: customImage || detectedColorImage || (item.productImage && item.productImage.trim() !== '' && !item.productImage.startsWith('media://')
                   ? item.productImage
-                  : exactImage,
+                  : exactImage),
               }
             : item
         );
@@ -1294,6 +1345,11 @@ export default function App() {
       triggerOrderPlacedSMS(newOrder).catch((smsErr) => {
         console.warn('[Order Placed SMS Warning]:', smsErr);
       });
+
+      // Dispatch Telegram Bot Alert to Admin, Staff & Customer (Pending status)
+      triggerTelegramNewOrder(newOrder).catch((tgErr) => {
+        console.warn('[Telegram New Order Alert Warning]:', tgErr);
+      });
     } catch (err) {
       console.warn('[KenaX BD] Error persisting order to Firestore:', err);
     }
@@ -1374,26 +1430,63 @@ export default function App() {
   const handleAddCategory = async (newCat: Category) => {
     setCategories((prev) => {
       const exists = prev.some((c) => c.id === newCat.id);
-      if (exists) {
-        return prev.map((c) => (c.id === newCat.id ? newCat : c));
-      }
-      return [...prev, newCat];
+      const next = exists ? prev.map((c) => (c.id === newCat.id ? newCat : c)) : [...prev, newCat];
+      try {
+        localStorage.setItem('kenax_categories', JSON.stringify(next));
+        localStorage.setItem('kenax_categories_cache', JSON.stringify(next));
+      } catch {}
+      return next;
     });
     await saveCategoryToDB(newCat);
   };
 
   const handleUpdateCategory = async (updatedCat: Category) => {
-    setCategories((prev) => prev.map((c) => (c.id === updatedCat.id ? updatedCat : c)));
+    const oldCat = categories.find((c) => c.id === updatedCat.id);
+    setCategories((prev) => {
+      const next = prev.map((c) => (c.id === updatedCat.id ? updatedCat : c));
+      try {
+        localStorage.setItem('kenax_categories', JSON.stringify(next));
+        localStorage.setItem('kenax_categories_cache', JSON.stringify(next));
+      } catch {}
+      return next;
+    });
     await saveCategoryToDB(updatedCat);
+
+    // Cascade category name change to products if name changed
+    if (oldCat && oldCat.name !== updatedCat.name) {
+      setProducts((prev) => {
+        const nextProducts = prev.map((p) =>
+          p.category === oldCat.name ? { ...p, category: updatedCat.name, categorySlug: updatedCat.slug || p.categorySlug } : p
+        );
+        try {
+          localStorage.setItem('kenax_products_cache', JSON.stringify(nextProducts));
+        } catch {}
+        return nextProducts;
+      });
+      products.filter((p) => p.category === oldCat.name).forEach((p) => {
+        saveProductToDB({ ...p, category: updatedCat.name, categorySlug: updatedCat.slug || p.categorySlug }).catch(() => {});
+      });
+    }
   };
 
   const handleDeleteCategory = async (catId: string) => {
-    setCategories((prev) => prev.filter((c) => c.id !== catId));
+    setCategories((prev) => {
+      const next = prev.filter((c) => c.id !== catId);
+      try {
+        localStorage.setItem('kenax_categories', JSON.stringify(next));
+        localStorage.setItem('kenax_categories_cache', JSON.stringify(next));
+      } catch {}
+      return next;
+    });
     await deleteCategoryFromDB(catId);
   };
 
   const handleReorderCategories = async (newCats: Category[]) => {
     setCategories(newCats);
+    try {
+      localStorage.setItem('kenax_categories', JSON.stringify(newCats));
+      localStorage.setItem('kenax_categories_cache', JSON.stringify(newCats));
+    } catch {}
     for (const c of newCats) {
       await saveCategoryToDB(c);
     }
@@ -1454,26 +1547,26 @@ export default function App() {
   const handleAddOrder = async (newOrder: Order) => {
     setOrders((prev) => [newOrder, ...prev]);
     await saveOrderToDB(newOrder);
+    triggerTelegramNewOrder(newOrder).catch((tgErr) => {
+      console.warn('[Telegram Manual Order Alert Warning]:', tgErr);
+    });
   };
 
   // Filter products for Home Sections
   const getHomeFilteredProducts = () => {
+    let list = [...products];
     if (selectedHomeTab === 'trending') {
-      return products.filter((p) => p.isTrending || p.saleBadge === 'Trending');
+      list = products.filter((p) => p.isTrending || p.saleBadge === 'Trending');
+    } else if (selectedHomeTab === 'electronics') {
+      list = products.filter((p) => p.category === 'Electronics & Gadgets');
+    } else if (selectedHomeTab === 'fashion') {
+      list = products.filter((p) => p.category === 'Fashion & Clothing');
+    } else if (selectedHomeTab === 'home') {
+      list = products.filter((p) => p.category === 'Home & Living');
+    } else if (selectedHomeTab === 'bestsellers') {
+      list = products.filter((p) => p.isBestSeller || p.saleBadge === 'Best Seller');
     }
-    if (selectedHomeTab === 'electronics') {
-      return products.filter((p) => p.category === 'Electronics & Gadgets');
-    }
-    if (selectedHomeTab === 'fashion') {
-      return products.filter((p) => p.category === 'Fashion & Clothing');
-    }
-    if (selectedHomeTab === 'home') {
-      return products.filter((p) => p.category === 'Home & Living');
-    }
-    if (selectedHomeTab === 'bestsellers') {
-      return products.filter((p) => p.isBestSeller || p.saleBadge === 'Best Seller');
-    }
-    return products;
+    return sortProductsByPagePriority(list, 'home');
   };
 
   // Filter products for Shop Page
@@ -1569,10 +1662,25 @@ export default function App() {
       list.sort((a, b) => b.price - a.price);
     } else if (sortBy === 'rating') {
       list.sort((a, b) => b.rating - a.rating);
+    } else {
+      let pageContext = 'shop';
+      if (selectedCategory && selectedCategory !== 'All') {
+        pageContext = `category:${selectedCategory}`;
+      }
+      list = sortProductsByPagePriority(list, pageContext);
     }
 
     return list;
   };
+
+  // Memoized filtered product lists to prevent heavy recalculations on mobile
+  const homeFilteredProducts = useMemo(() => {
+    return getHomeFilteredProducts();
+  }, [products, selectedHomeTab]);
+
+  const shopFilteredProducts = useMemo(() => {
+    return getShopFilteredProducts();
+  }, [products, selectedCategory, selectedSubcategory, selectedSubSubcategory, searchQuery, sortBy, categories]);
 
   const handleNavigateToStoreFromAdmin = () => {
     // Admin "View Store" Restriction:
@@ -1695,6 +1803,8 @@ export default function App() {
         currentStaff={currentStaff}
         onNavigateToStore={handleNavigateToStoreFromAdmin}
         onLogout={handleStaffLogout}
+        initialTab={adminInitialTab}
+        initialSettingsSubTab={adminInitialSettingsSubTab}
         onRoleChange={(role) => {
           setCurrentRole(role);
           if (currentStaff) {
@@ -1719,19 +1829,23 @@ export default function App() {
     <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col font-sans selection:bg-sky-500 selection:text-white">
       {/* Active Maintenance Mode Banner for Logged-in Staff */}
       {isMaintenanceActive && isStaffUser && (
-        <div className="bg-gradient-to-r from-amber-500 via-amber-400 to-amber-500 text-slate-950 px-3.5 py-1.5 text-xs font-black flex items-center justify-between shadow-xs sticky top-0 z-50 border-b border-amber-600/30">
-          <div className="flex items-center gap-2">
+        <div className="bg-gradient-to-r from-amber-500 via-amber-400 to-amber-500 text-slate-950 px-3 py-2 text-[11px] sm:text-xs font-black flex flex-col sm:flex-row items-center justify-between gap-1.5 shadow-sm relative z-50 border-b border-amber-600/30">
+          <div className="flex items-center gap-2 text-center sm:text-left">
             <span className="w-2 h-2 rounded-full bg-slate-950 animate-ping shrink-0" />
-            <span className="truncate">
-              ⚠️ <strong>Maintenance Mode Active:</strong> Public visitors will see the maintenance screen notice.
+            <span className="leading-tight">
+              ⚠️ <strong>Maintenance Mode Active:</strong> Public visitors see the notice.
             </span>
           </div>
           <button
             type="button"
-            onClick={() => setCurrentView('admin-dashboard')}
-            className="px-2.5 py-0.5 rounded-lg bg-slate-950 text-amber-300 hover:text-white hover:bg-slate-900 text-[11px] font-bold cursor-pointer shrink-0 transition-colors"
+            onClick={() => {
+              setAdminInitialTab('settings');
+              setAdminInitialSettingsSubTab('system');
+              setCurrentView('admin-dashboard');
+            }}
+            className="px-3 py-1 rounded-lg bg-slate-950 text-amber-300 hover:text-white hover:bg-slate-900 text-[11px] font-bold cursor-pointer shrink-0 transition-colors shadow-xs"
           >
-            Manage ↗
+            Manage Settings ↗
           </button>
         </div>
       )}
@@ -1768,16 +1882,17 @@ export default function App() {
 
       {/* 2. Main Body Content Based on Active View */}
       <main className="flex-1">
-        <AnimatePresence mode="popLayout">
+        <AnimatePresence mode="wait" initial={false}>
           <motion.div
             key={currentView}
-            initial={{ opacity: 0, y: 14, scale: 0.996 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -10, scale: 0.996 }}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
             transition={{
-              duration: 0.32,
-              ease: [0.22, 1, 0.36, 1],
+              duration: 0.12,
+              ease: 'easeOut',
             }}
+            className="w-full transform-gpu"
           >
             {/* VIEW: Home */}
         {currentView === 'home' && (
@@ -1861,13 +1976,13 @@ export default function App() {
 
               {/* Products Grid */}
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3 sm:gap-4">
-                {getHomeFilteredProducts().slice(0, 12).map((product, index) => (
+                {homeFilteredProducts.slice(0, 12).map((product, index) => (
                   <ProductCard
                     key={`${product.id}_${index}`}
                     product={product}
-                    onAddToCart={(p, qty, v, img) => handleAddToCart(p, qty || 1, v, img)}
-                    onBuyNow={(p, qty, v, img) => handleBuyNow(p, qty || 1, v, img)}
-                    onQuickView={(p) => handleOpenProductDetail(p)}
+                    onAddToCart={handleAddToCart}
+                    onBuyNow={handleBuyNow}
+                    onQuickView={handleOpenProductDetail}
                     onToggleWishlist={handleToggleWishlist}
                     isWishlisted={wishlist.some((w) => w.id === product.id)}
                     currentRole={currentRole}
@@ -1879,7 +1994,7 @@ export default function App() {
 
               <div className="mt-8 text-center">
                 <button
-                  onClick={() => setCurrentView('shop')}
+                  onClick={() => handleNavigate('shop')}
                   className="inline-flex items-center gap-2 px-8 py-3 rounded-2xl bg-white border border-slate-300 text-slate-900 hover:bg-sky-50 hover:text-sky-700 hover:border-sky-300 text-xs font-bold transition-all shadow-xs cursor-pointer"
                 >
                   <span>Explore All Products ({products.length})</span>
@@ -1950,7 +2065,7 @@ export default function App() {
             <nav className="flex items-center flex-wrap gap-1.5 text-xs text-slate-500 mb-4 bg-slate-50/80 px-3.5 py-2 rounded-xl border border-slate-100">
               <button
                 type="button"
-                onClick={() => setCurrentView('home')}
+                onClick={() => handleNavigate('home')}
                 className="hover:text-sky-600 font-semibold cursor-pointer"
               >
                 Home
@@ -1963,7 +2078,7 @@ export default function App() {
                   selectedCategory === 'All' ? 'text-sky-600 font-bold' : 'hover:text-sky-600'
                 }`}
               >
-                Shop
+                ALL Product
               </button>
               {selectedCategory !== 'All' && (
                 <>
@@ -2015,7 +2130,7 @@ export default function App() {
                     : selectedCategory}
                 </h1>
                 <p className="text-xs text-slate-500 mt-0.5 flex items-center gap-2">
-                  <span>Showing {getShopFilteredProducts().length} items</span>
+                  <span>Showing {shopFilteredProducts.length} items</span>
                   {(selectedCategory !== 'All' || selectedSubcategory !== 'All' || selectedSubSubcategory !== 'All') && (
                     <button
                       type="button"
@@ -2044,156 +2159,12 @@ export default function App() {
               </div>
             </div>
 
-            {/* Level 1: Main Category Filter Chips with Desktop Scroll Controls */}
-            <div className="relative mb-3 group/catbar">
-              {/* Left Scroll Arrow (Desktop) */}
-              <button
-                type="button"
-                onClick={() => scrollCategoryChips('left')}
-                className="hidden md:flex absolute -left-3 top-1/2 -translate-y-1/2 z-10 w-8 h-8 rounded-full bg-white border border-slate-300 shadow-md items-center justify-center text-slate-700 hover:text-sky-600 hover:bg-sky-50 hover:border-sky-300 transition-all cursor-pointer"
-                aria-label="Scroll left"
-              >
-                <ChevronLeft className="w-4 h-4" />
-              </button>
-
-              <div
-                ref={categoryChipsRef}
-                className="flex items-center gap-1.5 overflow-x-auto pb-1 scroll-smooth scrollbar-thin scrollbar-thumb-slate-200 hover:scrollbar-thumb-slate-300"
-              >
-                <button
-                  onClick={() => handleSelectCategory('All', 'All', 'All')}
-                  className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap shrink-0 ${
-                    selectedCategory === 'All'
-                      ? 'bg-sky-600 text-white shadow-xs'
-                      : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
-                  }`}
-                >
-                  All Categories
-                </button>
-                {[...categories].sort((a, b) => (a.priority ?? 0) - (b.priority ?? 0)).map((cat) => {
-                  const isCatSelected = selectedCategory === cat.name;
-                  return (
-                    <button
-                      key={cat.id}
-                      onClick={() => handleSelectCategory(cat.name, 'All', 'All')}
-                      className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap shrink-0 flex items-center gap-1.5 ${
-                        isCatSelected
-                          ? 'bg-sky-600 text-white shadow-xs ring-2 ring-sky-300'
-                          : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 hover:border-slate-300'
-                      }`}
-                    >
-                      <span>{cat.name}</span>
-                    </button>
-                  );
-                })}
-              </div>
-
-              {/* Right Scroll Arrow (Desktop) */}
-              <button
-                type="button"
-                onClick={() => scrollCategoryChips('right')}
-                className="hidden md:flex absolute -right-3 top-1/2 -translate-y-1/2 z-10 w-8 h-8 rounded-full bg-white border border-slate-300 shadow-md items-center justify-center text-slate-700 hover:text-sky-600 hover:bg-sky-50 hover:border-sky-300 transition-all cursor-pointer"
-                aria-label="Scroll right"
-              >
-                <ChevronRight className="w-4 h-4" />
-              </button>
-            </div>
-
-            {/* Level 2: Sub-categories Interactive Navigation Bar */}
-            {selectedCategory !== 'All' && (() => {
+            {/* Hierarchical Dynamic Category Bar: Shows only the active tier */}
+            {(() => {
               const activeCat = categories.find((c) => c.name === selectedCategory);
               const subcategories = activeCat?.subcategories || [];
               const totalCategoryProducts = products.filter((p) => p.category === selectedCategory).length;
 
-              if (subcategories.length === 0) return null;
-
-              return (
-                <div className="relative mb-2.5 p-1.5 rounded-2xl bg-slate-100/80 border border-slate-200/80 group/subbar">
-                  {/* Left Scroll Arrow (Desktop) */}
-                  <button
-                    type="button"
-                    onClick={() => scrollSubcategoryChips('left')}
-                    className="hidden md:flex absolute -left-2.5 top-1/2 -translate-y-1/2 z-10 w-7 h-7 rounded-full bg-white border border-slate-300 shadow-sm items-center justify-center text-slate-700 hover:text-sky-600 hover:bg-sky-50 hover:border-sky-300 transition-all cursor-pointer"
-                    aria-label="Scroll left"
-                  >
-                    <ChevronLeft className="w-3.5 h-3.5" />
-                  </button>
-
-                  <div
-                    ref={subcategoryChipsRef}
-                    className="flex items-center gap-1.5 overflow-x-auto pb-0.5 scroll-smooth scrollbar-none"
-                  >
-                    {/* All in Category */}
-                    <button
-                      onClick={() => handleSelectSubcategory('All')}
-                      className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap shrink-0 flex items-center gap-1.5 shadow-2xs ${
-                        selectedSubcategory === 'All'
-                          ? 'bg-sky-600 text-white shadow-xs ring-2 ring-sky-300'
-                          : 'bg-white border border-slate-200 text-slate-700 hover:bg-sky-50 hover:text-sky-700 hover:border-sky-300'
-                      }`}
-                    >
-                      <span>All {selectedCategory}</span>
-                      <span
-                        className={`text-[10px] px-1.5 py-0.2 rounded-full font-black ${
-                          selectedSubcategory === 'All'
-                            ? 'bg-sky-700 text-white'
-                            : 'bg-slate-100 text-slate-600'
-                        }`}
-                      >
-                        {totalCategoryProducts}
-                      </span>
-                    </button>
-
-                    {/* Subcategory Pills */}
-                    {subcategories.map((sub, idx) => {
-                      const subName = typeof sub === 'string' ? sub : (sub?.name || '');
-                      const subKey = typeof sub === 'string' ? `sub-${idx}-${sub}` : (sub?.id || `sub-${idx}-${sub?.name || ''}`);
-                      const count = products.filter(
-                        (p) => p.category === selectedCategory && p.subcategory === subName
-                      ).length;
-                      const isSelected = selectedSubcategory === subName;
-
-                      return (
-                        <button
-                          key={subKey}
-                          onClick={() => handleSelectSubcategory(subName)}
-                          className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap shrink-0 flex items-center gap-1.5 shadow-2xs ${
-                            isSelected
-                              ? 'bg-sky-600 text-white shadow-xs ring-2 ring-sky-300'
-                              : 'bg-white border border-slate-200 text-slate-700 hover:bg-sky-50 hover:text-sky-700 hover:border-sky-300'
-                          }`}
-                        >
-                          <span>{subName}</span>
-                          <span
-                            className={`text-[10px] px-1.5 py-0.2 rounded-full font-black ${
-                              isSelected
-                                ? 'bg-sky-700 text-white'
-                                : 'bg-slate-100 text-slate-600'
-                            }`}
-                          >
-                            {count}
-                          </span>
-                        </button>
-                      );
-                    })}
-                  </div>
-
-                  {/* Right Scroll Arrow (Desktop) */}
-                  <button
-                    type="button"
-                    onClick={() => scrollSubcategoryChips('right')}
-                    className="hidden md:flex absolute -right-2.5 top-1/2 -translate-y-1/2 z-10 w-7 h-7 rounded-full bg-white border border-slate-300 shadow-sm items-center justify-center text-slate-700 hover:text-sky-600 hover:bg-sky-50 hover:border-sky-300 transition-all cursor-pointer"
-                    aria-label="Scroll right"
-                  >
-                    <ChevronRight className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              );
-            })()}
-
-            {/* Level 3: 3rd-Tier Sub-subcategories Interactive Navigation Bar */}
-            {selectedCategory !== 'All' && selectedSubcategory !== 'All' && (() => {
-              const activeCat = categories.find((c) => c.name === selectedCategory);
               const activeSubObj = activeCat?.subcategories?.find(
                 (s) => (typeof s === 'string' ? s : s?.name) === selectedSubcategory
               );
@@ -2217,98 +2188,267 @@ export default function App() {
                 (p) => p.category === selectedCategory && p.subcategory === selectedSubcategory
               ).length;
 
-              if (availableChildSubs.length === 0) return null;
+              // Determine which single tier bar to display
+              const isLevel3Active = selectedCategory !== 'All' && selectedSubcategory !== 'All' && availableChildSubs.length > 0;
+              const isLevel2Active = selectedCategory !== 'All' && subcategories.length > 0 && !isLevel3Active;
+              const isLevel1Active = selectedCategory === 'All' || subcategories.length === 0;
 
               return (
-                <div className="relative mb-4 p-1.5 rounded-2xl bg-sky-50/70 border border-sky-200/70 group/subsubbar">
-                  {/* Left Scroll Arrow (Desktop) */}
-                  <button
-                    type="button"
-                    onClick={() => scrollSubSubcategoryChips('left')}
-                    className="hidden md:flex absolute -left-2.5 top-1/2 -translate-y-1/2 z-10 w-7 h-7 rounded-full bg-white border border-sky-300 shadow-sm items-center justify-center text-sky-700 hover:text-white hover:bg-sky-600 hover:border-sky-600 transition-all cursor-pointer"
-                    aria-label="Scroll left"
-                  >
-                    <ChevronLeft className="w-3.5 h-3.5" />
-                  </button>
-
-                  <div
-                    ref={subSubcategoryChipsRef}
-                    className="flex items-center gap-1.5 overflow-x-auto pb-0.5 scroll-smooth scrollbar-none"
-                  >
-                    {/* All in Subcategory */}
-                    <button
-                      onClick={() => handleSelectSubSubcategory('All')}
-                      className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap shrink-0 flex items-center gap-1.5 shadow-2xs ${
-                        selectedSubSubcategory === 'All'
-                          ? 'bg-slate-900 text-white shadow-xs ring-2 ring-slate-400'
-                          : 'bg-white border border-sky-200 text-slate-700 hover:bg-sky-600 hover:text-white hover:border-sky-600'
-                      }`}
-                    >
-                      <span>All {selectedSubcategory}</span>
-                      <span
-                        className={`text-[10px] px-1.5 py-0.2 rounded-full font-black ${
-                          selectedSubSubcategory === 'All'
-                            ? 'bg-slate-800 text-white'
-                            : 'bg-slate-100 text-slate-600'
-                        }`}
+                <div className="mb-4">
+                  {/* Level 1: Main Category Filter Chips (Shown ONLY when at All Products or Category has no subcategories) */}
+                  {isLevel1Active && (
+                    <div className="relative group/catbar animate-in fade-in duration-200">
+                      {/* Left Scroll Arrow (Desktop) */}
+                      <button
+                        type="button"
+                        onClick={() => scrollCategoryChips('left')}
+                        className="hidden md:flex absolute -left-3 top-1/2 -translate-y-1/2 z-10 w-8 h-8 rounded-full bg-white border border-slate-300 shadow-md items-center justify-center text-slate-700 hover:text-sky-600 hover:bg-sky-50 hover:border-sky-300 transition-all cursor-pointer"
+                        aria-label="Scroll left"
                       >
-                        {totalSubProducts}
-                      </span>
-                    </button>
+                        <ChevronLeft className="w-4 h-4" />
+                      </button>
 
-                    {/* Level-3 Sub-subcategory Pills */}
-                    {availableChildSubs.map((ssName, ssIdx) => {
-                      const target = ssName.toLowerCase();
-                      const count = products.filter(
-                        (p) =>
-                          p.category === selectedCategory &&
-                          p.subcategory === selectedSubcategory &&
-                          ((p.subSubcategory || p.childSubcategory || '').toLowerCase() === target ||
-                            (p.tags && p.tags.some((t) => t.toLowerCase() === target)) ||
-                            p.name.toLowerCase().includes(target))
-                      ).length;
-                      const isSelected = selectedSubSubcategory === ssName;
-
-                      return (
+                      <div
+                        ref={categoryChipsRef}
+                        className="flex items-center gap-1.5 overflow-x-auto pb-1 scroll-smooth scrollbar-thin scrollbar-thumb-slate-200 hover:scrollbar-thumb-slate-300"
+                      >
                         <button
-                          key={ssIdx}
-                          onClick={() => handleSelectSubSubcategory(ssName)}
-                          className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap shrink-0 flex items-center gap-1.5 shadow-2xs ${
-                            isSelected
-                              ? 'bg-sky-600 text-white shadow-xs ring-2 ring-sky-300'
-                              : 'bg-white border border-sky-200 text-slate-800 hover:bg-sky-600 hover:text-white hover:border-sky-600'
+                          onClick={() => handleSelectCategory('All', 'All', 'All')}
+                          className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+                            selectedCategory === 'All'
+                              ? 'bg-sky-600 text-white shadow-xs'
+                              : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
                           }`}
                         >
-                          <span>{ssName}</span>
+                          All Categories
+                        </button>
+                        {[...categories].sort((a, b) => (a.priority ?? 0) - (b.priority ?? 0)).map((cat) => {
+                          const isCatSelected = selectedCategory === cat.name;
+                          return (
+                            <button
+                              key={cat.id}
+                              onClick={() => handleSelectCategory(cat.name, 'All', 'All')}
+                              className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap shrink-0 flex items-center gap-1.5 ${
+                                isCatSelected
+                                  ? 'bg-sky-600 text-white shadow-xs ring-2 ring-sky-300'
+                                  : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 hover:border-slate-300'
+                              }`}
+                            >
+                              <span>{cat.name}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      {/* Right Scroll Arrow (Desktop) */}
+                      <button
+                        type="button"
+                        onClick={() => scrollCategoryChips('right')}
+                        className="hidden md:flex absolute -right-3 top-1/2 -translate-y-1/2 z-10 w-8 h-8 rounded-full bg-white border border-slate-300 shadow-md items-center justify-center text-slate-700 hover:text-sky-600 hover:bg-sky-50 hover:border-sky-300 transition-all cursor-pointer"
+                        aria-label="Scroll right"
+                      >
+                        <ChevronRight className="w-4 h-4" />
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Level 2: Sub-categories Bar (Shown ONLY when Category is selected & Level 3 is not active) */}
+                  {isLevel2Active && (
+                    <div className="relative p-1.5 rounded-2xl bg-slate-100/80 border border-slate-200/80 group/subbar animate-in fade-in duration-200">
+                      {/* Left Scroll Arrow (Desktop) */}
+                      <button
+                        type="button"
+                        onClick={() => scrollSubcategoryChips('left')}
+                        className="hidden md:flex absolute -left-2.5 top-1/2 -translate-y-1/2 z-10 w-7 h-7 rounded-full bg-white border border-slate-300 shadow-sm items-center justify-center text-slate-700 hover:text-sky-600 hover:bg-sky-50 hover:border-sky-300 transition-all cursor-pointer"
+                        aria-label="Scroll left"
+                      >
+                        <ChevronLeft className="w-3.5 h-3.5" />
+                      </button>
+
+                      <div
+                        ref={subcategoryChipsRef}
+                        className="flex items-center gap-1.5 overflow-x-auto pb-0.5 scroll-smooth scrollbar-none"
+                      >
+                        {/* Quick return to All Categories */}
+                        <button
+                          onClick={() => handleSelectCategory('All', 'All', 'All')}
+                          className="px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap shrink-0 flex items-center gap-1 bg-white border border-slate-200 text-slate-600 hover:bg-slate-200 hover:text-slate-900 shadow-2xs"
+                          title="Back to All Categories"
+                        >
+                          <ChevronLeft className="w-3.5 h-3.5" />
+                          <span>All Categories</span>
+                        </button>
+
+                        {/* All in Category */}
+                        <button
+                          onClick={() => handleSelectSubcategory('All')}
+                          className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap shrink-0 flex items-center gap-1.5 shadow-2xs ${
+                            selectedSubcategory === 'All'
+                              ? 'bg-sky-600 text-white shadow-xs ring-2 ring-sky-300'
+                              : 'bg-white border border-slate-200 text-slate-700 hover:bg-sky-50 hover:text-sky-700 hover:border-sky-300'
+                          }`}
+                        >
+                          <span>All {selectedCategory}</span>
                           <span
                             className={`text-[10px] px-1.5 py-0.2 rounded-full font-black ${
-                              isSelected
+                              selectedSubcategory === 'All'
                                 ? 'bg-sky-700 text-white'
-                                : 'bg-sky-50 text-sky-700'
+                                : 'bg-slate-100 text-slate-600'
                             }`}
                           >
-                            {count}
+                            {totalCategoryProducts}
                           </span>
                         </button>
-                      );
-                    })}
-                  </div>
 
-                  {/* Right Scroll Arrow (Desktop) */}
-                  <button
-                    type="button"
-                    onClick={() => scrollSubSubcategoryChips('right')}
-                    className="hidden md:flex absolute -right-2.5 top-1/2 -translate-y-1/2 z-10 w-7 h-7 rounded-full bg-white border border-sky-300 shadow-sm items-center justify-center text-sky-700 hover:text-white hover:bg-sky-600 hover:border-sky-600 transition-all cursor-pointer"
-                    aria-label="Scroll right"
-                  >
-                    <ChevronRight className="w-3.5 h-3.5" />
-                  </button>
+                        {/* Subcategory Pills */}
+                        {subcategories.map((sub, idx) => {
+                          const subName = typeof sub === 'string' ? sub : (sub?.name || '');
+                          const subKey = typeof sub === 'string' ? `sub-${idx}-${sub}` : (sub?.id || `sub-${idx}-${sub?.name || ''}`);
+                          const count = products.filter(
+                            (p) => p.category === selectedCategory && p.subcategory === subName
+                          ).length;
+                          const isSelected = selectedSubcategory === subName;
+
+                          return (
+                            <button
+                              key={subKey}
+                              onClick={() => handleSelectSubcategory(subName)}
+                              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap shrink-0 flex items-center gap-1.5 shadow-2xs ${
+                                isSelected
+                                  ? 'bg-sky-600 text-white shadow-xs ring-2 ring-sky-300'
+                                  : 'bg-white border border-slate-200 text-slate-700 hover:bg-sky-50 hover:text-sky-700 hover:border-sky-300'
+                              }`}
+                            >
+                              <span>{subName}</span>
+                              <span
+                                className={`text-[10px] px-1.5 py-0.2 rounded-full font-black ${
+                                  isSelected
+                                    ? 'bg-sky-700 text-white'
+                                    : 'bg-slate-100 text-slate-600'
+                                }`}
+                              >
+                                {count}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      {/* Right Scroll Arrow (Desktop) */}
+                      <button
+                        type="button"
+                        onClick={() => scrollSubcategoryChips('right')}
+                        className="hidden md:flex absolute -right-2.5 top-1/2 -translate-y-1/2 z-10 w-7 h-7 rounded-full bg-white border border-slate-300 shadow-sm items-center justify-center text-slate-700 hover:text-sky-600 hover:bg-sky-50 hover:border-sky-300 transition-all cursor-pointer"
+                        aria-label="Scroll right"
+                      >
+                        <ChevronRight className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Level 3: 3rd-Tier Sub-subcategories Interactive Navigation Bar (Shown ONLY when Subcategory selected with children) */}
+                  {isLevel3Active && (
+                    <div className="relative p-1.5 rounded-2xl bg-sky-50/70 border border-sky-200/70 group/subsubbar animate-in fade-in duration-200">
+                      {/* Left Scroll Arrow (Desktop) */}
+                      <button
+                        type="button"
+                        onClick={() => scrollSubSubcategoryChips('left')}
+                        className="hidden md:flex absolute -left-2.5 top-1/2 -translate-y-1/2 z-10 w-7 h-7 rounded-full bg-white border border-sky-300 shadow-sm items-center justify-center text-sky-700 hover:text-white hover:bg-sky-600 hover:border-sky-600 transition-all cursor-pointer"
+                        aria-label="Scroll left"
+                      >
+                        <ChevronLeft className="w-3.5 h-3.5" />
+                      </button>
+
+                      <div
+                        ref={subSubcategoryChipsRef}
+                        className="flex items-center gap-1.5 overflow-x-auto pb-0.5 scroll-smooth scrollbar-none"
+                      >
+                        {/* Quick return to parent Category Subcategories */}
+                        <button
+                          onClick={() => handleSelectCategory(selectedCategory, 'All', 'All')}
+                          className="px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap shrink-0 flex items-center gap-1 bg-white border border-sky-200 text-sky-800 hover:bg-sky-100 shadow-2xs"
+                          title={`Back to all ${selectedCategory}`}
+                        >
+                          <ChevronLeft className="w-3.5 h-3.5" />
+                          <span>All {selectedCategory}</span>
+                        </button>
+
+                        {/* All in Subcategory */}
+                        <button
+                          onClick={() => handleSelectSubSubcategory('All')}
+                          className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap shrink-0 flex items-center gap-1.5 shadow-2xs ${
+                            selectedSubSubcategory === 'All'
+                              ? 'bg-slate-900 text-white shadow-xs ring-2 ring-slate-400'
+                              : 'bg-white border border-sky-200 text-slate-700 hover:bg-sky-600 hover:text-white hover:border-sky-600'
+                          }`}
+                        >
+                          <span>All {selectedSubcategory}</span>
+                          <span
+                            className={`text-[10px] px-1.5 py-0.2 rounded-full font-black ${
+                              selectedSubSubcategory === 'All'
+                                ? 'bg-slate-800 text-white'
+                                : 'bg-slate-100 text-slate-600'
+                            }`}
+                          >
+                            {totalSubProducts}
+                          </span>
+                        </button>
+
+                        {/* Level-3 Sub-subcategory Pills */}
+                        {availableChildSubs.map((ssName, ssIdx) => {
+                          const target = ssName.toLowerCase();
+                          const count = products.filter(
+                            (p) =>
+                              p.category === selectedCategory &&
+                              p.subcategory === selectedSubcategory &&
+                              ((p.subSubcategory || p.childSubcategory || '').toLowerCase() === target ||
+                                (p.tags && p.tags.some((t) => t.toLowerCase() === target)) ||
+                                p.name.toLowerCase().includes(target))
+                          ).length;
+                          const isSelected = selectedSubSubcategory === ssName;
+
+                          return (
+                            <button
+                              key={ssIdx}
+                              onClick={() => handleSelectSubSubcategory(ssName)}
+                              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap shrink-0 flex items-center gap-1.5 shadow-2xs ${
+                                isSelected
+                                  ? 'bg-sky-600 text-white shadow-xs ring-2 ring-sky-300'
+                                  : 'bg-white border border-sky-200 text-slate-800 hover:bg-sky-600 hover:text-white hover:border-sky-600'
+                              }`}
+                            >
+                              <span>{ssName}</span>
+                              <span
+                                className={`text-[10px] px-1.5 py-0.2 rounded-full font-black ${
+                                  isSelected
+                                    ? 'bg-sky-700 text-white'
+                                    : 'bg-sky-50 text-sky-700'
+                                }`}
+                              >
+                                {count}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      {/* Right Scroll Arrow (Desktop) */}
+                      <button
+                        type="button"
+                        onClick={() => scrollSubSubcategoryChips('right')}
+                        className="hidden md:flex absolute -right-2.5 top-1/2 -translate-y-1/2 z-10 w-7 h-7 rounded-full bg-white border border-sky-300 shadow-sm items-center justify-center text-sky-700 hover:text-white hover:bg-sky-600 hover:border-sky-600 transition-all cursor-pointer"
+                        aria-label="Scroll right"
+                      >
+                        <ChevronRight className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  )}
                 </div>
               );
             })()}
 
             {/* Products Grid */}
-            {getShopFilteredProducts().length === 0 ? (
+            {shopFilteredProducts.length === 0 ? (
               <div className="bg-white rounded-3xl border border-slate-200 p-12 text-center max-w-md mx-auto">
                 <p className="text-sm font-bold text-slate-800">No Products Found</p>
                 <p className="text-xs text-slate-500 mt-1">
@@ -2341,13 +2481,13 @@ export default function App() {
               </div>
             ) : (
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3 sm:gap-4">
-                {getShopFilteredProducts().map((product, index) => (
+                {shopFilteredProducts.map((product, index) => (
                   <ProductCard
                     key={`${product.id}_${index}`}
                     product={product}
-                    onAddToCart={(p, qty, v, img) => handleAddToCart(p, qty || 1, v, img)}
-                    onBuyNow={(p, qty, v, img) => handleBuyNow(p, qty || 1, v, img)}
-                    onQuickView={(p) => handleOpenProductDetail(p)}
+                    onAddToCart={handleAddToCart}
+                    onBuyNow={handleBuyNow}
+                    onQuickView={handleOpenProductDetail}
                     onToggleWishlist={handleToggleWishlist}
                     isWishlisted={wishlist.some((w) => w.id === product.id)}
                     currentRole={currentRole}

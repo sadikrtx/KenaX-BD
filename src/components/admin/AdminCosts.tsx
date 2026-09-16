@@ -270,6 +270,12 @@ export const AdminCosts: React.FC<AdminCostsProps> = ({
   // Expense Modal State
   const [isExpenseModalOpen, setIsExpenseModalOpen] = useState(false);
   const [editingExpense, setEditingExpense] = useState<ExpenseRecord | null>(null);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  const showToast = (msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => setToastMessage(null), 4000);
+  };
   const [expenseFormData, setExpenseFormData] = useState<{
     category: ExpenseCategory;
     title: string;
@@ -564,6 +570,7 @@ export const AdminCosts: React.FC<AdminCostsProps> = ({
         updatedAt: new Date().toISOString(),
       };
       onUpdateExpense(updated);
+      showToast(`খরচের হিসাব "${updated.title}" সফলভাবে আপডেট হয়েছে!`);
     } else {
       const newExp: ExpenseRecord = {
         id: `EXP-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
@@ -581,6 +588,7 @@ export const AdminCosts: React.FC<AdminCostsProps> = ({
         createdAt: new Date().toISOString(),
       };
       onAddExpense(newExp);
+      showToast(`নতুন খরচ "${newExp.title}" সফলভাবে যোগ হয়েছে!`);
     }
 
     setIsExpenseModalOpen(false);
@@ -650,6 +658,7 @@ export const AdminCosts: React.FC<AdminCostsProps> = ({
         updatedAt: new Date().toISOString(),
       };
       onUpdateOtherProfit(updated);
+      showToast(`আদার্স প্রফিট "${updated.title}" সফলভাবে আপডেট হয়েছে!`);
     } else if (onAddOtherProfit) {
       const newProfit: OtherProfitRecord = {
         id: `PRF-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
@@ -666,6 +675,7 @@ export const AdminCosts: React.FC<AdminCostsProps> = ({
         createdAt: new Date().toISOString(),
       };
       onAddOtherProfit(newProfit);
+      showToast(`নতুন আদার্স প্রফিট "${newProfit.title}" সফলভাবে যুক্ত হয়েছে!`);
     }
 
     setIsProfitModalOpen(false);
@@ -727,6 +737,21 @@ export const AdminCosts: React.FC<AdminCostsProps> = ({
 
   return (
     <div className="space-y-6 pb-12">
+      {toastMessage && (
+        <div className="p-4 rounded-2xl bg-emerald-600 text-white font-bold text-xs sm:text-sm flex items-center justify-between shadow-lg shadow-emerald-600/20 animate-in fade-in">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-5 h-5 text-emerald-100 shrink-0" />
+            <span>{toastMessage}</span>
+          </div>
+          <button
+            onClick={() => setToastMessage(null)}
+            className="p-1 rounded-lg hover:bg-white/20 transition-colors cursor-pointer"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       {/* Top Header & Tab Navigation Bar */}
       <div className="bg-white p-4 sm:p-5 rounded-3xl border border-slate-200/80 shadow-xs">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">

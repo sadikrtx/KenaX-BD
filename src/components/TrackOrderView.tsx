@@ -366,7 +366,7 @@ export const TrackOrderView: React.FC<TrackOrderViewProps> = ({
         <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden animate-in fade-in duration-200">
           {/* Top Banner */}
           <div className="p-4 sm:p-6 bg-slate-900 text-white flex flex-col md:flex-row md:items-center md:justify-between gap-4 border-b border-slate-800">
-            {/* Left/Main Column: Order Info & Status */}
+            {/* Left/Main Column: Order Info & Status & Payment */}
             <div className="space-y-2 flex-1">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-[11px] font-bold text-sky-400 uppercase tracking-wider">
@@ -396,66 +396,55 @@ export const TrackOrderView: React.FC<TrackOrderViewProps> = ({
                 Status: <span className="text-sky-400">{searchedOrder.orderStatus}</span>
               </h2>
 
-              <p className="text-xs text-slate-400 flex flex-wrap items-center gap-x-2 gap-y-1">
-                <span>Placed on {new Date(searchedOrder.createdAt).toLocaleDateString('en-BD')}</span>
-                <span className="hidden sm:inline text-slate-600">•</span>
-                <span>
-                  Estimated Delivery:{' '}
-                  <b className="text-white bg-slate-800/80 px-2 py-0.5 rounded font-semibold text-[11px]">
-                    {searchedOrder.estimatedDelivery || '2-4 Days'}
-                  </b>
+              <div className="text-xs text-slate-300 flex flex-wrap items-center gap-x-2 gap-y-1.5">
+                <span>Placed on <b className="text-white">{new Date(searchedOrder.createdAt).toLocaleDateString('en-BD')}</b></span>
+                <span className="text-slate-600">•</span>
+                <span className="inline-flex items-center gap-1.5 flex-wrap">
+                  Payment: <b className="text-white">{searchedOrder.paymentMethod}</b>
+                  <span
+                    className={`text-[10px] sm:text-[11px] font-bold px-2 py-0.5 rounded-md ${
+                      searchedOrder.paymentStatus === 'Paid'
+                        ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                        : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                    }`}
+                  >
+                    ({searchedOrder.paymentStatus})
+                  </span>
                 </span>
-              </p>
+              </div>
             </div>
 
-            {/* Right/Amount Column: Strictly single line for Total Amount and Payment info */}
-            <div className="w-full md:w-auto p-3 sm:p-3.5 rounded-2xl bg-slate-800/80 border border-slate-700/70 flex items-center justify-between md:justify-end gap-3 flex-row flex-nowrap overflow-x-auto no-scrollbar">
-              <div className="flex items-center gap-1.5 whitespace-nowrap">
-                <span className="text-[11px] sm:text-xs text-slate-400 font-medium">Total Amount:</span>
-                <span className="text-base sm:text-xl font-black text-sky-400">
-                  ৳ {searchedOrder.totalAmount.toLocaleString('en-BD')}
-                </span>
-              </div>
-              <span className="text-slate-600 text-xs">•</span>
-              <div className="flex items-center gap-1.5 whitespace-nowrap">
-                <span className="text-[11px] sm:text-xs text-slate-300">
-                  Payment: <b className="text-white">{searchedOrder.paymentMethod}</b>
-                </span>
-                <span
-                  className={`text-[10px] sm:text-[11px] font-bold px-2 py-0.5 rounded-md ${
-                    searchedOrder.paymentStatus === 'Paid'
-                      ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
-                      : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
-                  }`}
-                >
-                  ({searchedOrder.paymentStatus})
-                </span>
-              </div>
+            {/* Right/Amount Column */}
+            <div className="p-3 sm:p-3.5 rounded-2xl bg-slate-800/80 border border-slate-700/70 flex items-center justify-between md:justify-end gap-3 shrink-0">
+              <span className="text-xs sm:text-sm text-slate-400 font-medium">Total Amount:</span>
+              <span className="text-lg sm:text-2xl font-black text-sky-400">
+                ৳ {searchedOrder.totalAmount.toLocaleString('en-BD')}
+              </span>
             </div>
           </div>
 
           {/* Timeline Visualizer */}
-          <div className="p-4 sm:p-7 border-b border-slate-100 bg-slate-50/60">
-            {/* Delivery Progress & Current Status Header strictly in 1 single line */}
-            <div className="flex items-center justify-between gap-2 mb-4 sm:mb-6 flex-nowrap">
-              <div className="flex items-center gap-2 whitespace-nowrap min-w-0">
+          <div className="p-3 sm:p-7 border-b border-slate-100 bg-slate-50/60 overflow-hidden">
+            {/* Delivery Progress & Current Status Header */}
+            <div className="flex items-center justify-between gap-2 mb-4 sm:mb-6">
+              <div className="flex items-center gap-2 min-w-0">
                 <span className="w-2 h-2 rounded-full bg-sky-500 animate-pulse shrink-0"></span>
                 <h3 className="text-xs font-black uppercase tracking-wider text-slate-700 truncate">
                   Delivery Progress
                 </h3>
               </div>
-              <div className="flex items-center gap-2 whitespace-nowrap shrink-0">
-                <span className="text-[11px] sm:text-xs font-bold text-sky-700 bg-sky-50 px-2.5 py-1 rounded-full border border-sky-200">
+              <div className="shrink-0">
+                <span className="text-[10px] sm:text-xs font-bold text-sky-700 bg-sky-50 px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-full border border-sky-200">
                   Current Status: <b className="font-black text-sky-900">{searchedOrder.orderStatus}</b>
                 </span>
               </div>
             </div>
 
-            {/* Single Continuous 7-Step Line (Mobile & Desktop) */}
-            <div className="overflow-x-auto no-scrollbar scroll-smooth py-2 -mx-2 px-2 sm:mx-0 sm:px-0">
-              <div className="min-w-[540px] sm:min-w-0 relative">
+            {/* 7-Step Responsive Node Line */}
+            <div className="py-2 w-full">
+              <div className="w-full relative">
                 {/* Connecting Track Line behind the circles */}
-                <div className="absolute top-4 sm:top-5 left-[7.14%] right-[7.14%] h-1 sm:h-1.5 bg-slate-200 rounded-full z-0 -translate-y-1/2">
+                <div className="absolute top-3 sm:top-5 left-[7.14%] right-[7.14%] h-1 sm:h-1.5 bg-slate-200 rounded-full z-0 -translate-y-1/2">
                   <div
                     className="h-full bg-gradient-to-r from-sky-500 via-sky-600 to-emerald-500 rounded-full transition-all duration-500 ease-out"
                     style={{
@@ -486,30 +475,30 @@ export const TrackOrderView: React.FC<TrackOrderViewProps> = ({
                       <div key={idx} className="flex flex-col items-center text-center px-0.5">
                         {/* Circle Badge */}
                         <div
-                          className={`w-8 h-8 sm:w-10 sm:h-10 rounded-full flex items-center justify-center transition-all duration-300 ${
+                          className={`w-6 h-6 sm:w-10 sm:h-10 rounded-full flex items-center justify-center transition-all duration-300 ${
                             isCurrent
-                              ? 'bg-emerald-600 text-white ring-4 ring-emerald-100 shadow-md scale-110'
+                              ? 'bg-emerald-600 text-white ring-2 sm:ring-4 ring-emerald-100 shadow-md scale-105 sm:scale-110'
                               : isCompleted
-                              ? 'bg-sky-600 text-white ring-2 ring-sky-100 shadow-xs'
+                              ? 'bg-sky-600 text-white ring-1 sm:ring-2 ring-sky-100 shadow-xs'
                               : isCancelled
                               ? 'bg-rose-50 text-rose-400 border border-rose-200'
-                              : 'bg-white text-slate-400 border-2 border-slate-200 shadow-xs'
+                              : 'bg-white text-slate-400 border border-slate-200 shadow-xs'
                           }`}
                           title={`Step ${idx + 1}: ${step}`}
                         >
                           {isCompleted && !isCurrent ? (
-                            <CheckCircle2 className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
+                            <CheckCircle2 className="w-3.5 h-3.5 sm:w-5 sm:h-5 text-white" />
                           ) : (
-                            <span className="text-[11px] sm:text-xs font-black">
+                            <span className="text-[10px] sm:text-xs font-black">
                               {idx + 1}
                             </span>
                           )}
                         </div>
 
                         {/* Step Label */}
-                        <div className="mt-2 text-center">
+                        <div className="mt-1.5 text-center">
                           <span
-                            className={`block text-[10px] sm:text-xs font-bold leading-tight ${
+                            className={`block text-[8px] sm:text-xs font-bold leading-tight tracking-tighter sm:tracking-normal ${
                               isCurrent
                                 ? 'text-emerald-700 font-black'
                                 : isCompleted
@@ -520,7 +509,7 @@ export const TrackOrderView: React.FC<TrackOrderViewProps> = ({
                             {step}
                           </span>
                           {isCurrent && (
-                            <span className="inline-block mt-0.5 px-1.5 py-0.5 rounded-full text-[9px] font-black bg-emerald-100 text-emerald-800 tracking-wide uppercase">
+                            <span className="hidden sm:inline-block mt-0.5 px-1.5 py-0.5 rounded-full text-[9px] font-black bg-emerald-100 text-emerald-800 tracking-wide uppercase">
                               Active
                             </span>
                           )}

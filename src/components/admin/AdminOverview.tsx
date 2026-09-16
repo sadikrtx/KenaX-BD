@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { KenaXLogo } from '../KenaXLogo';
 import {
   TrendingUp,
   DollarSign,
@@ -695,11 +696,9 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
     ctx.restore();
   };
 
-  // Black-background KenaX BD Logo
+  // KenaX BD Logo without background
   const drawBlackKenaXLogo = (ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number) => {
     ctx.save();
-    // Black background container
-    drawRoundRect(ctx, x, y, w, h, 14, '#000000', '#334155');
 
     // 1. Store Shopping Cart on Top (Pure White)
     ctx.strokeStyle = '#FFFFFF';
@@ -861,46 +860,39 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
       ctx.fillStyle = grad;
       drawRoundRect(ctx, 40, 40, width - 80, 210, 24, '#0f172a');
 
-      // Official Logo Container (Black Card with sleek border)
-      drawRoundRect(ctx, 65, 48, 224, 76, 14, '#000000', '#334155');
-
-      if (logoImg) {
-        try {
-          ctx.drawImage(logoImg, 65, 48, 224, 76);
-        } catch {
-          drawBlackKenaXLogo(ctx, 65, 48, 224, 76);
-        }
-      } else {
-        drawBlackKenaXLogo(ctx, 65, 48, 224, 76);
-      }
-
-      // Official Badges on Top Right
-      drawRoundRect(ctx, width - 330, 60, 260, 40, 10, '#0284c7');
-      ctx.fillStyle = '#ffffff';
-      ctx.font = 'bold 13px system-ui, -apple-system, sans-serif';
-      ctx.fillText(`STATEMENT: ${getFinTimeframeLabel(finTimeframe).toUpperCase()}`, width - 315, 85);
-
-      drawRoundRect(ctx, width - 330, 110, 260, 36, 10, '#0369a1');
-      ctx.fillStyle = '#ffffff';
-      ctx.font = 'bold 12px system-ui, -apple-system, sans-serif';
-      ctx.fillText('REAL-TIME EXECUTIVE AUDIT', width - 295, 133);
-
-      // Header Title & Subtitle
+      // Header Title & Subtitle on Left
       ctx.fillStyle = '#ffffff';
       ctx.font = 'bold 23px system-ui, -apple-system, sans-serif';
-      ctx.fillText('FINANCIAL PERFORMANCE & REVENUE OVERVIEW', 65, 148);
+      ctx.fillText('FINANCIAL PERFORMANCE & REVENUE OVERVIEW', 65, 110);
 
       ctx.fillStyle = '#38bdf8';
       ctx.font = 'bold 15px system-ui, -apple-system, sans-serif';
-      ctx.fillText(`OFFICIAL BALANCE & PROFIT STATEMENT (${getFinTimeframeLabel(finTimeframe).toUpperCase()})`, 65, 176);
+      ctx.fillText(`OFFICIAL BALANCE & PROFIT STATEMENT (${getFinTimeframeLabel(finTimeframe).toUpperCase()})`, 65, 142);
 
       ctx.fillStyle = '#94a3b8';
       ctx.font = '13px system-ui, -apple-system, sans-serif';
       ctx.fillText(
         `Generated On: ${new Date().toLocaleString('en-US', { dateStyle: 'full', timeStyle: 'short' })} | Period: ${getFinTimeframeLabel(finTimeframe)} | Signatory: Sadik`,
         65,
-        202
+        175
       );
+
+      // KenaX BD Logo on the Right side opposite to title (No black background, perfect aspect ratio)
+      const targetHeight = 88;
+      const naturalAspect = logoImg && logoImg.naturalWidth && logoImg.naturalHeight ? logoImg.naturalWidth / logoImg.naturalHeight : (250 / 105);
+      const targetWidth = targetHeight * naturalAspect;
+      const logoX = width - targetWidth - 65;
+      const logoY = 105 - targetHeight / 2;
+
+      if (logoImg) {
+        try {
+          ctx.drawImage(logoImg, logoX, logoY, targetWidth, targetHeight);
+        } catch {
+          drawBlackKenaXLogo(ctx, logoX, logoY, targetWidth, targetHeight);
+        }
+      } else {
+        drawBlackKenaXLogo(ctx, logoX, logoY, targetWidth, targetHeight);
+      }
 
       // 1. FINANCIAL PERFORMANCE METRICS (8 Key Matrix Boxes)
       let startY = 280;
@@ -2342,19 +2334,13 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
                 {/* Top Brand Header */}
                 <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pb-6 border-b-2 border-slate-100">
                   <div className="flex items-center gap-3.5">
-                    {/* Official Black KenaX BD Logo Box */}
-                    <div className="bg-slate-950 px-4 py-2.5 rounded-xl border border-slate-800 flex items-center gap-2 shadow-sm">
-                      <div className="w-7 h-7 rounded-lg bg-sky-500 flex items-center justify-center text-slate-950 font-black text-sm">
-                        K
-                      </div>
-                      <div className="text-left">
-                        <span className="text-lg font-black text-white tracking-tight">Kena<span className="text-sky-400">X</span> BD</span>
-                        <span className="block text-[9px] font-bold text-sky-300 uppercase tracking-widest">Smart Shopping</span>
-                      </div>
+                    {/* Official KenaX BD Logo without background */}
+                    <div className="flex items-center">
+                      <KenaXLogo size="md" theme="light" />
                     </div>
                     <div>
                       <span className="px-2.5 py-0.5 rounded-md bg-sky-100 text-sky-800 text-[11px] font-black uppercase tracking-wider border border-sky-200">
-                        OFFICIAL RECEIPT
+                        OFFICIAL REPORT
                       </span>
                       <p className="text-xs text-slate-500 mt-1">Authorized Executive Balance Statement</p>
                     </div>
@@ -2369,22 +2355,27 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
                   </div>
                 </div>
 
-                {/* Statement Title */}
-                <div className="bg-slate-900 rounded-xl p-4 text-white flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                {/* Statement Title with Logo on Right */}
+                <div className="bg-slate-900 rounded-xl p-5 text-white flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                   <div>
                     <div className="flex items-center gap-2">
-                      <h4 className="text-base font-black">Financial Performance &amp; Revenue Statement</h4>
+                      <h4 className="text-base sm:text-lg font-black">Financial Performance &amp; Revenue Statement</h4>
                       <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase bg-sky-500 text-slate-950">
                         {getFinTimeframeLabel(finTimeframe)}
                       </span>
                     </div>
-                    <p className="text-xs text-slate-300 mt-0.5">
-                      Delivered cash collections, supplier costs, courier logistics, operating expenses &amp; realized profits.
-                    </p>
+                    <span className="text-xs text-slate-400 mt-1 block font-mono">
+                      Real-Time Audited Financial &amp; Profit Report
+                    </span>
                   </div>
-                  <div className="text-right">
-                    <span className="text-xs text-emerald-400 font-bold block uppercase tracking-wide">Real Net Profit</span>
-                    <span className="text-2xl font-black text-emerald-300">৳{totalNetRevenue.toLocaleString('en-BD')}</span>
+                  <div className="flex items-center gap-5">
+                    <div className="text-right">
+                      <span className="text-xs text-emerald-400 font-bold block uppercase tracking-wide">Real Net Profit</span>
+                      <span className="text-2xl font-black text-emerald-300">৳{totalNetRevenue.toLocaleString('en-BD')}</span>
+                    </div>
+                    <div className="flex items-center">
+                      <KenaXLogo size="lg" theme="dark" className="h-14 sm:h-16 w-auto object-contain" />
+                    </div>
                   </div>
                 </div>
 
@@ -2469,7 +2460,7 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
                         <span className="block text-[7px] font-bold text-sky-700 uppercase">AUTHORIZED SIGNATURE</span>
                       </div>
                     </div>
-                    <span className="text-xs font-bold text-slate-800 mt-2">Authorized Signatory: Sadik</span>
+                    <span className="text-xs font-bold text-slate-800 mt-2">Authorized Signatory</span>
                     <span className="text-[10px] text-slate-500">Executive Authority</span>
                   </div>
                 </div>

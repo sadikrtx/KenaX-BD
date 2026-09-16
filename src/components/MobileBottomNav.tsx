@@ -205,7 +205,7 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
               setIsSearchOpen(false);
               setIsCategoriesOpen(false);
               onNavigate('home');
-              window.scrollTo({ top: 0, behavior: 'smooth' });
+              window.scrollTo({ top: 0, behavior: 'instant' });
             }}
             className={`flex-1 flex flex-col items-center justify-center py-1 relative transition-colors cursor-pointer ${
               isHomeActive && !isSearchOpen && !isCategoriesOpen && !isCartOpen
@@ -248,7 +248,7 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
             <span className="text-[10px] tracking-tight leading-none">Cart</span>
           </button>
 
-          {/* 5. Dashboard Tab (Far Right Corner - Role-Based Routing) */}
+          {/* 5. Dashboard / Login Tab (Far Right Corner - Role-Based Routing) */}
           <button
             type="button"
             onClick={() => {
@@ -256,8 +256,10 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
               setIsCategoriesOpen(false);
               if (currentStaff) {
                 onNavigate('admin-dashboard');
-              } else {
+              } else if (currentCustomer) {
                 onNavigate('customer-dashboard');
+              } else {
+                onOpenCustomerAuth();
               }
             }}
             className={`flex-1 flex flex-col items-center justify-center py-1 relative transition-colors cursor-pointer ${
@@ -276,10 +278,10 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
                 {currentCustomer.name ? currentCustomer.name.charAt(0).toUpperCase() : <User className="w-3.5 h-3.5" />}
               </div>
             ) : (
-              <User className="w-5 h-5 mb-0.5 transition-transform active:scale-90" />
+              <LogIn className="w-5 h-5 mb-0.5 transition-transform active:scale-90" />
             )}
             <span className="text-[10px] tracking-tight leading-none truncate max-w-[60px]">
-              {currentStaff ? 'Admin' : 'Dashboard'}
+              {currentStaff ? 'Admin' : currentCustomer ? 'Dashboard' : 'Login'}
             </span>
           </button>
         </div>

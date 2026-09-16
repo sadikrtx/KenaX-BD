@@ -3,6 +3,7 @@ import { ShoppingCart, Star, Heart, Eye, Zap, ExternalLink, User, Package } from
 import { Product, UserRole } from '../types';
 import { getOptimizedImageUrl, isImagePreloaded, markImageLoaded, NEUTRAL_PRODUCT_PLACEHOLDER } from '../utils/imageOptimizer';
 import { resolveOriginalImageMedia, getSynchronouslyResolvedMedia } from '../lib/firebase';
+import { getProductStockStatus, getStockStatusInfo } from '../utils/stockUtils';
 
 interface ProductCardProps {
   product: Product;
@@ -16,7 +17,7 @@ interface ProductCardProps {
   onOpenCustomerAuth?: () => void;
 }
 
-export const ProductCard: React.FC<ProductCardProps> = ({
+export const ProductCard: React.FC<ProductCardProps> = React.memo(({
   product,
   onAddToCart,
   onBuyNow,
@@ -36,12 +37,12 @@ export const ProductCard: React.FC<ProductCardProps> = ({
   const effectiveRaw = syncMedia || rawImage;
   const initialOptimized = effectiveRaw.startsWith('media://')
     ? effectiveRaw
-    : getOptimizedImageUrl(effectiveRaw, 400);
+    : getOptimizedImageUrl(effectiveRaw, 360);
 
   const [displayImage, setDisplayImage] = useState<string>(initialOptimized);
   const [isLoaded, setIsLoaded] = useState<boolean>(() => {
     if (initialOptimized.startsWith('media://')) return false;
-    return isImagePreloaded(initialOptimized, 400) || !initialOptimized.startsWith('media://');
+    return isImagePreloaded(initialOptimized, 360) || !initialOptimized.startsWith('media://');
   });
 
   useEffect(() => {
@@ -51,21 +52,21 @@ export const ProductCard: React.FC<ProductCardProps> = ({
       if (syncVal) {
         setDisplayImage(syncVal);
         setIsLoaded(true);
-        markImageLoaded(syncVal, 400);
+        markImageLoaded(syncVal, 360);
       } else {
         resolveOriginalImageMedia(rawImage, product.id).then((url) => {
           if (isMounted) {
             const validUrl = (url && !url.startsWith('media://')) ? url : NEUTRAL_PRODUCT_PLACEHOLDER;
             setDisplayImage(validUrl);
             setIsLoaded(true);
-            markImageLoaded(validUrl, 400);
+            markImageLoaded(validUrl, 360);
           }
         });
       }
     } else {
-      const optimized = getOptimizedImageUrl(rawImage, 400);
+      const optimized = getOptimizedImageUrl(rawImage, 360);
       setDisplayImage(optimized);
-      if (isImagePreloaded(optimized, 400)) {
+      if (isImagePreloaded(optimized, 360)) {
         setIsLoaded(true);
       }
     }
@@ -147,7 +148,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({
   };
 
   return (
-    <div className="bg-white rounded-2xl border border-slate-200 hover:border-sky-300 shadow-xs hover:shadow-md transition-all duration-200 flex flex-col justify-between overflow-hidden group">
+    <div className="product-card-contain bg-white rounded-2xl border border-slate-200 hover:border-sky-300 shadow-xs hover:shadow-md transition-all duration-200 flex flex-col justify-between overflow-hidden group transform-gpu">
       {/* Product Image & Badges */}
       <div
         onClick={() => onQuickView(product)}
@@ -223,23 +224,49 @@ export const ProductCard: React.FC<ProductCardProps> = ({
             {getSpecsSnippet()}
           </p>
 
-          {/* Star Rating & Review Count */}
-          <div className="flex items-center gap-1 mt-1 text-[10px] sm:text-xs text-amber-500">
-            <div className="flex items-center">
-              {[...Array(5)].map((_, i) => (
-                <Star
-                  key={i}
-                  className={`w-2.5 h-2.5 sm:w-3 sm:h-3 ${
-                    i < Math.floor(product.rating || 5)
-                      ? 'fill-amber-400 text-amber-400'
-                      : 'text-slate-300'
-                  }`}
-                />
-              ))}
+          {/* Star Rating & Review Count & Availability Badge */}
+          <div className="flex items-center justify-between gap-1 mt-1 text-[10px] sm:text-xs">
+            <div className="flex items-center gap-1 text-amber-500">
+              <div className="flex items-center">
+                {[...Array(5)].map((_, i) => (
+                  <Star
+                    key={i}
+                    className={`w-2.5 h-2.5 sm:w-3 sm:h-3 ${
+                      i < Math.floor(product.rating || 5)
+                        ? 'fill-amber-400 text-amber-400'
+                        : 'text-slate-300'
+                    }`}
+                  />
+                ))}
+              </div>
+              <span className="text-[10px] sm:text-[11px] font-semibold text-slate-600">
+                ({product.reviewsCount ?? 0})
+              </span>
             </div>
-            <span className="text-[10px] sm:text-[11px] font-semibold text-slate-600">
-              ({product.reviewsCount ?? 0})
-            </span>
+
+            {/* Availability status badge */}
+            {(() => {
+              const status = getProductStockStatus(product);
+              if (status === 'out_of_stock') {
+                return (
+                  <span className="text-[9px] sm:text-[10px] font-bold text-rose-700 bg-rose-50 border border-rose-200 px-1.5 py-0.2 rounded-md">
+                    Out of Stock
+                  </span>
+                );
+              }
+              if (status === 'upcoming') {
+                return (
+                  <span className="text-[9px] sm:text-[10px] font-bold text-purple-700 bg-purple-50 border border-purple-200 px-1.5 py-0.2 rounded-md">
+                    Upcoming
+                  </span>
+                );
+              }
+              return (
+                <span className="text-[9px] sm:text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.2 rounded-md">
+                  In Stock
+                </span>
+              );
+            })()}
           </div>
         </div>
 
@@ -265,37 +292,65 @@ export const ProductCard: React.FC<ProductCardProps> = ({
             ) : null}
           </div>
 
-          {/* Action Buttons: Add to Cart & Buy Now side-by-side (Compact & Responsive with zero overlap) */}
-          <div className="grid grid-cols-2 gap-1.5 sm:gap-2 mt-1 min-w-0">
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                onAddToCart(product, 1, undefined, displayImage || product.images?.[0]);
-              }}
-              className="w-full py-2 md:py-2.5 px-1.5 sm:px-2 rounded-xl bg-slate-100 hover:bg-sky-50 hover:border-sky-300 active:bg-slate-200 text-slate-800 hover:text-sky-900 font-bold text-[11px] sm:text-xs flex items-center justify-center gap-1 sm:gap-1.5 transition-all cursor-pointer border border-slate-200 shadow-2xs min-w-0 overflow-hidden"
-              title="Add to Cart"
-            >
-              <ShoppingCart className="w-3.5 h-3.5 text-sky-700 shrink-0" />
-              <span className="truncate">Add to Cart</span>
-            </button>
+          {/* Action Buttons based on Availability Status */}
+          {(() => {
+            const status = getProductStockStatus(product);
+            if (status === 'out_of_stock') {
+              return (
+                <button
+                  disabled
+                  className="w-full py-2.5 px-2 rounded-xl bg-slate-100 text-slate-400 font-bold text-xs flex items-center justify-center gap-1 border border-slate-200 opacity-80 cursor-not-allowed"
+                >
+                  <span>Out of Stock (আউট অফ স্টক)</span>
+                </button>
+              );
+            }
+            if (status === 'upcoming') {
+              return (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onQuickView(product);
+                  }}
+                  className="w-full py-2.5 px-2 rounded-xl bg-purple-50 hover:bg-purple-100 text-purple-800 font-bold text-xs flex items-center justify-center gap-1 border border-purple-200 cursor-pointer transition-colors"
+                >
+                  <span>Upcoming (আপকামিং)</span>
+                </button>
+              );
+            }
+            return (
+              <div className="grid grid-cols-2 gap-1.5 sm:gap-2 mt-1 min-w-0">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onAddToCart(product, 1, undefined, displayImage || product.images?.[0]);
+                  }}
+                  className="w-full py-2 md:py-2.5 px-1.5 sm:px-2 rounded-xl bg-slate-100 hover:bg-sky-50 hover:border-sky-300 active:bg-slate-200 text-slate-800 hover:text-sky-900 font-bold text-[11px] sm:text-xs flex items-center justify-center gap-1 sm:gap-1.5 transition-all cursor-pointer border border-slate-200 shadow-2xs min-w-0 overflow-hidden"
+                  title="Add to Cart"
+                >
+                  <ShoppingCart className="w-3.5 h-3.5 text-sky-700 shrink-0" />
+                  <span className="truncate">Add to Cart</span>
+                </button>
 
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                const chosenImage = displayImage || product.images?.[0];
-                if (onBuyNow) {
-                  onBuyNow(product, 1, undefined, chosenImage);
-                } else {
-                  onAddToCart(product, 1, undefined, chosenImage);
-                }
-              }}
-              className="w-full py-2 md:py-2.5 px-1.5 sm:px-2 rounded-xl bg-gradient-to-r from-sky-600 via-sky-600 to-blue-600 hover:from-sky-500 hover:to-blue-500 active:from-sky-700 text-white font-black text-[11px] sm:text-xs flex items-center justify-center gap-1 sm:gap-1.5 transition-all shadow-xs hover:shadow-md active:scale-98 cursor-pointer min-w-0 overflow-hidden"
-              title="Buy Now"
-            >
-              <Zap className="w-3.5 h-3.5 fill-amber-300 text-amber-300 shrink-0" />
-              <span className="truncate">Buy Now</span>
-            </button>
-          </div>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    const chosenImage = displayImage || product.images?.[0];
+                    if (onBuyNow) {
+                      onBuyNow(product, 1, undefined, chosenImage);
+                    } else {
+                      onAddToCart(product, 1, undefined, chosenImage);
+                    }
+                  }}
+                  className="w-full py-2 md:py-2.5 px-1.5 sm:px-2 rounded-xl bg-gradient-to-r from-sky-600 via-sky-600 to-blue-600 hover:from-sky-500 hover:to-blue-500 active:from-sky-700 text-white font-black text-[11px] sm:text-xs flex items-center justify-center gap-1 sm:gap-1.5 transition-all shadow-xs hover:shadow-md active:scale-98 cursor-pointer min-w-0 overflow-hidden"
+                  title="Buy Now"
+                >
+                  <Zap className="w-3.5 h-3.5 fill-amber-300 text-amber-300 shrink-0" />
+                  <span className="truncate">Buy Now</span>
+                </button>
+              </div>
+            );
+          })()}
 
           {/* Staff-Only Dropship / Supplier Link (Strictly hidden from customers, cleanly structured) */}
           {isStaff && product.supplierUrl && (
@@ -317,4 +372,4 @@ export const ProductCard: React.FC<ProductCardProps> = ({
       </div>
     </div>
   );
-};
+});

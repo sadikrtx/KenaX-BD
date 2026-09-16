@@ -19,8 +19,21 @@ import {
 import { Product } from '../types/index.ts';
 
 let dbInstance: any = null;
+let quotaExceededLogged = false;
+
+function isQuotaError(err: any): boolean {
+  if (!err) return false;
+  const msg = String(err.message || err.toString?.() || '');
+  return (
+    msg.includes('Quota limit exceeded') ||
+    msg.includes('resource-exhausted') ||
+    msg.includes('429') ||
+    msg.includes('Free daily read units')
+  );
+}
 
 function getDb() {
+  if (quotaExceededLogged) return null;
   if (dbInstance) return dbInstance;
   try {
     const configPath = path.join(process.cwd(), 'firebase-applet-config.json');
@@ -40,7 +53,7 @@ function getDb() {
 
 export async function syncFirestoreWithServerStore(): Promise<void> {
   const db = getDb();
-  if (!db) return;
+  if (!db || quotaExceededLogged) return;
 
   try {
     console.log('[Firestore Sync] Synchronizing Firestore collections with server store...');
@@ -54,6 +67,13 @@ export async function syncFirestoreWithServerStore(): Promise<void> {
         deleteCustomerFromStore(d.id);
       });
     } catch (err: any) {
+      if (isQuotaError(err)) {
+        if (!quotaExceededLogged) {
+          quotaExceededLogged = true;
+          console.warn('[Firestore Sync] Firestore quota limit exceeded. Operating in high-speed local storage fallback mode.');
+        }
+        return;
+      }
       console.warn('[Firestore Sync] deletedCustomers read fallback:', err.message);
     }
 
@@ -66,6 +86,13 @@ export async function syncFirestoreWithServerStore(): Promise<void> {
         deleteStaffFromStore(d.id);
       });
     } catch (err: any) {
+      if (isQuotaError(err)) {
+        if (!quotaExceededLogged) {
+          quotaExceededLogged = true;
+          console.warn('[Firestore Sync] Firestore quota limit exceeded. Operating in high-speed local storage fallback mode.');
+        }
+        return;
+      }
       console.warn('[Firestore Sync] deletedStaff read fallback:', err.message);
     }
 
@@ -79,6 +106,13 @@ export async function syncFirestoreWithServerStore(): Promise<void> {
         deleteProductFromSQL(d.id).catch(() => {});
       });
     } catch (err: any) {
+      if (isQuotaError(err)) {
+        if (!quotaExceededLogged) {
+          quotaExceededLogged = true;
+          console.warn('[Firestore Sync] Firestore quota limit exceeded. Operating in high-speed local storage fallback mode.');
+        }
+        return;
+      }
       console.warn('[Firestore Sync] deletedProducts read fallback:', err.message);
     }
 
@@ -100,6 +134,13 @@ export async function syncFirestoreWithServerStore(): Promise<void> {
         });
       }
     } catch (err: any) {
+      if (isQuotaError(err)) {
+        if (!quotaExceededLogged) {
+          quotaExceededLogged = true;
+          console.warn('[Firestore Sync] Firestore quota limit exceeded. Operating in high-speed local storage fallback mode.');
+        }
+        return;
+      }
       console.warn('[Firestore Sync] Product sync error:', err.message);
     }
 
@@ -120,6 +161,13 @@ export async function syncFirestoreWithServerStore(): Promise<void> {
       });
       console.log(`[Firestore Sync] Synced ${custSnap.size} customers from Firestore.`);
     } catch (err: any) {
+      if (isQuotaError(err)) {
+        if (!quotaExceededLogged) {
+          quotaExceededLogged = true;
+          console.warn('[Firestore Sync] Firestore quota limit exceeded. Operating in high-speed local storage fallback mode.');
+        }
+        return;
+      }
       console.warn('[Firestore Sync] Customer sync error:', err.message);
     }
 
@@ -134,7 +182,14 @@ export async function syncFirestoreWithServerStore(): Promise<void> {
       });
       console.log(`[Firestore Sync] Synced ${orderSnap.size} orders from Firestore.`);
     } catch (err: any) {
-      console.warn('[Firestore Sync] Order sync error:', err.message);
+      if (isQuotaError(err)) {
+        if (!quotaExceededLogged) {
+          quotaExceededLogged = true;
+          console.warn('[Firestore Sync] Firestore quota limit exceeded. Operating in high-speed local storage fallback mode.');
+        }
+        return;
+      }
+      console.warn('[Firestore Sync] Order sync notice:', err.message);
     }
 
     // 3. Sync Staff
@@ -151,7 +206,14 @@ export async function syncFirestoreWithServerStore(): Promise<void> {
       });
       console.log(`[Firestore Sync] Synced ${staffSnap.size} staff from Firestore.`);
     } catch (err: any) {
-      console.warn('[Firestore Sync] Staff sync error:', err.message);
+      if (isQuotaError(err)) {
+        if (!quotaExceededLogged) {
+          quotaExceededLogged = true;
+          console.warn('[Firestore Sync] Firestore quota limit exceeded. Operating in high-speed local storage fallback mode.');
+        }
+        return;
+      }
+      console.warn('[Firestore Sync] Staff sync notice:', err.message);
     }
 
     // Push local valid items that might not be in Firestore yet

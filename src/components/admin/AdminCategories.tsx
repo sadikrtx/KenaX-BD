@@ -9,7 +9,6 @@ import {
   Package,
   Layers,
   Tag,
-  Grid,
   List,
   ChevronUp,
   ChevronDown,
@@ -18,9 +17,12 @@ import {
   ChevronLeft,
   ChevronRight,
   LayoutGrid,
-  PlusCircle,
-  Hash,
   Check,
+  Image as ImageIcon,
+  Sparkles,
+  ExternalLink,
+  CornerDownRight,
+  RefreshCw,
 } from 'lucide-react';
 import { Product, UserRole, StaffUser, Category, SubCategoryItem } from '../../types';
 import { getOptimizedImageUrl, handleImageError } from '../../utils/imageOptimizer';
@@ -36,6 +38,17 @@ interface AdminCategoriesProps {
   currentStaff: StaffUser | null;
 }
 
+const PRESET_CATEGORY_IMAGES = [
+  { name: 'Electronics', url: 'https://images.unsplash.com/photo-1546868871-7041f2a55e12?w=500&auto=format&fit=crop&q=80' },
+  { name: 'Fashion & Clothing', url: 'https://images.unsplash.com/photo-1445205170230-053b83016050?w=500&auto=format&fit=crop&q=80' },
+  { name: 'Home & Living', url: 'https://images.unsplash.com/photo-1513694203232-719a280e022f?w=500&auto=format&fit=crop&q=80' },
+  { name: 'Beauty & Care', url: 'https://images.unsplash.com/photo-1522337360788-8b13dee7a37e?w=500&auto=format&fit=crop&q=80' },
+  { name: 'Smartphones & Gadgets', url: 'https://images.unsplash.com/photo-1511707171634-5f897ff02aa9?w=500&auto=format&fit=crop&q=80' },
+  { name: 'Shoes & Footwear', url: 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=500&auto=format&fit=crop&q=80' },
+  { name: 'Watches & Jewelry', url: 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=500&auto=format&fit=crop&q=80' },
+  { name: 'Sports & Fitness', url: 'https://images.unsplash.com/photo-1517838277536-f5f99be501cd?w=500&auto=format&fit=crop&q=80' },
+];
+
 export const AdminCategories: React.FC<AdminCategoriesProps> = ({
   categories,
   products,
@@ -44,14 +57,15 @@ export const AdminCategories: React.FC<AdminCategoriesProps> = ({
   onReorderCategories,
   onDeleteCategory,
 }) => {
-  const [viewMode, setViewMode] = useState<'compact-list' | 'bento-grid'>('compact-list');
+  const [viewMode, setViewMode] = useState<'bento-grid' | 'compact-list'>('bento-grid');
   const [searchQuery, setSearchQuery] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingCat, setEditingCat] = useState<Category | null>(null);
   const [expandedCatIds, setExpandedCatIds] = useState<Record<string, boolean>>({});
   const [lastMovedCatId, setLastMovedCatId] = useState<string | null>(null);
+  const [saveSuccessNotice, setSaveSuccessNotice] = useState<string | null>(null);
 
-  // Form states
+  // Form states for Add/Edit Modal
   const [catName, setCatName] = useState('');
   const [catBanglaName, setCatBanglaName] = useState('');
   const [catImage, setCatImage] = useState('');
@@ -60,12 +74,16 @@ export const AdminCategories: React.FC<AdminCategoriesProps> = ({
 
   // Modal subcategory draft inputs
   const [newSubName, setNewSubName] = useState('');
-  const [newSubIcon, setNewSubIcon] = useState('Layers');
   const [newSubSubInput, setNewSubSubInput] = useState<Record<number, string>>({});
 
-  // Quick inline add inputs
+  // Quick inline add inputs on category cards
   const [quickSubInputs, setQuickSubInputs] = useState<Record<string, string>>({});
   const [quickSubSubInputs, setQuickSubSubInputs] = useState<Record<string, string>>({});
+
+  // Inline editing state for Category Name directly on card
+  const [editingCatNameId, setEditingCatNameId] = useState<string | null>(null);
+  const [editingCatNameVal, setEditingCatNameVal] = useState('');
+  const [editingCatBanglaVal, setEditingCatBanglaVal] = useState('');
 
   // Inline editing states for subcategories
   const [editingSubKey, setEditingSubKey] = useState<string | null>(null); // `${cat.id}_${sIdx}`
@@ -81,6 +99,7 @@ export const AdminCategories: React.FC<AdminCategoriesProps> = ({
   const [editingDraftSubSubKey, setEditingDraftSubSubKey] = useState<string | null>(null); // `${sIdx}_${ssIdx}`
   const [editingDraftSubSubVal, setEditingDraftSubSubVal] = useState('');
 
+  // Normalize subcategories so every item is an object with id, name, icon, subSubcategories
   const normalizeSubs = (subs?: (string | SubCategoryItem)[]): SubCategoryItem[] => {
     if (!subs) return [];
     return subs.map((s, idx) => {
@@ -94,9 +113,9 @@ export const AdminCategories: React.FC<AdminCategoriesProps> = ({
       }
       return {
         id: s.id || ('sub-' + idx + '-' + (s.name || '')),
-        name: s.name,
+        name: s.name || '',
         icon: s.icon || 'Layers',
-        subSubcategories: s.subSubcategories || [],
+        subSubcategories: Array.isArray(s.subSubcategories) ? s.subSubcategories : [],
       };
     });
   };
@@ -106,7 +125,7 @@ export const AdminCategories: React.FC<AdminCategoriesProps> = ({
     return [...categories].sort((a, b) => (a.priority ?? 0) - (b.priority ?? 0));
   }, [categories]);
 
-  // Filtered categories
+  // Filtered categories based on search
   const filteredCategories = useMemo(() => {
     if (!searchQuery.trim()) return sortedCategories;
     const q = searchQuery.toLowerCase().trim();
@@ -115,13 +134,16 @@ export const AdminCategories: React.FC<AdminCategoriesProps> = ({
       const matchBangla = (cat.banglaName || '').toLowerCase().includes(q);
       const matchSubs = (cat.subcategories || []).some((s) => {
         const subName = typeof s === 'string' ? s : s.name;
-        return subName.toLowerCase().includes(q);
+        const subSubMatches =
+          typeof s !== 'string' &&
+          (s.subSubcategories || []).some((ss) => ss.toLowerCase().includes(q));
+        return subName.toLowerCase().includes(q) || subSubMatches;
       });
       return matchName || matchBangla || matchSubs;
     });
   }, [sortedCategories, searchQuery]);
 
-  // Metrics
+  // Metrics calculation
   const totalSubcategories = useMemo(() => {
     return categories.reduce((acc, cat) => acc + (cat.subcategories?.length || 0), 0);
   }, [categories]);
@@ -133,7 +155,7 @@ export const AdminCategories: React.FC<AdminCategoriesProps> = ({
     }, 0);
   }, [categories]);
 
-  // Flash highlight on move
+  // Visual highlight on priority change
   const triggerMoveHighlight = (catId: string) => {
     setLastMovedCatId(catId);
     setTimeout(() => {
@@ -141,7 +163,14 @@ export const AdminCategories: React.FC<AdminCategoriesProps> = ({
     }, 1800);
   };
 
-  // Reordering handlers
+  const showToast = (message: string) => {
+    setSaveSuccessNotice(message);
+    setTimeout(() => {
+      setSaveSuccessNotice(null);
+    }, 4000);
+  };
+
+  // Reordering handlers for Categories
   const handleSetCategoryPosition = (catId: string, newPositionZeroIndexed: number) => {
     if (newPositionZeroIndexed < 0 || newPositionZeroIndexed >= sortedCategories.length) return;
     const currentIndex = sortedCategories.findIndex((c) => c.id === catId);
@@ -159,6 +188,7 @@ export const AdminCategories: React.FC<AdminCategoriesProps> = ({
       updatedWithPriority.forEach((c) => onUpdateCategory(c));
     }
     triggerMoveHighlight(catId);
+    showToast(`✓ Category "${movedCat.name}" moved to position #${newPositionZeroIndexed + 1}`);
   };
 
   const handleMoveCategory = (index: number, direction: 'up' | 'down') => {
@@ -169,7 +199,7 @@ export const AdminCategories: React.FC<AdminCategoriesProps> = ({
     handleSetCategoryPosition(catId, targetIndex);
   };
 
-  // Subcategory ordering
+  // Subcategory ordering inside category
   const handleSetSubcategoryPosition = (cat: Category, subIndex: number, newPositionZeroIndexed: number) => {
     const subs = normalizeSubs(cat.subcategories);
     if (newPositionZeroIndexed < 0 || newPositionZeroIndexed >= subs.length || subIndex === newPositionZeroIndexed) return;
@@ -183,6 +213,7 @@ export const AdminCategories: React.FC<AdminCategoriesProps> = ({
       subcategories: updatedSubs,
     };
     onUpdateCategory(updated);
+    showToast(`✓ Subcategory "${movedSub.name}" reordered`);
   };
 
   const handleToggleExpand = (catId: string) => {
@@ -194,23 +225,22 @@ export const AdminCategories: React.FC<AdminCategoriesProps> = ({
     setEditingCat(null);
     setCatName('');
     setCatBanglaName('');
-    setCatImage('https://images.unsplash.com/photo-1546868871-7041f2a55e12?w=400&auto=format&fit=crop&q=80');
+    setCatImage('https://images.unsplash.com/photo-1546868871-7041f2a55e12?w=500&auto=format&fit=crop&q=80');
     setSubcategoriesList([
       {
-        id: 'sub-1',
-        name: "Boys & Men's Fashion",
-        icon: 'Shirt',
-        subSubcategories: ['T-Shirts', 'Jeans & Pants', 'Panjabi & Shirts'],
+        id: 'sub-' + Date.now() + '-1',
+        name: 'Smartphones & Gadgets',
+        icon: 'Layers',
+        subSubcategories: ['Android Phones', 'Smartwatches', 'Earbuds'],
       },
       {
-        id: 'sub-2',
-        name: "Women's Collection",
-        icon: 'Sparkles',
-        subSubcategories: ['Saree', 'Three Piece', 'Kurti & Tops'],
+        id: 'sub-' + Date.now() + '-2',
+        name: 'Accessories & Power',
+        icon: 'Layers',
+        subSubcategories: ['Fast Chargers', 'Power Banks', 'Cables'],
       },
     ]);
     setNewSubName('');
-    setNewSubIcon('Layers');
     setNewSubSubInput({});
     setCatPriority(categories.length + 1);
     setIsModalOpen(true);
@@ -223,14 +253,13 @@ export const AdminCategories: React.FC<AdminCategoriesProps> = ({
     setCatImage(cat.featuredImage || '');
     setSubcategoriesList(normalizeSubs(cat.subcategories));
     setNewSubName('');
-    setNewSubIcon('Layers');
     setNewSubSubInput({});
     const currentPos = sortedCategories.findIndex((c) => c.id === cat.id);
     setCatPriority(currentPos !== -1 ? currentPos + 1 : (cat.priority ?? 0) + 1);
     setIsModalOpen(true);
   };
 
-  const handleAddSubcategory = () => {
+  const handleAddSubcategoryToDraft = () => {
     const trimmed = newSubName.trim();
     if (!trimmed) return;
     setSubcategoriesList([
@@ -238,15 +267,14 @@ export const AdminCategories: React.FC<AdminCategoriesProps> = ({
       {
         id: 'sub-' + Date.now(),
         name: trimmed,
-        icon: newSubIcon,
+        icon: 'Layers',
         subSubcategories: [],
       },
     ]);
     setNewSubName('');
-    setNewSubIcon('Layers');
   };
 
-  const handleRemoveSubcategory = (subId: string) => {
+  const handleRemoveSubcategoryFromDraft = (subId: string) => {
     setSubcategoriesList(subcategoriesList.filter((s) => s.id !== subId));
   };
 
@@ -303,19 +331,39 @@ export const AdminCategories: React.FC<AdminCategoriesProps> = ({
     }
 
     setIsModalOpen(false);
+    showToast(`✓ Category "${payload.name}" successfully saved and updated on storefront!`);
   };
 
   const handleDelete = (cat: Category) => {
     const attachedCount = products.filter((p) => p.category === cat.name).length;
     if (attachedCount > 0) {
       alert(
-        `Cannot delete category "${cat.name}" because it has ${attachedCount} active products. Reassign the products first.`
+        `Cannot delete category "${cat.name}" because it currently has ${attachedCount} active products. Reassign the products first.`
       );
       return;
     }
-    if (confirm(`Are you sure you want to delete category "${cat.name}"?`)) {
+    if (confirm(`Are you sure you want to delete category "${cat.name}"? This action cannot be undone.`)) {
       onDeleteCategory(cat.id);
+      showToast(`Category "${cat.name}" deleted.`);
     }
+  };
+
+  // Quick inline rename Category directly from card
+  const handleSaveRenameCategory = (cat: Category) => {
+    const newName = editingCatNameVal.trim();
+    if (!newName) {
+      setEditingCatNameId(null);
+      return;
+    }
+    const updated: Category = {
+      ...cat,
+      name: newName,
+      banglaName: editingCatBanglaVal.trim() || cat.banglaName || newName,
+      slug: newName.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
+    };
+    onUpdateCategory(updated);
+    setEditingCatNameId(null);
+    showToast(`✓ Category renamed to "${newName}" and saved live!`);
   };
 
   // Quick inline add subcategory on card
@@ -338,9 +386,10 @@ export const AdminCategories: React.FC<AdminCategoriesProps> = ({
     onUpdateCategory(updated);
     setQuickSubInputs((prev) => ({ ...prev, [cat.id]: '' }));
     setExpandedCatIds((prev) => ({ ...prev, [cat.id]: true }));
+    showToast(`✓ Subcategory "${inputVal}" added to "${cat.name}"`);
   };
 
-  // Quick inline add nested sub-sub-category
+  // Quick inline add nested sub-sub-category (child tag)
   const handleQuickAddSubSubcategory = (cat: Category, subIndex: number) => {
     const key = `${cat.id}_${subIndex}`;
     const val = quickSubSubInputs[key]?.trim();
@@ -363,9 +412,10 @@ export const AdminCategories: React.FC<AdminCategoriesProps> = ({
     };
     onUpdateCategory(updated);
     setQuickSubSubInputs((prev) => ({ ...prev, [key]: '' }));
+    showToast(`✓ Child tag "${val}" added under "${targetSub.name}"`);
   };
 
-  // Quick remove sub-sub-category
+  // Quick remove child tag
   const handleQuickRemoveSubSubcategory = (cat: Category, subIndex: number, subSubToRemove: string) => {
     const subs = normalizeSubs(cat.subcategories);
     const targetSub = subs[subIndex];
@@ -377,16 +427,19 @@ export const AdminCategories: React.FC<AdminCategoriesProps> = ({
       subcategories: subs,
     };
     onUpdateCategory(updated);
+    showToast(`✓ Child tag "${subSubToRemove}" removed`);
   };
 
   // Quick remove subcategory
   const handleQuickRemoveSubcategory = (cat: Category, subId: string) => {
     const subs = normalizeSubs(cat.subcategories);
+    const targetSub = subs.find((s) => s.id === subId);
     const updated: Category = {
       ...cat,
       subcategories: subs.filter((s) => s.id !== subId),
     };
     onUpdateCategory(updated);
+    showToast(`✓ Subcategory "${targetSub?.name || ''}" removed`);
   };
 
   // Quick rename subcategory
@@ -398,6 +451,7 @@ export const AdminCategories: React.FC<AdminCategoriesProps> = ({
     }
     const subs = normalizeSubs(cat.subcategories);
     if (!subs[subIndex]) return;
+    const oldName = subs[subIndex].name;
     subs[subIndex].name = trimmed;
     const updated: Category = {
       ...cat,
@@ -405,9 +459,10 @@ export const AdminCategories: React.FC<AdminCategoriesProps> = ({
     };
     onUpdateCategory(updated);
     setEditingSubKey(null);
+    showToast(`✓ Subcategory renamed from "${oldName}" to "${trimmed}"`);
   };
 
-  // Quick rename nested sub-subcategory (child tag)
+  // Quick rename child subcategory (child tag)
   const handleSaveRenameSubSubcategory = (cat: Category, subIndex: number, subSubIndex: number) => {
     const trimmed = editingSubSubVal.trim();
     if (!trimmed) {
@@ -424,9 +479,10 @@ export const AdminCategories: React.FC<AdminCategoriesProps> = ({
     };
     onUpdateCategory(updated);
     setEditingSubSubKey(null);
+    showToast(`✓ Child tag updated to "${trimmed}"`);
   };
 
-  // Modal draft rename subcategory
+  // Draft rename in modal
   const handleSaveDraftRenameSubcategory = (sIdx: number) => {
     const trimmed = editingDraftSubVal.trim();
     if (trimmed) {
@@ -437,7 +493,6 @@ export const AdminCategories: React.FC<AdminCategoriesProps> = ({
     setEditingDraftSubIdx(null);
   };
 
-  // Modal draft rename nested child subcategory
   const handleSaveDraftRenameSubSubcategory = (sIdx: number, ssIdx: number) => {
     const trimmed = editingDraftSubSubVal.trim();
     if (trimmed) {
@@ -453,234 +508,653 @@ export const AdminCategories: React.FC<AdminCategoriesProps> = ({
     setEditingDraftSubSubKey(null);
   };
 
-  // Sub-subcategory (3rd Tier) ordering handlers
-  const handleSetSubSubcategoryPosition = (
-    cat: Category,
-    subIndex: number,
-    subSubIndex: number,
-    newPositionZeroIndexed: number
-  ) => {
-    const subs = normalizeSubs(cat.subcategories);
-    const targetSub = subs[subIndex];
-    if (!targetSub || !targetSub.subSubcategories) return;
-    const currentSubSubs = [...targetSub.subSubcategories];
-    if (
-      newPositionZeroIndexed < 0 ||
-      newPositionZeroIndexed >= currentSubSubs.length ||
-      subSubIndex === newPositionZeroIndexed
-    )
-      return;
-
-    const [movedItem] = currentSubSubs.splice(subSubIndex, 1);
-    currentSubSubs.splice(newPositionZeroIndexed, 0, movedItem);
-    targetSub.subSubcategories = currentSubSubs;
-
-    const updated: Category = {
-      ...cat,
-      subcategories: subs,
-    };
-    onUpdateCategory(updated);
-  };
-
-  const handleMoveSubSubcategory = (
-    cat: Category,
-    subIndex: number,
-    subSubIndex: number,
-    direction: 'left' | 'right'
-  ) => {
-    const targetIndex = direction === 'left' ? subSubIndex - 1 : subSubIndex + 1;
-    handleSetSubSubcategoryPosition(cat, subIndex, subSubIndex, targetIndex);
-  };
-
-  // Draft modal Sub-subcategory ordering handlers
-  const handleSetDraftSubSubcategoryPosition = (
-    subIndex: number,
-    subSubIndex: number,
-    newPositionZeroIndexed: number
-  ) => {
-    setSubcategoriesList((prev) => {
-      const nextList = [...prev];
-      const targetSub = nextList[subIndex];
-      if (!targetSub || !targetSub.subSubcategories) return prev;
-      const currentSubSubs = [...targetSub.subSubcategories];
-      if (
-        newPositionZeroIndexed < 0 ||
-        newPositionZeroIndexed >= currentSubSubs.length ||
-        subSubIndex === newPositionZeroIndexed
-      )
-        return prev;
-
-      const [movedItem] = currentSubSubs.splice(subSubIndex, 1);
-      currentSubSubs.splice(newPositionZeroIndexed, 0, movedItem);
-      nextList[subIndex] = { ...targetSub, subSubcategories: currentSubSubs };
-      return nextList;
-    });
-  };
-
-  const handleMoveDraftSubSubcategory = (
-    subIndex: number,
-    subSubIndex: number,
-    direction: 'left' | 'right'
-  ) => {
-    const targetIndex = direction === 'left' ? subSubIndex - 1 : subSubIndex + 1;
-    handleSetDraftSubSubcategoryPosition(subIndex, subSubIndex, targetIndex);
-  };
-
   return (
-    <div className="space-y-4 sm:space-y-5">
-      {/* Top Header & Compact Summary */}
-      <div className="p-4 sm:p-5 rounded-3xl bg-white border border-slate-200 shadow-2xs space-y-4">
+    <div className="space-y-5">
+      {/* Toast Notification Banner */}
+      {saveSuccessNotice && (
+        <div className="p-4 rounded-2xl bg-emerald-500 text-white shadow-lg flex items-center justify-between gap-3 animate-in fade-in slide-in-from-top-2 duration-300">
+          <div className="flex items-center gap-2.5">
+            <div className="w-7 h-7 rounded-xl bg-white/20 flex items-center justify-center font-bold">
+              <Check className="w-4 h-4" />
+            </div>
+            <span className="text-xs sm:text-sm font-bold">{saveSuccessNotice}</span>
+          </div>
+          <button
+            onClick={() => setSaveSuccessNotice(null)}
+            className="p-1 rounded-lg hover:bg-white/20 text-white/80 hover:text-white cursor-pointer"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
+      {/* Top Header Card */}
+      <div className="p-5 sm:p-6 rounded-3xl bg-white border border-slate-200 shadow-sm space-y-4">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-sky-600 flex items-center justify-center text-white shadow-md shadow-sky-600/20 shrink-0">
-              <FolderTree className="w-5 h-5" />
+          <div className="flex items-center gap-3.5">
+            <div className="w-12 h-12 rounded-2xl bg-sky-600 flex items-center justify-center text-white shadow-md shadow-sky-600/20 shrink-0">
+              <FolderTree className="w-6 h-6" />
             </div>
             <div>
-              <div className="flex items-center gap-2">
-                <h2 className="text-base sm:text-lg font-black text-slate-900">
-                  Category & Priority Management
+              <div className="flex items-center gap-2.5">
+                <h2 className="text-lg sm:text-xl font-black text-slate-900">
+                  Category & Subcategory Studio
                 </h2>
-                <span className="hidden sm:inline-block px-2 py-0.5 rounded-full bg-sky-100 text-sky-800 text-[10px] font-black border border-sky-200">
+                <span className="px-2.5 py-0.5 rounded-full bg-sky-100 text-sky-800 text-xs font-black border border-sky-200">
                   {categories.length} Categories
                 </span>
               </div>
-              <p className="hidden sm:block text-xs text-slate-500 mt-0.5">
-                Organize categories, adjust priority order via buttons or dropdowns, and manage subcategories.
+              <p className="text-xs sm:text-sm text-slate-500 mt-0.5">
+                Manage categories, subcategories, and 3rd-tier tags. All edits save instantly and sync to your storefront.
               </p>
             </div>
           </div>
 
-          <div className="flex items-center flex-nowrap gap-1.5 sm:gap-2 self-start lg:self-auto overflow-x-auto w-full sm:w-auto pb-1 sm:pb-0">
+          <div className="flex items-center flex-wrap gap-2.5 self-start lg:self-auto">
             {/* View Mode Switcher */}
-            <div className="flex items-center bg-slate-100 p-0.5 sm:p-1 rounded-xl border border-slate-200 text-[11px] sm:text-xs shrink-0">
-              <button
-                type="button"
-                onClick={() => setViewMode('compact-list')}
-                className={`flex items-center gap-1 px-2.5 sm:px-3 py-1.5 rounded-lg font-bold transition-all cursor-pointer whitespace-nowrap ${
-                  viewMode === 'compact-list'
-                    ? 'bg-white text-slate-900 shadow-2xs'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-                title="Compact List & Priority Table View"
-              >
-                <List className="w-3.5 h-3.5" />
-                <span>Compact List</span>
-              </button>
+            <div className="flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200 text-xs shrink-0">
               <button
                 type="button"
                 onClick={() => setViewMode('bento-grid')}
-                className={`flex items-center gap-1 px-2.5 sm:px-3 py-1.5 rounded-lg font-bold transition-all cursor-pointer whitespace-nowrap ${
+                className={`flex items-center gap-1.5 px-3.5 py-2 rounded-lg font-bold transition-all cursor-pointer ${
                   viewMode === 'bento-grid'
-                    ? 'bg-white text-slate-900 shadow-2xs'
+                    ? 'bg-white text-slate-900 shadow-xs'
                     : 'text-slate-600 hover:text-slate-900'
                 }`}
-                title="Bento Card Grid View"
               >
-                <LayoutGrid className="w-3.5 h-3.5" />
-                <span>Grid Cards</span>
+                <LayoutGrid className="w-4 h-4 text-sky-600" />
+                <span>Comfortable Cards</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode('compact-list')}
+                className={`flex items-center gap-1.5 px-3.5 py-2 rounded-lg font-bold transition-all cursor-pointer ${
+                  viewMode === 'compact-list'
+                    ? 'bg-white text-slate-900 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <List className="w-4 h-4 text-sky-600" />
+                <span>Table View</span>
               </button>
             </div>
 
             <button
               onClick={openAddModal}
-              className="px-3 sm:px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-700 active:bg-sky-800 text-white font-bold text-[11px] sm:text-xs shadow-md shadow-sky-600/20 flex items-center gap-1 transition-all cursor-pointer whitespace-nowrap shrink-0"
+              className="px-4 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-700 active:bg-sky-800 text-white font-bold text-xs sm:text-sm shadow-md shadow-sky-600/20 flex items-center gap-1.5 transition-all cursor-pointer shrink-0"
             >
-              <Plus className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-              <span>Add New Category</span>
+              <Plus className="w-4 h-4" />
+              <span>+ Add New Category</span>
             </button>
           </div>
         </div>
 
         {/* Quick Stats Strip */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 pt-1">
-          <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200/80 flex items-center gap-3">
-            <div className="w-8 h-8 rounded-xl bg-sky-100 text-sky-700 flex items-center justify-center shrink-0 font-black text-xs">
-              <FolderTree className="w-4 h-4" />
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2">
+          <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200/80 flex items-center gap-3.5">
+            <div className="w-10 h-10 rounded-xl bg-sky-100 text-sky-700 flex items-center justify-center shrink-0 font-black">
+              <FolderTree className="w-5 h-5" />
             </div>
             <div>
-              <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">Total Categories</p>
-              <p className="text-sm font-black text-slate-900">{categories.length}</p>
+              <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Main Categories</p>
+              <p className="text-base font-black text-slate-900">{categories.length}</p>
             </div>
           </div>
 
-          <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200/80 flex items-center gap-3">
-            <div className="w-8 h-8 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0 font-black text-xs">
-              <Layers className="w-4 h-4" />
+          <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200/80 flex items-center gap-3.5">
+            <div className="w-10 h-10 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0 font-black">
+              <Layers className="w-5 h-5" />
             </div>
             <div>
-              <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">Subcategories</p>
-              <p className="text-sm font-black text-slate-900">{totalSubcategories}</p>
+              <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Subcategories (২য় স্তর)</p>
+              <p className="text-base font-black text-slate-900">{totalSubcategories}</p>
             </div>
           </div>
 
-          <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200/80 flex items-center gap-3">
-            <div className="w-8 h-8 rounded-xl bg-amber-100 text-amber-800 flex items-center justify-center shrink-0 font-black text-xs">
-              <Tag className="w-4 h-4" />
+          <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200/80 flex items-center gap-3.5">
+            <div className="w-10 h-10 rounded-xl bg-amber-100 text-amber-800 flex items-center justify-center shrink-0 font-black">
+              <Tag className="w-5 h-5" />
             </div>
             <div>
-              <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">Sub-Sub Tags</p>
-              <p className="text-sm font-black text-slate-900">{totalSubSubcategories}</p>
+              <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Child Tags (৩য় স্তর)</p>
+              <p className="text-base font-black text-slate-900">{totalSubSubcategories}</p>
             </div>
           </div>
 
-          <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200/80 flex items-center gap-3">
-            <div className="w-8 h-8 rounded-xl bg-purple-100 text-purple-700 flex items-center justify-center shrink-0 font-black text-xs">
-              <Package className="w-4 h-4" />
+          <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200/80 flex items-center gap-3.5">
+            <div className="w-10 h-10 rounded-xl bg-purple-100 text-purple-700 flex items-center justify-center shrink-0 font-black">
+              <Package className="w-5 h-5" />
             </div>
             <div>
-              <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">Catalog Products</p>
-              <p className="text-sm font-black text-slate-900">{products.length}</p>
+              <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Catalog Products</p>
+              <p className="text-base font-black text-slate-900">{products.length}</p>
             </div>
           </div>
         </div>
       </div>
 
       {/* Filter & Search Bar */}
-      <div className="flex flex-col sm:flex-row items-center justify-between gap-3 bg-white p-3 rounded-2xl border border-slate-200 shadow-2xs">
-        <div className="relative w-full sm:w-80">
-          <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+      <div className="flex flex-col sm:flex-row items-center justify-between gap-3 bg-white p-3.5 rounded-2xl border border-slate-200 shadow-xs">
+        <div className="relative w-full sm:w-96">
+          <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
           <input
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search category or subcategory..."
-            className="w-full pl-9 pr-3 py-1.5 text-xs rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:outline-hidden focus:border-sky-500 transition-all"
+            placeholder="Search category, subcategory, or child tags..."
+            className="w-full pl-10 pr-3.5 py-2 text-xs sm:text-sm rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:outline-hidden focus:border-sky-500 transition-all font-medium"
           />
         </div>
 
-        <div className="flex items-center gap-2 w-full sm:w-auto justify-between sm:justify-end text-xs text-slate-500">
-          <span className="font-semibold">
-            Showing: <strong className="text-slate-900">{filteredCategories.length}</strong> Categories
+        <div className="flex items-center gap-3 w-full sm:w-auto justify-between sm:justify-end text-xs text-slate-500 font-semibold">
+          <span>
+            Showing <strong className="text-slate-900 font-black">{filteredCategories.length}</strong> of {categories.length} Categories
           </span>
           {searchQuery && (
             <button
               onClick={() => setSearchQuery('')}
-              className="text-sky-600 hover:text-sky-800 font-bold cursor-pointer text-xs"
+              className="text-sky-600 hover:text-sky-800 font-bold cursor-pointer"
             >
-              Clear Search
+              Clear
             </button>
           )}
         </div>
       </div>
 
-      {/* VIEW MODE 1: COMPACT LIST / TABLE VIEW WITH LIVE PRIORITY ORDERING */}
+      {/* VIEW MODE 1: COMFORTABLE BENTO CARDS (Primary, Spacious & User Friendly) */}
+      {viewMode === 'bento-grid' && (
+        <div className="space-y-4">
+          {filteredCategories.length === 0 ? (
+            <div className="p-12 text-center bg-white rounded-3xl border border-slate-200 text-slate-400 space-y-3">
+              <FolderTree className="w-12 h-12 mx-auto text-slate-300" />
+              <p className="text-sm font-bold">No categories match your search.</p>
+            </div>
+          ) : (
+            filteredCategories.map((cat) => {
+              const cIdx = sortedCategories.findIndex((c) => c.id === cat.id);
+              const prodCount = products.filter((p) => p.category === cat.name).length;
+              const parsedSubs = normalizeSubs(cat.subcategories);
+              const isExpanded = expandedCatIds[cat.id] !== false; // Default expanded for comfortable editing
+              const isHighlighted = lastMovedCatId === cat.id;
+
+              return (
+                <div
+                  key={cat.id}
+                  className={`bg-white rounded-3xl border transition-all shadow-xs overflow-hidden ${
+                    isHighlighted
+                      ? 'border-amber-400 ring-2 ring-amber-300/60 bg-amber-50/20'
+                      : 'border-slate-200 hover:border-slate-300'
+                  }`}
+                >
+                  {/* Category Header Card */}
+                  <div className="p-4 sm:p-5 flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-slate-100 bg-slate-50/50">
+                    <div className="flex items-center gap-4 min-w-0">
+                      {/* Priority Rank Selector */}
+                      <div className="flex flex-col items-center justify-center bg-white px-3 py-2 rounded-2xl border border-slate-200 shadow-2xs shrink-0">
+                        <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-tight">Rank</span>
+                        <div className="flex items-center gap-1 mt-0.5">
+                          <select
+                            value={cIdx}
+                            onChange={(e) => handleSetCategoryPosition(cat.id, Number(e.target.value))}
+                            className="text-xs font-black text-sky-800 bg-transparent cursor-pointer focus:outline-hidden"
+                            title="Change display order position"
+                          >
+                            {sortedCategories.map((_, idx) => (
+                              <option key={idx} value={idx}>
+                                #{idx + 1}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="flex items-center gap-1 mt-1">
+                          <button
+                            type="button"
+                            onClick={() => handleMoveCategory(cIdx, 'up')}
+                            disabled={cIdx === 0}
+                            className="p-1 rounded bg-slate-100 hover:bg-sky-50 text-slate-600 hover:text-sky-600 disabled:opacity-20 cursor-pointer transition-colors"
+                            title="Move Up"
+                          >
+                            <ChevronUp className="w-3 h-3" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleMoveCategory(cIdx, 'down')}
+                            disabled={cIdx === sortedCategories.length - 1}
+                            className="p-1 rounded bg-slate-100 hover:bg-sky-50 text-slate-600 hover:text-sky-600 disabled:opacity-20 cursor-pointer transition-colors"
+                            title="Move Down"
+                          >
+                            <ChevronDown className="w-3 h-3" />
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Image Thumbnail */}
+                      <div className="relative group shrink-0">
+                        <img
+                          src={getOptimizedImageUrl(cat.featuredImage || 'https://images.unsplash.com/photo-1546868871-7041f2a55e12?w=160', 160)}
+                          alt={cat.name}
+                          referrerPolicy="no-referrer"
+                          onError={(e) => handleImageError(e, cat.featuredImage)}
+                          className="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl object-cover bg-slate-100 border border-slate-200 shadow-2xs"
+                        />
+                      </div>
+
+                      {/* Category Name & Bangla Details */}
+                      <div className="min-w-0 flex-1">
+                        {editingCatNameId === cat.id ? (
+                          <div className="space-y-2 max-w-md">
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="text"
+                                value={editingCatNameVal}
+                                onChange={(e) => setEditingCatNameVal(e.target.value)}
+                                placeholder="English Category Name"
+                                className="px-3 py-1.5 text-sm font-bold text-slate-900 bg-white border-2 border-sky-500 rounded-xl focus:outline-hidden w-full"
+                              />
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="text"
+                                value={editingCatBanglaVal}
+                                onChange={(e) => setEditingCatBanglaVal(e.target.value)}
+                                placeholder="বাংলা ক্যাটাগরি নাম (ঐচ্ছিক)"
+                                className="px-3 py-1.5 text-xs text-slate-700 bg-white border border-slate-300 rounded-xl focus:outline-hidden w-full"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => handleSaveRenameCategory(cat)}
+                                className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold flex items-center gap-1 cursor-pointer shrink-0"
+                              >
+                                <Check className="w-3.5 h-3.5" />
+                                <span>Save</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setEditingCatNameId(null)}
+                                className="px-3 py-1.5 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-700 text-xs font-bold cursor-pointer shrink-0"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <h3 className="text-base sm:text-lg font-black text-slate-900 tracking-tight">
+                                {cat.name}
+                              </h3>
+                              {cIdx === 0 && (
+                                <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-900 text-[10px] font-black uppercase tracking-wider">
+                                  ★ #1 Priority
+                                </span>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setEditingCatNameId(cat.id);
+                                  setEditingCatNameVal(cat.name);
+                                  setEditingCatBanglaVal(cat.banglaName || '');
+                                }}
+                                className="text-slate-400 hover:text-sky-600 p-1 rounded-lg hover:bg-sky-50 transition-colors cursor-pointer"
+                                title="Quick Rename Category"
+                              >
+                                <Edit2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                            <div className="flex items-center gap-2.5 text-xs text-slate-500 mt-1">
+                              {cat.banglaName && (
+                                <span className="font-bold text-slate-700 bg-slate-100 px-2 py-0.5 rounded-md">
+                                  {cat.banglaName}
+                                </span>
+                              )}
+                              <span className="font-mono text-slate-400 text-[11px]">slug: /{cat.slug || cat.id}</span>
+                              <span className="inline-flex items-center gap-1 text-sky-800 bg-sky-50 font-bold px-2 py-0.5 rounded-md border border-sky-200">
+                                <Package className="w-3 h-3 text-sky-600" />
+                                {prodCount} Products
+                              </span>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Action buttons on category header */}
+                    <div className="flex items-center gap-2 self-end lg:self-center">
+                      <button
+                        onClick={() => openEditModal(cat)}
+                        className="px-3.5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs flex items-center gap-1.5 transition-colors cursor-pointer"
+                      >
+                        <Edit2 className="w-3.5 h-3.5 text-slate-500" />
+                        <span>Edit Details</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleToggleExpand(cat.id)}
+                        className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-2xs ${
+                          isExpanded
+                            ? 'bg-sky-600 text-white hover:bg-sky-700'
+                            : 'bg-sky-50 text-sky-700 hover:bg-sky-100 border border-sky-200'
+                        }`}
+                      >
+                        <Layers className="w-3.5 h-3.5" />
+                        <span>{parsedSubs.length} Subcategories</span>
+                        <span className="text-[10px] font-black">{isExpanded ? '▲ Hide' : '▼ Manage'}</span>
+                      </button>
+
+                      <button
+                        onClick={() => handleDelete(cat)}
+                        className="p-2 rounded-xl text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
+                        title="Delete Category"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* SUB-CATEGORIES & CHILD TAGS STUDIO (Spacious & Easy to Edit) */}
+                  {isExpanded && (
+                    <div className="p-4 sm:p-6 bg-slate-50/40 space-y-4">
+                      {/* Subcategory Add Bar */}
+                      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 p-3.5 rounded-2xl bg-white border border-slate-200 shadow-2xs">
+                        <div className="flex items-center gap-2">
+                          <div className="w-8 h-8 rounded-xl bg-sky-100 text-sky-700 flex items-center justify-center shrink-0">
+                            <Layers className="w-4 h-4" />
+                          </div>
+                          <div>
+                            <h4 className="text-xs sm:text-sm font-black text-slate-900">
+                              Subcategories & Child Tags for "{cat.name}"
+                            </h4>
+                            <p className="text-[11px] text-slate-500">
+                              Add subcategories (২য় স্তর) and nested child tags (৩য় স্তর) below.
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="text"
+                            placeholder="+ Enter new subcategory name (e.g. Smartwatches)..."
+                            value={quickSubInputs[cat.id] || ''}
+                            onChange={(e) =>
+                              setQuickSubInputs({ ...quickSubInputs, [cat.id]: e.target.value })
+                            }
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault();
+                                handleQuickAddSubcategory(cat);
+                              }
+                            }}
+                            className="flex-1 sm:w-80 px-3.5 py-2 rounded-xl border border-slate-300 text-xs sm:text-sm bg-slate-50 focus:bg-white focus:outline-hidden focus:border-sky-500 font-medium"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => handleQuickAddSubcategory(cat)}
+                            className="px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-700 text-white text-xs sm:text-sm font-bold transition-all cursor-pointer flex items-center gap-1.5 shadow-sm shrink-0"
+                          >
+                            <Plus className="w-4 h-4" />
+                            <span>Add Subcategory</span>
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Subcategory List (Comfortable Cards with generous padding and readable typography) */}
+                      {parsedSubs.length === 0 ? (
+                        <div className="p-8 text-center bg-white rounded-2xl border border-dashed border-slate-300 text-slate-400 space-y-2">
+                          <Layers className="w-8 h-8 mx-auto text-slate-300" />
+                          <p className="text-xs sm:text-sm font-semibold">No subcategories yet. Type a name above and click "Add Subcategory".</p>
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                          {parsedSubs.map((sub, sIdx) => {
+                            const subSubCount = (sub.subSubcategories || []).length;
+                            const isEditingSub = editingSubKey === `${cat.id}_${sIdx}`;
+
+                            return (
+                              <div
+                                key={sub.id || sIdx}
+                                className="p-4 sm:p-5 rounded-2xl bg-white border border-slate-200 hover:border-sky-300 hover:shadow-md transition-all space-y-3.5 flex flex-col justify-between"
+                              >
+                                {/* Top Header of Subcategory */}
+                                <div className="flex items-center justify-between gap-2 border-b border-slate-100 pb-3">
+                                  <div className="flex items-center gap-2 min-w-0 flex-1">
+                                    <span className="w-6 h-6 rounded-lg bg-sky-100 text-sky-800 flex items-center justify-center font-black text-xs shrink-0">
+                                      #{sIdx + 1}
+                                    </span>
+
+                                    {isEditingSub ? (
+                                      <div className="flex items-center gap-1 flex-1">
+                                        <input
+                                          type="text"
+                                          value={editingSubVal}
+                                          onChange={(e) => setEditingSubVal(e.target.value)}
+                                          onKeyDown={(e) => {
+                                            if (e.key === 'Enter') {
+                                              e.preventDefault();
+                                              handleSaveRenameSubcategory(cat, sIdx);
+                                            } else if (e.key === 'Escape') {
+                                              setEditingSubKey(null);
+                                            }
+                                          }}
+                                          autoFocus
+                                          className="w-full px-2.5 py-1 text-sm font-bold text-slate-900 bg-white border-2 border-sky-500 rounded-lg focus:outline-hidden"
+                                        />
+                                        <button
+                                          type="button"
+                                          onClick={() => handleSaveRenameSubcategory(cat, sIdx)}
+                                          className="p-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer"
+                                          title="Save Rename"
+                                        >
+                                          <Check className="w-3.5 h-3.5" />
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => setEditingSubKey(null)}
+                                          className="p-1.5 rounded-lg bg-slate-200 hover:bg-slate-300 text-slate-700 cursor-pointer"
+                                          title="Cancel"
+                                        >
+                                          <X className="w-3.5 h-3.5" />
+                                        </button>
+                                      </div>
+                                    ) : (
+                                      <div className="flex items-center gap-1.5 min-w-0">
+                                        <span className="font-black text-slate-900 text-sm sm:text-base truncate">
+                                          {sub.name}
+                                        </span>
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            setEditingSubKey(`${cat.id}_${sIdx}`);
+                                            setEditingSubVal(sub.name);
+                                          }}
+                                          className="p-1 text-slate-400 hover:text-sky-600 rounded hover:bg-sky-50 transition-colors cursor-pointer"
+                                          title="Rename Subcategory"
+                                        >
+                                          <Edit2 className="w-3.5 h-3.5" />
+                                        </button>
+                                      </div>
+                                    )}
+                                  </div>
+
+                                  {/* Subcategory Order Selector & Delete Button */}
+                                  <div className="flex items-center gap-1.5 shrink-0">
+                                    <select
+                                      value={sIdx}
+                                      onChange={(e) =>
+                                        handleSetSubcategoryPosition(cat, sIdx, Number(e.target.value))
+                                      }
+                                      className="text-xs font-bold text-slate-700 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 cursor-pointer focus:outline-hidden"
+                                      title="Change Position Order"
+                                    >
+                                      {parsedSubs.map((_, pIdx) => (
+                                        <option key={pIdx} value={pIdx}>
+                                          Pos #{pIdx + 1}
+                                        </option>
+                                      ))}
+                                    </select>
+
+                                    <button
+                                      type="button"
+                                      onClick={() => handleQuickRemoveSubcategory(cat, sub.id)}
+                                      className="text-slate-400 hover:text-rose-600 p-1.5 rounded-lg hover:bg-rose-50 cursor-pointer transition-colors"
+                                      title="Delete Subcategory"
+                                    >
+                                      <Trash2 className="w-4 h-4" />
+                                    </button>
+                                  </div>
+                                </div>
+
+                                {/* Child Subcategories (৩য় স্তর - 3rd Tier) Tags Section */}
+                                <div className="space-y-2.5">
+                                  <div className="flex items-center justify-between text-xs font-bold text-slate-700">
+                                    <span className="flex items-center gap-1.5">
+                                      <Tag className="w-3.5 h-3.5 text-sky-600" />
+                                      <span>Child Subcategories ({subSubCount})</span>
+                                    </span>
+                                    <span className="text-[10px] font-extrabold text-sky-700 bg-sky-50 px-2 py-0.5 rounded-full border border-sky-200">
+                                      ৩য় স্তর
+                                    </span>
+                                  </div>
+
+                                  {/* Child Tags Chips List (Generously sized with clear edit & delete) */}
+                                  <div className="flex flex-wrap gap-2 min-h-[36px]">
+                                    {sub.subSubcategories && sub.subSubcategories.length > 0 ? (
+                                      sub.subSubcategories.map((subSub, ssIdx) => (
+                                        <div
+                                          key={ssIdx}
+                                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-50 border border-slate-200 hover:border-sky-300 text-slate-900 text-xs font-semibold shadow-2xs transition-all group"
+                                        >
+                                          {editingSubSubKey === `${cat.id}_${sIdx}_${ssIdx}` ? (
+                                            <div className="flex items-center gap-1">
+                                              <input
+                                                type="text"
+                                                value={editingSubSubVal}
+                                                onChange={(e) => setEditingSubSubVal(e.target.value)}
+                                                onKeyDown={(e) => {
+                                                  if (e.key === 'Enter') {
+                                                    e.preventDefault();
+                                                    handleSaveRenameSubSubcategory(cat, sIdx, ssIdx);
+                                                  } else if (e.key === 'Escape') {
+                                                    setEditingSubSubKey(null);
+                                                  }
+                                                }}
+                                                autoFocus
+                                                className="w-28 px-2 py-0.5 text-xs bg-white border border-sky-500 rounded focus:outline-hidden font-bold"
+                                              />
+                                              <button
+                                                type="button"
+                                                onClick={() => handleSaveRenameSubSubcategory(cat, sIdx, ssIdx)}
+                                                className="text-emerald-600 hover:text-emerald-800 p-0.5 cursor-pointer"
+                                              >
+                                                <Check className="w-3 h-3" />
+                                              </button>
+                                              <button
+                                                type="button"
+                                                onClick={() => setEditingSubSubKey(null)}
+                                                className="text-slate-400 hover:text-slate-600 p-0.5 cursor-pointer"
+                                              >
+                                                <X className="w-3 h-3" />
+                                              </button>
+                                            </div>
+                                          ) : (
+                                            <>
+                                              <span className="w-4 h-4 rounded-md bg-sky-100 text-sky-800 flex items-center justify-center font-black text-[9px]">
+                                                {ssIdx + 1}
+                                              </span>
+                                              <span>{subSub}</span>
+                                              <button
+                                                type="button"
+                                                onClick={() => {
+                                                  setEditingSubSubKey(`${cat.id}_${sIdx}_${ssIdx}`);
+                                                  setEditingSubSubVal(subSub);
+                                                }}
+                                                className="text-slate-400 hover:text-sky-600 p-0.5 cursor-pointer"
+                                                title="Rename Tag"
+                                              >
+                                                <Edit2 className="w-3 h-3" />
+                                              </button>
+                                              <button
+                                                type="button"
+                                                onClick={() =>
+                                                  handleQuickRemoveSubSubcategory(cat, sIdx, subSub)
+                                                }
+                                                className="text-slate-400 hover:text-rose-600 p-0.5 cursor-pointer"
+                                                title="Remove Tag"
+                                              >
+                                                <X className="w-3 h-3" />
+                                              </button>
+                                            </>
+                                          )}
+                                        </div>
+                                      ))
+                                    ) : (
+                                      <span className="text-xs text-slate-400 italic py-1">
+                                        No child tags added yet
+                                      </span>
+                                    )}
+                                  </div>
+
+                                  {/* Comfortable Add Child Tag Input */}
+                                  <div className="flex items-center gap-1.5 pt-2 border-t border-slate-100">
+                                    <input
+                                      type="text"
+                                      placeholder="+ Add child tag (e.g. AMOLED Display)..."
+                                      value={quickSubSubInputs[`${cat.id}_${sIdx}`] || ''}
+                                      onChange={(e) =>
+                                        setQuickSubSubInputs({
+                                          ...quickSubSubInputs,
+                                          [`${cat.id}_${sIdx}`]: e.target.value,
+                                        })
+                                      }
+                                      onKeyDown={(e) => {
+                                        if (e.key === 'Enter') {
+                                          e.preventDefault();
+                                          handleQuickAddSubSubcategory(cat, sIdx);
+                                        }
+                                      }}
+                                      className="flex-1 px-3 py-1.5 text-xs rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:outline-hidden focus:border-sky-500 font-medium"
+                                    />
+                                    <button
+                                      type="button"
+                                      onClick={() => handleQuickAddSubSubcategory(cat, sIdx)}
+                                      className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold transition-all cursor-pointer shrink-0"
+                                    >
+                                      + Add Tag
+                                    </button>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })
+          )}
+        </div>
+      )}
+
+      {/* VIEW MODE 2: HIGH-DENSITY TABLE VIEW */}
       {viewMode === 'compact-list' && (
-        <div className="bg-white rounded-3xl border border-slate-200 shadow-2xs overflow-hidden">
+        <div className="bg-white rounded-3xl border border-slate-200 shadow-xs overflow-hidden">
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs min-w-[700px]">
-              <thead className="bg-slate-50 border-b border-slate-200 text-slate-600 font-bold uppercase tracking-wider text-[10px]">
+            <table className="w-full text-left text-xs sm:text-sm min-w-[750px]">
+              <thead className="bg-slate-50 border-b border-slate-200 text-slate-600 font-bold uppercase tracking-wider text-[11px]">
                 <tr>
-                  <th className="py-3 px-4 w-32 text-center">Priority Rank</th>
-                  <th className="py-3 px-4">Category Info</th>
-                  <th className="py-3 px-4 w-32 text-center">Products</th>
-                  <th className="py-3 px-4 min-w-[220px]">Subcategories & Sub-Tags</th>
-                  <th className="py-3 px-4 text-right w-28">Actions</th>
+                  <th className="py-3.5 px-4 w-32 text-center">Rank</th>
+                  <th className="py-3.5 px-4">Category Details</th>
+                  <th className="py-3.5 px-4 w-32 text-center">Products</th>
+                  <th className="py-3.5 px-4 min-w-[240px]">Subcategories</th>
+                  <th className="py-3.5 px-4 text-right w-32">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {filteredCategories.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="py-10 text-center text-slate-400">
+                    <td colSpan={5} className="py-12 text-center text-slate-400">
                       No categories found.
                     </td>
                   </tr>
@@ -689,486 +1163,74 @@ export const AdminCategories: React.FC<AdminCategoriesProps> = ({
                     const cIdx = sortedCategories.findIndex((c) => c.id === cat.id);
                     const prodCount = products.filter((p) => p.category === cat.name).length;
                     const parsedSubs = normalizeSubs(cat.subcategories);
-                    const isExpanded = !!expandedCatIds[cat.id];
-                    const isHighlighted = lastMovedCatId === cat.id;
 
                     return (
-                      <React.Fragment key={cat.id}>
-                        <tr
-                          className={`transition-colors ${
-                            isHighlighted ? 'bg-amber-50/80 ring-2 ring-amber-300 ring-inset' : 'hover:bg-slate-50/70'
-                          }`}
-                        >
-                          {/* Priority Column with Quick Dropdown & Up/Down Movers */}
-                          <td className="py-3 px-3 text-center align-middle">
-                            <div className="flex items-center justify-center gap-1.5">
-                              {/* Position Dropdown */}
-                              <div
-                                className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-xl border transition-all ${
-                                  cIdx === 0
-                                    ? 'bg-sky-50 border-sky-300 text-sky-900 font-black'
-                                    : 'bg-amber-50/80 border-amber-200 text-amber-900 font-bold'
-                                }`}
-                                title="Change Priority"
-                              >
-                                <ArrowUpDown className="w-3 h-3 text-amber-700 shrink-0" />
-                                <select
-                                  value={cIdx}
-                                  onChange={(e) => handleSetCategoryPosition(cat.id, Number(e.target.value))}
-                                  className="text-xs font-black bg-transparent cursor-pointer focus:outline-hidden pr-0.5"
-                                >
-                                  {sortedCategories.map((_, idx) => (
-                                    <option key={idx} value={idx}>
-                                      #{idx + 1} {idx === 0 ? '(1st - Top)' : ''}
-                                    </option>
-                                  ))}
-                                </select>
-                              </div>
-
-                              {/* Up / Down Arrows */}
-                              <div className="flex flex-col bg-slate-100 border border-slate-200 rounded-lg overflow-hidden shrink-0">
-                                <button
-                                  type="button"
-                                  onClick={() => handleMoveCategory(cIdx, 'up')}
-                                  disabled={cIdx === 0}
-                                  className="p-1 text-slate-600 hover:text-sky-600 hover:bg-white disabled:opacity-20 cursor-pointer"
-                                  title="Move Up"
-                                >
-                                  <ChevronUp className="w-3 h-3" />
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => handleMoveCategory(cIdx, 'down')}
-                                  disabled={cIdx === sortedCategories.length - 1}
-                                  className="p-1 text-slate-600 hover:text-sky-600 hover:bg-white disabled:opacity-20 cursor-pointer border-t border-slate-200"
-                                  title="Move Down"
-                                >
-                                  <ChevronDown className="w-3 h-3" />
-                                </button>
-                              </div>
+                      <tr key={cat.id} className="hover:bg-slate-50/80 transition-colors">
+                        <td className="py-3 px-4 text-center align-middle">
+                          <div className="flex items-center justify-center gap-1">
+                            <select
+                              value={cIdx}
+                              onChange={(e) => handleSetCategoryPosition(cat.id, Number(e.target.value))}
+                              className="text-xs font-black text-sky-800 bg-sky-50 border border-sky-200 rounded-lg px-2 py-1 cursor-pointer"
+                            >
+                              {sortedCategories.map((_, idx) => (
+                                <option key={idx} value={idx}>
+                                  #{idx + 1}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        </td>
+                        <td className="py-3 px-4 align-middle">
+                          <div className="flex items-center gap-3">
+                            <img
+                              src={getOptimizedImageUrl(cat.featuredImage || 'https://images.unsplash.com/photo-1546868871-7041f2a55e12?w=100', 100)}
+                              alt={cat.name}
+                              referrerPolicy="no-referrer"
+                              onError={(e) => handleImageError(e, cat.featuredImage)}
+                              className="w-10 h-10 rounded-xl object-cover bg-slate-100 border border-slate-200 shrink-0"
+                            />
+                            <div>
+                              <p className="font-black text-slate-900 text-sm">{cat.name}</p>
+                              {cat.banglaName && <p className="text-xs text-slate-500">{cat.banglaName}</p>}
                             </div>
-                          </td>
-
-                          {/* Category Info */}
-                          <td className="py-3 px-4 align-middle">
-                            <div className="flex items-center gap-3">
-                              <img
-                                src={getOptimizedImageUrl(cat.featuredImage || 'https://images.unsplash.com/photo-1546868871-7041f2a55e12?w=100', 100)}
-                                alt={cat.name}
-                                referrerPolicy="no-referrer"
-                                onError={(e) => handleImageError(e, cat.featuredImage)}
-                                className="w-10 h-10 rounded-xl object-cover bg-slate-100 shrink-0 border border-slate-200 shadow-2xs"
-                              />
-                              <div className="min-w-0">
-                                <div className="flex items-center gap-2">
-                                  <h4 className="font-black text-slate-900 text-xs sm:text-sm truncate">
-                                    {cat.name}
-                                  </h4>
-                                  {cIdx === 0 && (
-                                    <span className="px-1.5 py-0.2 rounded bg-sky-100 text-sky-800 text-[9px] font-black uppercase tracking-tight shrink-0">
-                                      ★ 1st
-                                    </span>
-                                  )}
-                                </div>
-                                <div className="flex items-center gap-2 text-[11px] text-slate-500 mt-0.5">
-                                  {cat.banglaName && (
-                                    <span className="font-medium text-slate-600">{cat.banglaName}</span>
-                                  )}
-                                  <span className="font-mono text-[10px] text-slate-400">/{cat.slug || cat.id}</span>
-                                </div>
-                              </div>
-                            </div>
-                          </td>
-
-                          {/* Products Count */}
-                          <td className="py-3 px-4 align-middle text-center">
-                            <span className="inline-flex items-center justify-center gap-1 text-[11px] font-bold text-sky-800 bg-sky-50 px-2.5 py-1 rounded-lg border border-sky-200/60">
-                              <Package className="w-3 h-3 text-sky-600" />
-                              <span>{prodCount} Prod</span>
-                            </span>
-                          </td>
-
-                          {/* Subcategories & Expand button */}
-                          <td className="py-3 px-4 align-middle">
-                            <div className="flex items-center gap-2">
-                              <button
-                                type="button"
-                                onClick={() => handleToggleExpand(cat.id)}
-                                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border shadow-2xs ${
-                                  isExpanded
-                                    ? 'bg-sky-600 text-white border-sky-600 shadow-sky-600/20'
-                                    : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200 hover:border-slate-300'
-                                }`}
-                              >
-                                <Layers className={`w-3.5 h-3.5 ${isExpanded ? 'text-white' : 'text-sky-600'}`} />
-                                <span>{parsedSubs.length} Subcategories</span>
-                                <span className={`text-[10px] font-black ${isExpanded ? 'text-sky-100' : 'text-sky-600'}`}>
-                                  {isExpanded ? '▲ Close' : '▼ View'}
-                                </span>
-                              </button>
-
-                              {/* Preview small chips */}
-                              {!isExpanded && parsedSubs.length > 0 && (
-                                <div className="hidden lg:flex items-center gap-1 overflow-hidden max-w-[180px] text-[10px] text-slate-500">
-                                  {parsedSubs.slice(0, 2).map((s, idx) => (
-                                    <span key={idx} className="bg-slate-100 px-1.5 py-0.5 rounded truncate max-w-[85px]">
-                                      {s.name}
-                                    </span>
-                                  ))}
-                                  {parsedSubs.length > 2 && (
-                                    <span className="text-[9px] text-slate-400 font-bold shrink-0">
-                                      +{parsedSubs.length - 2}
-                                    </span>
-                                  )}
-                                </div>
-                              )}
-                            </div>
-                          </td>
-
-                          {/* Actions */}
-                          <td className="py-3 px-4 align-middle text-right">
-                            <div className="flex items-center justify-end gap-1.5">
-                              <button
-                                onClick={() => openEditModal(cat)}
-                                className="px-2.5 py-1 rounded-lg bg-sky-50 hover:bg-sky-100 text-sky-700 font-bold text-xs transition-colors cursor-pointer flex items-center gap-1"
-                                title="Edit Category"
-                              >
-                                <Edit2 className="w-3.5 h-3.5" />
-                                <span className="hidden sm:inline">Edit</span>
-                              </button>
-                              <button
-                                onClick={() => handleDelete(cat)}
-                                className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
-                                title="Delete Category"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-
-                        {/* BEAUTIFUL & COMPACT SUB-CATEGORIES ACCORDION DRAWER */}
-                        {isExpanded && (
-                          <tr className="bg-gradient-to-b from-slate-50/90 to-sky-50/30 border-b border-slate-200">
-                            <td colSpan={5} className="p-3 sm:p-5">
-                              <div className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200/90 shadow-sm space-y-4">
-                                {/* Drawer Header */}
-                                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-3 border-b border-slate-100">
-                                  <div className="flex items-center gap-2">
-                                    <div className="w-7 h-7 rounded-lg bg-sky-100 text-sky-700 flex items-center justify-center shrink-0">
-                                      <Layers className="w-4 h-4" />
-                                    </div>
-                                    <div>
-                                      <h5 className="font-black text-xs sm:text-sm text-slate-900 flex items-center gap-1.5">
-                                        <span>Subcategories of "{cat.name}"</span>
-                                        <span className="px-2 py-0.5 rounded-full bg-sky-50 text-sky-700 text-[10px] font-bold border border-sky-200">
-                                          {parsedSubs.length} Subcategories
-                                        </span>
-                                      </h5>
-                                      <p className="text-[11px] text-slate-500 mt-0.5">
-                                        Arrange subcategory positions and manage nested sub-tags.
-                                      </p>
-                                    </div>
-                                  </div>
-
-                                  {/* Quick Add Subcategory bar in header */}
-                                  <div className="flex items-center gap-1.5 w-full sm:w-auto">
-                                    <input
-                                      type="text"
-                                      placeholder="+ New subcategory name..."
-                                      value={quickSubInputs[cat.id] || ''}
-                                      onChange={(e) =>
-                                        setQuickSubInputs({ ...quickSubInputs, [cat.id]: e.target.value })
-                                      }
-                                      onKeyDown={(e) => {
-                                        if (e.key === 'Enter') {
-                                          e.preventDefault();
-                                          handleQuickAddSubcategory(cat);
-                                        }
-                                      }}
-                                      className="flex-1 sm:w-64 px-3 py-1.5 rounded-xl border border-slate-200 text-xs bg-slate-50 focus:bg-white focus:outline-hidden focus:border-sky-500 font-medium"
-                                    />
-                                    <button
-                                      type="button"
-                                      onClick={() => handleQuickAddSubcategory(cat)}
-                                      className="px-3 py-1.5 rounded-xl bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold transition-all cursor-pointer shrink-0 flex items-center gap-1 shadow-xs"
-                                    >
-                                      <Plus className="w-3.5 h-3.5" />
-                                      <span>Add</span>
-                                    </button>
-                                  </div>
-                                </div>
-
-                                {/* Compact Responsive Sub-categories Grid */}
-                                {parsedSubs.length > 0 ? (
-                                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-                                    {parsedSubs.map((sub, sIdx) => (
-                                      <div
-                                        key={sub.id || sIdx}
-                                        className="p-3 rounded-xl bg-slate-50/80 border border-slate-200 hover:border-sky-300 hover:bg-white transition-all space-y-2.5 flex flex-col justify-between shadow-2xs group"
-                                      >
-                                        {/* Sub Top Info & Reordering */}
-                                        <div className="flex items-center justify-between gap-2">
-                                          <div className="flex items-center gap-1.5 min-w-0 flex-1">
-                                            <span className="w-5 h-5 rounded-md bg-sky-100 text-sky-800 flex items-center justify-center font-black text-[10px] shrink-0">
-                                              {sIdx + 1}
-                                            </span>
-                                            {editingSubKey === `${cat.id}_${sIdx}` ? (
-                                              <div className="flex items-center gap-1 flex-1">
-                                                <input
-                                                  type="text"
-                                                  value={editingSubVal}
-                                                  onChange={(e) => setEditingSubVal(e.target.value)}
-                                                  onKeyDown={(e) => {
-                                                    if (e.key === 'Enter') {
-                                                      e.preventDefault();
-                                                      handleSaveRenameSubcategory(cat, sIdx);
-                                                    } else if (e.key === 'Escape') {
-                                                      setEditingSubKey(null);
-                                                    }
-                                                  }}
-                                                  autoFocus
-                                                  className="w-full px-2 py-0.5 text-xs font-bold text-slate-900 bg-white border border-sky-400 rounded-md focus:outline-hidden"
-                                                />
-                                                <button
-                                                  type="button"
-                                                  onClick={() => handleSaveRenameSubcategory(cat, sIdx)}
-                                                  className="p-1 rounded bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer"
-                                                  title="Save"
-                                                >
-                                                  <Check className="w-3 h-3" />
-                                                </button>
-                                                <button
-                                                  type="button"
-                                                  onClick={() => setEditingSubKey(null)}
-                                                  className="p-1 rounded bg-slate-200 hover:bg-slate-300 text-slate-700 cursor-pointer"
-                                                  title="Cancel"
-                                                >
-                                                  <X className="w-3 h-3" />
-                                                </button>
-                                              </div>
-                                            ) : (
-                                              <div className="flex items-center gap-1 min-w-0">
-                                                <span className="font-black text-slate-900 text-xs truncate">
-                                                  {sub.name}
-                                                </span>
-                                                <button
-                                                  type="button"
-                                                  onClick={() => {
-                                                    setEditingSubKey(`${cat.id}_${sIdx}`);
-                                                    setEditingSubVal(sub.name);
-                                                  }}
-                                                  className="opacity-60 hover:opacity-100 p-0.5 text-slate-400 hover:text-sky-600 transition-opacity cursor-pointer"
-                                                  title="Rename Subcategory"
-                                                >
-                                                  <Edit2 className="w-2.5 h-2.5" />
-                                                </button>
-                                              </div>
-                                            )}
-                                          </div>
-
-                                          <div className="flex items-center gap-1 shrink-0">
-                                            {/* Sub Pos Selector */}
-                                            <select
-                                              value={sIdx}
-                                              onChange={(e) => handleSetSubcategoryPosition(cat, sIdx, Number(e.target.value))}
-                                              className="text-[10px] font-bold text-slate-700 bg-white border border-slate-200 rounded-md px-1 py-0.5 cursor-pointer focus:outline-hidden"
-                                              title="Change Subcategory Position"
-                                            >
-                                              {parsedSubs.map((_, pIdx) => (
-                                                <option key={pIdx} value={pIdx}>
-                                                  #{pIdx + 1}
-                                                </option>
-                                              ))}
-                                            </select>
-
-                                            <button
-                                              type="button"
-                                              onClick={() => handleQuickRemoveSubcategory(cat, sub.id)}
-                                              className="text-slate-400 hover:text-rose-600 p-1 rounded-md hover:bg-rose-50 cursor-pointer transition-colors"
-                                              title="Delete Subcategory"
-                                            >
-                                              <Trash2 className="w-3.5 h-3.5" />
-                                            </button>
-                                          </div>
-                                        </div>
-
-                                        {/* Sub-sub tags list */}
-                                        <div className="space-y-2">
-                                          <div className="flex items-center justify-between text-[10px] text-slate-600 font-bold">
-                                            <span className="flex items-center gap-1">
-                                              <Tag className="w-3 h-3 text-sky-600" />
-                                              <span>Child Subcategories ({(sub.subSubcategories || []).length})</span>
-                                            </span>
-                                            <span className="text-[9px] text-slate-400">৩য় স্তর</span>
-                                          </div>
-
-                                          <div className="flex flex-wrap gap-1.5 min-h-[26px]">
-                                            {sub.subSubcategories && sub.subSubcategories.length > 0 ? (
-                                              sub.subSubcategories.map((subSub, ssIdx) => (
-                                                <span
-                                                  key={ssIdx}
-                                                  className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-white border border-slate-200 text-slate-800 text-[10px] font-bold shadow-2xs transition-colors hover:border-sky-300"
-                                                >
-                                                  {editingSubSubKey === `${cat.id}_${sIdx}_${ssIdx}` ? (
-                                                    <span className="inline-flex items-center gap-0.5">
-                                                      <input
-                                                        type="text"
-                                                        value={editingSubSubVal}
-                                                        onChange={(e) => setEditingSubSubVal(e.target.value)}
-                                                        onKeyDown={(e) => {
-                                                          if (e.key === 'Enter') {
-                                                            e.preventDefault();
-                                                            handleSaveRenameSubSubcategory(cat, sIdx, ssIdx);
-                                                          } else if (e.key === 'Escape') {
-                                                            setEditingSubSubKey(null);
-                                                          }
-                                                        }}
-                                                        autoFocus
-                                                        className="w-24 px-1 py-0.2 text-[10px] bg-sky-50 border border-sky-400 rounded focus:outline-hidden"
-                                                      />
-                                                      <button
-                                                        type="button"
-                                                        onClick={() => handleSaveRenameSubSubcategory(cat, sIdx, ssIdx)}
-                                                        className="text-emerald-600 hover:text-emerald-800 p-0.5"
-                                                      >
-                                                        <Check className="w-2.5 h-2.5" />
-                                                      </button>
-                                                      <button
-                                                        type="button"
-                                                        onClick={() => setEditingSubSubKey(null)}
-                                                        className="text-slate-400 hover:text-slate-600 p-0.5"
-                                                      >
-                                                        <X className="w-2.5 h-2.5" />
-                                                      </button>
-                                                    </span>
-                                                  ) : (
-                                                    <>
-                                                      {/* Priority Position Selector & Badge */}
-                                                      <select
-                                                        value={ssIdx}
-                                                        onChange={(e) =>
-                                                          handleSetSubSubcategoryPosition(
-                                                            cat,
-                                                            sIdx,
-                                                            ssIdx,
-                                                            Number(e.target.value)
-                                                          )
-                                                        }
-                                                        className="text-[9px] font-black bg-sky-50 text-sky-800 border border-sky-200 rounded px-1 py-0.2 cursor-pointer focus:outline-hidden"
-                                                        title="Change priority position"
-                                                      >
-                                                        {(sub.subSubcategories || []).map((_, pIdx) => (
-                                                          <option key={pIdx} value={pIdx}>
-                                                            #{pIdx + 1}
-                                                          </option>
-                                                        ))}
-                                                      </select>
-
-                                                      <span className="font-semibold text-slate-800">{subSub}</span>
-
-                                                      {/* Move Left / Right buttons */}
-                                                      <div className="inline-flex items-center gap-0.2 border-l border-slate-200 pl-1 ml-0.5">
-                                                        <button
-                                                          type="button"
-                                                          onClick={() => handleMoveSubSubcategory(cat, sIdx, ssIdx, 'left')}
-                                                          disabled={ssIdx === 0}
-                                                          className="p-0.5 text-slate-400 hover:text-sky-600 disabled:opacity-20 cursor-pointer"
-                                                          title="Move left"
-                                                        >
-                                                          <ChevronLeft className="w-2.5 h-2.5" />
-                                                        </button>
-                                                        <button
-                                                          type="button"
-                                                          onClick={() => handleMoveSubSubcategory(cat, sIdx, ssIdx, 'right')}
-                                                          disabled={ssIdx === (sub.subSubcategories || []).length - 1}
-                                                          className="p-0.5 text-slate-400 hover:text-sky-600 disabled:opacity-20 cursor-pointer"
-                                                          title="Move right"
-                                                        >
-                                                          <ChevronRight className="w-2.5 h-2.5" />
-                                                        </button>
-                                                      </div>
-
-                                                      {/* Edit button */}
-                                                      <button
-                                                        type="button"
-                                                        onClick={() => {
-                                                          setEditingSubSubKey(`${cat.id}_${sIdx}_${ssIdx}`);
-                                                          setEditingSubSubVal(subSub);
-                                                        }}
-                                                        className="text-slate-400 hover:text-sky-600 cursor-pointer ml-0.5"
-                                                        title="Edit Child Subcategory"
-                                                      >
-                                                        <Edit2 className="w-2.5 h-2.5" />
-                                                      </button>
-
-                                                      {/* Delete button */}
-                                                      <button
-                                                        type="button"
-                                                        onClick={() => handleQuickRemoveSubSubcategory(cat, sIdx, subSub)}
-                                                        className="text-slate-400 hover:text-rose-600 cursor-pointer ml-0.5"
-                                                        title="Remove Child Subcategory"
-                                                      >
-                                                        <Trash2 className="w-2.5 h-2.5" />
-                                                      </button>
-                                                    </>
-                                                  )}
-                                                </span>
-                                              ))
-                                            ) : (
-                                              <span className="text-[10px] text-slate-400 italic py-0.5">
-                                                No child subcategories yet
-                                              </span>
-                                            )}
-                                          </div>
-
-                                          {/* Inline add sub-sub */}
-                                          <div className="flex items-center gap-1 pt-1 border-t border-slate-200/60">
-                                            <input
-                                              type="text"
-                                              placeholder="+ Add Child Subcategory (e.g. Jeans & Cargo)..."
-                                              value={quickSubSubInputs[`${cat.id}_${sIdx}`] || ''}
-                                              onChange={(e) =>
-                                                setQuickSubSubInputs({
-                                                  ...quickSubSubInputs,
-                                                  [`${cat.id}_${sIdx}`]: e.target.value,
-                                                })
-                                              }
-                                              onKeyDown={(e) => {
-                                                if (e.key === 'Enter') {
-                                                  e.preventDefault();
-                                                  handleQuickAddSubSubcategory(cat, sIdx);
-                                                }
-                                              }}
-                                              className="flex-1 px-2 py-1 rounded-md border border-slate-200 text-[10px] bg-white focus:outline-hidden focus:border-sky-500 font-medium"
-                                            />
-                                            <button
-                                              type="button"
-                                              onClick={() => handleQuickAddSubSubcategory(cat, sIdx)}
-                                              className="px-2 py-1 rounded-md bg-slate-900 hover:bg-slate-800 text-white text-[10px] font-bold cursor-pointer shrink-0 transition-colors"
-                                            >
-                                              + Tag
-                                            </button>
-                                          </div>
-                                        </div>
-                                      </div>
-                                    ))}
-                                  </div>
-                                ) : (
-                                  <div className="text-center py-6 border border-dashed border-slate-200 rounded-xl bg-slate-50/50 space-y-1">
-                                    <p className="text-xs font-bold text-slate-600">
-                                      No subcategories added to this category yet.
-                                    </p>
-                                    <p className="text-[11px] text-slate-400">
-                                      Type a name in the input box above to add a subcategory.
-                                    </p>
-                                  </div>
-                                )}
-                              </div>
-                            </td>
-                          </tr>
-                        )}
-                      </React.Fragment>
+                          </div>
+                        </td>
+                        <td className="py-3 px-4 align-middle text-center">
+                          <span className="font-bold text-sky-800 bg-sky-50 px-2.5 py-1 rounded-lg border border-sky-200 text-xs">
+                            {prodCount} Prod
+                          </span>
+                        </td>
+                        <td className="py-3 px-4 align-middle">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            {parsedSubs.slice(0, 3).map((s, idx) => (
+                              <span key={idx} className="px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 text-xs font-semibold">
+                                {s.name}
+                              </span>
+                            ))}
+                            {parsedSubs.length > 3 && (
+                              <span className="text-xs text-slate-400 font-bold">+{parsedSubs.length - 3} more</span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="py-3 px-4 align-middle text-right">
+                          <div className="flex items-center justify-end gap-1.5">
+                            <button
+                              onClick={() => openEditModal(cat)}
+                              className="px-3 py-1.5 rounded-lg bg-sky-50 hover:bg-sky-100 text-sky-700 font-bold text-xs cursor-pointer flex items-center gap-1"
+                            >
+                              <Edit2 className="w-3.5 h-3.5" />
+                              <span>Edit</span>
+                            </button>
+                            <button
+                              onClick={() => handleDelete(cat)}
+                              className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 cursor-pointer"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
                     );
                   })
                 )}
@@ -1178,507 +1240,130 @@ export const AdminCategories: React.FC<AdminCategoriesProps> = ({
         </div>
       )}
 
-      {/* VIEW MODE 2: COMPACT BENTO GRID CARDS */}
-      {viewMode === 'bento-grid' && (
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-5">
-          {filteredCategories.map((cat) => {
-            const cIdx = sortedCategories.findIndex((c) => c.id === cat.id);
-            const count = products.filter((p) => p.category === cat.name).length;
-            const parsedSubs = normalizeSubs(cat.subcategories);
-            const isExpanded = !!expandedCatIds[cat.id];
-            const isHighlighted = lastMovedCatId === cat.id;
-
-            return (
-              <div
-                key={cat.id}
-                className={`p-4 sm:p-5 rounded-3xl bg-white border transition-all flex flex-col justify-between space-y-3.5 ${
-                  isHighlighted
-                    ? 'border-amber-400 shadow-md ring-2 ring-amber-300'
-                    : 'border-slate-200 shadow-2xs hover:border-slate-300 hover:shadow-sm'
-                }`}
-              >
-                <div>
-                  {/* Category Card Header */}
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex items-center gap-3 min-w-0">
-                      <img
-                        src={getOptimizedImageUrl(cat.featuredImage || 'https://images.unsplash.com/photo-1546868871-7041f2a55e12?w=120', 120)}
-                        alt={cat.name}
-                        referrerPolicy="no-referrer"
-                        onError={(e) => handleImageError(e, cat.featuredImage)}
-                        className="w-12 h-12 rounded-2xl object-cover bg-slate-100 shrink-0 border border-slate-200 shadow-2xs"
-                      />
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-1.5">
-                          <span
-                            className={`px-1.5 py-0.5 rounded-md font-mono text-[10px] font-black shrink-0 ${
-                              cIdx === 0
-                                ? 'bg-sky-600 text-white'
-                                : 'bg-slate-100 text-slate-700'
-                            }`}
-                          >
-                            #{cIdx + 1}
-                          </span>
-                          <h3 className="font-black text-slate-900 text-sm truncate">{cat.name}</h3>
-                        </div>
-                        {cat.banglaName && (
-                          <p className="text-xs text-slate-500 font-medium truncate mt-0.5">{cat.banglaName}</p>
-                        )}
-                        <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
-                          <span className="inline-flex items-center gap-1 text-[10px] font-bold text-sky-800 bg-sky-50 px-2 py-0.5 rounded-md">
-                            <Package className="w-3 h-3" />
-                            {count} Prod
-                          </span>
-                          <span className="inline-flex items-center gap-1 text-[10px] font-bold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-md">
-                            <Layers className="w-3 h-3" />
-                            {parsedSubs.length} Subs
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Actions */}
-                    <div className="flex items-center gap-1">
-                      <button
-                        onClick={() => openEditModal(cat)}
-                        className="p-1.5 rounded-xl text-slate-500 hover:text-sky-600 hover:bg-sky-50 transition-colors cursor-pointer"
-                        title="Edit Category"
-                      >
-                        <Edit2 className="w-3.5 h-3.5" />
-                      </button>
-                      <button
-                        onClick={() => handleDelete(cat)}
-                        className="p-1.5 rounded-xl text-slate-500 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
-                        title="Delete Category"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Priority Order Changer Strip */}
-                  <div className="mt-3 p-2 rounded-xl bg-amber-50/70 border border-amber-200/80 flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-1 text-[11px] text-amber-900">
-                      <ArrowUpDown className="w-3 h-3 text-amber-600 shrink-0" />
-                      <span className="font-bold">Priority Position:</span>
-                      <select
-                        value={cIdx}
-                        onChange={(e) => handleSetCategoryPosition(cat.id, Number(e.target.value))}
-                        className="font-black text-amber-950 bg-white border border-amber-300 rounded px-1.5 py-0.5 text-xs cursor-pointer focus:outline-hidden"
-                      >
-                        {sortedCategories.map((_, idx) => (
-                          <option key={idx} value={idx}>
-                            #{idx + 1} {idx === 0 ? '(1st - Top)' : ''}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div className="flex items-center gap-1">
-                      <button
-                        type="button"
-                        onClick={() => handleMoveCategory(cIdx, 'up')}
-                        disabled={cIdx === 0}
-                        className="p-1 rounded bg-white text-slate-600 hover:text-sky-600 disabled:opacity-20 border border-amber-200 cursor-pointer shadow-2xs"
-                        title="Move Up"
-                      >
-                        <ChevronUp className="w-3 h-3" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleMoveCategory(cIdx, 'down')}
-                        disabled={cIdx === sortedCategories.length - 1}
-                        className="p-1 rounded bg-white text-slate-600 hover:text-sky-600 disabled:opacity-20 border border-amber-200 cursor-pointer shadow-2xs"
-                        title="Move Down"
-                      >
-                        <ChevronDown className="w-3 h-3" />
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Subcategories Accordion trigger */}
-                  <div className="mt-3 pt-2.5 border-t border-slate-100">
-                    <button
-                      type="button"
-                      onClick={() => handleToggleExpand(cat.id)}
-                      className="w-full flex items-center justify-between text-xs font-bold text-slate-700 hover:text-slate-900 transition-colors cursor-pointer py-1"
-                    >
-                      <span className="flex items-center gap-1.5">
-                        <Layers className="w-3.5 h-3.5 text-sky-600" />
-                        <span>Subcategories ({parsedSubs.length})</span>
-                      </span>
-                      <span className="text-[10px] text-sky-600 font-black">
-                        {isExpanded ? 'Hide ▲' : 'View Details ▼'}
-                      </span>
-                    </button>
-
-                    {isExpanded && (
-                      <div className="mt-2.5 space-y-2 max-h-72 overflow-y-auto pr-1">
-                        {parsedSubs.map((sub, sIdx) => (
-                          <div
-                            key={sub.id || sIdx}
-                            className="p-2.5 rounded-xl bg-slate-50 border border-slate-200/90 space-y-1.5 text-xs"
-                          >
-                            <div className="flex items-center justify-between gap-1">
-                              {editingSubKey === `${cat.id}_${sIdx}` ? (
-                                <div className="flex items-center gap-1 flex-1">
-                                  <input
-                                    type="text"
-                                    value={editingSubVal}
-                                    onChange={(e) => setEditingSubVal(e.target.value)}
-                                    onKeyDown={(e) => {
-                                      if (e.key === 'Enter') {
-                                        e.preventDefault();
-                                        handleSaveRenameSubcategory(cat, sIdx);
-                                      } else if (e.key === 'Escape') {
-                                        setEditingSubKey(null);
-                                      }
-                                    }}
-                                    autoFocus
-                                    className="w-full px-1.5 py-0.2 text-xs font-bold text-slate-900 bg-white border border-sky-400 rounded focus:outline-hidden"
-                                  />
-                                  <button
-                                    type="button"
-                                    onClick={() => handleSaveRenameSubcategory(cat, sIdx)}
-                                    className="p-0.5 rounded bg-emerald-600 text-white cursor-pointer"
-                                    title="Save"
-                                  >
-                                    <Check className="w-2.5 h-2.5" />
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => setEditingSubKey(null)}
-                                    className="p-0.5 rounded bg-slate-200 text-slate-700 cursor-pointer"
-                                    title="Cancel"
-                                  >
-                                    <X className="w-2.5 h-2.5" />
-                                  </button>
-                                </div>
-                              ) : (
-                                <div className="flex items-center gap-1 min-w-0 flex-1">
-                                  <span className="font-black text-slate-900 truncate">
-                                    {sIdx + 1}. {sub.name}
-                                  </span>
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      setEditingSubKey(`${cat.id}_${sIdx}`);
-                                      setEditingSubVal(sub.name);
-                                    }}
-                                    className="opacity-50 hover:opacity-100 p-0.5 text-slate-400 hover:text-sky-600 cursor-pointer"
-                                    title="Rename"
-                                  >
-                                    <Edit2 className="w-2.5 h-2.5" />
-                                  </button>
-                                </div>
-                              )}
-                              <div className="flex items-center gap-1 shrink-0">
-                                <select
-                                  value={sIdx}
-                                  onChange={(e) => handleSetSubcategoryPosition(cat, sIdx, Number(e.target.value))}
-                                  className="text-[10px] font-bold bg-white border border-slate-200 rounded px-1 py-0.2"
-                                  title="Select Position"
-                                >
-                                  {parsedSubs.map((_, pIdx) => (
-                                    <option key={pIdx} value={pIdx}>
-                                      #{pIdx + 1}
-                                    </option>
-                                  ))}
-                                </select>
-                                <button
-                                  type="button"
-                                  onClick={() => handleQuickRemoveSubcategory(cat, sub.id)}
-                                  className="text-slate-400 hover:text-rose-600 p-0.5 cursor-pointer"
-                                  title="Delete"
-                                >
-                                  <Trash2 className="w-3 h-3" />
-                                </button>
-                              </div>
-                            </div>
-
-                            {/* Sub-sub tags */}
-                            <div className="flex flex-wrap gap-1.5">
-                              {(sub.subSubcategories || []).map((subSub, ssIdx) => (
-                                <span
-                                  key={ssIdx}
-                                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-white border border-slate-200 text-[10px] text-slate-700 font-medium hover:border-sky-300 shadow-2xs"
-                                >
-                                  {editingSubSubKey === `${cat.id}_${sIdx}_${ssIdx}` ? (
-                                    <span className="inline-flex items-center gap-0.5">
-                                      <input
-                                        type="text"
-                                        value={editingSubSubVal}
-                                        onChange={(e) => setEditingSubSubVal(e.target.value)}
-                                        onKeyDown={(e) => {
-                                          if (e.key === 'Enter') {
-                                            e.preventDefault();
-                                            handleSaveRenameSubSubcategory(cat, sIdx, ssIdx);
-                                          } else if (e.key === 'Escape') {
-                                            setEditingSubSubKey(null);
-                                          }
-                                        }}
-                                        autoFocus
-                                        className="w-20 px-1 py-0.2 text-[9px] bg-sky-50 border border-sky-400 rounded focus:outline-hidden"
-                                      />
-                                      <button
-                                        type="button"
-                                        onClick={() => handleSaveRenameSubSubcategory(cat, sIdx, ssIdx)}
-                                        className="text-emerald-600 hover:text-emerald-800"
-                                      >
-                                        <Check className="w-2.5 h-2.5" />
-                                      </button>
-                                      <button
-                                        type="button"
-                                        onClick={() => setEditingSubSubKey(null)}
-                                        className="text-slate-400 hover:text-slate-600"
-                                      >
-                                        <X className="w-2.5 h-2.5" />
-                                      </button>
-                                    </span>
-                                  ) : (
-                                    <>
-                                      {/* Position Selector */}
-                                      <select
-                                        value={ssIdx}
-                                        onChange={(e) =>
-                                          handleSetSubSubcategoryPosition(
-                                            cat,
-                                            sIdx,
-                                            ssIdx,
-                                            Number(e.target.value)
-                                          )
-                                        }
-                                        className="text-[9px] font-black bg-sky-50 text-sky-800 border border-sky-200 rounded px-1 py-0.2 cursor-pointer focus:outline-hidden"
-                                        title="Change priority position"
-                                      >
-                                        {(sub.subSubcategories || []).map((_, pIdx) => (
-                                          <option key={pIdx} value={pIdx}>
-                                            #{pIdx + 1}
-                                          </option>
-                                        ))}
-                                      </select>
-
-                                      <span className="font-semibold text-slate-800">{subSub}</span>
-
-                                      {/* Move Left / Right buttons */}
-                                      <div className="inline-flex items-center gap-0.2 border-l border-slate-200 pl-1 ml-0.5">
-                                        <button
-                                          type="button"
-                                          onClick={() => handleMoveSubSubcategory(cat, sIdx, ssIdx, 'left')}
-                                          disabled={ssIdx === 0}
-                                          className="p-0.5 text-slate-400 hover:text-sky-600 disabled:opacity-20 cursor-pointer"
-                                          title="Move left"
-                                        >
-                                          <ChevronLeft className="w-2.5 h-2.5" />
-                                        </button>
-                                        <button
-                                          type="button"
-                                          onClick={() => handleMoveSubSubcategory(cat, sIdx, ssIdx, 'right')}
-                                          disabled={ssIdx === (sub.subSubcategories || []).length - 1}
-                                          className="p-0.5 text-slate-400 hover:text-sky-600 disabled:opacity-20 cursor-pointer"
-                                          title="Move right"
-                                        >
-                                          <ChevronRight className="w-2.5 h-2.5" />
-                                        </button>
-                                      </div>
-
-                                      <button
-                                        type="button"
-                                        onClick={() => {
-                                          setEditingSubSubKey(`${cat.id}_${sIdx}_${ssIdx}`);
-                                          setEditingSubSubVal(subSub);
-                                        }}
-                                        className="text-slate-400 hover:text-sky-600 cursor-pointer ml-0.5"
-                                        title="Edit Tag"
-                                      >
-                                        <Edit2 className="w-2 h-2" />
-                                      </button>
-                                      <button
-                                        type="button"
-                                        onClick={() => handleQuickRemoveSubSubcategory(cat, sIdx, subSub)}
-                                        className="text-slate-400 hover:text-rose-600 cursor-pointer ml-0.5"
-                                        title="Remove Tag"
-                                      >
-                                        <Trash2 className="w-2.5 h-2.5" />
-                                      </button>
-                                    </>
-                                  )}
-                                </span>
-                              ))}
-                            </div>
-
-                            {/* Inline Add nested */}
-                            <div className="flex items-center gap-1 pt-0.5">
-                              <input
-                                type="text"
-                                placeholder="+ Child Subcategory..."
-                                value={quickSubSubInputs[`${cat.id}_${sIdx}`] || ''}
-                                onChange={(e) =>
-                                  setQuickSubSubInputs({
-                                    ...quickSubSubInputs,
-                                    [`${cat.id}_${sIdx}`]: e.target.value,
-                                  })
-                                }
-                                onKeyDown={(e) => {
-                                  if (e.key === 'Enter') {
-                                    e.preventDefault();
-                                    handleQuickAddSubSubcategory(cat, sIdx);
-                                  }
-                                }}
-                                className="flex-1 px-2 py-0.5 rounded border border-slate-200 text-[10px] bg-white focus:outline-hidden font-medium"
-                              />
-                              <button
-                                type="button"
-                                onClick={() => handleQuickAddSubSubcategory(cat, sIdx)}
-                                className="px-2 py-0.5 rounded bg-slate-900 hover:bg-slate-800 text-white text-[10px] font-bold cursor-pointer"
-                              >
-                                Add
-                              </button>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* Quick Add Subcategory footer */}
-                <div className="pt-2 border-t border-slate-100 flex items-center gap-1.5">
-                  <input
-                    type="text"
-                    placeholder="Subcategory name..."
-                    value={quickSubInputs[cat.id] || ''}
-                    onChange={(e) => setQuickSubInputs({ ...quickSubInputs, [cat.id]: e.target.value })}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault();
-                        handleQuickAddSubcategory(cat);
-                      }
-                    }}
-                    className="flex-1 px-2.5 py-1 text-xs rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:outline-hidden"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => handleQuickAddSubcategory(cat)}
-                    className="px-2.5 py-1 rounded-xl bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold cursor-pointer shrink-0"
-                  >
-                    + Add
-                  </button>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {/* ADD / EDIT CATEGORY MODAL */}
+      {/* FULL MODAL: ADD / EDIT CATEGORY STUDIO */}
       {isModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl max-w-2xl w-full shadow-2xl overflow-hidden border border-slate-200 max-h-[90vh] flex flex-col">
-            <div className="bg-slate-900 text-white px-6 py-4 flex items-center justify-between shrink-0">
-              <div className="flex items-center gap-2">
-                <FolderTree className="w-5 h-5 text-sky-400" />
-                <h3 className="font-black text-base">
-                  {editingCat ? `Edit Category: ${editingCat.name}` : 'Add New Category & Subcategories'}
-                </h3>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-slate-950/60 backdrop-blur-xs overflow-y-auto">
+          <div className="bg-white rounded-3xl max-w-3xl w-full border border-slate-200 shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+            {/* Modal Header */}
+            <div className="p-5 sm:p-6 border-b border-slate-100 flex items-center justify-between bg-slate-50/80">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-sky-600 text-white flex items-center justify-center font-bold">
+                  {editingCat ? <Edit2 className="w-5 h-5" /> : <Plus className="w-5 h-5" />}
+                </div>
+                <div>
+                  <h3 className="text-base sm:text-lg font-black text-slate-900">
+                    {editingCat ? `Edit Category: ${editingCat.name}` : 'Add New Category'}
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Set category details, priority order, and nested subcategories.
+                  </p>
+                </div>
               </div>
               <button
                 onClick={() => setIsModalOpen(false)}
-                className="text-slate-400 hover:text-white cursor-pointer"
+                className="p-2 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100 cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <form onSubmit={handleSubmit} className="p-6 space-y-4 sm:space-y-5 overflow-y-auto flex-1">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Category Name (English) *
+            {/* Modal Form Body */}
+            <form onSubmit={handleSubmit} className="p-5 sm:p-6 space-y-6 overflow-y-auto flex-1">
+              {/* Basic Details Grid */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-700">
+                    Category Name (English) <span className="text-rose-500">*</span>
                   </label>
                   <input
                     type="text"
                     required
                     value={catName}
                     onChange={(e) => setCatName(e.target.value)}
-                    placeholder="e.g. Smart Electronics"
-                    className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs text-slate-900 font-bold focus:border-sky-500 focus:outline-hidden"
+                    placeholder="e.g. Electronics & Gadgets"
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-xs sm:text-sm bg-slate-50 focus:bg-white focus:outline-hidden focus:border-sky-500 font-semibold"
                   />
                 </div>
 
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Secondary / Local Name (Optional)
-                  </label>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-700">বাংলা নাম (ঐচ্ছিক)</label>
                   <input
                     type="text"
                     value={catBanglaName}
                     onChange={(e) => setCatBanglaName(e.target.value)}
-                    placeholder="e.g. Smart Electronics"
-                    className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs text-slate-900 focus:border-sky-500 focus:outline-hidden"
+                    placeholder="যেমন: ইলেকট্রনিক্স ও গ্যাজেট"
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-xs sm:text-sm bg-slate-50 focus:bg-white focus:outline-hidden focus:border-sky-500 font-semibold"
                   />
                 </div>
-              </div>
 
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Banner / Featured Image URL
-                </label>
-                <input
-                  type="url"
-                  value={catImage}
-                  onChange={(e) => setCatImage(e.target.value)}
-                  placeholder="https://images.unsplash.com/..."
-                  className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs text-slate-900 focus:border-sky-500 focus:outline-hidden"
-                />
-              </div>
-
-              {/* Display Priority Order in Navigation */}
-              <div className="p-3.5 bg-amber-50/90 border border-amber-200 rounded-2xl space-y-1.5">
-                <label className="block text-xs font-black text-amber-950 flex items-center gap-1.5">
-                  <ArrowUpDown className="w-3.5 h-3.5 text-amber-700" />
-                  <span>Storefront Navigation Priority</span>
-                </label>
-                <select
-                  value={catPriority}
-                  onChange={(e) => setCatPriority(Number(e.target.value))}
-                  className="w-full px-3 py-2 rounded-xl border border-amber-300 text-xs font-bold text-slate-900 bg-white focus:outline-hidden"
-                >
-                  {Array.from({ length: editingCat ? sortedCategories.length : sortedCategories.length + 1 }).map((_, idx) => (
-                    <option key={idx + 1} value={idx + 1}>
-                      Position #{idx + 1} {idx === 0 ? '(1st position - directly after "All Categories")' : ''}
-                    </option>
-                  ))}
-                </select>
-                <p className="text-[11px] text-amber-800">
-                  When customers browse the homepage or shop page, categories will be displayed according to this priority sequence.
-                </p>
-              </div>
-
-              {/* Sub-categories & Nested Sub-subcategories Manager */}
-              <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-3.5">
-                <div className="flex items-center justify-between">
-                  <label className="block text-xs font-black text-slate-900 uppercase tracking-wide">
-                    Subcategories & Child Sub-tags ({subcategoriesList.length})
-                  </label>
-                  <span className="text-[11px] text-slate-500 font-semibold">
-                    Multi-tier Categories
-                  </span>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-700">Featured Image URL</label>
+                  <input
+                    type="text"
+                    value={catImage}
+                    onChange={(e) => setCatImage(e.target.value)}
+                    placeholder="https://images.unsplash.com/..."
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-xs sm:text-sm bg-slate-50 focus:bg-white focus:outline-hidden focus:border-sky-500 font-medium"
+                  />
                 </div>
 
-                {/* Add new subcategory input row */}
-                <div className="flex items-center gap-2">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-700">Display Priority Position</label>
                   <select
-                    value={newSubIcon}
-                    onChange={(e) => setNewSubIcon(e.target.value)}
-                    className="px-3 py-2 rounded-xl border border-slate-300 text-xs text-slate-900 bg-white font-bold"
+                    value={catPriority}
+                    onChange={(e) => setCatPriority(Number(e.target.value))}
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-xs sm:text-sm bg-slate-50 focus:bg-white focus:outline-hidden focus:border-sky-500 font-bold cursor-pointer"
                   >
-                    <option value="Layers">📁 Layers</option>
-                    <option value="Shirt">👕 Fashion</option>
-                    <option value="Sparkles">✨ Beauty</option>
-                    <option value="Package">📦 Goods</option>
-                    <option value="Tag">🏷️ Tag</option>
+                    {Array.from({ length: Math.max(categories.length + 1, 10) }).map((_, idx) => (
+                      <option key={idx} value={idx + 1}>
+                        Position #{idx + 1} {idx === 0 ? '(1st on Homepage)' : ''}
+                      </option>
+                    ))}
                   </select>
+                </div>
+              </div>
+
+              {/* Image Quick Presets */}
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-slate-600 flex items-center gap-1">
+                  <ImageIcon className="w-3.5 h-3.5 text-sky-600" />
+                  <span>Choose Preset Image</span>
+                </label>
+                <div className="flex items-center gap-2 overflow-x-auto pb-1">
+                  {PRESET_CATEGORY_IMAGES.map((preset, idx) => (
+                    <button
+                      type="button"
+                      key={idx}
+                      onClick={() => setCatImage(preset.url)}
+                      className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-bold shrink-0 transition-all cursor-pointer ${
+                        catImage === preset.url
+                          ? 'bg-sky-50 border-sky-500 text-sky-900 shadow-2xs'
+                          : 'bg-white border-slate-200 hover:border-slate-300 text-slate-700'
+                      }`}
+                    >
+                      <img src={preset.url} alt="" className="w-5 h-5 rounded-md object-cover" />
+                      <span>{preset.name}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Subcategories & Nested Tags Builder */}
+              <div className="space-y-4 pt-3 border-t border-slate-100">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h4 className="text-sm font-black text-slate-900 flex items-center gap-1.5">
+                      <Layers className="w-4 h-4 text-sky-600" />
+                      <span>Subcategories & Child Tags</span>
+                    </h4>
+                    <p className="text-xs text-slate-500">
+                      Configure subcategories and their 3rd-tier child tags for this category.
+                    </p>
+                  </div>
+                </div>
+
+                {/* Subcategory Add input */}
+                <div className="flex items-center gap-2">
                   <input
                     type="text"
                     value={newSubName}
@@ -1686,228 +1371,105 @@ export const AdminCategories: React.FC<AdminCategoriesProps> = ({
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') {
                         e.preventDefault();
-                        handleAddSubcategory();
+                        handleAddSubcategoryToDraft();
                       }
                     }}
-                    placeholder="Subcategory name (e.g. Smart Watch)"
-                    className="flex-1 px-3 py-2 rounded-xl border border-slate-300 text-xs text-slate-900 bg-white focus:outline-hidden focus:border-sky-500"
+                    placeholder="+ New Subcategory Name (e.g. Smart Watches)..."
+                    className="flex-1 px-3.5 py-2 rounded-xl border border-slate-200 text-xs sm:text-sm bg-slate-50 focus:bg-white focus:outline-hidden focus:border-sky-500 font-medium"
                   />
                   <button
                     type="button"
-                    onClick={handleAddSubcategory}
-                    className="px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold transition-colors cursor-pointer shrink-0 flex items-center gap-1"
+                    onClick={handleAddSubcategoryToDraft}
+                    className="px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-700 text-white text-xs sm:text-sm font-bold cursor-pointer shrink-0"
                   >
-                    <Plus className="w-4 h-4" />
-                    <span>Add</span>
+                    + Add Subcategory
                   </button>
                 </div>
 
-                {/* List of subcategories with nested sub-subcategories */}
-                <div className="space-y-2.5 pt-1 max-h-56 overflow-y-auto pr-1">
+                {/* Subcategories List */}
+                <div className="space-y-3">
                   {subcategoriesList.map((sub, sIdx) => (
                     <div
                       key={sub.id || sIdx}
-                      className="p-3 rounded-2xl bg-white border border-slate-200 shadow-2xs space-y-2"
+                      className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-3"
                     >
                       <div className="flex items-center justify-between gap-2">
-                        <div className="flex items-center gap-1.5 flex-1 min-w-0">
-                          <span className="w-5 h-5 rounded-md bg-sky-100 text-sky-800 flex items-center justify-center text-[10px] font-black shrink-0">
-                            {sIdx + 1}
+                        <div className="flex items-center gap-2 min-w-0 flex-1">
+                          <span className="w-6 h-6 rounded-md bg-sky-100 text-sky-800 flex items-center justify-center font-black text-xs shrink-0">
+                            #{sIdx + 1}
                           </span>
+
                           {editingDraftSubIdx === sIdx ? (
                             <div className="flex items-center gap-1 flex-1">
                               <input
                                 type="text"
                                 value={editingDraftSubVal}
                                 onChange={(e) => setEditingDraftSubVal(e.target.value)}
-                                onKeyDown={(e) => {
-                                  if (e.key === 'Enter') {
-                                    e.preventDefault();
-                                    handleSaveDraftRenameSubcategory(sIdx);
-                                  } else if (e.key === 'Escape') {
-                                    setEditingDraftSubIdx(null);
-                                  }
-                                }}
                                 autoFocus
-                                className="w-full px-2 py-0.5 text-xs font-bold text-slate-900 bg-white border border-sky-400 rounded-md focus:outline-hidden"
+                                className="w-full px-2 py-1 text-xs font-bold text-slate-900 bg-white border border-sky-400 rounded-md focus:outline-hidden"
                               />
                               <button
                                 type="button"
                                 onClick={() => handleSaveDraftRenameSubcategory(sIdx)}
-                                className="p-1 rounded bg-emerald-600 text-white cursor-pointer"
-                                title="Save"
+                                className="p-1 rounded bg-emerald-600 text-white"
                               >
                                 <Check className="w-3 h-3" />
                               </button>
-                              <button
-                                type="button"
-                                onClick={() => setEditingDraftSubIdx(null)}
-                                className="p-1 rounded bg-slate-200 text-slate-700 cursor-pointer"
-                                title="Cancel"
-                              >
-                                <X className="w-3 h-3" />
-                              </button>
                             </div>
                           ) : (
-                            <div className="flex items-center gap-1 min-w-0">
-                              <span className="font-bold text-slate-900 text-xs truncate">
-                                {sub.name}
-                              </span>
+                            <div className="flex items-center gap-1.5">
+                              <span className="font-black text-slate-900 text-sm">{sub.name}</span>
                               <button
                                 type="button"
                                 onClick={() => {
                                   setEditingDraftSubIdx(sIdx);
                                   setEditingDraftSubVal(sub.name);
                                 }}
-                                className="opacity-50 hover:opacity-100 p-0.5 text-slate-400 hover:text-sky-600 cursor-pointer"
-                                title="Rename Subcategory"
+                                className="text-slate-400 hover:text-sky-600 p-0.5 cursor-pointer"
                               >
-                                <Edit2 className="w-2.5 h-2.5" />
+                                <Edit2 className="w-3 h-3" />
                               </button>
-                              <span className="text-[10px] px-1.5 py-0.2 rounded bg-slate-100 text-slate-600 font-bold shrink-0">
-                                {sub.subSubcategories?.length || 0} tags
-                              </span>
                             </div>
                           )}
                         </div>
+
                         <button
                           type="button"
-                          onClick={() => handleRemoveSubcategory(sub.id)}
-                          className="text-slate-400 hover:text-rose-600 cursor-pointer p-1 rounded-lg hover:bg-rose-50"
+                          onClick={() => handleRemoveSubcategoryFromDraft(sub.id)}
+                          className="p-1 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 cursor-pointer"
                           title="Delete Subcategory"
                         >
-                          <Trash2 className="w-3.5 h-3.5" />
+                          <Trash2 className="w-4 h-4" />
                         </button>
                       </div>
 
-                      {/* Nested sub-sub tags manager */}
-                      <div className="pl-6 space-y-1.5 border-l-2 border-sky-100 ml-1.5">
-                        <div className="flex flex-wrap gap-1">
-                          {sub.subSubcategories && sub.subSubcategories.length > 0 ? (
-                            sub.subSubcategories.map((subSub, ssIdx) => (
-                              <span
-                                key={ssIdx}
-                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-sky-50 border border-sky-200 text-sky-900 text-[11px] font-bold shadow-2xs"
+                      {/* Child tags */}
+                      <div className="space-y-2">
+                        <div className="flex flex-wrap gap-1.5">
+                          {(sub.subSubcategories || []).map((subSub, ssIdx) => (
+                            <span
+                              key={ssIdx}
+                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white border border-slate-200 text-xs font-semibold text-slate-800"
+                            >
+                              <span>{subSub}</span>
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveSubSubcategoryFromDraft(sIdx, subSub)}
+                                className="text-slate-400 hover:text-rose-600 cursor-pointer"
                               >
-                                {editingDraftSubSubKey === `${sIdx}_${ssIdx}` ? (
-                                  <span className="inline-flex items-center gap-0.5">
-                                    <input
-                                      type="text"
-                                      value={editingDraftSubSubVal}
-                                      onChange={(e) => setEditingDraftSubSubVal(e.target.value)}
-                                      onKeyDown={(e) => {
-                                        if (e.key === 'Enter') {
-                                          e.preventDefault();
-                                          handleSaveDraftRenameSubSubcategory(sIdx, ssIdx);
-                                        } else if (e.key === 'Escape') {
-                                          setEditingDraftSubSubKey(null);
-                                        }
-                                      }}
-                                      autoFocus
-                                      className="w-24 px-1 py-0.2 text-[10px] bg-white border border-sky-400 rounded focus:outline-hidden"
-                                    />
-                                    <button
-                                      type="button"
-                                      onClick={() => handleSaveDraftRenameSubSubcategory(sIdx, ssIdx)}
-                                      className="text-emerald-600 hover:text-emerald-800"
-                                    >
-                                      <Check className="w-2.5 h-2.5" />
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => setEditingDraftSubSubKey(null)}
-                                      className="text-slate-400 hover:text-slate-600"
-                                    >
-                                      <X className="w-2.5 h-2.5" />
-                                    </button>
-                                  </span>
-                                ) : (
-                                  <>
-                                    {/* Position Selector */}
-                                    <select
-                                      value={ssIdx}
-                                      onChange={(e) =>
-                                        handleSetDraftSubSubcategoryPosition(
-                                          sIdx,
-                                          ssIdx,
-                                          Number(e.target.value)
-                                        )
-                                      }
-                                      className="text-[9px] font-black bg-white text-sky-900 border border-sky-300 rounded px-1 py-0.2 cursor-pointer focus:outline-hidden"
-                                      title="Change priority position"
-                                    >
-                                      {(sub.subSubcategories || []).map((_, pIdx) => (
-                                        <option key={pIdx} value={pIdx}>
-                                          #{pIdx + 1}
-                                        </option>
-                                      ))}
-                                    </select>
-
-                                    <span className="font-bold text-sky-950">{subSub}</span>
-
-                                    {/* Move Left / Right buttons */}
-                                    <div className="inline-flex items-center gap-0.2 border-l border-sky-200 pl-1 ml-0.5">
-                                      <button
-                                        type="button"
-                                        onClick={() => handleMoveDraftSubSubcategory(sIdx, ssIdx, 'left')}
-                                        disabled={ssIdx === 0}
-                                        className="p-0.5 text-sky-400 hover:text-sky-700 disabled:opacity-20 cursor-pointer"
-                                        title="Move left"
-                                      >
-                                        <ChevronLeft className="w-2.5 h-2.5" />
-                                      </button>
-                                      <button
-                                        type="button"
-                                        onClick={() => handleMoveDraftSubSubcategory(sIdx, ssIdx, 'right')}
-                                        disabled={ssIdx === (sub.subSubcategories || []).length - 1}
-                                        className="p-0.5 text-sky-400 hover:text-sky-700 disabled:opacity-20 cursor-pointer"
-                                        title="Move right"
-                                      >
-                                        <ChevronRight className="w-2.5 h-2.5" />
-                                      </button>
-                                    </div>
-
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        setEditingDraftSubSubKey(`${sIdx}_${ssIdx}`);
-                                        setEditingDraftSubSubVal(subSub);
-                                      }}
-                                      className="text-sky-400 hover:text-sky-700 cursor-pointer ml-0.5"
-                                      title="Rename Child Tag"
-                                    >
-                                      <Edit2 className="w-2.5 h-2.5" />
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => handleRemoveSubSubcategoryFromDraft(sIdx, subSub)}
-                                      className="text-sky-400 hover:text-rose-600 cursor-pointer ml-0.5"
-                                      title="Delete Child Tag"
-                                    >
-                                      <Trash2 className="w-2.5 h-2.5" />
-                                    </button>
-                                  </>
-                                )}
-                              </span>
-                            ))
-                          ) : (
-                            <span className="text-[11px] text-slate-400 italic">
-                              No child subcategories yet
+                                <X className="w-3 h-3" />
+                              </button>
                             </span>
-                          )}
+                          ))}
                         </div>
 
-                        {/* Add sub-sub input */}
-                        <div className="flex items-center gap-1.5 pt-0.5">
+                        <div className="flex items-center gap-1.5">
                           <input
                             type="text"
-                            placeholder="+ Add Child Subcategory (e.g. Jeans & Pants)..."
+                            placeholder="+ Add child tag (e.g. Wireless)..."
                             value={newSubSubInput[sIdx] || ''}
                             onChange={(e) =>
-                              setNewSubSubInput({
-                                ...newSubSubInput,
-                                [sIdx]: e.target.value,
-                              })
+                              setNewSubSubInput({ ...newSubSubInput, [sIdx]: e.target.value })
                             }
                             onKeyDown={(e) => {
                               if (e.key === 'Enter') {
@@ -1915,12 +1477,12 @@ export const AdminCategories: React.FC<AdminCategoriesProps> = ({
                                 handleAddSubSubcategoryToDraft(sIdx);
                               }
                             }}
-                            className="flex-1 px-2.5 py-1 rounded-lg border border-slate-200 text-[11px] text-slate-900 bg-slate-50 focus:bg-white focus:outline-hidden"
+                            className="flex-1 px-3 py-1 text-xs rounded-lg border border-slate-200 bg-white focus:outline-hidden focus:border-sky-500 font-medium"
                           />
                           <button
                             type="button"
                             onClick={() => handleAddSubSubcategoryToDraft(sIdx)}
-                            className="px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-[11px] font-bold cursor-pointer"
+                            className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold cursor-pointer"
                           >
                             + Tag
                           </button>
@@ -1928,30 +1490,24 @@ export const AdminCategories: React.FC<AdminCategoriesProps> = ({
                       </div>
                     </div>
                   ))}
-
-                  {subcategoriesList.length === 0 && (
-                    <p className="text-xs text-slate-400 text-center py-3 italic">
-                      No subcategories added yet.
-                    </p>
-                  )}
                 </div>
               </div>
 
-              {/* Modal Buttons */}
-              <div className="flex justify-end gap-2.5 pt-3 border-t border-slate-100">
+              {/* Modal Footer Controls */}
+              <div className="pt-4 border-t border-slate-100 flex items-center justify-end gap-3">
                 <button
                   type="button"
                   onClick={() => setIsModalOpen(false)}
-                  className="px-4 py-2 rounded-xl border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50 cursor-pointer"
+                  className="px-5 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs sm:text-sm font-bold transition-colors cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 rounded-xl bg-sky-600 hover:bg-sky-700 text-white text-xs font-black shadow-md shadow-sky-600/20 cursor-pointer flex items-center gap-1.5"
+                  className="px-6 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-700 active:bg-sky-800 text-white text-xs sm:text-sm font-bold shadow-md shadow-sky-600/20 flex items-center gap-2 transition-all cursor-pointer"
                 >
                   <Save className="w-4 h-4" />
-                  <span>Save</span>
+                  <span>Save & Apply Live</span>
                 </button>
               </div>
             </form>

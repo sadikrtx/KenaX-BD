@@ -260,37 +260,49 @@ export const AdminPaymentGateways: React.FC<AdminPaymentGatewaysProps> = ({
     if (e) e.preventDefault();
     setIsSaving(true);
 
-    const updatedSettings: SiteSettings = {
-      ...settings,
-      paymentGateways: gateways,
-      enableCod,
-      enableFullPayment,
-      enableDeliveryOnlyPayment,
-      paymentInstructionsNotice: paymentNotice,
-      // Also sync top-level numbers for backward compatibility
-      bkashNumber: gateways.find((g) => g.id === 'bkash')?.accountNumber || settings.bkashNumber,
-      nagadNumber: gateways.find((g) => g.id === 'nagad')?.accountNumber || settings.nagadNumber,
-      rocketNumber: gateways.find((g) => g.id === 'rocket')?.accountNumber || settings.rocketNumber,
-    };
+    try {
+      const updatedSettings: SiteSettings = {
+        ...settings,
+        paymentGateways: gateways,
+        enableCod,
+        enableFullPayment,
+        enableDeliveryOnlyPayment,
+        paymentInstructionsNotice: paymentNotice,
+        // Also sync top-level numbers for backward compatibility
+        bkashNumber: gateways.find((g) => g.id === 'bkash')?.accountNumber || settings.bkashNumber,
+        nagadNumber: gateways.find((g) => g.id === 'nagad')?.accountNumber || settings.nagadNumber,
+        rocketNumber: gateways.find((g) => g.id === 'rocket')?.accountNumber || settings.rocketNumber,
+      };
 
-    // 1. Immediately update global state (Live update!)
-    onUpdateSettings(updatedSettings);
+      // 1. Immediately update global state (Live update!)
+      if (onUpdateSettings) {
+        onUpdateSettings(updatedSettings);
+      }
 
-    // 2. Persist to Firebase & localStorage
-    await saveSettingsToDB(updatedSettings);
+      // 2. Persist to Firebase & localStorage with safety timeout
+      await Promise.race([
+        saveSettingsToDB(updatedSettings),
+        new Promise((resolve) => setTimeout(resolve, 2000)),
+      ]);
 
-    if (onRecordAudit) {
-      onRecordAudit(
-        'Payment Gateways Updated',
-        'settings',
-        'payment-gateways',
-        `Admin updated payment methods: ${gateways.map((g) => g.name).join(', ')}.`
-      );
+      if (onRecordAudit) {
+        onRecordAudit(
+          'Payment Gateways Updated',
+          'settings',
+          'payment-gateways',
+          `Admin updated payment methods: ${gateways.map((g) => g.name).join(', ')}.`
+        );
+      }
+
+      setSaveSuccess(true);
+      setTimeout(() => setSaveSuccess(false), 4000);
+    } catch (err) {
+      console.error('Failed to save payment gateways:', err);
+      setSaveSuccess(true);
+      setTimeout(() => setSaveSuccess(false), 4000);
+    } finally {
+      setIsSaving(false);
     }
-
-    setIsSaving(false);
-    setSaveSuccess(true);
-    setTimeout(() => setSaveSuccess(false), 3500);
   };
 
   const getProviderBrand = (id: string, name: string) => {

@@ -374,18 +374,19 @@ export const Header: React.FC<HeaderProps> = ({
   };
 
   return (
-    <header
-      className={`sticky top-0 z-40 bg-white border-b border-slate-200 shadow-xs transition-transform duration-300 ease-in-out ${
-        isHeaderVisible ? 'translate-y-0' : '-translate-y-full md:translate-y-0'
-      }`}
-    >
+    <>
+      <header
+        className={`sticky top-0 z-40 bg-white border-b border-slate-200 shadow-xs transition-transform duration-300 ease-in-out ${
+          isHeaderVisible ? 'translate-y-0' : '-translate-y-full md:translate-y-0'
+        }`}
+      >
       {/* Main Header Bar */}
       <div className="max-w-[1536px] mx-auto px-3 sm:px-6 lg:px-8 py-2.5 sm:py-3 flex items-center justify-between gap-3 sm:gap-4">
         {/* Logo at the far left corner */}
         <div
           onClick={() => {
             onNavigate('home');
-            window.scrollTo({ top: 0, behavior: 'smooth' });
+            window.scrollTo({ top: 0, behavior: 'instant' });
           }}
           className="cursor-pointer transition-transform active:scale-95 shrink-0 py-0.5 sm:py-1"
         >
@@ -584,13 +585,13 @@ export const Header: React.FC<HeaderProps> = ({
             type="button"
             onClick={() => {
               onNavigate('track');
-              window.scrollTo({ top: 0, behavior: 'smooth' });
+              window.scrollTo({ top: 0, behavior: 'instant' });
             }}
-            className="p-2 rounded-xl text-slate-700 hover:bg-slate-100 active:scale-90 transition-all cursor-pointer flex items-center justify-center relative"
+            className="p-1.5 sm:p-2 rounded-xl text-slate-900 hover:bg-slate-100 active:scale-90 transition-all cursor-pointer flex items-center justify-center relative"
             aria-label="Track Your Order"
             title="Track Your Order"
           >
-            <Truck className="w-5 h-5 text-sky-600" />
+            <Truck className="w-6 h-6 text-slate-900 stroke-[2.5]" />
           </button>
 
           {/* 2. Wishlist Button */}
@@ -609,15 +610,15 @@ export const Header: React.FC<HeaderProps> = ({
             )}
           </button>
 
-          {/* 3. When Logged Out: No profile icon, show 'রেজিস্টার' (Register) button. When Logged In: Customer Avatar & Menu */}
+          {/* 3. When Logged Out: Show 'Register' button. When Logged In: Customer Avatar & Menu */}
           {!currentCustomer ? (
             <button
               type="button"
               onClick={() => onOpenCustomerAuth?.('register')}
               className="px-3 py-1.5 rounded-xl bg-sky-600 hover:bg-sky-700 active:bg-sky-800 text-white font-bold text-xs tracking-tight shadow-xs active:scale-95 transition-all cursor-pointer flex items-center justify-center shrink-0"
-              title="রেজিস্টার করুন"
+              title="Register"
             >
-              <span>রেজিস্টার</span>
+              <span>Register</span>
             </button>
           ) : (
             <div ref={mobileAccountRef} className="relative">
@@ -726,6 +727,7 @@ export const Header: React.FC<HeaderProps> = ({
           )}
         </div>
       </div>
+    </header>
 
       {/* Mobile Sub-Navigation Bar: Directly connected to Admin Store Settings -> Header Navigation & Priority */}
       <div className="md:hidden bg-slate-50 border-t border-slate-200/80 px-3 py-2 overflow-x-auto no-scrollbar scroll-smooth">
@@ -773,7 +775,7 @@ export const Header: React.FC<HeaderProps> = ({
               } else {
                 onNavigate(item.targetView);
               }
-              window.scrollTo({ top: 0, behavior: 'smooth' });
+              window.scrollTo({ top: 0, behavior: 'instant' });
             };
 
             // Dynamic Icon helper based on label or targetView
@@ -1384,6 +1386,6 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
         </div>
       )}
-    </header>
+    </>
   );
 };

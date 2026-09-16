@@ -20,8 +20,10 @@ import {
 import { getAuth } from 'firebase/auth';
 import { safeSetLocalStorage, safeSetCartActivitiesCache, getIdbItem, setIdbItem } from './storage';
 import firebaseConfig from '../../firebase-applet-config.json';
-import { Product, Order, Category, WebsiteSettings, DeliveryZone, Coupon, OrderItem, HeroBannerItem, Review } from '../types';
+import { Product, Order, Category, SubCategoryItem, WebsiteSettings, DeliveryZone, Coupon, OrderItem, HeroBannerItem, Review, Supplier, SourcingLocation } from '../types';
 import { INITIAL_PRODUCTS, DEMO_PRODUCT_IDS } from '../data/initialProducts';
+import { INITIAL_SUPPLIERS } from '../data/initialSuppliers';
+import { INITIAL_SOURCING_LOCATIONS } from '../data/initialSourcingLocations';
 import {
   INITIAL_CATEGORIES,
   INITIAL_WEBSITE_SETTINGS,
@@ -351,45 +353,32 @@ export function mergeCategoriesLists(baseList: Category[] = INITIAL_CATEGORIES, 
     }
   });
 
-  // 2. Add or update incoming categories (from Firestore or local cache)
+  // 2. Add or update incoming categories (from Firestore or local cache) - User edits take full priority
   (incomingList || []).forEach((c) => {
     if (c && c.id && !deletedIds.has(c.id)) {
-      const existing = map.get(c.id);
-      if (!existing) {
-        map.set(c.id, { ...c });
-      } else {
-        // Merge subcategories intelligently: preserve nested subSubcategories from template if incoming has empty tags
-        const incomingSubs = c.subcategories || [];
-        const mergedSubs = incomingSubs.map((subItem: any, sIdx: number) => {
-          const subName = typeof subItem === 'string' ? subItem : subItem.name;
-          const baseSub = (existing.subcategories || []).find((b: any) =>
-            (typeof b === 'string' ? b : b.name) === subName
-          );
-          const baseSubSubs = baseSub && typeof baseSub !== 'string' ? (baseSub.subSubcategories || []) : [];
-
-          if (typeof subItem === 'string') {
-            return {
-              id: `sub-${c.id}-${sIdx}`,
-              name: subItem,
-              icon: 'Layers',
-              subSubcategories: baseSubSubs,
-            };
-          }
+      const normalizedSubs: SubCategoryItem[] = (c.subcategories || []).map((subItem: any, sIdx: number) => {
+        if (typeof subItem === 'string') {
           return {
-            ...subItem,
-            subSubcategories:
-              subItem.subSubcategories && subItem.subSubcategories.length > 0
-                ? subItem.subSubcategories
-                : baseSubSubs,
+            id: `sub-${c.id}-${sIdx}`,
+            name: subItem,
+            icon: 'Layers',
+            subSubcategories: [],
           };
-        });
+        }
+        return {
+          id: subItem.id || `sub-${c.id}-${sIdx}`,
+          name: subItem.name || '',
+          icon: subItem.icon || 'Layers',
+          subSubcategories: Array.isArray(subItem.subSubcategories) ? subItem.subSubcategories : [],
+        };
+      });
 
-        map.set(c.id, {
-          ...existing,
-          ...c,
-          subcategories: mergedSubs.length > 0 ? mergedSubs : existing.subcategories,
-        });
-      }
+      const existing = map.get(c.id);
+      map.set(c.id, {
+        ...(existing || {}),
+        ...c,
+        subcategories: normalizedSubs,
+      });
     }
   });
 
@@ -2957,12 +2946,16 @@ export async function getCategoriesFromDB(): Promise<Category[]> {
   // Merge default INITIAL_CATEGORIES + cached categories + live firestore categories
   const merged = mergeCategoriesLists(INITIAL_CATEGORIES, [...cachedCategories, ...firestoreItems]);
 
-  // Ensure ALL INITIAL_CATEGORIES exist in Firestore if missing
-  if (firestoreItems.length < INITIAL_CATEGORIES.length) {
+  // Ensure INITIAL_CATEGORIES exist in Firestore ONLY on fresh initial install
+  let deletedCategoryIds = new Set<string>();
+  try {
+    const rawDel = localStorage.getItem('kenax_deleted_category_ids');
+    if (rawDel) deletedCategoryIds = new Set(JSON.parse(rawDel));
+  } catch {}
+
+  if (firestoreItems.length === 0 && (!cachedCategories || cachedCategories.length === 0) && deletedCategoryIds.size === 0) {
     INITIAL_CATEGORIES.forEach((cat) => {
-      if (!firestoreItems.some((fc) => fc.id === cat.id)) {
-        setDoc(doc(db, 'categories', cat.id), cleanFirestoreData(cat), { merge: true }).catch(() => {});
-      }
+      setDoc(doc(db, 'categories', cat.id), cleanFirestoreData(cat), { merge: true }).catch(() => {});
     });
   }
 
@@ -3769,6 +3762,281 @@ export async function deleteReviewFromDB(reviewId: string): Promise<void> {
       safeSetLocalStorage('kenax_reviews_cache', JSON.stringify(filtered));
     }
   } catch (e) {}
+}
+
+// ==========================================
+// DROPSHIPPING SUPPLIERS
+// ==========================================
+
+export async function getSuppliersFromDB(): Promise<Supplier[]> {
+  try {
+    const snap = await getDocs(collection(db, 'suppliers'));
+    if (!snap.empty) {
+      const fetched = snap.docs.map((d) => ({ ...d.data(), id: d.id } as Supplier));
+
+      // Check deleted list
+      const rawDeleted = localStorage.getItem('kenax_deleted_supplier_ids');
+      const deletedIds: string[] = rawDeleted ? JSON.parse(rawDeleted) : [];
+      const valid = fetched.filter((s) => !deletedIds.includes(s.id));
+
+      // Merge with initial if not deleted
+      const existingIds = new Set(valid.map((s) => s.id));
+      INITIAL_SUPPLIERS.forEach((initS) => {
+        if (!existingIds.has(initS.id) && !deletedIds.includes(initS.id)) {
+          valid.push(initS);
+        }
+      });
+
+      safeSetLocalStorage('kenax_suppliers_cache', JSON.stringify(valid));
+      return valid;
+    }
+  } catch (err) {
+    console.warn('[KenaX BD] getSuppliersFromDB Firestore fallback:', err);
+  }
+
+  // Fallback to cache or initial
+  try {
+    const cached = localStorage.getItem('kenax_suppliers_cache');
+    if (cached) {
+      const list: Supplier[] = JSON.parse(cached);
+      const rawDeleted = localStorage.getItem('kenax_deleted_supplier_ids');
+      const deletedIds: string[] = rawDeleted ? JSON.parse(rawDeleted) : [];
+      return list.filter((s) => !deletedIds.includes(s.id));
+    }
+  } catch (e) {}
+
+  return [...INITIAL_SUPPLIERS];
+}
+
+export async function saveSupplierToDB(supplier: Supplier): Promise<void> {
+  const cleaned = cleanFirestoreData(supplier);
+  try {
+    await setDoc(doc(db, 'suppliers', supplier.id), cleaned, { merge: true });
+    await deleteDoc(doc(db, 'deletedSuppliers', supplier.id));
+  } catch (err) {
+    console.warn('[KenaX BD] Firestore saveSupplierToDB fallback:', err);
+  }
+
+  try {
+    const rawDeleted = localStorage.getItem('kenax_deleted_supplier_ids');
+    if (rawDeleted) {
+      const deletedList: string[] = JSON.parse(rawDeleted);
+      const filtered = deletedList.filter((id) => id !== supplier.id);
+      safeSetLocalStorage('kenax_deleted_supplier_ids', JSON.stringify(filtered));
+    }
+
+    const cached = localStorage.getItem('kenax_suppliers_cache');
+    let list: Supplier[] = cached ? JSON.parse(cached) : [...INITIAL_SUPPLIERS];
+    const idx = list.findIndex((s) => s.id === supplier.id);
+    if (idx >= 0) {
+      list[idx] = supplier;
+    } else {
+      list.unshift(supplier);
+    }
+    safeSetLocalStorage('kenax_suppliers_cache', JSON.stringify(list));
+  } catch (e) {
+    console.warn('[KenaX BD] saveSupplierToDB local cache error:', e);
+  }
+}
+
+export async function updateSupplierInDB(supplier: Supplier): Promise<void> {
+  await saveSupplierToDB(supplier);
+}
+
+export async function deleteSupplierFromDB(supplierId: string): Promise<void> {
+  try {
+    await deleteDoc(doc(db, 'suppliers', supplierId));
+    await setDoc(doc(db, 'deletedSuppliers', supplierId), {
+      deletedAt: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.warn('[KenaX BD] Firestore deleteSupplierFromDB fallback:', err);
+  }
+
+  try {
+    const rawDeleted = localStorage.getItem('kenax_deleted_supplier_ids');
+    const deletedList: string[] = rawDeleted ? JSON.parse(rawDeleted) : [];
+    if (!deletedList.includes(supplierId)) {
+      deletedList.push(supplierId);
+      safeSetLocalStorage('kenax_deleted_supplier_ids', JSON.stringify(deletedList));
+    }
+
+    const cached = localStorage.getItem('kenax_suppliers_cache');
+    if (cached) {
+      const list: Supplier[] = JSON.parse(cached);
+      const filtered = list.filter((s) => s.id !== supplierId);
+      safeSetLocalStorage('kenax_suppliers_cache', JSON.stringify(filtered));
+    }
+  } catch (e) {}
+}
+
+export function subscribeToSuppliers(callback: (suppliers: Supplier[]) => void): Unsubscribe {
+  try {
+    const q = collection(db, 'suppliers');
+    return onSnapshot(
+      q,
+      (snap) => {
+        const rawDeleted = localStorage.getItem('kenax_deleted_supplier_ids');
+        const deletedIds: string[] = rawDeleted ? JSON.parse(rawDeleted) : [];
+        const fetched = snap.docs.map((d) => ({ ...d.data(), id: d.id } as Supplier));
+        const valid = fetched.filter((s) => !deletedIds.includes(s.id));
+
+        const existingIds = new Set(valid.map((s) => s.id));
+        INITIAL_SUPPLIERS.forEach((initS) => {
+          if (!existingIds.has(initS.id) && !deletedIds.includes(initS.id)) {
+            valid.push(initS);
+          }
+        });
+
+        safeSetLocalStorage('kenax_suppliers_cache', JSON.stringify(valid));
+        callback(valid);
+      },
+      (err) => {
+        console.warn('[KenaX BD] subscribeToSuppliers listener warning:', err);
+        getSuppliersFromDB().then(callback);
+      }
+    );
+  } catch (e) {
+    console.warn('[KenaX BD] subscribeToSuppliers setup error:', e);
+    getSuppliersFromDB().then(callback);
+    return () => {};
+  }
+}
+
+// ==========================================
+// SOURCING LOCATIONS & WHOLESALERS (ON STOCK)
+// ==========================================
+export async function getSourcingLocationsFromDB(): Promise<SourcingLocation[]> {
+  try {
+    const snap = await getDocs(collection(db, 'sourcingLocations'));
+    if (!snap.empty) {
+      const fetched = snap.docs.map((d) => ({ ...d.data(), id: d.id } as SourcingLocation));
+
+      const rawDeleted = localStorage.getItem('kenax_deleted_sourcing_location_ids');
+      const deletedIds: string[] = rawDeleted ? JSON.parse(rawDeleted) : [];
+      const valid = fetched.filter((s) => !deletedIds.includes(s.id));
+
+      const existingIds = new Set(valid.map((s) => s.id));
+      INITIAL_SOURCING_LOCATIONS.forEach((initLoc) => {
+        if (!existingIds.has(initLoc.id) && !deletedIds.includes(initLoc.id)) {
+          valid.push(initLoc);
+        }
+      });
+
+      safeSetLocalStorage('kenax_sourcing_locations_cache', JSON.stringify(valid));
+      return valid;
+    }
+  } catch (err) {
+    console.warn('[KenaX BD] getSourcingLocationsFromDB Firestore fallback:', err);
+  }
+
+  // Fallback to cache or initial
+  try {
+    const cached = localStorage.getItem('kenax_sourcing_locations_cache');
+    if (cached) {
+      const list: SourcingLocation[] = JSON.parse(cached);
+      const rawDeleted = localStorage.getItem('kenax_deleted_sourcing_location_ids');
+      const deletedIds: string[] = rawDeleted ? JSON.parse(rawDeleted) : [];
+      return list.filter((s) => !deletedIds.includes(s.id));
+    }
+  } catch (e) {}
+
+  return [...INITIAL_SOURCING_LOCATIONS];
+}
+
+export async function saveSourcingLocationToDB(location: SourcingLocation): Promise<void> {
+  const cleaned = cleanFirestoreData(location);
+  try {
+    await setDoc(doc(db, 'sourcingLocations', location.id), cleaned, { merge: true });
+    await deleteDoc(doc(db, 'deletedSourcingLocations', location.id));
+  } catch (err) {
+    console.warn('[KenaX BD] Firestore saveSourcingLocationToDB fallback:', err);
+  }
+
+  try {
+    const rawDeleted = localStorage.getItem('kenax_deleted_sourcing_location_ids');
+    if (rawDeleted) {
+      const deletedList: string[] = JSON.parse(rawDeleted);
+      const filtered = deletedList.filter((id) => id !== location.id);
+      safeSetLocalStorage('kenax_deleted_sourcing_location_ids', JSON.stringify(filtered));
+    }
+
+    const cached = localStorage.getItem('kenax_sourcing_locations_cache');
+    let list: SourcingLocation[] = cached ? JSON.parse(cached) : [...INITIAL_SOURCING_LOCATIONS];
+    const idx = list.findIndex((s) => s.id === location.id);
+    if (idx >= 0) {
+      list[idx] = location;
+    } else {
+      list.unshift(location);
+    }
+    safeSetLocalStorage('kenax_sourcing_locations_cache', JSON.stringify(list));
+  } catch (e) {
+    console.warn('[KenaX BD] saveSourcingLocationToDB local cache error:', e);
+  }
+}
+
+export async function updateSourcingLocationInDB(location: SourcingLocation): Promise<void> {
+  await saveSourcingLocationToDB(location);
+}
+
+export async function deleteSourcingLocationFromDB(locationId: string): Promise<void> {
+  try {
+    await deleteDoc(doc(db, 'sourcingLocations', locationId));
+    await setDoc(doc(db, 'deletedSourcingLocations', locationId), {
+      deletedAt: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.warn('[KenaX BD] Firestore deleteSourcingLocationFromDB fallback:', err);
+  }
+
+  try {
+    const rawDeleted = localStorage.getItem('kenax_deleted_sourcing_location_ids');
+    const deletedList: string[] = rawDeleted ? JSON.parse(rawDeleted) : [];
+    if (!deletedList.includes(locationId)) {
+      deletedList.push(locationId);
+      safeSetLocalStorage('kenax_deleted_sourcing_location_ids', JSON.stringify(deletedList));
+    }
+
+    const cached = localStorage.getItem('kenax_sourcing_locations_cache');
+    if (cached) {
+      const list: SourcingLocation[] = JSON.parse(cached);
+      const filtered = list.filter((s) => s.id !== locationId);
+      safeSetLocalStorage('kenax_sourcing_locations_cache', JSON.stringify(filtered));
+    }
+  } catch (e) {}
+}
+
+export function subscribeToSourcingLocations(callback: (locations: SourcingLocation[]) => void): Unsubscribe {
+  try {
+    const q = collection(db, 'sourcingLocations');
+    return onSnapshot(
+      q,
+      (snap) => {
+        const rawDeleted = localStorage.getItem('kenax_deleted_sourcing_location_ids');
+        const deletedIds: string[] = rawDeleted ? JSON.parse(rawDeleted) : [];
+        const fetched = snap.docs.map((d) => ({ ...d.data(), id: d.id } as SourcingLocation));
+        const valid = fetched.filter((s) => !deletedIds.includes(s.id));
+
+        const existingIds = new Set(valid.map((s) => s.id));
+        INITIAL_SOURCING_LOCATIONS.forEach((initLoc) => {
+          if (!existingIds.has(initLoc.id) && !deletedIds.includes(initLoc.id)) {
+            valid.push(initLoc);
+          }
+        });
+
+        safeSetLocalStorage('kenax_sourcing_locations_cache', JSON.stringify(valid));
+        callback(valid);
+      },
+      (err) => {
+        console.warn('[KenaX BD] subscribeToSourcingLocations listener warning:', err);
+        getSourcingLocationsFromDB().then(callback);
+      }
+    );
+  } catch (e) {
+    console.warn('[KenaX BD] subscribeToSourcingLocations setup error:', e);
+    getSourcingLocationsFromDB().then(callback);
+    return () => {};
+  }
 }
 
 

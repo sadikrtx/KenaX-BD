@@ -32,6 +32,12 @@ export const AdminCoupons: React.FC<AdminCouponsProps> = ({
   const [minSpend, setMinSpend] = useState<number>(1500);
   const [maxDiscount, setMaxDiscount] = useState<number>(500);
   const [expiryDate, setExpiryDate] = useState('2026-12-31');
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  const showNotice = (msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => setToastMessage(null), 4000);
+  };
 
   const handleCreate = (e: React.FormEvent) => {
     e.preventDefault();
@@ -50,11 +56,27 @@ export const AdminCoupons: React.FC<AdminCouponsProps> = ({
     };
 
     onAddCoupon(newCoupon);
+    showNotice(`কুপন কোড "${newCoupon.code}" সফলভাবে তৈরি ও সক্রিয় করা হয়েছে!`);
     setIsModalOpen(false);
   };
 
   return (
     <div className="space-y-6">
+      {toastMessage && (
+        <div className="p-4 rounded-2xl bg-emerald-600 text-white font-bold text-xs sm:text-sm flex items-center justify-between shadow-lg shadow-emerald-600/20 animate-in fade-in">
+          <div className="flex items-center gap-2">
+            <CheckCircle className="w-5 h-5 text-emerald-100 shrink-0" />
+            <span>{toastMessage}</span>
+          </div>
+          <button
+            onClick={() => setToastMessage(null)}
+            className="p-1 rounded-lg hover:bg-white/20 transition-colors cursor-pointer"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
       <div className="p-5 rounded-2xl bg-white border border-slate-200 shadow-2xs flex items-center justify-between">
         <div>
           <h2 className="text-sm sm:text-base font-bold text-slate-900">Promotions & Coupons ({coupons.length})</h2>

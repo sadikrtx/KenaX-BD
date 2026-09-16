@@ -53,12 +53,24 @@ import {SpeedInsights} from '@vercel/speed-insights/react';
 import {Analytics} from '@vercel/analytics/react';
 import './index.css';
 
+const SafeAnalytics = () => {
+  try {
+    return (
+      <>
+        <SpeedInsights />
+        <Analytics />
+      </>
+    );
+  } catch {
+    return null;
+  }
+};
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <ErrorBoundary>
       <App />
-      <SpeedInsights />
-      <Analytics />
+      <SafeAnalytics />
     </ErrorBoundary>
   </StrictMode>,
 );

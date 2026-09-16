@@ -50,6 +50,7 @@ import {
   Clock,
 } from 'lucide-react';
 import { saveOriginalImageMedia, saveSettingsToDB } from '../../lib/firebase';
+import { getOptimizedImageUrl, handleImageError } from '../../utils/imageOptimizer';
 
 interface AdminPromoGridManagerProps {
   promoGridSettings: PromoGridSettings;
@@ -641,7 +642,7 @@ export const AdminPromoGridManager: React.FC<AdminPromoGridManagerProps> = ({
                   style={
                     card.backgroundImage
                       ? {
-                          backgroundImage: `url("${card.backgroundImage}")`,
+                          backgroundImage: `url("${getOptimizedImageUrl(card.backgroundImage, 1200)}")`,
                           backgroundSize: 'cover',
                           backgroundPosition: 'center',
                         }
@@ -1106,13 +1107,13 @@ export const AdminPromoGridManager: React.FC<AdminPromoGridManagerProps> = ({
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                           <div>
                             <label className="block text-[11px] font-bold text-slate-600 mb-1">
-                              Image URL
+                              Desktop Image URL
                             </label>
                             <input
                               type="text"
                               value={card.backgroundImage || ''}
                               onChange={(e) => updateBannerItem(idx, { backgroundImage: e.target.value })}
-                              placeholder="https://... or upload below"
+                              placeholder="Google Drive link or Web image URL..."
                               className="w-full px-3 py-1.5 rounded-lg border border-slate-300 text-xs font-medium text-slate-900"
                             />
                           </div>
@@ -1138,6 +1139,21 @@ export const AdminPromoGridManager: React.FC<AdminPromoGridManagerProps> = ({
                           </div>
                         </div>
 
+                        {card.backgroundImage && card.backgroundImage.trim() !== '' && (
+                          <div className="relative h-20 w-full rounded-lg overflow-hidden border border-slate-200 bg-slate-900 mt-2">
+                            <img
+                              src={getOptimizedImageUrl(card.backgroundImage, 1200)}
+                              alt={`Desktop banner ${idx + 1}`}
+                              className="w-full h-full object-cover"
+                              referrerPolicy="no-referrer"
+                              onError={(e) => handleImageError(e, card.backgroundImage)}
+                            />
+                            <span className="absolute bottom-1 right-1 px-1.5 py-0.5 rounded bg-black/75 text-white text-[9px] font-bold">
+                              Desktop Preview
+                            </span>
+                          </div>
+                        )}
+
                         {/* Optional Mobile Background Image */}
                         <div className="pt-2 border-t border-slate-100">
                           <label className="block text-[11px] font-bold text-slate-600 mb-1">
@@ -1148,7 +1164,7 @@ export const AdminPromoGridManager: React.FC<AdminPromoGridManagerProps> = ({
                               type="text"
                               value={card.mobileBackgroundImage || ''}
                               onChange={(e) => updateBannerItem(idx, { mobileBackgroundImage: e.target.value })}
-                              placeholder="Mobile image URL (leaves desktop unchanged)"
+                              placeholder="Google Drive link or Mobile image URL..."
                               className="w-full px-3 py-1.5 rounded-lg border border-slate-300 text-xs font-medium text-slate-900"
                             />
                             <label className="w-full px-3 py-1.5 rounded-lg border border-dashed border-purple-300 bg-purple-50/50 hover:bg-purple-50 text-xs font-bold text-purple-700 flex items-center justify-center gap-1.5 cursor-pointer transition-colors">
@@ -1166,6 +1182,21 @@ export const AdminPromoGridManager: React.FC<AdminPromoGridManagerProps> = ({
                               />
                             </label>
                           </div>
+
+                          {card.mobileBackgroundImage && card.mobileBackgroundImage.trim() !== '' && (
+                            <div className="relative h-20 w-full rounded-lg overflow-hidden border border-slate-200 bg-slate-900 mt-2">
+                              <img
+                                src={getOptimizedImageUrl(card.mobileBackgroundImage, 800)}
+                                alt={`Mobile banner ${idx + 1}`}
+                                className="w-full h-full object-cover"
+                                referrerPolicy="no-referrer"
+                                onError={(e) => handleImageError(e, card.mobileBackgroundImage)}
+                              />
+                              <span className="absolute bottom-1 right-1 px-1.5 py-0.5 rounded bg-purple-700 text-white text-[9px] font-bold">
+                                Mobile Preview
+                              </span>
+                            </div>
+                          )}
                         </div>
                       </div>
 

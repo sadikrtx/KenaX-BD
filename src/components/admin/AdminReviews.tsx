@@ -14,7 +14,7 @@ import {
   Shield,
   Upload,
 } from 'lucide-react';
-import { Review, UserRole, StaffUser } from '../../types';
+import { Review, UserRole, StaffUser, Product } from '../../types';
 
 interface AdminReviewsProps {
   reviews: Review[];

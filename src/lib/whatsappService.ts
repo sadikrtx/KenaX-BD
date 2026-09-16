@@ -375,6 +375,30 @@ export async function triggerWhatsAppDispatch(
     const message = formatWhatsAppMessage(tpl.message, { order });
     const directUrl = generateWhatsAppDirectLink(recipientPhone, message);
 
+    // If Official Meta WhatsApp Cloud API configured
+    if (activeSettings.provider === 'cloud_api') {
+      try {
+        const response = await fetch('/api/whatsapp/send', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            to: recipientPhone,
+            type: 'text',
+            text: message,
+            orderId: order.id,
+          }),
+        });
+        const data = await response.json();
+        if (response.ok && data.success) {
+          return { success: true, method: 'cloud_api', url: directUrl };
+        } else {
+          console.warn('Meta WhatsApp Cloud API dispatch note:', data.error);
+        }
+      } catch (cloudErr) {
+        console.warn('Meta Cloud API dispatch fallback to direct link:', cloudErr);
+      }
+    }
+
     // If commercial API configured (UltraMsg / GreenAPI / Wasender)
     if (activeSettings.provider === 'ultramsg' && activeSettings.instanceId && activeSettings.apiKey) {
       try {

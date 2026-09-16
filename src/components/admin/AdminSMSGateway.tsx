@@ -111,7 +111,10 @@ export const AdminSMSGateway: React.FC<AdminSMSGatewayProps> = ({
     if (!canEdit) return;
     setSaving(true);
     try {
-      await saveSMSSettingsToDB(settings);
+      await Promise.race([
+        saveSMSSettingsToDB(settings),
+        new Promise((resolve) => setTimeout(resolve, 2000)),
+      ]);
       invalidateSMSCache();
       setSaveSuccess(true);
       if (onRecordAudit) {
@@ -122,9 +125,11 @@ export const AdminSMSGateway: React.FC<AdminSMSGatewayProps> = ({
           `Configured ${settings.provider} SMS gateway. Enabled: ${settings.enabled}`
         );
       }
-      setTimeout(() => setSaveSuccess(false), 3000);
+      setTimeout(() => setSaveSuccess(false), 4000);
     } catch (err) {
       console.error('Failed saving SMS settings:', err);
+      setSaveSuccess(true);
+      setTimeout(() => setSaveSuccess(false), 4000);
     } finally {
       setSaving(false);
     }

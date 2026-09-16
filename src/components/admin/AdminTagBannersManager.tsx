@@ -389,13 +389,7 @@ export const AdminTagBannersManager: React.FC<AdminTagBannersManagerProps> = ({
             <h3 className="text-base sm:text-lg font-black text-slate-900">
               Tag Collection Banners & Artwork Manager
             </h3>
-            <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300">
-              ⚡ Synced with Header Navigation ({effectiveNavItems.length} Items)
-            </span>
           </div>
-          <p className="text-xs text-slate-600 mt-1">
-            Tag Collection Banners are synchronized with your <strong>Header Navigation Bar & Priorities</strong>. All {effectiveNavItems.length} items (Trending, Flash Sale, New Arrivals, Deals, Best Sellers, etc.) are listed in their exact priority order so you can upload desktop & mobile artworks, customize headings, and configure buttons.
-          </p>
         </div>
 
         {/* Global Device Preview Switcher & Add Button */}

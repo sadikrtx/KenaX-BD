@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { Product, UserRole, SiteSettings, TagCollectionSlide } from '../types';
 import { ProductCard } from './ProductCard';
+import { sortProductsByPagePriority } from '../utils/productPriorityUtils';
 import { getTagSlides } from '../utils/tagBannerDefaults';
 import { TagBannerEditorModal } from './admin/TagBannerEditorModal';
 import { resolveOriginalImageMedia, getSynchronouslyResolvedMedia } from '../lib/firebase';
@@ -66,7 +67,7 @@ export const TagProductsView: React.FC<TagProductsViewProps> = ({
 
   // Filter tagged products
   const taggedProducts = useMemo(() => {
-    return allProducts.filter((p) => {
+    const filtered = allProducts.filter((p) => {
       // Direct tag array match
       if (p.tags && p.tags.some((t) => t.trim().toLowerCase() === lowerTag)) return true;
 
@@ -135,7 +136,9 @@ export const TagProductsView: React.FC<TagProductsViewProps> = ({
       if (p.saleBadge && p.saleBadge.toLowerCase() === lowerTag) return true;
       return false;
     });
-  }, [allProducts, lowerTag]);
+
+    return sortProductsByPagePriority(filtered, `tag:${cleanTag}`);
+  }, [allProducts, lowerTag, cleanTag]);
 
   // Dynamic slides for this tag from siteSettings or defaults
   const slides: TagCollectionSlide[] = useMemo(() => {

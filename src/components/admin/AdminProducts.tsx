@@ -34,7 +34,15 @@ import {
   Camera,
   UploadCloud,
   FileText,
+  ArrowUpDown,
+  Building2,
+  Globe,
+  MessageCircle,
+  Phone,
+  Facebook,
+  MapPin,
 } from 'lucide-react';
+import { AdminProductPriorityManager } from './AdminProductPriorityManager';
 import {
   Product,
   UserRole,
@@ -43,11 +51,17 @@ import {
   Category,
   ColorVariation,
   ProductVariationOption,
+  ProductHighlight,
+  Supplier,
 } from '../../types';
 import { hasPermission } from '../../lib/permissions';
 import { compressImage } from '../../lib/firebase';
 import { FormattedText } from '../FormattedText';
 import { getOptimizedImageUrl, handleImageError } from '../../utils/imageOptimizer';
+import { ProductVideoPlayer } from '../ProductVideoPlayer';
+import { getProductStockStatus, getStockStatusInfo } from '../../utils/stockUtils';
+import { ProductKeyHighlightsEditor } from './ProductKeyHighlightsEditor';
+import { DEFAULT_PRODUCT_HIGHLIGHTS } from '../../utils/highlightConstants';
 
 interface AdminProductsProps {
   products: Product[];
@@ -57,6 +71,12 @@ interface AdminProductsProps {
   onDeleteProduct: (productId: string) => void;
   currentRole: UserRole;
   currentStaff: StaffUser | null;
+  suppliers?: Supplier[];
+  onAddSupplier?: (supplier: Supplier) => Promise<void> | void;
+  targetProductForEdit?: Product | null;
+  targetSupplierForNewProduct?: Supplier | null;
+  onClearTargetProductForEdit?: () => void;
+  onClearTargetSupplierForNewProduct?: () => void;
 }
 
 export const AdminProducts: React.FC<AdminProductsProps> = ({
@@ -67,6 +87,12 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
   onDeleteProduct,
   currentRole,
   currentStaff,
+  suppliers = [],
+  onAddSupplier,
+  targetProductForEdit,
+  targetSupplierForNewProduct,
+  onClearTargetProductForEdit,
+  onClearTargetSupplierForNewProduct,
 }) => {
   const staffPermissions = currentStaff?.permissions || [];
   const canCreate = hasPermission(currentRole, staffPermissions, 'products.create');
@@ -78,12 +104,15 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
   const [stockFilter, setStockFilter] = useState('all');
   const [baseTagFilter, setBaseTagFilter] = useState('all');
 
-  // Modal state
+  // Modal & Priority Manager state
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [showPriorityManager, setShowPriorityManager] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
 
   // Form states
   const [formName, setFormName] = useState('');
+  const [formPriority, setFormPriority] = useState<number | ''>('');
+  const [formPagePriorities, setFormPagePriorities] = useState<Record<string, number | ''>>({});
   const [formSlug, setFormSlug] = useState('');
   const [formBanglaName, setFormBanglaName] = useState('');
   const [formCategory, setFormCategory] = useState('Electronics & Gadgets');
@@ -95,6 +124,7 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
   const [formOriginalPrice, setFormOriginalPrice] = useState<number | ''>(3000);
   const [formCostPrice, setFormCostPrice] = useState<number | ''>(1800);
   const [formStock, setFormStock] = useState<number | ''>(50);
+  const [formStockStatus, setFormStockStatus] = useState<'in_stock' | 'out_of_stock' | 'upcoming'>('in_stock');
   const [formImages, setFormImages] = useState<string[]>([]);
   const [formImageInput, setFormImageInput] = useState('');
   const [formVideoUrl, setFormVideoUrl] = useState('');
@@ -103,11 +133,28 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
   const [formDescription, setFormDescription] = useState('');
   const [descMode, setDescMode] = useState<'edit' | 'preview'>('edit');
   const [formType, setFormType] = useState<ProductType>('own');
+  const [formSupplierId, setFormSupplierId] = useState<string>('');
   const [formSupplierName, setFormSupplierName] = useState('');
   const [formSupplierUrl, setFormSupplierUrl] = useState('');
+  // Own stock sourcing fields
+  const [formSourcingAddress, setFormSourcingAddress] = useState('');
+  const [formSourcingPhone, setFormSourcingPhone] = useState('');
+  const [formSourcingVendorName, setFormSourcingVendorName] = useState('');
+  const [formSourcingMemo, setFormSourcingMemo] = useState('');
   const [formIsFeatured, setFormIsFeatured] = useState(true);
   const [formIsHot, setFormIsHot] = useState(false);
   const [formIsNew, setFormIsNew] = useState(false);
+
+  // Quick Inline Supplier Modal State
+  const [isQuickSupplierOpen, setIsQuickSupplierOpen] = useState(false);
+  const [quickSuppName, setQuickSuppName] = useState('');
+  const [quickSuppWebsite, setQuickSuppWebsite] = useState('');
+  const [quickSuppFacebook, setQuickSuppFacebook] = useState('');
+  const [quickSuppTiktok, setQuickSuppTiktok] = useState('');
+  const [quickSuppWhatsapp, setQuickSuppWhatsapp] = useState('');
+  const [quickSuppManagerPhone, setQuickSuppManagerPhone] = useState('');
+  const [quickSuppError, setQuickSuppError] = useState<string | null>(null);
+  const [isSavingQuickSupp, setIsSavingQuickSupp] = useState(false);
 
   // Product Base Tag & Discount Configuration
   const [formSaleBadge, setFormSaleBadge] = useState<string>('Trending');
@@ -124,6 +171,9 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
   const [formColors, setFormColors] = useState<ColorVariation[]>([]);
   const [formSizes, setFormSizes] = useState<string[]>([]);
   const [formVariations, setFormVariations] = useState<ProductVariationOption[]>([]);
+
+  // Key Highlights & Benefits state
+  const [formKeyHighlights, setFormKeyHighlights] = useState<ProductHighlight[]>([]);
 
   // Specifications state
   const [formSpecifications, setFormSpecifications] = useState<Record<string, string>>({});
@@ -241,9 +291,10 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
       categoryFilter === 'all' || p.category.toLowerCase() === categoryFilter.toLowerCase();
 
     let matchesStock = true;
-    if (stockFilter === 'in_stock') matchesStock = p.stock > 10;
-    else if (stockFilter === 'low_stock') matchesStock = p.stock > 0 && p.stock <= 10;
-    else if (stockFilter === 'out_of_stock') matchesStock = p.stock === 0;
+    const pStatus = getProductStockStatus(p);
+    if (stockFilter === 'in_stock') matchesStock = pStatus === 'in_stock';
+    else if (stockFilter === 'out_of_stock') matchesStock = pStatus === 'out_of_stock';
+    else if (stockFilter === 'upcoming') matchesStock = pStatus === 'upcoming';
 
     let matchesBaseTag = true;
     if (baseTagFilter === 'trending') matchesBaseTag = !!p.isTrending || p.saleBadge === 'Trending';
@@ -275,9 +326,9 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
   const stockMetrics = useMemo(() => {
     return {
       all: products.length,
-      inStock: products.filter((p) => p.stock > 10).length,
-      lowStock: products.filter((p) => p.stock > 0 && p.stock <= 10).length,
-      outOfStock: products.filter((p) => p.stock === 0).length,
+      inStock: products.filter((p) => getProductStockStatus(p) === 'in_stock').length,
+      outOfStock: products.filter((p) => getProductStockStatus(p) === 'out_of_stock').length,
+      upcoming: products.filter((p) => getProductStockStatus(p) === 'upcoming').length,
     };
   }, [products]);
 
@@ -430,6 +481,78 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
     }
   };
 
+  // Handle external navigation from Dropshipping Supplier view
+  useEffect(() => {
+    if (targetProductForEdit) {
+      openEditModal(targetProductForEdit);
+      if (onClearTargetProductForEdit) onClearTargetProductForEdit();
+    }
+  }, [targetProductForEdit]);
+
+  useEffect(() => {
+    if (targetSupplierForNewProduct) {
+      openCreateModal();
+      if (targetSupplierForNewProduct.id === 'own-stock') {
+        setFormType('own');
+      } else {
+        setFormType('dropshipping');
+        setFormSupplierId(targetSupplierForNewProduct.id);
+        setFormSupplierName(targetSupplierForNewProduct.name);
+        if (targetSupplierForNewProduct.websiteUrl) {
+          setFormSupplierUrl(targetSupplierForNewProduct.websiteUrl);
+        }
+      }
+      if (onClearTargetSupplierForNewProduct) onClearTargetSupplierForNewProduct();
+    }
+  }, [targetSupplierForNewProduct]);
+
+  // Quick Inline Supplier Creation inside Product Modal
+  const handleSaveQuickSupplier = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!quickSuppName.trim()) {
+      setQuickSuppError('Supplier business name is required');
+      return;
+    }
+    setIsSavingQuickSupp(true);
+    try {
+      const newSupplier: Supplier = {
+        id: `supplier-${Date.now()}`,
+        name: quickSuppName.trim(),
+        websiteUrl: quickSuppWebsite.trim() || undefined,
+        facebookUrl: quickSuppFacebook.trim() || undefined,
+        tiktokUrl: quickSuppTiktok.trim() || undefined,
+        whatsapp: quickSuppWhatsapp.trim() || undefined,
+        managerPhone: quickSuppManagerPhone.trim() || undefined,
+        status: 'active',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+
+      if (onAddSupplier) {
+        await onAddSupplier(newSupplier);
+      }
+
+      setFormSupplierId(newSupplier.id);
+      setFormSupplierName(newSupplier.name);
+      if (!formSupplierUrl && newSupplier.websiteUrl) {
+        setFormSupplierUrl(newSupplier.websiteUrl);
+      }
+
+      setIsQuickSupplierOpen(false);
+      setQuickSuppName('');
+      setQuickSuppWebsite('');
+      setQuickSuppFacebook('');
+      setQuickSuppTiktok('');
+      setQuickSuppWhatsapp('');
+      setQuickSuppManagerPhone('');
+      setQuickSuppError(null);
+    } catch (err: any) {
+      setQuickSuppError(err?.message || 'Failed to save supplier');
+    } finally {
+      setIsSavingQuickSupp(false);
+    }
+  };
+
   const openCreateModal = () => {
     setEditingProduct(null);
     setFormName('');
@@ -449,7 +572,8 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
     setFormDiscountValue('');
     setFormPrice('');
     setFormCostPrice('');
-    setFormStock('');
+    setFormStock(999);
+    setFormStockStatus('in_stock');
     setFormSaleBadge('Trending');
     setFormTags(['Shop', 'Trending']);
     setNewCustomTagInput('');
@@ -460,8 +584,13 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
     setFormError(null);
     setFormDescription('Official genuine product with warranty and fast delivery across Bangladesh.');
     setFormType('own');
+    setFormSupplierId('');
     setFormSupplierName('');
     setFormSupplierUrl('');
+    setFormSourcingAddress('');
+    setFormSourcingPhone('');
+    setFormSourcingVendorName('');
+    setFormSourcingMemo('');
     setEnableColors(false);
     setEnableSizes(false);
     setFormColors([]);
@@ -479,13 +608,18 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
     setFormIsFeatured(true);
     setFormIsHot(false);
     setFormIsNew(false);
+    setFormPriority('');
+    setFormPagePriorities({});
     setPriceLockedByAdmin(false);
+    setFormKeyHighlights(DEFAULT_PRODUCT_HIGHLIGHTS.map((h, i) => ({ ...h, id: `hl-${Date.now()}-${i}` })));
     setIsModalOpen(true);
   };
 
   const openEditModal = (p: Product) => {
     setEditingProduct(p);
     setFormName(p.name);
+    setFormPriority(p.priority || '');
+    setFormPagePriorities(p.pagePriorities ? { ...p.pagePriorities } : {});
     setFormSlug(p.slug || '');
     setFormBanglaName(p.banglaName || '');
     setFormCategory(p.category);
@@ -498,6 +632,10 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
     setPriceLockedByAdmin(true);
     setFormCostPrice(p.costPrice || Math.round(p.price * 0.7));
     setFormStock(p.stock);
+    setFormStockStatus(
+      p.stockStatus ||
+      (p.stock === 0 ? 'out_of_stock' : 'in_stock')
+    );
 
     // Resolve Base Tag
     let initialBadge = p.saleBadge || 'None';
@@ -530,8 +668,13 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
     setFormError(null);
     setFormDescription(p.description);
     setFormType(p.productType);
+    setFormSupplierId(p.supplierId || '');
     setFormSupplierName(p.supplierName || '');
     setFormSupplierUrl(p.supplierUrl || '');
+    setFormSourcingAddress(p.sourcingAddress || '');
+    setFormSourcingPhone(p.sourcingPhone || '');
+    setFormSourcingVendorName(p.sourcingVendorName || '');
+    setFormSourcingMemo(p.sourcingMemo || '');
     setEnableColors(!!(p.colors && p.colors.length > 0));
     setEnableSizes(!!(p.sizes && p.sizes.length > 0));
     setFormColors(p.colors ? [...p.colors] : []);
@@ -570,6 +713,21 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
     }
     setFormTags(existingTags);
     setNewCustomTagInput('');
+
+    // Resolve Key Highlights & Benefits
+    if (p.keyHighlights && Array.isArray(p.keyHighlights) && p.keyHighlights.length > 0) {
+      setFormKeyHighlights(
+        p.keyHighlights.map((h: any, idx: number) => ({
+          id: h.id || `hl-${Date.now()}-${idx}`,
+          text: typeof h === 'string' ? h : (h.text || ''),
+          icon: typeof h === 'object' ? (h.icon || 'check-circle') : 'check-circle',
+          iconColor: typeof h === 'object' ? (h.iconColor || 'emerald') : 'emerald',
+          active: typeof h === 'object' && typeof h.active === 'boolean' ? h.active : true,
+        }))
+      );
+    } else {
+      setFormKeyHighlights(DEFAULT_PRODUCT_HIGHLIGHTS.map((h, i) => ({ ...h, id: `hl-${Date.now()}-${i}` })));
+    }
 
     setIsModalOpen(true);
   };
@@ -664,6 +822,15 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
     const isHot = formSaleBadge === 'Hot' || formIsHot;
     const isFeatured = formSaleBadge === 'Featured' || formIsFeatured;
 
+    const cleanPagePriorities: Record<string, number> = {};
+    if (formPagePriorities) {
+      Object.entries(formPagePriorities).forEach(([k, v]) => {
+        if (typeof v === 'number' && !isNaN(v) && v > 0) {
+          cleanPagePriorities[k] = v;
+        }
+      });
+    }
+
     const productPayload: Product = {
       id: editingProduct ? editingProduct.id : 'prod-' + Date.now(),
       sku: formSku.trim() || 'KB-' + Math.floor(1000 + Math.random() * 9000),
@@ -693,7 +860,10 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
       isBestSeller,
       isHot,
       isFeatured,
-      stock: Number(formStock),
+      priority: typeof formPriority === 'number' && formPriority > 0 ? formPriority : undefined,
+      pagePriorities: Object.keys(cleanPagePriorities).length > 0 ? cleanPagePriorities : undefined,
+      stockStatus: formStockStatus || 'in_stock',
+      stock: (formStockStatus === 'out_of_stock' ? 0 : 999),
       images: finalImages,
       videoUrl: formVideoUrl.trim() || undefined,
       description: formDescription.trim(),
@@ -701,9 +871,15 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
       sizes: enableSizes && formSizes.length > 0 ? formSizes : undefined,
       variations: formVariations.length > 0 ? formVariations : undefined,
       specifications: Object.keys(formSpecifications).length > 0 ? formSpecifications : undefined,
+      keyHighlights: formKeyHighlights.length > 0 ? formKeyHighlights : undefined,
       productType: formType,
+      supplierId: formSupplierId.trim() || undefined,
       supplierName: formSupplierName.trim() || (formSupplierUrl.trim() ? 'Direct Supplier / Platform' : undefined),
       supplierUrl: formSupplierUrl.trim() || undefined,
+      sourcingAddress: formType === 'own' ? (formSourcingAddress.trim() || undefined) : undefined,
+      sourcingPhone: formType === 'own' ? (formSourcingPhone.trim() || undefined) : undefined,
+      sourcingVendorName: formType === 'own' ? (formSourcingVendorName.trim() || undefined) : undefined,
+      sourcingMemo: formType === 'own' ? (formSourcingMemo.trim() || undefined) : undefined,
       rating: editingProduct ? editingProduct.rating : 4.9,
       reviewsCount: editingProduct ? editingProduct.reviewsCount : 1,
       createdAt: editingProduct?.createdAt || new Date().toISOString(),
@@ -758,23 +934,6 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
         </button>
 
         <button
-          onClick={() => setStockFilter('low_stock')}
-          className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer border ${
-            stockFilter === 'low_stock'
-              ? 'bg-amber-600 text-white border-amber-600 shadow-xs'
-              : 'bg-white text-amber-700 border-slate-200 hover:bg-amber-50/50'
-          }`}
-        >
-          <span className="w-2 h-2 rounded-full bg-amber-500" />
-          <span>Low Stock (≤10)</span>
-          <span className={`ml-0.5 px-1.5 py-0.2 rounded-full text-[10px] ${
-            stockFilter === 'low_stock' ? 'bg-white/20 text-white' : 'bg-amber-50 text-amber-700 font-bold'
-          }`}>
-            {stockMetrics.lowStock}
-          </span>
-        </button>
-
-        <button
           onClick={() => setStockFilter('out_of_stock')}
           className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer border ${
             stockFilter === 'out_of_stock'
@@ -783,11 +942,28 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
           }`}
         >
           <span className="w-2 h-2 rounded-full bg-rose-500" />
-          <span>Out of Stock (0)</span>
+          <span>Out of Stock</span>
           <span className={`ml-0.5 px-1.5 py-0.2 rounded-full text-[10px] ${
             stockFilter === 'out_of_stock' ? 'bg-white/20 text-white' : 'bg-rose-50 text-rose-700 font-bold'
           }`}>
             {stockMetrics.outOfStock}
+          </span>
+        </button>
+
+        <button
+          onClick={() => setStockFilter('upcoming')}
+          className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer border ${
+            stockFilter === 'upcoming'
+              ? 'bg-purple-600 text-white border-purple-600 shadow-xs'
+              : 'bg-white text-purple-700 border-slate-200 hover:bg-purple-50/50'
+          }`}
+        >
+          <span className="w-2 h-2 rounded-full bg-purple-500" />
+          <span>Upcoming</span>
+          <span className={`ml-0.5 px-1.5 py-0.2 rounded-full text-[10px] ${
+            stockFilter === 'upcoming' ? 'bg-white/20 text-white' : 'bg-purple-50 text-purple-700 font-bold'
+          }`}>
+            {stockMetrics.upcoming}
           </span>
         </button>
       </div>
@@ -824,10 +1000,10 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
             onChange={(e) => setStockFilter(e.target.value)}
             className="px-2.5 py-2 rounded-xl border border-slate-200 text-xs font-semibold text-slate-700 bg-white cursor-pointer focus:outline-hidden focus:ring-1 focus:ring-sky-500"
           >
-            <option value="all">All Stock</option>
-            <option value="in_stock">In Stock (&gt;10)</option>
-            <option value="low_stock">Low Stock (≤10)</option>
-            <option value="out_of_stock">Out of Stock (0)</option>
+            <option value="all">All Statuses</option>
+            <option value="in_stock">In Stock</option>
+            <option value="out_of_stock">Out of Stock</option>
+            <option value="upcoming">Upcoming</option>
           </select>
 
           <select
@@ -844,6 +1020,18 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
             <option value="discounted">🏷️ Has Discount</option>
           </select>
 
+          <button
+            onClick={() => setShowPriorityManager(!showPriorityManager)}
+            className={`px-3.5 py-2 rounded-xl text-white font-bold text-xs shadow-xs flex items-center gap-1.5 transition-all cursor-pointer shrink-0 ${
+              showPriorityManager
+                ? 'bg-amber-600 hover:bg-amber-700 ring-2 ring-amber-300'
+                : 'bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700'
+            }`}
+          >
+            <ArrowUpDown className="w-4 h-4" />
+            <span>{showPriorityManager ? 'Hide Priority Manager' : 'Page Priority & Ranking'}</span>
+          </button>
+
           {canCreate && (
             <button
               onClick={openCreateModal}
@@ -855,6 +1043,18 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
           )}
         </div>
       </div>
+
+      {/* Visual Priority Ranking Manager View */}
+      {showPriorityManager && (
+        <div className="mb-6">
+          <AdminProductPriorityManager
+            products={products}
+            categories={categories}
+            onUpdateProduct={onUpdateProduct}
+            onClose={() => setShowPriorityManager(false)}
+          />
+        </div>
+      )}
 
       {/* Products Table - Desktop-Optimized (Zero horizontal scroll on PC) / Mobile Cards */}
       <div className="rounded-2xl bg-white border border-slate-200 shadow-2xs overflow-hidden">
@@ -930,6 +1130,15 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                               {product.brand && (
                                 <span className="truncate text-slate-500 font-medium">
                                   • {product.brand}
+                                </span>
+                              )}
+                              {(product.supplierName || product.supplierId || product.productType === 'dropshipping') && (
+                                <span
+                                  className="inline-flex items-center gap-1 font-bold text-indigo-700 bg-indigo-50 px-1.5 py-0.2 rounded border border-indigo-200 shrink-0 text-[9px]"
+                                  title={product.supplierUrl || 'Dropshipping Supplier'}
+                                >
+                                  <Building2 className="w-2.5 h-2.5" />
+                                  <span className="truncate max-w-[100px]">{product.supplierName || 'Dropshipped'}</span>
                                 </span>
                               )}
                             </div>
@@ -1030,28 +1239,18 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                         </div>
                       </td>
 
-                      {/* 6. Stock Count & Indicator */}
+                      {/* 6. Stock Status Indicator */}
                       <td className="py-2.5 px-2.5 whitespace-nowrap">
-                        <span
-                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                            product.stock > 10
-                              ? 'bg-emerald-100 text-emerald-800'
-                              : product.stock > 0
-                              ? 'bg-amber-100 text-amber-800'
-                              : 'bg-rose-100 text-rose-800'
-                          }`}
-                        >
-                          <span
-                            className={`w-1.5 h-1.5 rounded-full shrink-0 ${
-                              product.stock > 10
-                                ? 'bg-emerald-600'
-                                : product.stock > 0
-                                ? 'bg-amber-600'
-                                : 'bg-rose-600'
-                            }`}
-                          />
-                          <span>{product.stock} pcs</span>
-                        </span>
+                        {(() => {
+                          const status = getProductStockStatus(product);
+                          const info = getStockStatusInfo(status);
+                          return (
+                            <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold border ${info.badgeClass}`}>
+                              <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${info.dotClass}`} />
+                              <span>{info.labelEn}</span>
+                            </span>
+                          );
+                        })()}
                       </td>
 
                       {/* 7. Source / Supplier */}
@@ -1202,6 +1401,11 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                           <ExternalLink className="w-2.5 h-2.5 text-indigo-600" />
                           <span>Source</span>
                         </a>
+                      ) : product.productType === 'own' ? (
+                        <span className="text-[9px] font-bold text-emerald-800 bg-emerald-100 px-1.5 py-0.5 rounded flex items-center gap-1">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                          On Stock
+                        </span>
                       ) : (
                         <span className="text-[9px] font-medium text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">
                           Own
@@ -1848,16 +2052,20 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
 
                     <div>
                       <label className="block text-[11px] font-bold text-slate-700 mb-1">
-                        Stock Quantity *
+                        Product Stock Status *
                       </label>
-                      <input
-                        type="number"
-                        min="0"
-                        value={formStock}
-                        onChange={(e) => setFormStock(e.target.value === '' ? '' : Number(e.target.value))}
-                        placeholder="e.g. 50"
-                        className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 text-xs font-bold text-slate-900 bg-white focus:ring-2 focus:ring-sky-500"
-                      />
+                      <select
+                        value={formStockStatus}
+                        onChange={(e) => {
+                          const val = e.target.value as 'in_stock' | 'out_of_stock' | 'upcoming';
+                          setFormStockStatus(val || 'in_stock');
+                        }}
+                        className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 text-xs font-bold text-slate-900 bg-white focus:ring-2 focus:ring-sky-500 cursor-pointer"
+                      >
+                        <option value="in_stock">In Stock</option>
+                        <option value="out_of_stock">Out of Stock</option>
+                        <option value="upcoming">Upcoming</option>
+                      </select>
                     </div>
                   </div>
 
@@ -1885,6 +2093,89 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                       )}
                     </div>
                   </div>
+
+                  {/* Product Priority & Page Ranking Configuration */}
+                  <div className="p-3.5 bg-gradient-to-r from-purple-50/70 to-indigo-50/70 border border-purple-200/80 rounded-xl space-y-3">
+                    <div className="flex items-center justify-between flex-wrap gap-2">
+                      <div className="flex items-center gap-1.5 font-extrabold text-xs text-purple-950">
+                        <ArrowUpDown className="w-4 h-4 text-purple-600 shrink-0" />
+                        <span>Product Page Priorities (Set Position per Store Page)</span>
+                      </div>
+                      <span className="text-[10px] font-bold bg-white text-purple-800 px-2 py-0.5 rounded-md border border-purple-200">
+                        1 = Top Priority (#1 Position)
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-xs">
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                          Home Page Rank
+                        </label>
+                        <input
+                          type="number"
+                          min="1"
+                          value={formPagePriorities['home'] ?? ''}
+                          onChange={(e) => {
+                            const val = e.target.value === '' ? '' : Number(e.target.value);
+                            setFormPagePriorities((prev) => ({ ...prev, home: val }));
+                          }}
+                          placeholder="Auto / Default"
+                          className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 font-bold text-slate-900 bg-white focus:ring-2 focus:ring-purple-500"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                          Shop Page Rank
+                        </label>
+                        <input
+                          type="number"
+                          min="1"
+                          value={formPagePriorities['shop'] ?? ''}
+                          onChange={(e) => {
+                            const val = e.target.value === '' ? '' : Number(e.target.value);
+                            setFormPagePriorities((prev) => ({ ...prev, shop: val }));
+                          }}
+                          placeholder="Auto / Default"
+                          className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 font-bold text-slate-900 bg-white focus:ring-2 focus:ring-purple-500"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-700 mb-1 truncate" title={`Category: ${formCategory}`}>
+                          Category Rank
+                        </label>
+                        <input
+                          type="number"
+                          min="1"
+                          value={formPagePriorities[`category:${formCategory}`] ?? ''}
+                          onChange={(e) => {
+                            const val = e.target.value === '' ? '' : Number(e.target.value);
+                            setFormPagePriorities((prev) => ({ ...prev, [`category:${formCategory}`]: val }));
+                          }}
+                          placeholder="Auto / Default"
+                          className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 font-bold text-slate-900 bg-white focus:ring-2 focus:ring-purple-500"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-700 mb-1 truncate" title={`Tag: ${formSaleBadge}`}>
+                          Tag Page Rank
+                        </label>
+                        <input
+                          type="number"
+                          min="1"
+                          value={formPagePriorities[`tag:${formSaleBadge}`] ?? ''}
+                          onChange={(e) => {
+                            const val = e.target.value === '' ? '' : Number(e.target.value);
+                            setFormPagePriorities((prev) => ({ ...prev, [`tag:${formSaleBadge}`]: val }));
+                          }}
+                          placeholder="Auto / Default"
+                          className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 font-bold text-slate-900 bg-white focus:ring-2 focus:ring-purple-500"
+                        />
+                      </div>
+                    </div>
+                  </div>
                 </div>
 
                 {/* Description & Specifications Side-by-Side Compact Layout */}
@@ -1894,7 +2185,7 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                     <div className="flex items-center justify-between flex-wrap gap-1.5">
                       <label className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
                         <FileText className="w-3.5 h-3.5 text-sky-600" />
-                        <span>Description (ফরম্যাটিং সাপোর্টেড)</span>
+                        <span>Description (Formatting Supported)</span>
                       </label>
                       <div className="flex items-center gap-1 bg-slate-200/70 p-0.5 rounded-lg text-[10px] font-bold">
                         <button
@@ -1926,38 +2217,38 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                       <>
                         {/* Format helper buttons */}
                         <div className="flex items-center gap-1.5 flex-wrap text-[10px]">
-                          <span className="text-slate-500 font-medium">ফরম্যাট:</span>
+                          <span className="text-slate-500 font-medium">Format:</span>
                           <button
                             type="button"
-                            onClick={() => setFormDescription((prev) => prev + ' **বোল্ড টেক্সট** ')}
+                            onClick={() => setFormDescription((prev) => prev + ' **Bold Text** ')}
                             className="px-1.5 py-0.5 bg-white border border-slate-300 rounded hover:bg-sky-50 hover:border-sky-300 text-slate-800 font-extrabold cursor-pointer"
                           >
                             **B** Bold
                           </button>
                           <button
                             type="button"
-                            onClick={() => setFormDescription((prev) => prev + ' *ইটালিক টেক্সট* ')}
+                            onClick={() => setFormDescription((prev) => prev + ' *Italic Text* ')}
                             className="px-1.5 py-0.5 bg-white border border-slate-300 rounded hover:bg-sky-50 hover:border-sky-300 text-slate-800 italic cursor-pointer"
                           >
                             *I* Italic
                           </button>
                           <button
                             type="button"
-                            onClick={() => setFormDescription((prev) => prev + '\n# হেডিং ১\n')}
+                            onClick={() => setFormDescription((prev) => prev + '\n# Heading 1\n')}
                             className="px-1.5 py-0.5 bg-white border border-slate-300 rounded hover:bg-sky-50 hover:border-sky-300 text-slate-800 font-black cursor-pointer"
                           >
                             # H1
                           </button>
                           <button
                             type="button"
-                            onClick={() => setFormDescription((prev) => prev + '\n## হেডিং ২\n')}
+                            onClick={() => setFormDescription((prev) => prev + '\n## Heading 2\n')}
                             className="px-1.5 py-0.5 bg-white border border-slate-300 rounded hover:bg-sky-50 hover:border-sky-300 text-slate-800 font-bold cursor-pointer"
                           >
                             ## H2
                           </button>
                           <button
                             type="button"
-                            onClick={() => setFormDescription((prev) => prev + '\n- পয়েন্ট ১\n- পয়েন্ট ২\n')}
+                            onClick={() => setFormDescription((prev) => prev + '\n- Item 1\n- Item 2\n')}
                             className="px-1.5 py-0.5 bg-white border border-slate-300 rounded hover:bg-sky-50 hover:border-sky-300 text-slate-800 font-semibold cursor-pointer"
                           >
                             • List
@@ -1968,11 +2259,11 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                           rows={6}
                           value={formDescription}
                           onChange={(e) => setFormDescription(e.target.value)}
-                          placeholder="উদাহরণ: **প্রোডাক্ট ফিচার্স:**\n- ১০০% অরিজিনাল ব্র্যান্ড প্রোডাক্ট\n- ১ বছরের ওয়ারেন্টি\n# মূল বৈশিষ্ট্যসমূহ"
+                          placeholder="Example: **Product Features:**\n- 100% Original Brand Product\n- 1 Year Warranty\n# Key Specifications"
                           className="w-full flex-1 px-3 py-2 rounded-lg border border-slate-300 text-xs text-slate-900 leading-relaxed bg-white focus:ring-2 focus:ring-sky-500 font-sans"
                         />
                         <p className="text-[10px] text-slate-500 italic">
-                          💡 টেক্সটের দুই পাশে <code className="bg-slate-200 px-1 py-0.5 rounded text-slate-800 font-mono">**</code> দিলে বোল্ড হবে, <code className="bg-slate-200 px-1 py-0.5 rounded text-slate-800 font-mono">#</code> দিলে বড় শিরোনাম হবে এবং <code className="bg-slate-200 px-1 py-0.5 rounded text-slate-800 font-mono">-</code> দিলে বুলেট পয়েন্ট হবে।
+                          💡 Wrap text with <code className="bg-slate-200 px-1 py-0.5 rounded text-slate-800 font-mono">**</code> for Bold, use <code className="bg-slate-200 px-1 py-0.5 rounded text-slate-800 font-mono">#</code> for Headings, and <code className="bg-slate-200 px-1 py-0.5 rounded text-slate-800 font-mono">-</code> for Bullet lists.
                         </p>
                       </>
                     ) : (
@@ -1980,7 +2271,7 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                         {formDescription.trim() ? (
                           <FormattedText content={formDescription} className="text-xs text-slate-800" />
                         ) : (
-                          <span className="text-slate-400 italic">কোনো ডেসক্রিপশন লেখা হয়নি। "Edit" ট্যাবে গিয়ে লিখুন।</span>
+                          <span className="text-slate-400 italic">No description written yet. Switch to "Edit" tab to write one.</span>
                         )}
                       </div>
                     )}
@@ -2062,6 +2353,14 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                       </div>
                     )}
                   </div>
+                </div>
+
+                {/* Key Highlights & Benefits Section */}
+                <div className="sm:col-span-2">
+                  <ProductKeyHighlightsEditor
+                    highlights={formKeyHighlights}
+                    onChange={setFormKeyHighlights}
+                  />
                 </div>
 
                 {/* Photo & Media Section */}
@@ -2238,10 +2537,24 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                         type="url"
                         value={formVideoUrl}
                         onChange={(e) => setFormVideoUrl(e.target.value)}
-                        placeholder="Or video link (YouTube / MP4)"
+                        placeholder="TikTok, YouTube, Google Drive, or MP4 link..."
                         className="px-2.5 py-1.5 rounded-lg border border-slate-300 text-xs text-slate-900 bg-white"
                       />
                     </div>
+
+                    <p className="text-[10px] text-slate-500 font-medium">
+                      ✨ Supports <strong>TikTok</strong>, <strong>YouTube</strong>, <strong>Google Drive</strong>, or MP4 files. Plays natively in HD without YouTube titles/logos or skip buttons.
+                    </p>
+
+                    {formVideoUrl && formVideoUrl.trim() !== '' && (
+                      <div className="mt-2.5 relative aspect-video w-full rounded-xl overflow-hidden border border-slate-300 bg-black shadow-inner">
+                        <ProductVideoPlayer
+                          videoUrl={formVideoUrl}
+                          title="Admin Product Video Preview"
+                          className="w-full h-full object-contain bg-black"
+                        />
+                      </div>
+                    )}
                   </div>
 
                   {/* 3. Product Variations Section (Dynamic on toggle) */}
@@ -2686,25 +2999,210 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                       </button>
                     </div>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
-                      <div>
-                        <input
-                          type="url"
-                          value={formSupplierUrl}
-                          onChange={(e) => setFormSupplierUrl(e.target.value)}
-                          placeholder="Supplier link (AliExpress, Alibaba, etc.)"
-                          className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 text-xs text-slate-900 bg-white placeholder:text-slate-400 focus:ring-2 focus:ring-amber-500"
-                        />
-                      </div>
-                      <div>
-                        <input
-                          type="text"
-                          value={formSupplierName}
-                          onChange={(e) => setFormSupplierName(e.target.value)}
-                          placeholder="Supplier / Platform name (Optional)"
-                          className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 text-xs text-slate-900 bg-white placeholder:text-slate-400"
-                        />
-                      </div>
+                    <div className="pt-2 space-y-3">
+                      {formType === 'own' ? (
+                        /* Own Stock Sourcing Details */
+                        <div className="p-3.5 rounded-xl bg-sky-50/70 border border-sky-200/80 space-y-3">
+                          <div className="flex items-center justify-between">
+                            <label className="text-xs font-black text-sky-950 flex items-center gap-1.5">
+                              <MapPin className="w-3.5 h-3.5 text-sky-600" />
+                              <span>Own Stock Sourcing Information (In-House Inventory)</span>
+                            </label>
+                            <span className="text-[10px] font-bold text-sky-800 bg-sky-100/90 px-2 py-0.5 rounded">
+                              📦 On Stock Sourcing
+                            </span>
+                          </div>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                            {/* Sourcing Location / Address */}
+                            <div>
+                              <label className="block text-[10px] font-bold text-slate-700 uppercase tracking-wider mb-1">
+                                Sourcing Location / Shop Address <span className="text-sky-600 font-normal">(Where product was brought from)</span>
+                              </label>
+                              <input
+                                type="text"
+                                value={formSourcingAddress}
+                                onChange={(e) => setFormSourcingAddress(e.target.value)}
+                                placeholder="e.g. Chawkbazar Wholesale Market, Shop #14, Dhaka"
+                                className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 text-xs text-slate-900 bg-white placeholder:text-slate-400 focus:ring-2 focus:ring-sky-500"
+                              />
+                            </div>
+
+                            {/* Vendor / Contact Phone */}
+                            <div>
+                              <label className="block text-[10px] font-bold text-slate-700 uppercase tracking-wider mb-1">
+                                Vendor Contact Number <span className="text-sky-600 font-normal">(Wholesaler / Person phone)</span>
+                              </label>
+                              <input
+                                type="text"
+                                value={formSourcingPhone}
+                                onChange={(e) => setFormSourcingPhone(e.target.value)}
+                                placeholder="e.g. 01712-345678"
+                                className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 text-xs text-slate-900 bg-white placeholder:text-slate-400 focus:ring-2 focus:ring-sky-500"
+                              />
+                            </div>
+
+                            {/* Wholesaler / Merchant Name */}
+                            <div>
+                              <label className="block text-[10px] font-bold text-slate-700 uppercase tracking-wider mb-1">
+                                Merchant / Wholesaler Name (Optional)
+                              </label>
+                              <input
+                                type="text"
+                                value={formSourcingVendorName}
+                                onChange={(e) => setFormSourcingVendorName(e.target.value)}
+                                placeholder="e.g. Haji Traders, Al-Madina Wholesale"
+                                className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 text-xs text-slate-900 bg-white placeholder:text-slate-400 focus:ring-2 focus:ring-sky-500"
+                              />
+                            </div>
+
+                            {/* Memo / Invoice No */}
+                            <div>
+                              <label className="block text-[10px] font-bold text-slate-700 uppercase tracking-wider mb-1">
+                                Purchase Memo / Receipt / Notes (Optional)
+                              </label>
+                              <input
+                                type="text"
+                                value={formSourcingMemo}
+                                onChange={(e) => setFormSourcingMemo(e.target.value)}
+                                placeholder="e.g. Memo #7482 or Direct Cash Purchase"
+                                className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 text-xs text-slate-900 bg-white placeholder:text-slate-400 focus:ring-2 focus:ring-sky-500"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      ) : (
+                        /* Dropshipping Supplier Selection Row */
+                        <div className="p-3.5 rounded-xl bg-indigo-50/60 border border-indigo-100/80 space-y-3">
+                          <div className="flex items-center justify-between">
+                            <label className="text-xs font-black text-indigo-950 flex items-center gap-1.5">
+                              <Building2 className="w-3.5 h-3.5 text-indigo-600" />
+                              <span>Sourcing Supplier / Drop-shipper</span>
+                            </label>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setQuickSuppError(null);
+                                setIsQuickSupplierOpen(true);
+                              }}
+                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-[11px] font-bold transition-all cursor-pointer shadow-2xs"
+                            >
+                              <Plus className="w-3 h-3" />
+                              <span>+ Add New Supplier</span>
+                            </button>
+                          </div>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                            {/* Supplier Dropdown */}
+                            <div>
+                              <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">
+                                Select Registered Supplier
+                              </label>
+                              <select
+                                value={formSupplierId}
+                                onChange={(e) => {
+                                  const sId = e.target.value;
+                                  setFormSupplierId(sId);
+                                  const matched = suppliers?.find((s) => s.id === sId);
+                                  if (matched) {
+                                    setFormSupplierName(matched.name);
+                                    if (!formSupplierUrl && matched.websiteUrl) {
+                                      setFormSupplierUrl(matched.websiteUrl);
+                                    }
+                                  } else if (sId === '') {
+                                    setFormSupplierName('');
+                                  }
+                                }}
+                                className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 text-xs text-slate-900 bg-white font-medium focus:ring-2 focus:ring-indigo-500"
+                              >
+                                <option value="">-- Choose Registered Supplier --</option>
+                                {suppliers?.map((s) => (
+                                  <option key={s.id} value={s.id}>
+                                    {s.name} {s.status === 'inactive' ? '(Inactive)' : ''}
+                                  </option>
+                                ))}
+                                <option value="custom">Custom / Unlisted Supplier</option>
+                              </select>
+                            </div>
+
+                            {/* Supplier Display Name */}
+                            <div>
+                              <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">
+                                Supplier / Business Name
+                              </label>
+                              <input
+                                type="text"
+                                value={formSupplierName}
+                                onChange={(e) => setFormSupplierName(e.target.value)}
+                                placeholder="e.g. Shopbase Reseller, BD Sourcing"
+                                className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 text-xs text-slate-900 bg-white placeholder:text-slate-400 focus:ring-2 focus:ring-indigo-500"
+                              />
+                            </div>
+                          </div>
+
+                          {/* Selected Supplier Quick Info Pill */}
+                          {formSupplierId && suppliers?.find((s) => s.id === formSupplierId) && (
+                            (() => {
+                              const supp = suppliers.find((s) => s.id === formSupplierId)!;
+                              return (
+                                <div className="flex items-center justify-between p-2 rounded-lg bg-white border border-indigo-100 text-[11px] text-slate-600">
+                                  <span className="font-bold text-indigo-900 flex items-center gap-1.5 truncate">
+                                    <Building2 className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                                    {supp.name}
+                                  </span>
+                                  <div className="flex items-center gap-2 shrink-0">
+                                    {supp.whatsapp && (
+                                      <span className="text-emerald-700 font-mono font-bold flex items-center gap-1">
+                                        <MessageCircle className="w-3 h-3" />
+                                        {supp.whatsapp}
+                                      </span>
+                                    )}
+                                    {supp.websiteUrl && (
+                                      <a
+                                        href={supp.websiteUrl}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="text-indigo-600 hover:underline flex items-center gap-0.5"
+                                      >
+                                        <Globe className="w-3 h-3" />
+                                        <span>Portal</span>
+                                      </a>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })()
+                          )}
+
+                          {/* Exact Product Link on Supplier's Site */}
+                          <div>
+                            <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">
+                              Product Sourcing Link (Supplier Item URL)
+                            </label>
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="url"
+                                value={formSupplierUrl}
+                                onChange={(e) => setFormSupplierUrl(e.target.value)}
+                                placeholder="https://shopbasebd.com/store/products/details/... or supplier item link"
+                                className="flex-1 px-2.5 py-1.5 rounded-lg border border-slate-300 text-xs text-slate-900 bg-white placeholder:text-slate-400 focus:ring-2 focus:ring-indigo-500"
+                              />
+                              {formSupplierUrl && (
+                                <a
+                                  href={formSupplierUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-black text-white text-[11px] font-bold flex items-center gap-1 shrink-0"
+                                  title="Open supplier link"
+                                >
+                                  <span>Test Link</span>
+                                  <ExternalLink className="w-3 h-3" />
+                                </a>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -2724,6 +3222,145 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                 >
                   <Save className="w-4 h-4" />
                   <span>{editingProduct ? 'Save Changes' : 'Create Product'}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Quick Add Supplier Modal inside Product Dialog */}
+      {isQuickSupplierOpen && (
+        <div className="fixed inset-0 z-60 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl w-full max-w-lg border border-slate-200 shadow-2xl overflow-hidden">
+            <div className="flex items-center justify-between px-5 py-3.5 border-b border-slate-100 bg-slate-50">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-lg bg-indigo-600 text-white flex items-center justify-center">
+                  <Building2 className="w-4 h-4" />
+                </div>
+                <div>
+                  <h4 className="text-xs font-black text-slate-900">Add New Sourcing Supplier</h4>
+                  <p className="text-[10px] text-slate-500">Create supplier profile & link directly to this product</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsQuickSupplierOpen(false)}
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-600"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveQuickSupplier} className="p-5 space-y-3">
+              {quickSuppError && (
+                <div className="p-2.5 rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-xs font-semibold">
+                  {quickSuppError}
+                </div>
+              )}
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Supplier Business Name <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={quickSuppName}
+                  onChange={(e) => setQuickSuppName(e.target.value)}
+                  placeholder="e.g. Shopbase, BD Dropship Hub"
+                  className="w-full px-3 py-1.5 rounded-lg border border-slate-300 text-xs text-slate-900 bg-white placeholder:text-slate-400 focus:ring-2 focus:ring-indigo-500 font-medium"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center gap-1">
+                  <Globe className="w-3 h-3 text-slate-400" />
+                  <span>Website Link</span>
+                </label>
+                <input
+                  type="url"
+                  value={quickSuppWebsite}
+                  onChange={(e) => setQuickSuppWebsite(e.target.value)}
+                  placeholder="https://shopbasebd.com"
+                  className="w-full px-3 py-1.5 rounded-lg border border-slate-300 text-xs text-slate-900 bg-white placeholder:text-slate-400 focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center gap-1">
+                    <Facebook className="w-3 h-3 text-blue-600" />
+                    <span>Facebook Page</span>
+                  </label>
+                  <input
+                    type="url"
+                    value={quickSuppFacebook}
+                    onChange={(e) => setQuickSuppFacebook(e.target.value)}
+                    placeholder="https://facebook.com/..."
+                    className="w-full px-3 py-1.5 rounded-lg border border-slate-300 text-xs text-slate-900 bg-white placeholder:text-slate-400 focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center gap-1">
+                    <Video className="w-3 h-3 text-rose-500" />
+                    <span>TikTok Link</span>
+                  </label>
+                  <input
+                    type="url"
+                    value={quickSuppTiktok}
+                    onChange={(e) => setQuickSuppTiktok(e.target.value)}
+                    placeholder="https://tiktok.com/@..."
+                    className="w-full px-3 py-1.5 rounded-lg border border-slate-300 text-xs text-slate-900 bg-white placeholder:text-slate-400 focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center gap-1">
+                    <MessageCircle className="w-3 h-3 text-emerald-600" />
+                    <span>WhatsApp / Personal</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={quickSuppWhatsapp}
+                    onChange={(e) => setQuickSuppWhatsapp(e.target.value)}
+                    placeholder="+8801700000000"
+                    className="w-full px-3 py-1.5 rounded-lg border border-slate-300 text-xs text-slate-900 bg-white placeholder:text-slate-400 focus:ring-2 focus:ring-indigo-500 font-mono"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center gap-1">
+                    <Phone className="w-3 h-3 text-indigo-600" />
+                    <span>CEO / Manager Number</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={quickSuppManagerPhone}
+                    onChange={(e) => setQuickSuppManagerPhone(e.target.value)}
+                    placeholder="+8801800000000"
+                    className="w-full px-3 py-1.5 rounded-lg border border-slate-300 text-xs text-slate-900 bg-white placeholder:text-slate-400 focus:ring-2 focus:ring-indigo-500 font-mono"
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setIsQuickSupplierOpen(false)}
+                  className="px-3.5 py-1.5 rounded-xl border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50 cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingQuickSupp}
+                  className="px-4 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-xs cursor-pointer disabled:opacity-50 flex items-center gap-1"
+                >
+                  <span>{isSavingQuickSupp ? 'Saving...' : 'Save & Link Supplier'}</span>
                 </button>
               </div>
             </form>

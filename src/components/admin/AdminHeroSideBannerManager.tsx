@@ -19,6 +19,7 @@ import {
   Tag,
 } from 'lucide-react';
 import { HeroSideBannerSettings, DEFAULT_HERO_SIDE_BANNER } from '../../types';
+import { getOptimizedImageUrl, handleImageError } from '../../utils/imageOptimizer';
 
 interface AdminHeroSideBannerManagerProps {
   sideBanner: HeroSideBannerSettings;
@@ -616,9 +617,11 @@ export const AdminHeroSideBannerManager: React.FC<AdminHeroSideBannerManagerProp
                     <div className="flex items-center justify-between p-2.5 rounded-xl bg-white border border-slate-200">
                       <div className="flex items-center gap-2.5 min-w-0">
                         <img
-                          src={currentBanner.bgImage}
+                          src={getOptimizedImageUrl(currentBanner.bgImage, 800)}
                           alt="Banner preview"
                           className="w-12 h-12 rounded-lg object-cover border border-slate-200 shrink-0"
+                          referrerPolicy="no-referrer"
+                          onError={(e) => handleImageError(e, currentBanner.bgImage)}
                         />
                         <div className="min-w-0">
                           <p className="text-xs font-bold text-slate-900 truncate">Background Image Set</p>
@@ -685,9 +688,11 @@ export const AdminHeroSideBannerManager: React.FC<AdminHeroSideBannerManagerProp
               {bgType === 'image' && currentBanner.bgImage && currentBanner.bgImage.trim() !== '' && (
                 <div className="absolute inset-0 z-0">
                   <img
-                    src={currentBanner.bgImage}
+                    src={getOptimizedImageUrl(currentBanner.bgImage, 800)}
                     alt="Promo Banner"
                     className="w-full h-full object-cover opacity-40"
+                    referrerPolicy="no-referrer"
+                    onError={(e) => handleImageError(e, currentBanner.bgImage)}
                   />
                   <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/75 to-transparent"></div>
                 </div>

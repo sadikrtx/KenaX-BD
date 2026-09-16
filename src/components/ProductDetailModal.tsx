@@ -16,8 +16,12 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { Product, UserRole, ColorVariation } from '../types';
+import { getProductStockStatus, getStockStatusInfo } from '../utils/stockUtils';
 import { FormattedText } from './FormattedText';
+import { HighlightIcon } from './HighlightIcon';
+import { DEFAULT_PRODUCT_HIGHLIGHTS } from '../utils/highlightConstants';
 import { NEUTRAL_PRODUCT_PLACEHOLDER, getOptimizedImageUrl, markImageLoaded, preloadImage } from '../utils/imageOptimizer';
+import { ProductVideoPlayer } from './ProductVideoPlayer';
 
 interface ProductDetailModalProps {
   product: Product | null;
@@ -47,12 +51,23 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
   const [quantity, setQuantity] = useState(1);
   const [activeTab, setActiveTab] = useState<'details' | 'specs' | 'reviews'>('details');
   const [isPaused, setIsPaused] = useState(false);
+  const [holdUntil, setHoldUntil] = useState<number>(() => Date.now() + 4000);
 
   // Variations state
   const [selectedColor, setSelectedColor] = useState<string>('');
   const [selectedSize, setSelectedSize] = useState<string>('');
   const [selectedCustomOptions, setSelectedCustomOptions] = useState<Record<string, string>>({});
   const [activeColorImage, setActiveColorImage] = useState<string | null>(null);
+
+  const validImages = useMemo(() => {
+    const list = (product?.images || []).filter(
+      (img) => typeof img === 'string' && img.trim() !== ''
+    );
+    return list.length > 0 ? list : [NEUTRAL_PRODUCT_PLACEHOLDER];
+  }, [product?.images]);
+
+  const hasVideo = Boolean(product?.videoUrl && product.videoUrl.trim() !== '');
+  const totalSlides = validImages.length + (hasVideo ? 1 : 0);
 
   // Initialize variation states when product changes
   useEffect(() => {
@@ -65,8 +80,12 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
       if (product.colors && product.colors.length > 0) {
         const firstColor = product.colors[0];
         setSelectedColor(firstColor.name);
-        if (firstColor.imageUrl) {
+        if (firstColor.imageUrl && firstColor.imageUrl.trim() !== '') {
           setActiveColorImage(firstColor.imageUrl);
+          const imgIdx = (product.images || []).findIndex((img) => img === firstColor.imageUrl);
+          if (imgIdx !== -1) {
+            setSelectedImageIndex(imgIdx);
+          }
         } else {
           setActiveColorImage(null);
         }
@@ -92,21 +111,34 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
       } else {
         setSelectedCustomOptions({});
       }
+
+      // 4-second hold on initial load with default color
+      setHoldUntil(Date.now() + 4000);
     }
   }, [product]);
 
-  // 3-Second Auto-Slide for product images in Quick View
+  // Auto-Slide carousel: 4s hold on initial load / color switch, then 3s auto-slide across images & video
   useEffect(() => {
-    if (!isOpen || !product || showVideo || isPaused || activeColorImage) return;
-    const imagesCount = product.images?.length || 0;
-    if (imagesCount <= 1) return;
+    if (!isOpen || !product || isPaused || totalSlides <= 1) return;
 
-    const interval = setInterval(() => {
-      setSelectedImageIndex((prev) => (prev + 1) % imagesCount);
-    }, 3000);
+    const remainingHold = Math.max(0, holdUntil - Date.now());
+    const delay = remainingHold > 0 ? remainingHold : 3000;
 
-    return () => clearInterval(interval);
-  }, [isOpen, product, showVideo, isPaused, activeColorImage, product?.images?.length]);
+    const timer = setTimeout(() => {
+      if (isPaused) return;
+      setActiveColorImage(null);
+      const currentIdx = showVideo ? validImages.length : selectedImageIndex;
+      const nextIdx = (currentIdx + 1) % totalSlides;
+      if (hasVideo && nextIdx === validImages.length) {
+        setShowVideo(true);
+      } else {
+        setShowVideo(false);
+        setSelectedImageIndex(nextIdx);
+      }
+    }, delay);
+
+    return () => clearTimeout(timer);
+  }, [isOpen, product, selectedImageIndex, showVideo, holdUntil, isPaused, totalSlides, hasVideo, validImages.length]);
 
   if (!isOpen || !product) return null;
 
@@ -158,10 +190,60 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
   // Handle color selection
   const handleSelectColor = (color: ColorVariation) => {
     setSelectedColor(color.name);
-    if (color.imageUrl) {
+    setShowVideo(false);
+    if (color.imageUrl && color.imageUrl.trim() !== '') {
       setActiveColorImage(color.imageUrl);
-      setShowVideo(false);
+      const imgIdx = validImages.findIndex((img) => img === color.imageUrl);
+      if (imgIdx !== -1) {
+        setSelectedImageIndex(imgIdx);
+      }
+    } else {
+      setActiveColorImage(null);
     }
+    // Hold 4 seconds when user selects another color
+    setHoldUntil(Date.now() + 4000);
+  };
+
+  const handleSelectImageSlide = (idx: number) => {
+    setSelectedImageIndex(idx);
+    setShowVideo(false);
+    setActiveColorImage(null);
+    setHoldUntil(Date.now() + 4000);
+  };
+
+  const handleSelectVideoSlide = () => {
+    if (!hasVideo) return;
+    setShowVideo(true);
+    setActiveColorImage(null);
+    setHoldUntil(Date.now() + 4000);
+  };
+
+  const handlePrevSlide = () => {
+    if (totalSlides <= 1) return;
+    setActiveColorImage(null);
+    const currentIdx = showVideo ? validImages.length : selectedImageIndex;
+    const newIdx = currentIdx === 0 ? totalSlides - 1 : currentIdx - 1;
+    if (hasVideo && newIdx === validImages.length) {
+      setShowVideo(true);
+    } else {
+      setShowVideo(false);
+      setSelectedImageIndex(newIdx);
+    }
+    setHoldUntil(Date.now() + 4000);
+  };
+
+  const handleNextSlide = () => {
+    if (totalSlides <= 1) return;
+    setActiveColorImage(null);
+    const currentIdx = showVideo ? validImages.length : selectedImageIndex;
+    const newIdx = (currentIdx + 1) % totalSlides;
+    if (hasVideo && newIdx === validImages.length) {
+      setShowVideo(true);
+    } else {
+      setShowVideo(false);
+      setSelectedImageIndex(newIdx);
+    }
+    setHoldUntil(Date.now() + 4000);
   };
 
   // Compose complete variant string for Cart & Checkout
@@ -175,33 +257,16 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
     return parts.length > 0 ? parts.join(' | ') : undefined;
   };
 
-  const validImages = (product.images || []).filter((img) => typeof img === 'string' && img.trim() !== '');
-  const imagesList = validImages.length > 0
-    ? validImages
-    : [NEUTRAL_PRODUCT_PLACEHOLDER];
+  const imagesList = validImages;
 
   const currentDisplayImage =
     (matchedVariant?.image && matchedVariant.image.trim() !== '' && !activeColorImage)
       ? matchedVariant.image
       : (activeColorImage && activeColorImage.trim() !== '')
       ? activeColorImage
-      : imagesList[selectedImageIndex] ||
+      : imagesList[selectedImageIndex < imagesList.length ? selectedImageIndex : 0] ||
         imagesList[0] ||
         NEUTRAL_PRODUCT_PLACEHOLDER;
-
-  const handlePrevImage = () => {
-    if (imagesList.length <= 1) return;
-    setActiveColorImage(null);
-    setShowVideo(false);
-    setSelectedImageIndex((prev) => (prev === 0 ? imagesList.length - 1 : prev - 1));
-  };
-
-  const handleNextImage = () => {
-    if (imagesList.length <= 1) return;
-    setActiveColorImage(null);
-    setShowVideo(false);
-    setSelectedImageIndex((prev) => (prev + 1) % imagesList.length);
-  };
 
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-0 sm:p-4 md:p-6">
@@ -228,10 +293,9 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
               {/* Main Media Preview Box */}
               <div className="relative aspect-square rounded-none sm:rounded-2xl bg-white border-0 sm:border border-slate-200/90 overflow-hidden flex items-center justify-center shadow-none sm:shadow-xs group">
                 {showVideo && product.videoUrl ? (
-                  <video
-                    src={product.videoUrl}
-                    controls
-                    autoPlay
+                  <ProductVideoPlayer
+                    videoUrl={product.videoUrl}
+                    title={product.name}
                     className="w-full h-full object-contain bg-black"
                   />
                 ) : (
@@ -253,23 +317,23 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
 
                 {/* Color preview badge if active */}
                 {activeColorImage && (
-                  <div className="absolute top-2.5 left-2.5 px-2.5 py-1 rounded-lg bg-slate-900/85 text-white text-[10px] sm:text-[11px] font-bold backdrop-blur-xs flex items-center gap-1.5 shadow-sm">
+                  <div className="absolute top-2.5 left-2.5 px-2.5 py-1 rounded-lg bg-slate-900/85 text-white text-[10px] sm:text-[11px] font-bold backdrop-blur-xs flex items-center gap-1.5 shadow-sm z-10">
                     <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
                     <span>{selectedColor} Preview</span>
                   </div>
                 )}
 
-                {/* Left/Right Slide Arrows if multiple images */}
-                {!showVideo && imagesList.length > 1 && (
+                {/* Left/Right Slide Arrows if multiple media items */}
+                {totalSlides > 1 && (
                   <>
                     <button
                       type="button"
                       onClick={(e) => {
                         e.stopPropagation();
-                        handlePrevImage();
+                        handlePrevSlide();
                       }}
-                      className="absolute left-2 top-1/2 -translate-y-1/2 w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-white/90 hover:bg-white text-slate-700 shadow-md flex items-center justify-center transition-all cursor-pointer hover:scale-110 active:scale-95"
-                      aria-label="Previous Image"
+                      className="absolute left-2 top-1/2 -translate-y-1/2 w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-white/90 hover:bg-white text-slate-700 shadow-md flex items-center justify-center transition-all cursor-pointer hover:scale-110 active:scale-95 z-20"
+                      aria-label="Previous Slide"
                     >
                       <ChevronLeft className="w-4 h-4 sm:w-5 sm:h-5" />
                     </button>
@@ -277,10 +341,10 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
                       type="button"
                       onClick={(e) => {
                         e.stopPropagation();
-                        handleNextImage();
+                        handleNextSlide();
                       }}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-white/90 hover:bg-white text-slate-700 shadow-md flex items-center justify-center transition-all cursor-pointer hover:scale-110 active:scale-95"
-                      aria-label="Next Image"
+                      className="absolute right-2 top-1/2 -translate-y-1/2 w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-white/90 hover:bg-white text-slate-700 shadow-md flex items-center justify-center transition-all cursor-pointer hover:scale-110 active:scale-95 z-20"
+                      aria-label="Next Slide"
                     >
                       <ChevronRight className="w-4 h-4 sm:w-5 sm:h-5" />
                     </button>
@@ -288,13 +352,19 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
                 )}
 
                 {/* Video toggle button if video exists */}
-                {product.videoUrl && (
+                {hasVideo && (
                   <button
                     onClick={() => {
-                      setShowVideo(!showVideo);
-                      if (!showVideo) setActiveColorImage(null);
+                      if (showVideo) {
+                        setShowVideo(false);
+                        setSelectedImageIndex(0);
+                      } else {
+                        setShowVideo(true);
+                        setActiveColorImage(null);
+                      }
+                      setHoldUntil(Date.now() + 4000);
                     }}
-                    className="absolute top-2.5 right-2.5 px-2.5 py-1 rounded-lg bg-slate-900/80 hover:bg-slate-900 text-white text-[11px] font-semibold backdrop-blur-xs flex items-center gap-1.5 shadow-md cursor-pointer transition-colors"
+                    className="absolute top-2.5 right-2.5 px-2.5 py-1 rounded-lg bg-slate-900/80 hover:bg-slate-900 text-white text-[11px] font-semibold backdrop-blur-xs flex items-center gap-1.5 shadow-md cursor-pointer transition-colors z-20"
                   >
                     {showVideo ? (
                       <>
@@ -313,16 +383,12 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
 
               {/* Thumbnails Row */}
               <div className="flex items-center gap-2 mt-2.5 overflow-x-auto pb-1 scrollbar-none">
-                {imagesList.filter((img) => typeof img === 'string' && img.trim() !== '').map((img, idx) => (
+                {imagesList.map((img, idx) => (
                   <button
                     key={idx}
-                    onClick={() => {
-                      setSelectedImageIndex(idx);
-                      setActiveColorImage(null);
-                      setShowVideo(false);
-                    }}
+                    onClick={() => handleSelectImageSlide(idx)}
                     className={`w-12 h-12 sm:w-14 sm:h-14 rounded-xl border-2 overflow-hidden shrink-0 bg-white p-0.5 cursor-pointer transition-all ${
-                      !showVideo && !activeColorImage && selectedImageIndex === idx
+                      !showVideo && (selectedImageIndex === idx || activeColorImage === img)
                         ? 'border-sky-500 ring-2 ring-sky-500/20 shadow-xs scale-105'
                         : 'border-slate-200 hover:border-slate-400'
                     }`}
@@ -344,14 +410,11 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
                   </button>
                 ))}
 
-                {product.videoUrl && (
+                {hasVideo && (
                   <button
-                    onClick={() => {
-                      setShowVideo(true);
-                      setActiveColorImage(null);
-                    }}
+                    onClick={handleSelectVideoSlide}
                     className={`w-12 h-12 sm:w-14 sm:h-14 rounded-xl border-2 shrink-0 bg-slate-900 text-white flex flex-col items-center justify-center p-0.5 cursor-pointer transition-all ${
-                      showVideo ? 'border-sky-500 ring-2 ring-sky-500/20' : 'border-slate-800'
+                      showVideo ? 'border-sky-500 ring-2 ring-sky-500/20 shadow-xs scale-105' : 'border-slate-800 hover:border-slate-700'
                     }`}
                   >
                     <Play className="w-4 h-4 text-sky-400 fill-sky-400" />
@@ -423,12 +486,16 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
                   <span className="hidden sm:inline"> customer reviews</span>)
                 </span>
                 <span className="text-slate-300">•</span>
-                <span className={`text-xs font-semibold flex items-center gap-1 ${
-                  activeStock > 0 ? 'text-emerald-600' : 'text-rose-600'
-                }`}>
-                  <CheckCircle className="w-3.5 h-3.5 shrink-0" />
-                  {activeStock > 0 ? `In Stock (${activeStock})` : 'Out of Stock'}
-                </span>
+                {(() => {
+                  const currentStatus = getProductStockStatus(product);
+                  const info = getStockStatusInfo(currentStatus);
+                  return (
+                    <span className={`text-xs font-bold px-2 py-0.5 rounded-md border flex items-center gap-1 ${info.badgeClass}`}>
+                      <span className={`w-1.5 h-1.5 rounded-full ${info.dotClass}`} />
+                      {info.labelEn} ({info.labelBn})
+                    </span>
+                  );
+                })()}
               </div>
 
               {/* Dynamic Price Box based on Quantity */}
@@ -705,11 +772,50 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
               {/* Tab Content */}
               <div className="py-2.5 text-xs text-slate-600 min-h-[60px]">
                 {activeTab === 'details' && (
-                  <FormattedText
-                    content={product.description}
-                    fallback={`${product.name} is built with top-tier materials to ensure maximum performance and durability.`}
-                    className="text-xs text-slate-600"
-                  />
+                  <div className="space-y-3">
+                    <FormattedText
+                      content={product.description}
+                      fallback={`${product.name} is built with top-tier materials to ensure maximum performance and durability.`}
+                      className="text-xs text-slate-600"
+                    />
+
+                    {/* Key Highlights */}
+                    {(() => {
+                      const highlightsToRender = product.keyHighlights && Array.isArray(product.keyHighlights)
+                        ? product.keyHighlights.filter((h: any) => (typeof h === 'string' ? true : h.active !== false))
+                        : DEFAULT_PRODUCT_HIGHLIGHTS;
+
+                      if (highlightsToRender.length === 0) return null;
+
+                      return (
+                        <div className="p-3.5 rounded-xl bg-sky-50/60 border border-sky-100">
+                          <h4 className="text-[11px] font-black uppercase tracking-wider text-sky-900 mb-2 flex items-center gap-1.5">
+                            <Sparkles className="w-3.5 h-3.5 text-sky-600" />
+                            <span>Key Highlights & Benefits</span>
+                          </h4>
+                          <ul className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs text-slate-700 font-medium">
+                            {highlightsToRender.map((item: any, idx: number) => {
+                              const text = typeof item === 'string' ? item : item.text;
+                              const icon = typeof item === 'object' ? (item.icon || 'check-circle') : 'check-circle';
+                              const iconColor = typeof item === 'object' ? (item.iconColor || 'emerald') : 'emerald';
+                              const key = typeof item === 'object' && item.id ? item.id : `hl-${idx}`;
+
+                              return (
+                                <li key={key} className="flex items-center gap-2">
+                                  <HighlightIcon
+                                    icon={icon}
+                                    iconColor={iconColor}
+                                    className="w-3.5 h-3.5 shrink-0"
+                                  />
+                                  <span className="truncate">{text}</span>
+                                </li>
+                              );
+                            })}
+                          </ul>
+                        </div>
+                      );
+                    })()}
+                  </div>
                 )}
 
                 {hasSpecifications && activeTab === 'specs' && (
@@ -747,47 +853,74 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
               </div>
             </div>
 
-            {/* Bottom Actions: Side-by-Side Add to Cart & Buy Now */}
+            {/* Bottom Actions based on Availability Status */}
             <div className="pt-3 border-t border-slate-200 mt-3">
-              <div className="grid grid-cols-2 gap-2 sm:gap-3 min-w-0">
-                <button
-                  type="button"
-                  onClick={() => {
-                    const variantStr = getSelectedVariantString();
-                    const chosenImg = activeColorImage || (matchedVariant?.image) || imagesList[selectedImageIndex] || imagesList[0];
-                    const customProduct: Product = {
-                      ...product,
-                      price: activeUnitPrice,
-                      sku: activeSku || product.sku,
-                    };
-                    onAddToCart(customProduct, quantity, variantStr, chosenImg);
-                    onClose();
-                  }}
-                  className="w-full py-2.5 sm:py-3 px-2 sm:px-4 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-1.5 sm:gap-2 transition-all cursor-pointer shadow-xs active:scale-98 min-w-0 overflow-hidden"
-                >
-                  <ShoppingCart className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
-                  <span className="truncate">Add to Cart</span>
-                </button>
+              {(() => {
+                const currentStatus = getProductStockStatus(product);
+                if (currentStatus === 'out_of_stock') {
+                  return (
+                    <button
+                      disabled
+                      type="button"
+                      className="w-full py-3 px-4 rounded-xl bg-slate-100 text-slate-400 font-bold text-xs sm:text-sm flex items-center justify-center gap-2 border border-slate-200 cursor-not-allowed opacity-80"
+                    >
+                      <span>Out of Stock (আউট অফ স্টক)</span>
+                    </button>
+                  );
+                }
+                if (currentStatus === 'upcoming') {
+                  return (
+                    <button
+                      disabled
+                      type="button"
+                      className="w-full py-3 px-4 rounded-xl bg-purple-50 text-purple-700 font-bold text-xs sm:text-sm flex items-center justify-center gap-2 border border-purple-200"
+                    >
+                      <span>Upcoming Product (আপকামিং)</span>
+                    </button>
+                  );
+                }
+                return (
+                  <div className="grid grid-cols-2 gap-2 sm:gap-3 min-w-0">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const variantStr = getSelectedVariantString();
+                        const chosenImg = activeColorImage || (matchedVariant?.image) || imagesList[selectedImageIndex] || imagesList[0];
+                        const customProduct: Product = {
+                          ...product,
+                          price: activeUnitPrice,
+                          sku: activeSku || product.sku,
+                        };
+                        onAddToCart(customProduct, quantity, variantStr, chosenImg);
+                        onClose();
+                      }}
+                      className="w-full py-2.5 sm:py-3 px-2 sm:px-4 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-1.5 sm:gap-2 transition-all cursor-pointer shadow-xs active:scale-98 min-w-0 overflow-hidden"
+                    >
+                      <ShoppingCart className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
+                      <span className="truncate">Add to Cart</span>
+                    </button>
 
-                <button
-                  type="button"
-                  onClick={() => {
-                    const variantStr = getSelectedVariantString();
-                    const chosenImg = activeColorImage || (matchedVariant?.image) || imagesList[selectedImageIndex] || imagesList[0];
-                    const customProduct: Product = {
-                      ...product,
-                      price: activeUnitPrice,
-                      sku: activeSku || product.sku,
-                    };
-                    onBuyNow(customProduct, quantity, variantStr, chosenImg);
-                    onClose();
-                  }}
-                  className="w-full py-2.5 sm:py-3 px-2 sm:px-4 rounded-xl bg-gradient-to-r from-sky-600 to-blue-600 hover:from-sky-500 hover:to-blue-500 text-white font-black text-xs sm:text-sm flex items-center justify-center gap-1.5 sm:gap-2 transition-all cursor-pointer shadow-md shadow-sky-600/20 active:scale-98 min-w-0 overflow-hidden"
-                >
-                  <Zap className="w-3.5 h-3.5 sm:w-4 sm:h-4 fill-amber-300 text-amber-300 shrink-0" />
-                  <span className="truncate">Buy Now • ৳{(activeUnitPrice * quantity).toLocaleString('en-BD')}</span>
-                </button>
-              </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const variantStr = getSelectedVariantString();
+                        const chosenImg = activeColorImage || (matchedVariant?.image) || imagesList[selectedImageIndex] || imagesList[0];
+                        const customProduct: Product = {
+                          ...product,
+                          price: activeUnitPrice,
+                          sku: activeSku || product.sku,
+                        };
+                        onBuyNow(customProduct, quantity, variantStr, chosenImg);
+                        onClose();
+                      }}
+                      className="w-full py-2.5 sm:py-3 px-2 sm:px-4 rounded-xl bg-gradient-to-r from-sky-600 to-blue-600 hover:from-sky-500 hover:to-blue-500 text-white font-black text-xs sm:text-sm flex items-center justify-center gap-1.5 sm:gap-2 transition-all cursor-pointer shadow-md shadow-sky-600/20 active:scale-98 min-w-0 overflow-hidden"
+                    >
+                      <Zap className="w-3.5 h-3.5 sm:w-4 sm:h-4 fill-amber-300 text-amber-300 shrink-0" />
+                      <span className="truncate">Buy Now • ৳{(activeUnitPrice * quantity).toLocaleString('en-BD')}</span>
+                    </button>
+                  </div>
+                );
+              })()}
             </div>
           </div>
         </div>

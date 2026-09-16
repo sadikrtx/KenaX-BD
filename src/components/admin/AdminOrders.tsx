@@ -28,6 +28,7 @@ import {
 } from 'lucide-react';
 import { Order, OrderStatus, UserRole, StaffUser, Product, OrderItem } from '../../types';
 import { getOptimizedImageUrl, handleImageError } from '../../utils/imageOptimizer';
+import { CartItemImage } from '../CartItemImage';
 import {
   generateWhatsAppDirectLink,
   formatWhatsAppMessage,
@@ -943,19 +944,49 @@ export const AdminOrders: React.FC<AdminOrdersProps> = ({
                   return (
                     <tr key={order.id} className="hover:bg-slate-50/60 transition-colors">
                       <td className="py-3.5 px-4">
-                        <button
-                          type="button"
-                          onClick={(e) => handleCopyOrderId(order.id, e)}
-                          title="Click to copy Order ID"
-                          className="font-mono font-bold text-sky-700 hover:text-sky-900 hover:underline cursor-pointer text-left inline-flex items-center gap-1 focus:outline-hidden"
-                        >
-                          #{order.id}
-                          {copiedOrderId === order.id && (
-                            <span className="text-[9px] font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.2 rounded border border-emerald-200 animate-pulse">
-                              Copied!
-                            </span>
+                        <div className="flex items-center gap-2.5">
+                          {order.items && order.items.length > 0 && (
+                            <div
+                              onClick={() => setSelectedOrder(order)}
+                              title={order.items.map((i) => i.productName || i.name).filter(Boolean).join(', ')}
+                              className="relative shrink-0 cursor-pointer hover:opacity-90 transition-opacity"
+                            >
+                              <CartItemImage
+                                item={order.items[0]}
+                                product={products.find((p) => p.id === order.items[0].productId)}
+                                sizeClassName="w-10 h-10 rounded-lg shrink-0 shadow-2xs"
+                              />
+                              {order.items.length > 1 && (
+                                <span
+                                  title={`${order.items.length} products in this order`}
+                                  className="absolute -bottom-1 -right-1 bg-slate-900 text-white text-[9px] font-black px-1 rounded-sm shadow-xs border border-white/80"
+                                >
+                                  +{order.items.length - 1}
+                                </span>
+                              )}
+                            </div>
                           )}
-                        </button>
+                          <div className="min-w-0">
+                            <button
+                              type="button"
+                              onClick={(e) => handleCopyOrderId(order.id, e)}
+                              title="Click to copy Order ID"
+                              className="font-mono font-bold text-sky-700 hover:text-sky-900 hover:underline cursor-pointer text-left inline-flex items-center gap-1 focus:outline-hidden"
+                            >
+                              #{order.id}
+                              {copiedOrderId === order.id && (
+                                <span className="text-[9px] font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.2 rounded border border-emerald-200 animate-pulse">
+                                  Copied!
+                                </span>
+                              )}
+                            </button>
+                            {order.items?.[0] && (
+                              <p className="text-[11px] text-slate-500 truncate max-w-[120px] lg:max-w-[150px]">
+                                {order.items[0].productName || order.items[0].name}
+                              </p>
+                            )}
+                          </div>
+                        </div>
                       </td>
                       <td className="py-3.5 px-4 text-[11px] whitespace-nowrap">
                         <div className="flex flex-col leading-tight">
@@ -1104,24 +1135,43 @@ export const AdminOrders: React.FC<AdminOrdersProps> = ({
 
               return (
                 <div key={order.id} className="p-3.5 space-y-2.5 hover:bg-slate-50/50 transition-colors">
-                  {/* Row 1: Order ID + Status Badge */}
+                  {/* Row 1: Leftmost Product Thumbnail + Order ID + Status Badge */}
                   <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-1.5 min-w-0">
-                      <button
-                        type="button"
-                        onClick={(e) => handleCopyOrderId(order.id, e)}
-                        className="font-mono font-bold text-sky-700 text-xs flex items-center gap-1 truncate"
-                      >
-                        #{order.id}
-                        {copiedOrderId === order.id && (
-                          <span className="text-[9px] font-bold text-emerald-700 bg-emerald-50 px-1 py-0.2 rounded border border-emerald-200 shrink-0">
-                            Copied!
-                          </span>
-                        )}
-                      </button>
-                      <span className="text-[10px] text-slate-400 shrink-0">
-                        {date} {time}
-                      </span>
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      {order.items && order.items.length > 0 && (
+                        <div
+                          onClick={() => setSelectedOrder(order)}
+                          className="relative shrink-0 cursor-pointer active:scale-95 transition-transform"
+                        >
+                          <CartItemImage
+                            item={order.items[0]}
+                            product={products.find((p) => p.id === order.items[0].productId)}
+                            sizeClassName="w-10 h-10 rounded-lg shrink-0 shadow-2xs"
+                          />
+                          {order.items.length > 1 && (
+                            <span className="absolute -bottom-1 -right-1 bg-slate-900 text-white text-[9px] font-black px-1 rounded-sm shadow-xs border border-white/80">
+                              +{order.items.length - 1}
+                            </span>
+                          )}
+                        </div>
+                      )}
+                      <div className="min-w-0">
+                        <button
+                          type="button"
+                          onClick={(e) => handleCopyOrderId(order.id, e)}
+                          className="font-mono font-bold text-sky-700 text-xs flex items-center gap-1 truncate"
+                        >
+                          #{order.id}
+                          {copiedOrderId === order.id && (
+                            <span className="text-[9px] font-bold text-emerald-700 bg-emerald-50 px-1 py-0.2 rounded border border-emerald-200 shrink-0">
+                              Copied!
+                            </span>
+                          )}
+                        </button>
+                        <span className="text-[10px] text-slate-400 block truncate">
+                          {date} • {time}
+                        </span>
+                      </div>
                     </div>
                     <div className="shrink-0">
                       {getStatusPill(order.orderStatus)}
@@ -1348,14 +1398,37 @@ export const AdminOrders: React.FC<AdminOrdersProps> = ({
                           return (
                             <tr key={i} className="hover:bg-slate-50/50">
                               <td className="py-2.5 px-3">
-                                <p className="font-bold text-slate-900">
-                                  {item.productName || item.name || 'Item'}
-                                </p>
-                                {item.variantName && (
-                                  <p className="text-[11px] text-slate-400">
-                                    Variant: {item.variantName}
-                                  </p>
-                                )}
+                                <div className="flex items-center gap-3">
+                                  <CartItemImage
+                                    item={item}
+                                    product={products.find((p) => p.id === item.productId)}
+                                    sizeClassName="w-11 h-11 rounded-lg shrink-0 shadow-2xs"
+                                  />
+                                  <div className="min-w-0">
+                                    <p className="font-bold text-slate-900 leading-snug">
+                                      {item.productName || item.name || 'Item'}
+                                    </p>
+                                    {(item.variant || item.variantName || item.selectedColor || item.selectedSize) && (
+                                      <div className="flex items-center gap-1.5 flex-wrap mt-1">
+                                        {item.selectedColor && (
+                                          <span className="inline-flex items-center gap-1 text-[10px] font-bold text-slate-700 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">
+                                            Color: {item.selectedColor}
+                                          </span>
+                                        )}
+                                        {item.selectedSize && (
+                                          <span className="inline-flex items-center gap-1 text-[10px] font-bold text-slate-700 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">
+                                            Size: {item.selectedSize}
+                                          </span>
+                                        )}
+                                        {!item.selectedColor && !item.selectedSize && (item.variant || item.variantName) && (
+                                          <span className="text-[11px] text-slate-500">
+                                            Variant: {item.variant || item.variantName}
+                                          </span>
+                                        )}
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
                               </td>
                               <td className="py-2.5 px-3 text-right">
                                 ৳{item.price.toLocaleString()}
@@ -1394,20 +1467,41 @@ export const AdminOrders: React.FC<AdminOrdersProps> = ({
                       const lineMargin = lineSelling - lineCost;
                       return (
                         <div key={i} className="p-2.5 rounded-xl bg-slate-50/80 border border-slate-100 space-y-2 text-xs">
-                          <div className="flex items-start justify-between gap-2">
-                            <div className="min-w-0">
-                              <p className="font-bold text-slate-900 truncate">
-                                {item.productName || item.name || 'Item'}
-                              </p>
-                              {item.variantName && (
-                                <p className="text-[11px] text-slate-400 truncate">
-                                  Variant: {item.variantName}
+                          <div className="flex items-start gap-2.5">
+                            <CartItemImage
+                              item={item}
+                              product={products.find((p) => p.id === item.productId)}
+                              sizeClassName="w-11 h-11 rounded-lg shrink-0 shadow-2xs"
+                            />
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-start justify-between gap-2">
+                                <p className="font-bold text-slate-900 text-xs leading-snug">
+                                  {item.productName || item.name || 'Item'}
                                 </p>
+                                <span className="font-bold text-slate-900 bg-white px-2 py-0.5 rounded-lg border border-slate-200 text-xs shrink-0">
+                                  Qty: {qty}
+                                </span>
+                              </div>
+                              {(item.variant || item.variantName || item.selectedColor || item.selectedSize) && (
+                                <div className="flex items-center gap-1 flex-wrap mt-1">
+                                  {item.selectedColor && (
+                                    <span className="inline-flex items-center text-[9px] font-bold text-slate-700 bg-white px-1.5 py-0.5 rounded border border-slate-200">
+                                      Color: {item.selectedColor}
+                                    </span>
+                                  )}
+                                  {item.selectedSize && (
+                                    <span className="inline-flex items-center text-[9px] font-bold text-slate-700 bg-white px-1.5 py-0.5 rounded border border-slate-200">
+                                      Size: {item.selectedSize}
+                                    </span>
+                                  )}
+                                  {!item.selectedColor && !item.selectedSize && (item.variant || item.variantName) && (
+                                    <p className="text-[10px] text-slate-400">
+                                      Variant: {item.variant || item.variantName}
+                                    </p>
+                                  )}
+                                </div>
                               )}
                             </div>
-                            <span className="font-bold text-slate-900 bg-white px-2 py-0.5 rounded-lg border border-slate-200 text-xs shrink-0">
-                              Qty: {qty}
-                            </span>
                           </div>
                           <div className="grid grid-cols-2 gap-2 text-[11px] pt-1.5 border-t border-slate-200/60">
                             <div>

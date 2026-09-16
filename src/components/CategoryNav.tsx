@@ -123,8 +123,11 @@ export const CategoryNav: React.FC<CategoryNavProps> = ({
 
   // Touch and mouse drag handlers
   const handleTouchStart = () => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
     isPausedRef.current = true;
     hasMovedRef.current = false;
+    dragStartScrollLeftRef.current = container.scrollLeft;
     if (resumeTimeoutRef.current) clearTimeout(resumeTimeoutRef.current);
   };
 

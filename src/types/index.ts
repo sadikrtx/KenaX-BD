@@ -22,6 +22,14 @@ export interface ProductVariationOption {
   colorItems?: ColorVariation[]; // If color, stores the colorName + colorCode + linked imageUrl!
 }
 
+export interface ProductHighlight {
+  id: string;
+  text: string;
+  icon?: string; // 'check-circle' (default), 'shield-check', 'zap', 'truck', 'sparkles', 'star', 'award', 'heart', 'flame', 'thumbs-up', 'clock', 'badge-percent', 'package-check', 'refresh-cw', 'headphones', 'gift', etc., or custom emoji
+  iconColor?: string; // 'emerald' | 'sky' | 'indigo' | 'amber' | 'rose' | 'purple' | 'teal' | 'slate'
+  active: boolean; // true = visible, false = hidden/deactivated
+}
+
 export interface ProductVariant {
   id: string;
   name: string; // e.g. "8GB / 256GB" or "Black" or "Size 42"
@@ -48,15 +56,22 @@ export interface Product {
   costPrice?: number; // internal supplier cost in ৳ BDT
   discountPercent?: number;
   stock: number;
+  stockStatus?: 'in_stock' | 'out_of_stock' | 'upcoming';
   sku: string;
   images: string[];
   videoUrl?: string;
   description: string;
   specifications?: Record<string, string>;
   productType: ProductType;
+  supplierId?: string;
   supplierName?: string;
   supplierUrl?: string;
   supplierSku?: string;
+  // Own stock sourcing details (purchase address, vendor contact phone, vendor name, memo)
+  sourcingAddress?: string;
+  sourcingPhone?: string;
+  sourcingVendorName?: string;
+  sourcingMemo?: string;
   rating: number;
   reviewsCount: number;
   isBestSeller?: boolean;
@@ -68,6 +83,8 @@ export interface Product {
   discountType?: 'percentage' | 'flat' | 'none';
   discountValue?: number; // e.g. 10 for 10% or 500 for ৳500 flat
   tags?: string[];
+  priority?: number; // Global priority ranking (e.g. 1 is highest/top)
+  pagePriorities?: Record<string, number>; // Page-specific priority rankings (e.g. { 'home': 1, 'shop': 2, 'category:Smartphones': 1, 'tag:Trending': 3 })
   createdAt?: string;
   updatedAt?: string;
   // Variations & Color-linked images
@@ -75,6 +92,7 @@ export interface Product {
   colors?: ColorVariation[];
   sizes?: string[];
   variants?: ProductVariant[];
+  keyHighlights?: ProductHighlight[];
   [key: string]: any;
 }
 
@@ -95,6 +113,39 @@ export interface Category {
   featuredImage?: string;
   subcategories?: (string | SubCategoryItem)[];
   priority?: number;
+}
+
+export interface Supplier {
+  id: string;
+  name: string; // Business name
+  websiteUrl?: string; // Website link
+  facebookUrl?: string; // Facebook page link
+  tiktokUrl?: string; // TikTok link
+  whatsapp?: string; // WhatsApp number or personal number
+  personalPhone?: string; // Personal phone
+  managerPhone?: string; // CEO number or manager number
+  ceoPhone?: string; // CEO number
+  address?: string;
+  contactPerson?: string;
+  notes?: string;
+  status?: 'active' | 'inactive';
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface SourcingLocation {
+  id: string;
+  vendorName: string; // Wholesaler / Vendor name (e.g. Haji Fabrics & Wholesale)
+  marketName?: string; // Wholesale market / Area (e.g. Islampur Cloth Market)
+  address: string; // Shop / Market physical address
+  phone: string; // Contact phone number
+  secondaryPhone?: string; // Alternative contact / WhatsApp
+  contactPerson?: string; // Shop owner / Manager name
+  memo?: string; // Sourcing notes / purchase terms / pricing agreements
+  productCategories?: string; // Categories / products sourced from here
+  status?: 'active' | 'inactive';
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface DeliveryAddress {
@@ -164,6 +215,7 @@ export type PaymentStatus =
 export interface OrderItem {
   productId: string;
   productName: string;
+  name?: string;
   productImage: string;
   variant?: string;
   selectedColor?: string;
@@ -242,6 +294,8 @@ export interface Order {
   handledByStaffId?: string;
   handledByStaffName?: string;
   handledByStaffRole?: string;
+  telegramChatId?: string;
+  telegramUsername?: string;
   [key: string]: any;
 }
 
@@ -884,6 +938,8 @@ export interface CustomerRecord {
   isPanelPurchased?: boolean;
   panelPurchases?: PanelPurchaseInfo[];
   isV2Account?: boolean;
+  telegramChatId?: string;
+  telegramUsername?: string;
 }
 
 export interface CartActivityItem {
@@ -1127,6 +1183,81 @@ export interface WhatsAppSettings {
   autoSendOnDelivered: boolean;
   autoSendOnPayment: boolean;
   templates: Record<WhatsAppEventType, WhatsAppTemplate>;
+}
+
+// Telegram Bot Types
+export type TelegramEventType =
+  | 'admin_new_order'
+  | 'admin_user_registered'
+  | 'super_admin_staff_activity'
+  | 'customer_order_placed'
+  | 'customer_order_status_update'
+  | 'channel_new_product'
+  | 'super_admin_product_created'
+  | 'channel_discount_alert'
+  | 'channel_coupon_alert'
+  | 'super_admin_discount_coupon_activity';
+
+export interface TelegramTemplate {
+  id: TelegramEventType;
+  title: string;
+  banglaTitle: string;
+  recipientType: 'admin' | 'super_admin' | 'staff' | 'customer';
+  enabled: boolean;
+  message: string;
+  variables: string[];
+}
+
+export interface TelegramLog {
+  id: string;
+  timestamp: string;
+  eventType: TelegramEventType;
+  recipientChatId: string;
+  recipientType: 'admin' | 'super_admin' | 'staff' | 'customer';
+  recipientName?: string;
+  orderId?: string;
+  status: 'sent' | 'failed';
+  errorMessage?: string;
+  messagePreview: string;
+}
+
+export interface TelegramBotSettings {
+  enabled: boolean;
+  botToken: string;
+  botUsername?: string;
+  superAdminChatId: string; // sadikrtx3060 / super admin chatId
+  adminChatIds: string[]; // admin, manager, moderator chat or channel IDs
+  moderatorChatIds?: string[];
+  channelId?: string; // Telegram Channel ID (e.g. @kenaxbd_channel or -100xxxxxxxxxx)
+  channelUsername?: string;
+  
+  // Feature Toggles
+  notifyAdminOnNewOrder: boolean;
+  notifyStaffOnNewOrder: boolean;
+  notifyAdminOnUserRegister: boolean;
+  notifyCustomerOnOrderPlaced: boolean;
+  notifySuperAdminOnStaffActivity: boolean;
+  notifyCustomerOnStatusUpdate: boolean;
+
+  // Telegram Channel & Product / Discount / Coupon Broadcasts
+  postNewProductsToChannel?: boolean;
+  postDiscountsToChannel?: boolean;
+  postCouponsToChannel?: boolean;
+  notifySuperAdminOnProductCreated?: boolean;
+  notifySuperAdminOnDiscountCreated?: boolean;
+  notifySuperAdminOnCouponCreated?: boolean;
+
+  customerNotifyStatuses: {
+    confirmed: boolean;
+    processing: boolean;
+    picked: boolean;
+    shipped: boolean;
+    delivered: boolean;
+    cancelled: boolean;
+    refunded: boolean;
+  };
+
+  templates: Record<TelegramEventType, TelegramTemplate>;
 }
 
 

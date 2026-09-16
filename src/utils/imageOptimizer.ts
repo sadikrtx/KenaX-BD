@@ -140,39 +140,38 @@ export function preloadImage(url?: string, width = 400): Promise<void> {
 }
 
 /**
- * Preload a batch of product thumbnail images in the background for zero-latency page transitions
+ * Preload a batch of product thumbnail images gently in the background for zero-latency page transitions without network blocking
  */
 export function preloadProductThumbnailBatch(products: Array<{ images?: string[]; colors?: Array<{ imageUrl?: string }> }>): void {
   if (!Array.isArray(products) || products.length === 0) return;
 
-  // Preload first 30 products immediately
-  const firstBatch = products.slice(0, 30);
+  // Preload top visible products first (8 items)
+  const firstBatch = products.slice(0, 8);
   firstBatch.forEach((p) => {
     const firstImg = p.images?.[0];
-    if (firstImg) preloadImage(firstImg, 400);
+    if (firstImg) preloadImage(firstImg, 360);
   });
 
-  // Preload secondary images & remaining products during idle frames
+  // Stagger remaining products in non-blocking batches of 4 during idle frames
   const scheduleIdle =
     typeof window !== 'undefined' && 'requestIdleCallback' in window
       ? (window as unknown as { requestIdleCallback: (cb: () => void) => void }).requestIdleCallback
-      : (cb: () => void) => setTimeout(cb, 100);
+      : (cb: () => void) => setTimeout(cb, 200);
 
   scheduleIdle(() => {
-    products.forEach((p) => {
-      // Preload extra gallery images
-      if (Array.isArray(p.images) && p.images.length > 1) {
-        p.images.slice(1, 4).forEach((img) => {
-          if (img) preloadImage(img, 400);
-        });
+    let index = 8;
+    const interval = setInterval(() => {
+      if (index >= products.length) {
+        clearInterval(interval);
+        return;
       }
-      // Preload color variation images
-      if (Array.isArray(p.colors)) {
-        p.colors.forEach((c) => {
-          if (c.imageUrl) preloadImage(c.imageUrl, 400);
-        });
-      }
-    });
+      const chunk = products.slice(index, index + 4);
+      chunk.forEach((p) => {
+        const firstImg = p.images?.[0];
+        if (firstImg) preloadImage(firstImg, 360);
+      });
+      index += 4;
+    }, 120);
   });
 }
 

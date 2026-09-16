@@ -14,6 +14,18 @@ service cloud.firestore {
     match /deletedCategories/{categoryId} {
       allow read, write: if true;
     }
+    match /suppliers/{supplierId} {
+      allow read, write: if true;
+    }
+    match /deletedSuppliers/{supplierId} {
+      allow read, write: if true;
+    }
+    match /sourcingLocations/{locId} {
+      allow read, write: if true;
+    }
+    match /deletedSourcingLocations/{locId} {
+      allow read, write: if true;
+    }
     match /deliveryZones/{zoneId} {
       allow read, write: if true;
     }
@@ -110,6 +122,12 @@ service cloud.firestore {
       allow read, write: if true;
     }
     match /googleSheetsSync/{syncId} {
+      allow read, write: if true;
+    }
+    match /whatsapp_messages/{messageId} {
+      allow read, write: if true;
+    }
+    match /whatsapp_webhooks/{webhookId} {
       allow read, write: if true;
     }
     match /test/{docId} {

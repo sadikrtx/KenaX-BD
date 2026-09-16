@@ -32,6 +32,7 @@ export const AdminDelivery: React.FC<AdminDeliveryProps> = ({
   const [courierFilter, setCourierFilter] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   const [courier, setCourier] = useState('Steadfast Courier');
   const [tracking, setTracking] = useState('');
@@ -71,11 +72,28 @@ export const AdminDelivery: React.FC<AdminDeliveryProps> = ({
     e.preventDefault();
     if (!selectedOrder) return;
     onUpdateDelivery(selectedOrder.id, courier, tracking, status);
+    setToastMessage(`অর্ডার #${selectedOrder.id} এর ডেলিভারি তথ্য ও ট্র্যাকিং সফলভাবে আপডেট হয়েছে!`);
+    setTimeout(() => setToastMessage(null), 4000);
     setSelectedOrder(null);
   };
 
   return (
     <div className="space-y-6">
+      {toastMessage && (
+        <div className="p-4 rounded-2xl bg-emerald-600 text-white font-bold text-xs sm:text-sm flex items-center justify-between shadow-lg shadow-emerald-600/20 animate-in fade-in">
+          <div className="flex items-center gap-2">
+            <CheckCircle className="w-5 h-5 text-emerald-100 shrink-0" />
+            <span>{toastMessage}</span>
+          </div>
+          <button
+            onClick={() => setToastMessage(null)}
+            className="p-1 rounded-lg hover:bg-white/20 transition-colors cursor-pointer"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       {/* Courier Quick Stats */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         <div className="p-4 rounded-2xl bg-white border border-slate-200 shadow-2xs">

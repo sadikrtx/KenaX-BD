@@ -32,6 +32,7 @@ import {
   Sliders,
 } from 'lucide-react';
 import { extractYouTubeId } from '../HeroBanner';
+import { getOptimizedImageUrl, handleImageError } from '../../utils/imageOptimizer';
 
 interface AdminHeroSlidesManagerProps {
   heroBanners: HeroBannerSlide[];
@@ -267,12 +268,11 @@ export const AdminHeroSlidesManager: React.FC<AdminHeroSlidesManagerProps> = ({
                       <Video className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-sky-400" />
                     ) : slide.image && slide.image.trim() !== '' ? (
                       <img
-                        src={slide.image}
+                        src={getOptimizedImageUrl(slide.image, 200)}
                         alt="Slide thumbnail"
                         className="w-full h-full object-cover"
-                        onError={(e) => {
-                          (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1550009158-9ebf69173e03?w=200&auto=format&fit=crop&q=80';
-                        }}
+                        referrerPolicy="no-referrer"
+                        onError={(e) => handleImageError(e, slide.image)}
                       />
                     ) : (
                       <ImageIcon className="w-3.5 h-3.5 text-slate-400" />
@@ -1168,7 +1168,7 @@ export const AdminHeroSlidesManager: React.FC<AdminHeroSlidesManagerProps> = ({
 
                               <input
                                 type="url"
-                                placeholder="Or image URL..."
+                                placeholder="Paste Google Drive, Facebook, or Direct Image URL..."
                                 value={slide.image || ''}
                                 onChange={(e) => {
                                   const updated = [...heroBanners];
@@ -1178,13 +1178,18 @@ export const AdminHeroSlidesManager: React.FC<AdminHeroSlidesManagerProps> = ({
                                 className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 text-xs font-mono text-slate-900 bg-white"
                               />
                             </div>
+                            <p className="text-[10px] text-slate-500 italic">
+                              💡 Supports: Local Device file upload, Google Drive sharing links, Facebook photo links, & Direct web URLs.
+                            </p>
 
                             {slide.image && slide.image.trim() !== '' && (
                               <div className="relative h-24 w-full rounded-lg overflow-hidden border border-slate-300 bg-slate-900">
                                 <img
-                                  src={slide.image}
+                                  src={getOptimizedImageUrl(slide.image, 1600)}
                                   alt={`Desktop preview ${idx + 1}`}
                                   className="w-full h-full object-cover"
+                                  referrerPolicy="no-referrer"
+                                  onError={(e) => handleImageError(e, slide.image)}
                                 />
                                 <span className="absolute bottom-1 right-1 px-1.5 py-0.5 rounded bg-black/75 text-white text-[9px] font-bold">
                                   Desktop View
@@ -1217,7 +1222,7 @@ export const AdminHeroSlidesManager: React.FC<AdminHeroSlidesManagerProps> = ({
 
                               <input
                                 type="url"
-                                placeholder="Or mobile image URL..."
+                                placeholder="Paste Google Drive, Facebook, or Direct Image URL..."
                                 value={slide.mobileImage || ''}
                                 onChange={(e) => {
                                   const updated = [...heroBanners];
@@ -1227,13 +1232,18 @@ export const AdminHeroSlidesManager: React.FC<AdminHeroSlidesManagerProps> = ({
                                 className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 text-xs font-mono text-slate-900 bg-white"
                               />
                             </div>
+                            <p className="text-[10px] text-slate-500 italic">
+                              💡 Supports: Local Device file upload, Google Drive sharing links, Facebook photo links, & Direct web URLs.
+                            </p>
 
                             {slide.mobileImage && slide.mobileImage.trim() !== '' ? (
                               <div className="relative h-24 w-full rounded-lg overflow-hidden border border-slate-300 bg-slate-900">
                                 <img
-                                  src={slide.mobileImage}
+                                  src={getOptimizedImageUrl(slide.mobileImage, 800)}
                                   alt={`Mobile preview ${idx + 1}`}
                                   className="w-full h-full object-cover"
+                                  referrerPolicy="no-referrer"
+                                  onError={(e) => handleImageError(e, slide.mobileImage)}
                                 />
                                 <span className="absolute bottom-1 right-1 px-1.5 py-0.5 rounded bg-emerald-700 text-white text-[9px] font-bold">
                                   Mobile View
@@ -1361,9 +1371,11 @@ export const AdminHeroSlidesManager: React.FC<AdminHeroSlidesManagerProps> = ({
                         {/* Background Media */}
                         {mediaType === 'image' && slide.image && slide.image.trim() !== '' && (
                           <img
-                            src={slide.image}
+                            src={getOptimizedImageUrl(slide.image, 1600)}
                             alt="Desktop preview"
                             className="absolute inset-0 w-full h-full object-cover opacity-40 mix-blend-overlay"
+                            referrerPolicy="no-referrer"
+                            onError={(e) => handleImageError(e, slide.image)}
                           />
                         )}
                         <div className={`absolute inset-0 bg-gradient-to-r ${slide.theme || 'from-blue-900 via-sky-900 to-slate-950'} opacity-75`} />

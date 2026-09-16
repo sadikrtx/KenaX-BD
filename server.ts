@@ -1,6 +1,7 @@
 import express from "express";
 import path from "path";
 import fs from "fs";
+import crypto from "crypto";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, ThinkingLevel } from "@google/genai";
 import dotenv from "dotenv";
@@ -77,6 +78,15 @@ import {
   writeProductToFirestore,
   deleteProductFromFirestore,
 } from "./src/db/firestoreSync.ts";
+import {
+  saveWhatsAppMessage,
+  updateWhatsAppMessageStatus,
+  logWhatsAppWebhook,
+  getAllWhatsAppMessages,
+  getAllWhatsAppWebhookLogs,
+  syncWhatsAppMessageToFirestore,
+  WhatsAppMessageRecord,
+} from "./src/db/whatsapp.ts";
 
 dotenv.config();
 
@@ -89,7 +99,14 @@ async function startServer() {
     console.warn("[Server Startup] Firestore sync notice:", err.message);
   });
 
-  app.use(express.json({ limit: "50mb" }));
+  app.use(
+    express.json({
+      limit: "50mb",
+      verify: (req: any, _res, buf) => {
+        req.rawBody = buf;
+      },
+    })
+  );
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
   app.use(express.static(path.join(process.cwd(), "public")));
 
@@ -449,29 +466,7 @@ Tone: Friendly, helpful, professional, fluent in both Bengali and English (Bangl
               "Importance": "High",
               "List-Unsubscribe": "<mailto:support@kenaxbd.com?subject=unsubscribe>",
             },
-            attachments: [],
           };
-
-          // Attach official high-resolution branding assets with CID embedding
-          const sealPngPath = path.join(process.cwd(), "public", "kenax-seal.png");
-          if (fs.existsSync(sealPngPath)) {
-            mailPayload.attachments.push({
-              filename: "kenax-seal.png",
-              path: sealPngPath,
-              cid: "kenax-seal",
-              contentDisposition: "inline",
-            });
-          }
-
-          const logoPngPath = path.join(process.cwd(), "public", "kenax-logo.png");
-          if (fs.existsSync(logoPngPath)) {
-            mailPayload.attachments.push({
-              filename: "kenax-logo.png",
-              path: logoPngPath,
-              cid: "kenax-logo",
-              contentDisposition: "inline",
-            });
-          }
 
           if (bccList.length > 0) {
             mailPayload.bcc = bccList;
@@ -596,6 +591,369 @@ Tone: Friendly, helpful, professional, fluent in both Bengali and English (Bangl
     }
   });
 
+  // ==========================================
+  // OFFICIAL META WHATSAPP CLOUD API WEBHOOKS
+  // ==========================================
+
+  // Universal CORS & Preflight middleware for Webhook routes
+  const webhookCors = (_req: express.Request, res: express.Response, next: express.NextFunction) => {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS, HEAD");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Hub-Signature-256, hub.mode, hub.verify_token, hub.challenge");
+    next();
+  };
+
+  // 1. GET & HEAD Webhook Verification for Meta Developer Portal (Supports multiple path aliases)
+  const handleWhatsAppWebhookVerification = (req: express.Request, res: express.Response) => {
+    try {
+      res.setHeader("Access-Control-Allow-Origin", "*");
+      res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS, HEAD");
+
+      if (req.method === "OPTIONS" || req.method === "HEAD") {
+        return res.status(200).end();
+      }
+
+      const urlObj = new URL(req.originalUrl || req.url, "http://localhost");
+      
+      const mode = (
+        req.query["hub.mode"] ||
+        req.query["hub_mode"] ||
+        (req.query.hub as any)?.mode ||
+        urlObj.searchParams.get("hub.mode") ||
+        urlObj.searchParams.get("hub_mode") ||
+        ""
+      ) as string;
+
+      const token = (
+        req.query["hub.verify_token"] ||
+        req.query["hub_verify_token"] ||
+        (req.query.hub as any)?.verify_token ||
+        urlObj.searchParams.get("hub.verify_token") ||
+        urlObj.searchParams.get("hub_verify_token") ||
+        ""
+      ) as string;
+
+      const challenge = (
+        req.query["hub.challenge"] ||
+        req.query["hub_challenge"] ||
+        (req.query.hub as any)?.challenge ||
+        urlObj.searchParams.get("hub.challenge") ||
+        urlObj.searchParams.get("hub_challenge") ||
+        ""
+      ) as string;
+
+      const configuredToken = (process.env.WHATSAPP_VERIFY_TOKEN || "").replace(/^["']|["']$/g, "").trim();
+
+      console.log(
+        `[WhatsApp Webhook GET] mode="${mode}", tokenReceived=${Boolean(token)}, challengeReceived=${Boolean(challenge)}`
+      );
+
+      // Meta sends hub.mode='subscribe' and hub.verify_token
+      if (mode && token) {
+        const isModeSubscribe = mode.trim().toLowerCase() === "subscribe";
+        const isTokenValid = Boolean(configuredToken) && token.trim() === configuredToken;
+
+        if (isModeSubscribe && isTokenValid) {
+          console.log(`[WhatsApp Webhook Verification SUCCESS] Verified with Meta. Returning challenge.`);
+          // Meta expects exactly HTTP 200 and challenge string in text/plain
+          return res.status(200).type("text/plain").send(String(challenge).trim());
+        } else {
+          console.warn(
+            `[WhatsApp Webhook Verification REJECTED] Mismatch or invalid mode/token: mode="${mode}", tokenProvided=${Boolean(token)}, tokenConfigured=${Boolean(configuredToken)}`
+          );
+          return res.status(403).type("text/plain").send("Verification token mismatch");
+        }
+      }
+
+      // Friendly JSON status if visited directly from browser or diagnostic tools
+      return res.status(200).json({
+        status: "active",
+        service: "Official Meta WhatsApp Cloud API Webhook",
+        endpoint: "/api/whatsapp/webhook",
+        note: "Meta Developer Dashboard sends GET verification requests with hub.mode, hub.verify_token, and hub.challenge",
+        verifyTokenConfigured: Boolean(configuredToken),
+        timestamp: new Date().toISOString(),
+      });
+    } catch (err: any) {
+      console.error("[WhatsApp Webhook GET Exception]:", err);
+      return res.status(500).json({ error: "Internal webhook verification error", details: err.message });
+    }
+  };
+
+  app.use("/api/whatsapp/webhook", webhookCors);
+  app.use("/webhook", webhookCors);
+  app.use("/api/webhook", webhookCors);
+
+  app.options("/api/whatsapp/webhook", (_req, res) => res.status(200).end());
+  app.options("/api/whatsapp/webhook/", (_req, res) => res.status(200).end());
+  app.options("/webhook", (_req, res) => res.status(200).end());
+  app.options("/api/webhook", (_req, res) => res.status(200).end());
+
+  app.get("/api/whatsapp/webhook", handleWhatsAppWebhookVerification);
+  app.get("/api/whatsapp/webhook/", handleWhatsAppWebhookVerification);
+  app.get("/api/webhook", handleWhatsAppWebhookVerification);
+  app.get("/webhook", handleWhatsAppWebhookVerification);
+
+  // 2. POST Webhook Incoming Event Receiver (Messages, Delivery Statuses, Button Clicks)
+  const handleWhatsAppWebhookPost = async (req: any, res: express.Response) => {
+    try {
+      const signature = req.headers["x-hub-signature-256"] as string | undefined;
+      const appSecret = (process.env.WHATSAPP_APP_SECRET || process.env.META_APP_SECRET || "").trim();
+
+      // Verify HMAC-SHA256 signature if app secret is provided in environment
+      if (appSecret) {
+        if (!signature) {
+          console.warn("[WhatsApp Webhook Security] Missing X-Hub-Signature-256 header. Request rejected.");
+          return res.status(401).json({ error: "Missing signature header" });
+        }
+
+        const rawPayload = req.rawBody || Buffer.from(JSON.stringify(req.body));
+        const expectedHash = crypto.createHmac("sha256", appSecret).update(rawPayload).digest("hex");
+        const signatureHash = signature.replace(/^sha256=/, "");
+
+        try {
+          const signatureBuffer = Buffer.from(signatureHash, "hex");
+          const expectedBuffer = Buffer.from(expectedHash, "hex");
+
+          if (
+            signatureBuffer.length !== expectedBuffer.length ||
+            !crypto.timingSafeEqual(signatureBuffer, expectedBuffer)
+          ) {
+            console.warn("[WhatsApp Webhook Security] Invalid HMAC-SHA256 signature. Request rejected.");
+            return res.status(401).json({ error: "Invalid signature" });
+          }
+        } catch (signErr) {
+          console.warn("[WhatsApp Webhook Security] Signature parsing error:", signErr);
+          return res.status(401).json({ error: "Malformed signature format" });
+        }
+      }
+
+      const body = req.body;
+      console.log(`[WhatsApp Webhook POST] Received payload. Object: ${body?.object || "unknown"}`);
+
+      // Log raw webhook event
+      logWhatsAppWebhook({
+        id: `WHK-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+        receivedAt: new Date().toISOString(),
+        type: body?.object || "whatsapp_business_account",
+        summary: "Meta WhatsApp Cloud API Webhook Event",
+        rawPayload: body,
+      });
+
+      // Meta strictly mandates responding with 200 OK immediately
+      res.status(200).json({ status: "EVENT_RECEIVED" });
+
+      // Asynchronous event processing
+      if (body?.object === "whatsapp_business_account") {
+        const entries = body.entry || [];
+        for (const entry of entries) {
+          const changes = entry.changes || [];
+          for (const change of changes) {
+            const value = change.value;
+            if (!value) continue;
+
+            // Process Incoming Customer Messages
+            if (value.messages && Array.isArray(value.messages)) {
+              const contacts = value.contacts || [];
+              const senderProfile = contacts[0]?.profile?.name;
+
+              for (const msg of value.messages) {
+                const messageId = msg.id || `wamid.${Date.now()}`;
+                const from = msg.from;
+                const type = msg.type || "text";
+                let textBody = "";
+
+                if (type === "text") {
+                  textBody = msg.text?.body || "";
+                } else if (type === "interactive") {
+                  textBody =
+                    msg.interactive?.button_reply?.title ||
+                    msg.interactive?.list_reply?.title ||
+                    "[Interactive Selection]";
+                } else if (type === "button") {
+                  textBody = msg.button?.text || "[Button Action]";
+                } else if (type === "image") {
+                  textBody = msg.image?.caption || "[Image]";
+                } else if (type === "location") {
+                  textBody = `[Location: Lat ${msg.location?.latitude}, Lng ${msg.location?.longitude}]`;
+                } else {
+                  textBody = `[${type.toUpperCase()} Message]`;
+                }
+
+                console.log(
+                  `[WhatsApp Incoming Message] From: ${from} (${senderProfile || "Customer"}) | Type: ${type} | Text: ${textBody}`
+                );
+
+                const record: WhatsAppMessageRecord = {
+                  id: messageId,
+                  direction: "incoming",
+                  from,
+                  senderName: senderProfile,
+                  text: textBody,
+                  messageType: type as any,
+                  rawPayload: msg,
+                  status: "received",
+                  timestamp: msg.timestamp
+                    ? new Date(Number(msg.timestamp) * 1000).toISOString()
+                    : new Date().toISOString(),
+                };
+
+                saveWhatsAppMessage(record);
+                syncWhatsAppMessageToFirestore(record).catch(() => {});
+              }
+            }
+
+            // Process Message Delivery Status Updates (sent, delivered, read, failed)
+            if (value.statuses && Array.isArray(value.statuses)) {
+              for (const st of value.statuses) {
+                const messageId = st.id;
+                const statusName = st.status as "sent" | "delivered" | "read" | "failed";
+                const recipientId = st.recipient_id;
+                const errStr = st.errors ? JSON.stringify(st.errors) : undefined;
+
+                console.log(
+                  `[WhatsApp Status Receipt] ID: ${messageId} | Status: ${statusName} | Recipient: ${recipientId}`
+                );
+                updateWhatsAppMessageStatus(messageId, statusName, errStr);
+              }
+            }
+          }
+        }
+      }
+    } catch (err: any) {
+      console.error("[WhatsApp Webhook POST Exception]:", err);
+      if (!res.headersSent) {
+        res.status(200).json({ status: "ERROR_RECORDED", error: err.message });
+      }
+    }
+  };
+
+  app.post("/api/whatsapp/webhook", handleWhatsAppWebhookPost);
+  app.post("/api/whatsapp/webhook/", handleWhatsAppWebhookPost);
+  app.post("/api/webhook", handleWhatsAppWebhookPost);
+  app.post("/webhook", handleWhatsAppWebhookPost);
+
+  // 3. Official Meta WhatsApp Cloud API Message Dispatch (Server-Side Proxy)
+  app.post("/api/whatsapp/send", async (req, res) => {
+    try {
+      const { to, type = "text", text, template, orderId } = req.body;
+      if (!to) {
+        return res.status(400).json({ error: "Missing recipient phone number 'to'" });
+      }
+
+      const accessToken = (
+        process.env.WHATSAPP_ACCESS_TOKEN ||
+        process.env.META_WHATSAPP_TOKEN ||
+        ""
+      ).trim();
+      const phoneNumberId = (process.env.WHATSAPP_PHONE_NUMBER_ID || "").trim();
+
+      const cleanTo = String(to).replace(/[^0-9]/g, "");
+      const formattedPhone = cleanTo.startsWith("88") ? cleanTo : `88${cleanTo}`;
+
+      if (!accessToken || !phoneNumberId) {
+        return res.status(400).json({
+          success: false,
+          error: "Meta WhatsApp Cloud API credentials not configured in server environment.",
+          missing: [
+            !accessToken ? "WHATSAPP_ACCESS_TOKEN" : null,
+            !phoneNumberId ? "WHATSAPP_PHONE_NUMBER_ID" : null,
+          ].filter(Boolean),
+          note: "Set WHATSAPP_ACCESS_TOKEN and WHATSAPP_PHONE_NUMBER_ID in your environment secrets.",
+        });
+      }
+
+      let payload: any = {
+        messaging_product: "whatsapp",
+        recipient_type: "individual",
+        to: formattedPhone,
+      };
+
+      if (type === "template" && template) {
+        payload.type = "template";
+        payload.template = template;
+      } else {
+        payload.type = "text";
+        payload.text = {
+          preview_url: true,
+          body: text || "Greetings from KenaX BD!",
+        };
+      }
+
+      const metaUrl = `https://graph.facebook.com/v21.0/${phoneNumberId}/messages`;
+      console.log(`[Meta Cloud API Dispatch] To: ${formattedPhone} | Type: ${payload.type}`);
+
+      const response = await fetch(metaUrl, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      });
+
+      const resData: any = await response.json();
+
+      if (!response.ok) {
+        console.error("[Meta Cloud API Send Error]:", resData);
+        return res.status(response.status).json({
+          success: false,
+          error: "Meta WhatsApp Cloud API rejected request",
+          details: resData,
+        });
+      }
+
+      const messageId = resData.messages?.[0]?.id || `wamid.${Date.now()}`;
+      const record: WhatsAppMessageRecord = {
+        id: messageId,
+        direction: "outgoing",
+        from: phoneNumberId,
+        to: formattedPhone,
+        text: text || `[Template: ${template?.name}]`,
+        messageType: type === "template" ? "template" : "text",
+        rawPayload: resData,
+        status: "sent",
+        timestamp: new Date().toISOString(),
+        orderId,
+      };
+
+      saveWhatsAppMessage(record);
+      syncWhatsAppMessageToFirestore(record).catch(() => {});
+
+      return res.json({
+        success: true,
+        messageId,
+        data: resData,
+      });
+    } catch (err: any) {
+      console.error("[WhatsApp Send API Error]:", err);
+      return res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // 4. Retrieve WhatsApp Live Messages & Status for Admin Dashboard
+  app.get("/api/whatsapp/messages", (req, res) => {
+    try {
+      const messages = getAllWhatsAppMessages();
+      const webhooks = getAllWhatsAppWebhookLogs();
+
+      res.json({
+        messages,
+        webhooks,
+        configStatus: {
+          isConfigured: !!(process.env.WHATSAPP_ACCESS_TOKEN && process.env.WHATSAPP_PHONE_NUMBER_ID),
+          hasAccessToken: !!process.env.WHATSAPP_ACCESS_TOKEN,
+          hasPhoneNumberId: !!process.env.WHATSAPP_PHONE_NUMBER_ID,
+          hasAppSecret: !!process.env.WHATSAPP_APP_SECRET,
+          hasVerifyToken: !!process.env.WHATSAPP_VERIFY_TOKEN,
+          endpointUrl: "/api/whatsapp/webhook",
+        },
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: "Failed to read messages", details: err.message });
+    }
+  });
+
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
@@ -604,10 +962,23 @@ Tone: Friendly, helpful, professional, fluent in both Bengali and English (Bangl
     });
     app.use(vite.middlewares);
   } else {
-    const distPath = path.join(process.cwd(), "dist");
-    app.use(express.static(distPath));
+    // Robust multi-fallback dist directory resolution for Cloud Run container deployment
+    const primaryDist = path.join(process.cwd(), "dist");
+    const fallbackDist = path.resolve(__dirname);
+    const distPath = fs.existsSync(path.join(primaryDist, "index.html"))
+      ? primaryDist
+      : fs.existsSync(path.join(fallbackDist, "index.html"))
+      ? fallbackDist
+      : primaryDist;
+
+    app.use(express.static(distPath, { maxAge: "1d" }));
     app.get("*", (req, res) => {
-      res.sendFile(path.join(distPath, "index.html"));
+      const indexPath = path.join(distPath, "index.html");
+      if (fs.existsSync(indexPath)) {
+        res.sendFile(indexPath);
+      } else {
+        res.status(404).send("Application index.html not found.");
+      }
     });
   }
 

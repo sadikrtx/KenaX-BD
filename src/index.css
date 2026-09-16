@@ -1,5 +1,17 @@
 @import "tailwindcss";
 
+html, body {
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+/* Rendering containment for offscreen product cards and ultra-smooth mobile scrolling */
+.product-card-contain {
+  contain: layout style;
+  content-visibility: auto;
+  contain-intrinsic-size: 280px 380px;
+}
+
 @keyframes shine-sweep {
   0% {
     transform: translateX(-200%) skewX(-25deg);
@@ -25,3 +37,4 @@
 .animate-dark-glow {
   animation: dark-pulse-glow 2.8s infinite ease-in-out;
 }
+

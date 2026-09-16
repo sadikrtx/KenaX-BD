@@ -22,28 +22,41 @@ export const CartItemImage: React.FC<CartItemImageProps> = ({
 }) => {
   // Determine raw starting image candidates
   const getCandidateImage = (): string => {
-    // 1. Explicit color image or item image
+    // 1. Explicit color image
     if (item.selectedColorImage && item.selectedColorImage.trim() !== '') {
       return item.selectedColorImage;
     }
-    if (item.productImage && item.productImage.trim() !== '') {
-      return item.productImage;
-    }
-    // 2. Lookup in product if provided
+
+    // 2. Lookup by selected color or variant string in product if available
     if (product) {
-      if (item.selectedColor && product.colors && product.colors.length > 0) {
+      const colorCandidate = item.selectedColor || (item.variant ? item.variant.split('/')[0].trim() : '');
+      if (colorCandidate && product.colors && product.colors.length > 0) {
         const matchedColor = product.colors.find(
-          (c) => (c.name || c.colorName || '').toLowerCase() === item.selectedColor?.toLowerCase()
+          (c) => (c.name || c.colorName || '').trim().toLowerCase() === colorCandidate.toLowerCase()
         );
         if (matchedColor?.imageUrl && matchedColor.imageUrl.trim() !== '') {
           return matchedColor.imageUrl;
         }
       }
+    }
+
+    // 3. Explicit item product image
+    if (item.productImage && item.productImage.trim() !== '') {
+      return item.productImage;
+    }
+
+    // 4. Default product image
+    if (product) {
       if (product.images && product.images.length > 0) {
         const valid = product.images.find((img) => typeof img === 'string' && img.trim() !== '');
         if (valid) return valid;
       }
+      if (product.colors && product.colors.length > 0) {
+        const firstColorWithImg = product.colors.find((c) => c.imageUrl && c.imageUrl.trim() !== '');
+        if (firstColorWithImg) return firstColorWithImg.imageUrl!;
+      }
     }
+
     return DEFAULT_FALLBACK_IMAGE;
   };
 
@@ -128,6 +141,8 @@ export const CartItemImage: React.FC<CartItemImageProps> = ({
       <img
         src={imgSrc}
         alt={alt || item.productName || 'Product Image'}
+        crossOrigin="anonymous"
+        referrerPolicy="no-referrer"
         onError={handleError}
         onLoad={() => {
           setIsLoading(false);

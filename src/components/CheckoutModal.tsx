@@ -135,11 +135,21 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
         : (prod?.images?.[0] || prod?.colors?.[0]?.imageUrl || '');
       let selectedSize = item.selectedSize;
 
-      if (prod?.colors && prod.colors.length > 0 && !selectedColor) {
-        selectedColor = prod.colors[0].name;
-        if (prod.colors[0].imageUrl && (!productImage || productImage.trim() === '')) {
-          selectedColorImage = prod.colors[0].imageUrl;
-          productImage = prod.colors[0].imageUrl;
+      if (prod?.colors && prod.colors.length > 0) {
+        const colorName = selectedColor || (item.variant ? item.variant.split('/')[0].trim() : '');
+        const matched = colorName ? prod.colors.find((c) => (c.name || '').trim().toLowerCase() === colorName.toLowerCase()) : undefined;
+        if (matched) {
+          selectedColor = matched.name;
+          if (matched.imageUrl && matched.imageUrl.trim() !== '') {
+            selectedColorImage = matched.imageUrl;
+            productImage = matched.imageUrl;
+          }
+        } else if (!selectedColor) {
+          selectedColor = prod.colors[0].name;
+          if (prod.colors[0].imageUrl && (!productImage || productImage.trim() === '')) {
+            selectedColorImage = prod.colors[0].imageUrl;
+            productImage = prod.colors[0].imageUrl;
+          }
         }
       }
 
@@ -175,11 +185,21 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
           : (prod?.images?.[0] || prod?.colors?.[0]?.imageUrl || '');
         let selectedSize = item.selectedSize;
 
-        if (prod?.colors && prod.colors.length > 0 && !selectedColor) {
-          selectedColor = prod.colors[0].name;
-          if (prod.colors[0].imageUrl && (!productImage || productImage.trim() === '')) {
-            selectedColorImage = prod.colors[0].imageUrl;
-            productImage = prod.colors[0].imageUrl;
+        if (prod?.colors && prod.colors.length > 0) {
+          const colorName = selectedColor || (item.variant ? item.variant.split('/')[0].trim() : '');
+          const matched = colorName ? prod.colors.find((c) => (c.name || '').trim().toLowerCase() === colorName.toLowerCase()) : undefined;
+          if (matched) {
+            selectedColor = matched.name;
+            if (matched.imageUrl && matched.imageUrl.trim() !== '') {
+              selectedColorImage = matched.imageUrl;
+              productImage = matched.imageUrl;
+            }
+          } else if (!selectedColor) {
+            selectedColor = prod.colors[0].name;
+            if (prod.colors[0].imageUrl && (!productImage || productImage.trim() === '')) {
+              selectedColorImage = prod.colors[0].imageUrl;
+              productImage = prod.colors[0].imageUrl;
+            }
           }
         }
 
@@ -214,12 +234,27 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
           const prod = products.find((p) => p.id === item.productId);
           if (!prod) return item;
           let productImage = item.productImage;
+          let selectedColorImage = item.selectedColorImage;
+
+          if (prod.colors && prod.colors.length > 0) {
+            const colorName = item.selectedColor || (item.variant ? item.variant.split('/')[0].trim() : '');
+            const matchedColor = colorName ? prod.colors.find((c) => (c.name || '').trim().toLowerCase() === colorName.toLowerCase()) : undefined;
+            if (matchedColor?.imageUrl && matchedColor.imageUrl.trim() !== '') {
+              if (selectedColorImage !== matchedColor.imageUrl || productImage !== matchedColor.imageUrl) {
+                selectedColorImage = matchedColor.imageUrl;
+                productImage = matchedColor.imageUrl;
+                changed = true;
+              }
+            }
+          }
+
           if (!productImage || productImage.trim() === '' || productImage.startsWith('media://')) {
-            productImage = prod.images?.[0] || prod.colors?.[0]?.imageUrl || item.productImage;
+            productImage = selectedColorImage || prod.images?.[0] || prod.colors?.[0]?.imageUrl || item.productImage;
             changed = true;
           }
           return {
             ...item,
+            selectedColorImage,
             productImage,
           };
         });

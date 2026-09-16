@@ -24,7 +24,8 @@
         "reviewsCount": { "type": "number" },
         "isBestSeller": { "type": "boolean" },
         "isNew": { "type": "boolean" },
-        "isHot": { "type": "boolean" }
+        "isHot": { "type": "boolean" },
+        "keyHighlights": { "type": "array" }
       },
       "required": ["name", "price", "category", "sku"]
     },
@@ -141,12 +142,67 @@
         "updatedAt": { "type": "string" }
       },
       "required": ["id", "category", "title", "amount", "date", "recordedBy"]
+    },
+    "Supplier": {
+      "title": "Supplier",
+      "description": "Dropshipping supplier profile with contact links and phone numbers",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "websiteUrl": { "type": "string" },
+        "facebookUrl": { "type": "string" },
+        "tiktokUrl": { "type": "string" },
+        "whatsapp": { "type": "string" },
+        "personalPhone": { "type": "string" },
+        "managerPhone": { "type": "string" },
+        "ceoPhone": { "type": "string" },
+        "address": { "type": "string" },
+        "notes": { "type": "string" },
+        "status": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "name"]
+    },
+    "WhatsAppMessage": {
+      "title": "WhatsAppMessage",
+      "description": "Meta WhatsApp Cloud API incoming and outgoing message record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "direction": { "type": "string" },
+        "from": { "type": "string" },
+        "to": { "type": "string" },
+        "senderName": { "type": "string" },
+        "text": { "type": "string" },
+        "messageType": { "type": "string" },
+        "status": { "type": "string" },
+        "timestamp": { "type": "string" }
+      },
+      "required": ["id", "direction", "from", "timestamp"]
+    },
+    "WhatsAppWebhookLog": {
+      "title": "WhatsAppWebhookLog",
+      "description": "Raw Meta WhatsApp webhook payload events audit",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "receivedAt": { "type": "string" },
+        "type": { "type": "string" },
+        "summary": { "type": "string" }
+      },
+      "required": ["id", "receivedAt", "type"]
     }
   },
   "firestore": {
     "/products/{productId}": {
       "schema": "Product",
       "description": "Products catalog"
+    },
+    "/suppliers/{supplierId}": {
+      "schema": "Supplier",
+      "description": "Dropshipping supplier profiles"
     },
     "/orders/{orderId}": {
       "schema": "Order",
@@ -179,6 +235,14 @@
     "/sms_logs/{logId}": {
       "schema": "EntityDefinition",
       "description": "SMS dispatch logs and status records"
+    },
+    "/whatsapp_messages/{messageId}": {
+      "schema": "WhatsAppMessage",
+      "description": "Meta WhatsApp Cloud API incoming and outgoing messages"
+    },
+    "/whatsapp_webhooks/{webhookId}": {
+      "schema": "WhatsAppWebhookLog",
+      "description": "Meta WhatsApp Cloud API webhook logs"
     }
   }
 }

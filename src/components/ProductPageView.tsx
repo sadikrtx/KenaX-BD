@@ -33,6 +33,10 @@ import { ProductCard } from './ProductCard';
 import { applyProductOpenGraphMeta, restoreStoreOpenGraphMeta } from '../utils/seo';
 import { getOptimizedImageUrl, NEUTRAL_PRODUCT_PLACEHOLDER, markImageLoaded, preloadImage } from '../utils/imageOptimizer';
 import { resolveOriginalImageMedia, getSynchronouslyResolvedMedia } from '../lib/firebase';
+import { ProductVideoPlayer } from './ProductVideoPlayer';
+import { getProductStockStatus, getStockStatusInfo } from '../utils/stockUtils';
+import { HighlightIcon } from './HighlightIcon';
+import { DEFAULT_PRODUCT_HIGHLIGHTS } from '../utils/highlightConstants';
 
 export interface CustomerReview {
   id: string;
@@ -92,12 +96,24 @@ export const ProductPageView: React.FC<ProductPageViewProps> = ({
   const [quantity, setQuantity] = useState(1);
   const [activeTab, setActiveTab] = useState<'details' | 'specs' | 'reviews' | 'shipping'>('details');
   const [isPaused, setIsPaused] = useState(false);
+  const [holdUntil, setHoldUntil] = useState<number>(() => Date.now() + 4000);
 
   // Variations state
   const [selectedColor, setSelectedColor] = useState<string>('');
   const [selectedSize, setSelectedSize] = useState<string>('');
   const [selectedCustomOptions, setSelectedCustomOptions] = useState<Record<string, string>>({});
   const [activeColorImage, setActiveColorImage] = useState<string | null>(null);
+
+  // List of valid product images
+  const validProductImages = useMemo(() => {
+    const list = (product.images || []).filter(
+      (img) => typeof img === 'string' && img.trim() !== ''
+    );
+    return list.length > 0 ? list : [NEUTRAL_PRODUCT_PLACEHOLDER];
+  }, [product.images]);
+
+  const hasVideo = Boolean(product.videoUrl && product.videoUrl.trim() !== '');
+  const totalSlides = validProductImages.length + (hasVideo ? 1 : 0);
 
   // Added to cart feedback state
   const [addedFeedback, setAddedFeedback] = useState(false);
@@ -156,8 +172,12 @@ export const ProductPageView: React.FC<ProductPageViewProps> = ({
     if (product.colors && product.colors.length > 0) {
       const firstColor = product.colors[0];
       setSelectedColor(firstColor.name);
-      if (firstColor.imageUrl) {
+      if (firstColor.imageUrl && firstColor.imageUrl.trim() !== '') {
         setActiveColorImage(firstColor.imageUrl);
+        const imgIdx = (product.images || []).findIndex((img) => img === firstColor.imageUrl);
+        if (imgIdx !== -1) {
+          setSelectedImageIndex(imgIdx);
+        }
       } else {
         setActiveColorImage(null);
       }
@@ -184,6 +204,9 @@ export const ProductPageView: React.FC<ProductPageViewProps> = ({
       setSelectedCustomOptions({});
     }
 
+    // 4-second hold on initial load / default color
+    setHoldUntil(Date.now() + 4000);
+
     // Immediately ensure viewport is at top smoothly without bottom-to-top scroll animation lag
     window.scrollTo({ top: 0, behavior: 'instant' });
   }, [product.id]);
@@ -199,18 +222,28 @@ export const ProductPageView: React.FC<ProductPageViewProps> = ({
     };
   }, [product, selectedColor, selectedSize, selectedCustomOptions, activeColorImage]);
 
-  // 3-Second Auto-Slide for all product images
+  // Auto-Slide with 4-second hold on initial load / color switch, and 3-second interval for images & video
   useEffect(() => {
-    if (showVideo || isPaused || activeColorImage) return;
-    const imagesCount = product.images?.length || 0;
-    if (imagesCount <= 1) return;
+    if (isPaused || totalSlides <= 1) return;
 
-    const interval = setInterval(() => {
-      setSelectedImageIndex((prev) => (prev + 1) % imagesCount);
-    }, 3000);
+    const remainingHold = Math.max(0, holdUntil - Date.now());
+    const delay = remainingHold > 0 ? remainingHold : 3000;
 
-    return () => clearInterval(interval);
-  }, [product.id, showVideo, isPaused, activeColorImage, product.images?.length]);
+    const timer = setTimeout(() => {
+      if (isPaused) return;
+      setActiveColorImage(null);
+      const currentIdx = showVideo ? validProductImages.length : selectedImageIndex;
+      const nextIdx = (currentIdx + 1) % totalSlides;
+      if (hasVideo && nextIdx === validProductImages.length) {
+        setShowVideo(true);
+      } else {
+        setShowVideo(false);
+        setSelectedImageIndex(nextIdx);
+      }
+    }, delay);
+
+    return () => clearTimeout(timer);
+  }, [selectedImageIndex, showVideo, holdUntil, isPaused, totalSlides, hasVideo, validProductImages.length]);
 
   const isStaff = ['super_admin', 'admin', 'manager', 'moderator'].includes(currentRole);
 
@@ -265,10 +298,60 @@ export const ProductPageView: React.FC<ProductPageViewProps> = ({
   // Handle color selection
   const handleSelectColor = (color: ColorVariation) => {
     setSelectedColor(color.name);
-    if (color.imageUrl) {
+    setShowVideo(false);
+    if (color.imageUrl && color.imageUrl.trim() !== '') {
       setActiveColorImage(color.imageUrl);
-      setShowVideo(false);
+      const imgIdx = validProductImages.findIndex((img) => img === color.imageUrl);
+      if (imgIdx !== -1) {
+        setSelectedImageIndex(imgIdx);
+      }
+    } else {
+      setActiveColorImage(null);
     }
+    // Hold 4 seconds on newly selected color
+    setHoldUntil(Date.now() + 4000);
+  };
+
+  const handleSelectImageSlide = (idx: number) => {
+    setSelectedImageIndex(idx);
+    setShowVideo(false);
+    setActiveColorImage(null);
+    setHoldUntil(Date.now() + 4000);
+  };
+
+  const handleSelectVideoSlide = () => {
+    if (!hasVideo) return;
+    setShowVideo(true);
+    setActiveColorImage(null);
+    setHoldUntil(Date.now() + 4000);
+  };
+
+  const handlePrevSlide = () => {
+    if (totalSlides <= 1) return;
+    setActiveColorImage(null);
+    const currentIdx = showVideo ? validProductImages.length : selectedImageIndex;
+    const newIdx = currentIdx === 0 ? totalSlides - 1 : currentIdx - 1;
+    if (hasVideo && newIdx === validProductImages.length) {
+      setShowVideo(true);
+    } else {
+      setShowVideo(false);
+      setSelectedImageIndex(newIdx);
+    }
+    setHoldUntil(Date.now() + 4000);
+  };
+
+  const handleNextSlide = () => {
+    if (totalSlides <= 1) return;
+    setActiveColorImage(null);
+    const currentIdx = showVideo ? validProductImages.length : selectedImageIndex;
+    const newIdx = (currentIdx + 1) % totalSlides;
+    if (hasVideo && newIdx === validProductImages.length) {
+      setShowVideo(true);
+    } else {
+      setShowVideo(false);
+      setSelectedImageIndex(newIdx);
+    }
+    setHoldUntil(Date.now() + 4000);
   };
 
   // Compose complete variant string for Cart & Checkout
@@ -282,16 +365,12 @@ export const ProductPageView: React.FC<ProductPageViewProps> = ({
     return parts.length > 0 ? parts.join(' | ') : undefined;
   };
 
-  const validProductImages = (product.images || []).filter(
-    (img) => typeof img === 'string' && img.trim() !== ''
-  );
-
   const currentDisplayImage =
     (matchedVariant?.image && matchedVariant.image.trim() !== '' && !activeColorImage)
       ? matchedVariant.image
       : (activeColorImage && activeColorImage.trim() !== '')
       ? activeColorImage
-      : validProductImages[selectedImageIndex] ||
+      : validProductImages[selectedImageIndex < validProductImages.length ? selectedImageIndex : 0] ||
         validProductImages[0] ||
         'https://images.unsplash.com/photo-1598327105666-5b89351aff97?w=500';
 
@@ -553,15 +632,13 @@ export const ProductPageView: React.FC<ProductPageViewProps> = ({
                   className="relative aspect-square rounded-none sm:rounded-2xl bg-white sm:bg-slate-50 border-b sm:border border-slate-200/90 overflow-hidden flex items-center justify-center shadow-none sm:shadow-xs group"
                 >
                   {showVideo && product.videoUrl ? (
-                    <video
-                      src={product.videoUrl}
-                      controls
-                      autoPlay
+                    <ProductVideoPlayer
+                      videoUrl={product.videoUrl}
+                      title={product.name}
                       className="w-full h-full object-contain bg-black"
                     />
                   ) : (
                     <img
-                      key={currentDisplayImage}
                       src={getOptimizedImageUrl(currentDisplayImage, 800)}
                       alt={product.name}
                       loading="eager"
@@ -578,18 +655,16 @@ export const ProductPageView: React.FC<ProductPageViewProps> = ({
                   )}
 
                   {/* Left / Right Carousel Navigation Arrows (Desktop hover & Mobile) */}
-                  {!showVideo && (product.images || []).length > 1 && (
+                  {totalSlides > 1 && (
                     <>
                       <button
                         type="button"
                         onClick={(e) => {
                           e.stopPropagation();
-                          setActiveColorImage(null);
-                          const total = product.images.length;
-                          setSelectedImageIndex((prev) => (prev === 0 ? total - 1 : prev - 1));
+                          handlePrevSlide();
                         }}
-                        className="absolute left-2.5 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-white/90 hover:bg-white text-slate-800 shadow-md flex items-center justify-center transition-all opacity-0 group-hover:opacity-100 sm:opacity-80 sm:hover:opacity-100 cursor-pointer z-10 hover:scale-110 active:scale-95"
-                        aria-label="Previous Image"
+                        className="absolute left-2.5 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-white/90 hover:bg-white text-slate-800 shadow-md flex items-center justify-center transition-all opacity-0 group-hover:opacity-100 sm:opacity-80 sm:hover:opacity-100 cursor-pointer z-20 hover:scale-110 active:scale-95"
+                        aria-label="Previous Slide"
                       >
                         <ChevronLeft className="w-4 h-4 text-slate-700" />
                       </button>
@@ -597,12 +672,10 @@ export const ProductPageView: React.FC<ProductPageViewProps> = ({
                         type="button"
                         onClick={(e) => {
                           e.stopPropagation();
-                          setActiveColorImage(null);
-                          const total = product.images.length;
-                          setSelectedImageIndex((prev) => (prev + 1) % total);
+                          handleNextSlide();
                         }}
-                        className="absolute right-2.5 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-white/90 hover:bg-white text-slate-800 shadow-md flex items-center justify-center transition-all opacity-0 group-hover:opacity-100 sm:opacity-80 sm:hover:opacity-100 cursor-pointer z-10 hover:scale-110 active:scale-95"
-                        aria-label="Next Image"
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-white/90 hover:bg-white text-slate-800 shadow-md flex items-center justify-center transition-all opacity-0 group-hover:opacity-100 sm:opacity-80 sm:hover:opacity-100 cursor-pointer z-20 hover:scale-110 active:scale-95"
+                        aria-label="Next Slide"
                       >
                         <ChevronRight className="w-4 h-4 text-slate-700" />
                       </button>
@@ -611,7 +684,7 @@ export const ProductPageView: React.FC<ProductPageViewProps> = ({
 
                   {/* Active Color Preview Pill */}
                   {activeColorImage && (
-                    <div className="absolute top-3 left-3 px-3 py-1.5 rounded-xl bg-slate-900/85 text-white text-xs font-bold backdrop-blur-xs flex items-center gap-1.5 shadow-md">
+                    <div className="absolute top-3 left-3 px-3 py-1.5 rounded-xl bg-slate-900/85 text-white text-xs font-bold backdrop-blur-xs flex items-center gap-1.5 shadow-md z-10">
                       <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
                       <span>{selectedColor} Preview</span>
                     </div>
@@ -649,13 +722,19 @@ export const ProductPageView: React.FC<ProductPageViewProps> = ({
                   </div>
 
                   {/* Video Toggle Button */}
-                  {product.videoUrl && (
+                  {hasVideo && (
                     <button
                       onClick={() => {
-                        setShowVideo(!showVideo);
-                        if (!showVideo) setActiveColorImage(null);
+                        if (showVideo) {
+                          setShowVideo(false);
+                          setSelectedImageIndex(0);
+                        } else {
+                          setShowVideo(true);
+                          setActiveColorImage(null);
+                        }
+                        setHoldUntil(Date.now() + 4000);
                       }}
-                      className="absolute bottom-3 right-3 px-3.5 py-2 rounded-xl bg-slate-900/85 hover:bg-slate-900 text-white text-xs font-bold backdrop-blur-xs flex items-center gap-1.5 shadow-md cursor-pointer transition-colors"
+                      className="absolute bottom-3 right-3 px-3.5 py-2 rounded-xl bg-slate-900/85 hover:bg-slate-900 text-white text-xs font-bold backdrop-blur-xs flex items-center gap-1.5 shadow-md cursor-pointer transition-colors z-20"
                     >
                       {showVideo ? (
                         <>
@@ -674,17 +753,13 @@ export const ProductPageView: React.FC<ProductPageViewProps> = ({
 
                 {/* Thumbnails Row */}
                 <div className="flex items-center gap-2 sm:gap-2.5 mt-2.5 sm:mt-4 px-3 sm:px-0 overflow-x-auto pb-1 scrollbar-thin">
-                  {(product.images || []).filter((img) => typeof img === 'string' && img.trim() !== '').map((img, idx) => (
+                  {validProductImages.map((img, idx) => (
                     <button
                       key={idx}
-                      onClick={() => {
-                        setSelectedImageIndex(idx);
-                        setActiveColorImage(null);
-                        setShowVideo(false);
-                      }}
+                      onClick={() => handleSelectImageSlide(idx)}
                       className={`w-16 h-16 sm:w-20 sm:h-20 rounded-xl sm:rounded-2xl border-2 overflow-hidden shrink-0 bg-white p-1 cursor-pointer transition-all ${
-                        !showVideo && !activeColorImage && selectedImageIndex === idx
-                          ? 'border-sky-500 ring-2 ring-sky-500/20 shadow-md'
+                        !showVideo && (selectedImageIndex === idx || activeColorImage === img)
+                          ? 'border-sky-500 ring-2 ring-sky-500/20 shadow-md scale-105'
                           : 'border-slate-200 hover:border-slate-400'
                       }`}
                     >
@@ -705,14 +780,11 @@ export const ProductPageView: React.FC<ProductPageViewProps> = ({
                     </button>
                   ))}
 
-                  {product.videoUrl && (
+                  {hasVideo && (
                     <button
-                      onClick={() => {
-                        setShowVideo(true);
-                        setActiveColorImage(null);
-                      }}
+                      onClick={handleSelectVideoSlide}
                       className={`w-16 h-16 sm:w-20 sm:h-20 rounded-xl sm:rounded-2xl border-2 shrink-0 bg-slate-900 text-white flex flex-col items-center justify-center p-1 cursor-pointer transition-all ${
-                        showVideo ? 'border-sky-500 ring-2 ring-sky-500/20' : 'border-slate-800'
+                        showVideo ? 'border-sky-500 ring-2 ring-sky-500/20 shadow-md scale-105' : 'border-slate-800 hover:border-slate-700'
                       }`}
                     >
                       <Play className="w-5 h-5 sm:w-6 sm:h-6 text-sky-400 fill-sky-400" />
@@ -769,23 +841,17 @@ export const ProductPageView: React.FC<ProductPageViewProps> = ({
                     </span>
                   </div>
 
-                  <div className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1 rounded-xl font-bold shrink-0 ${
-                    activeStock > 0
-                      ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
-                      : 'bg-rose-50 text-rose-800 border border-rose-200'
-                  }`}>
-                    {activeStock > 0 ? (
-                      <>
-                        <CheckCircle className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                        <span>In Stock ({activeStock} available)</span>
-                      </>
-                    ) : (
-                      <>
-                        <AlertCircle className="w-3.5 h-3.5 text-rose-600 shrink-0" />
-                        <span>Out of Stock</span>
-                      </>
-                    )}
-                  </div>
+                  {/* Clean Availability Badge without numeric numbers */}
+                  {(() => {
+                    const currentStatus = getProductStockStatus(product);
+                    const info = getStockStatusInfo(currentStatus);
+                    return (
+                      <div className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1 rounded-xl font-bold shrink-0 border ${info.badgeClass}`}>
+                        <span className={`w-2 h-2 rounded-full shrink-0 ${info.dotClass}`} />
+                        <span>{info.labelEn} ({info.labelBn})</span>
+                      </div>
+                    );
+                  })()}
                 </div>
 
                 {/* Price Box */}
@@ -1023,52 +1089,91 @@ export const ProductPageView: React.FC<ProductPageViewProps> = ({
                   </div>
                 )}
 
-                <div className="grid grid-cols-2 sm:grid-cols-12 gap-2 sm:gap-3 min-w-0">
-                  {/* Add to Cart Button */}
-                  <button
-                    onClick={handleAddToCartClick}
-                    className="col-span-1 sm:col-span-6 py-2.5 sm:py-3.5 px-2 sm:px-6 rounded-xl sm:rounded-2xl bg-slate-900 hover:bg-slate-800 active:bg-black text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-1.5 sm:gap-2.5 transition-all shadow-md cursor-pointer min-w-0 overflow-hidden"
-                  >
-                    <ShoppingCart className="w-4 h-4 sm:w-5 sm:h-5 shrink-0" />
-                    <span className="truncate">Add to Cart</span>
-                  </button>
+                {(() => {
+                  const currentStatus = getProductStockStatus(product);
+                  if (currentStatus === 'out_of_stock') {
+                    return (
+                      <div className="flex items-center gap-2">
+                        <button
+                          disabled
+                          className="flex-1 py-3.5 px-6 rounded-2xl bg-slate-100 text-slate-400 font-bold text-sm flex items-center justify-center gap-2 border border-slate-200 cursor-not-allowed opacity-80"
+                        >
+                          <AlertCircle className="w-5 h-5 text-rose-500" />
+                          <span>Out of Stock (আউট অফ স্টক)</span>
+                        </button>
+                        <button
+                          onClick={() => onToggleWishlist(product)}
+                          className={`p-3.5 rounded-2xl border flex items-center justify-center transition-all cursor-pointer ${
+                            isWishlisted
+                              ? 'bg-rose-50 border-rose-200 text-rose-600'
+                              : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                          }`}
+                        >
+                          <Heart className={`w-5 h-5 ${isWishlisted ? 'fill-rose-600' : ''}`} />
+                        </button>
+                      </div>
+                    );
+                  }
+                  if (currentStatus === 'upcoming') {
+                    return (
+                      <div className="flex items-center gap-2">
+                        <button
+                          disabled
+                          className="flex-1 py-3.5 px-6 rounded-2xl bg-purple-50 text-purple-700 font-bold text-sm flex items-center justify-center gap-2 border border-purple-200"
+                        >
+                          <Clock className="w-5 h-5 text-purple-600" />
+                          <span>Upcoming Product (আপকামিং)</span>
+                        </button>
+                        <button
+                          onClick={() => onToggleWishlist(product)}
+                          className={`p-3.5 rounded-2xl border flex items-center justify-center transition-all cursor-pointer ${
+                            isWishlisted
+                              ? 'bg-rose-50 border-rose-200 text-rose-600'
+                              : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                          }`}
+                        >
+                          <Heart className={`w-5 h-5 ${isWishlisted ? 'fill-rose-600' : ''}`} />
+                        </button>
+                      </div>
+                    );
+                  }
+                  return (
+                    <div className="grid grid-cols-2 sm:grid-cols-12 gap-2 sm:gap-3 min-w-0">
+                      {/* Add to Cart Button */}
+                      <button
+                        onClick={handleAddToCartClick}
+                        className="col-span-1 sm:col-span-6 py-2.5 sm:py-3.5 px-2 sm:px-6 rounded-xl sm:rounded-2xl bg-slate-900 hover:bg-slate-800 active:bg-black text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-1.5 sm:gap-2.5 transition-all shadow-md cursor-pointer min-w-0 overflow-hidden"
+                      >
+                        <ShoppingCart className="w-4 h-4 sm:w-5 sm:h-5 shrink-0" />
+                        <span className="truncate">Add to Cart</span>
+                      </button>
 
-                  {/* Buy Now Button (Direct checkout) */}
-                  <button
-                    onClick={handleBuyNowClick}
-                    className="col-span-1 sm:col-span-5 py-2.5 sm:py-3.5 px-2 sm:px-6 rounded-xl sm:rounded-2xl bg-gradient-to-r from-sky-600 to-blue-600 hover:from-sky-500 hover:to-blue-500 text-white font-black text-xs sm:text-sm flex items-center justify-center gap-1.5 sm:gap-2 transition-all shadow-lg shadow-sky-600/20 cursor-pointer min-w-0 overflow-hidden"
-                  >
-                    <Zap className="w-4 h-4 sm:w-5 sm:h-5 fill-amber-300 text-amber-300 shrink-0" />
-                    <span className="truncate">Buy Now • ৳{(product.price * quantity).toLocaleString('en-BD')}</span>
-                  </button>
+                      {/* Buy Now Button (Direct checkout) */}
+                      <button
+                        onClick={handleBuyNowClick}
+                        className="col-span-1 sm:col-span-5 py-2.5 sm:py-3.5 px-2 sm:px-6 rounded-xl sm:rounded-2xl bg-gradient-to-r from-sky-600 to-blue-600 hover:from-sky-500 hover:to-blue-500 text-white font-black text-xs sm:text-sm flex items-center justify-center gap-1.5 sm:gap-2 transition-all shadow-lg shadow-sky-600/20 cursor-pointer min-w-0 overflow-hidden"
+                      >
+                        <Zap className="w-4 h-4 sm:w-5 sm:h-5 fill-amber-300 text-amber-300 shrink-0" />
+                        <span className="truncate">Buy Now • ৳{(product.price * quantity).toLocaleString('en-BD')}</span>
+                      </button>
 
-                  {/* Wishlist Button */}
-                  <button
-                    onClick={() => onToggleWishlist(product)}
-                    className={`hidden sm:flex sm:col-span-1 p-3.5 rounded-2xl border items-center justify-center transition-all cursor-pointer ${
-                      isWishlisted
-                        ? 'bg-rose-50 border-rose-200 text-rose-600 shadow-xs'
-                        : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
-                    }`}
-                    title={isWishlisted ? 'Remove from Wishlist' : 'Add to Wishlist'}
-                  >
-                    <Heart className={`w-5 h-5 ${isWishlisted ? 'fill-rose-600' : ''}`} />
-                  </button>
-                </div>
+                      {/* Wishlist Button */}
+                      <button
+                        onClick={() => onToggleWishlist(product)}
+                        className={`hidden sm:flex sm:col-span-1 p-3.5 rounded-2xl border items-center justify-center transition-all cursor-pointer ${
+                          isWishlisted
+                            ? 'bg-rose-50 border-rose-200 text-rose-600 shadow-xs'
+                            : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                        }`}
+                        title={isWishlisted ? 'Remove from Wishlist' : 'Add to Wishlist'}
+                      >
+                        <Heart className={`w-5 h-5 ${isWishlisted ? 'fill-rose-600' : ''}`} />
+                      </button>
+                    </div>
+                  );
+                })()}
 
-                {/* Delivery Information Strip */}
-                <div className="mt-2 p-3.5 rounded-2xl bg-slate-50 border border-slate-200/80 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-600">
-                  <div className="flex items-center gap-2">
-                    <Truck className="w-4 h-4 text-sky-600 shrink-0" />
-                    <span>
-                      Inside Dhaka: <strong>৳{safeInsideDhaka}</strong> (24-48h) • Outside Dhaka: <strong>৳{safeOutsideDhaka}</strong> (2-3 days)
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-2 text-slate-500 text-[11px]">
-                    <Clock className="w-3.5 h-3.5 text-slate-400" />
-                    <span>Fast dispatch via Steadfast / Pathao</span>
-                  </div>
-                </div>
+                {/* End of Product Actions */}
               </div>
             </div>
           </div>
@@ -1144,30 +1249,41 @@ export const ProductPageView: React.FC<ProductPageViewProps> = ({
                 </div>
 
                 {/* Key Highlights */}
-                <div className="p-5 rounded-2xl bg-sky-50/60 border border-sky-100">
-                  <h4 className="text-xs font-black uppercase tracking-wider text-sky-900 mb-3 flex items-center gap-1.5">
-                    <Sparkles className="w-4 h-4 text-sky-600" />
-                    <span>Key Highlights & Benefits</span>
-                  </h4>
-                  <ul className="grid grid-cols-1 md:grid-cols-2 gap-2.5 text-xs text-slate-700 font-medium">
-                    <li className="flex items-center gap-2">
-                      <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" />
-                      <span>Original product specifications & brand warranty</span>
-                    </li>
-                    <li className="flex items-center gap-2">
-                      <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" />
-                      <span>Cash on Delivery home delivery available across Bangladesh</span>
-                    </li>
-                    <li className="flex items-center gap-2">
-                      <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" />
-                      <span>Secure protective packaging for safe transit</span>
-                    </li>
-                    <li className="flex items-center gap-2">
-                      <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" />
-                      <span>Direct support & assistance from KenaX BD team</span>
-                    </li>
-                  </ul>
-                </div>
+                {(() => {
+                  const highlightsToRender = product.keyHighlights && Array.isArray(product.keyHighlights)
+                    ? product.keyHighlights.filter((h: any) => (typeof h === 'string' ? true : h.active !== false))
+                    : DEFAULT_PRODUCT_HIGHLIGHTS;
+
+                  if (highlightsToRender.length === 0) return null;
+
+                  return (
+                    <div className="p-5 rounded-2xl bg-sky-50/60 border border-sky-100">
+                      <h4 className="text-xs font-black uppercase tracking-wider text-sky-900 mb-3 flex items-center gap-1.5">
+                        <Sparkles className="w-4 h-4 text-sky-600" />
+                        <span>Key Highlights & Benefits</span>
+                      </h4>
+                      <ul className="grid grid-cols-1 md:grid-cols-2 gap-2.5 text-xs text-slate-700 font-medium">
+                        {highlightsToRender.map((item: any, idx: number) => {
+                          const text = typeof item === 'string' ? item : item.text;
+                          const icon = typeof item === 'object' ? (item.icon || 'check-circle') : 'check-circle';
+                          const iconColor = typeof item === 'object' ? (item.iconColor || 'emerald') : 'emerald';
+                          const key = typeof item === 'object' && item.id ? item.id : `hl-${idx}`;
+
+                          return (
+                            <li key={key} className="flex items-center gap-2">
+                              <HighlightIcon
+                                icon={icon}
+                                iconColor={iconColor}
+                                className="w-4 h-4 shrink-0"
+                              />
+                              <span>{text}</span>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </div>
+                  );
+                })()}
               </div>
             )}
 
@@ -1595,7 +1711,7 @@ export const ProductPageView: React.FC<ProductPageViewProps> = ({
                 onBuyNow={(prod) => onBuyNow(prod, 1)}
                 onQuickView={(prod) => {
                   onSelectProduct(prod);
-                  window.scrollTo({ top: 0, behavior: 'smooth' });
+                  window.scrollTo({ top: 0, behavior: 'instant' });
                 }}
                 onToggleWishlist={onToggleWishlist}
                 isWishlisted={wishlist.some((w) => w.id === p.id)}

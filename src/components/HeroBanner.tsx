@@ -13,6 +13,7 @@ import {
 import { Category, HeroBannerItem, HeroFeatureTag, HeroSideBannerSettings } from '../types';
 import { DEFAULT_HERO_FEATURES } from '../data/initialSettings';
 import { resolveOriginalImageMedia } from '../lib/firebase';
+import { getOptimizedImageUrl, handleImageError } from '../utils/imageOptimizer';
 
 interface HeroBannerProps {
   categories: Category[];
@@ -84,18 +85,22 @@ export const HeroBanner: React.FC<HeroBannerProps> = ({
 
     if (rawImg.startsWith('media://')) {
       resolveOriginalImageMedia(rawImg).then((url) => {
-        if (isMounted) setResolvedSlideImage(url || rawImg);
+        if (isMounted) setResolvedSlideImage(url ? getOptimizedImageUrl(url, 1600) : '');
       });
+    } else if (rawImg) {
+      setResolvedSlideImage(getOptimizedImageUrl(rawImg, 1600));
     } else {
-      setResolvedSlideImage(rawImg);
+      setResolvedSlideImage('');
     }
 
     if (rawMobImg.startsWith('media://')) {
       resolveOriginalImageMedia(rawMobImg).then((url) => {
-        if (isMounted) setResolvedMobileSlideImage(url || rawMobImg);
+        if (isMounted) setResolvedMobileSlideImage(url ? getOptimizedImageUrl(url, 800) : '');
       });
+    } else if (rawMobImg) {
+      setResolvedMobileSlideImage(getOptimizedImageUrl(rawMobImg, 800));
     } else {
-      setResolvedMobileSlideImage(rawMobImg);
+      setResolvedMobileSlideImage('');
     }
 
     return () => {
@@ -425,8 +430,10 @@ export const HeroBanner: React.FC<HeroBannerProps> = ({
 
             {/* Default to Image */}
             if (currentSlide.image || currentSlide.mobileImage) {
-              const displayImg = resolvedSlideImage || currentSlide.image || currentSlide.mobileImage;
-              const displayMobImg = resolvedMobileSlideImage || currentSlide.mobileImage || displayImg;
+              const rawDisplayImg = resolvedSlideImage || currentSlide.image || currentSlide.mobileImage;
+              const rawDisplayMobImg = resolvedMobileSlideImage || currentSlide.mobileImage || rawDisplayImg;
+              const displayImg = getOptimizedImageUrl(rawDisplayImg, 1600);
+              const displayMobImg = getOptimizedImageUrl(rawDisplayMobImg, 800);
               return (
                 <div className="absolute inset-0 z-0">
                   <picture className="w-full h-full block">
@@ -436,6 +443,8 @@ export const HeroBanner: React.FC<HeroBannerProps> = ({
                     <img
                       src={displayImg}
                       alt={currentSlide.title || 'Hero Slide'}
+                      referrerPolicy="no-referrer"
+                      onError={(e) => handleImageError(e, rawDisplayImg)}
                       className="w-full h-full object-cover object-center transform scale-100 group-hover:scale-105 transition-transform duration-1000"
                     />
                   </picture>
@@ -616,8 +625,10 @@ export const HeroBanner: React.FC<HeroBannerProps> = ({
                   {bgType === 'image' && bgImg && (
                     <div className="absolute inset-0 z-0">
                       <img
-                        src={bgImg}
+                        src={getOptimizedImageUrl(bgImg, 800)}
                         alt="Promo Banner"
+                        referrerPolicy="no-referrer"
+                        onError={(e) => handleImageError(e, bgImg)}
                         className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700 opacity-40"
                       />
                       <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/75 to-transparent"></div>

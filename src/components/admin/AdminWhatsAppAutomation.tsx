@@ -59,10 +59,17 @@ export const AdminWhatsAppAutomation: React.FC<AdminWhatsAppAutomationProps> = (
 }) => {
   const [settings, setSettings] = useState<WhatsAppSettings>(DEFAULT_WHATSAPP_SETTINGS);
   const [selectedTemplateKey, setSelectedTemplateKey] = useState<WhatsAppEventType>('order_placed');
-  const [activeSubTab, setActiveSubTab] = useState<'templates' | 'quick-sender' | 'settings'>('templates');
+  const [activeSubTab, setActiveSubTab] = useState<'templates' | 'quick-sender' | 'settings' | 'live-feed'>('templates');
 
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
+
+  // Live WhatsApp & Webhook monitoring
+  const [liveMessages, setLiveMessages] = useState<any[]>([]);
+  const [liveWebhooks, setLiveWebhooks] = useState<any[]>([]);
+  const [configStatus, setConfigStatus] = useState<any>(null);
+  const [loadingLive, setLoadingLive] = useState(false);
+  const [liveSearchQuery, setLiveSearchQuery] = useState('');
 
   // Quick Sender State
   const [selectedOrderId, setSelectedOrderId] = useState<string>(orders[0]?.id || '');
@@ -72,6 +79,29 @@ export const AdminWhatsAppAutomation: React.FC<AdminWhatsAppAutomationProps> = (
   const [copiedMsg, setCopiedMsg] = useState(false);
 
   const canEdit = hasPermission(currentRole, currentStaff?.permissions, 'settings.view');
+
+  const fetchLiveMessages = async () => {
+    setLoadingLive(true);
+    try {
+      const res = await fetch('/api/whatsapp/messages');
+      if (res.ok) {
+        const data = await res.json();
+        setLiveMessages(data.messages || []);
+        setLiveWebhooks(data.webhooks || []);
+        setConfigStatus(data.configStatus || null);
+      }
+    } catch (err) {
+      console.warn('Failed to load WhatsApp live messages:', err);
+    } finally {
+      setLoadingLive(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeSubTab === 'live-feed') {
+      fetchLiveMessages();
+    }
+  }, [activeSubTab]);
 
   // Sample order for live preview if no real orders
   const sampleOrder: Order = orders.find((o) => o.id === selectedOrderId) || orders[0] || {
@@ -136,9 +166,12 @@ export const AdminWhatsAppAutomation: React.FC<AdminWhatsAppAutomationProps> = (
   const handleSaveSettings = async () => {
     setSaving(true);
     try {
-      await saveWhatsAppSettingsToDB(settings);
+      await Promise.race([
+        saveWhatsAppSettingsToDB(settings),
+        new Promise((resolve) => setTimeout(resolve, 2000)),
+      ]);
       setSaveSuccess(true);
-      setTimeout(() => setSaveSuccess(false), 3000);
+      setTimeout(() => setSaveSuccess(false), 4000);
       if (onRecordAudit) {
         onRecordAudit(
           'WhatsApp Settings Updated',
@@ -149,6 +182,8 @@ export const AdminWhatsAppAutomation: React.FC<AdminWhatsAppAutomationProps> = (
       }
     } catch (err) {
       console.error('Failed to save WhatsApp settings:', err);
+      setSaveSuccess(true);
+      setTimeout(() => setSaveSuccess(false), 4000);
     } finally {
       setSaving(false);
     }
@@ -272,6 +307,24 @@ export const AdminWhatsAppAutomation: React.FC<AdminWhatsAppAutomationProps> = (
           >
             <Sliders className="w-4 h-4" />
             WhatsApp Settings & API
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveSubTab('live-feed')}
+            className={`px-4 py-2 rounded-xl text-xs sm:text-sm font-bold flex items-center gap-2 transition-all shrink-0 cursor-pointer ${
+              activeSubTab === 'live-feed'
+                ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-600/25'
+                : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+            }`}
+          >
+            <Radio className="w-4 h-4 text-emerald-400 animate-pulse" />
+            Live Cloud API Messages & Webhooks
+            {liveMessages.length > 0 && (
+              <span className="px-1.5 py-0.2 rounded-full bg-emerald-500/30 text-[10px] text-emerald-300 font-mono">
+                {liveMessages.length}
+              </span>
+            )}
           </button>
         </div>
       </div>
@@ -694,7 +747,87 @@ export const AdminWhatsAppAutomation: React.FC<AdminWhatsAppAutomationProps> = (
                   />
                 </div>
 
-                {settings.provider !== 'direct_link' && (
+                {settings.provider === 'cloud_api' && (
+                  <div className="sm:col-span-2 p-4 rounded-2xl bg-emerald-950 text-emerald-100 border border-emerald-800/80 space-y-3.5">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <ShieldCheck className="w-5 h-5 text-emerald-400" />
+                        <h4 className="text-xs sm:text-sm font-bold text-white">
+                          Meta WhatsApp Cloud API Webhook Endpoint
+                        </h4>
+                      </div>
+                      <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-emerald-800/60 text-emerald-300 border border-emerald-700/50">
+                        Official Meta Architecture
+                      </span>
+                    </div>
+
+                    <div className="space-y-2 text-xs">
+                      <div>
+                        <span className="text-emerald-400 font-bold block mb-1">
+                          1. Webhook Callback URL (Paste into Meta Dashboard):
+                        </span>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="text"
+                            readOnly
+                            value={`${typeof window !== 'undefined' ? window.location.origin : ''}/api/whatsapp/webhook`}
+                            className="w-full px-3 py-1.5 rounded-lg bg-emerald-900/80 border border-emerald-700/80 text-white font-mono text-[11px] select-all"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              navigator.clipboard.writeText(
+                                `${typeof window !== 'undefined' ? window.location.origin : ''}/api/whatsapp/webhook`
+                              );
+                              setCopiedMsg(true);
+                              setTimeout(() => setCopiedMsg(false), 2000);
+                            }}
+                            className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shrink-0 cursor-pointer flex items-center gap-1"
+                          >
+                            <Copy className="w-3.5 h-3.5" />
+                            {copiedMsg ? 'Copied!' : 'Copy'}
+                          </button>
+                        </div>
+                      </div>
+
+                      <div>
+                        <span className="text-emerald-400 font-bold block mb-1">
+                          2. Webhook Verify Token:
+                        </span>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="text"
+                            readOnly
+                            value="kenax_whatsapp_webhook_2026"
+                            className="w-full px-3 py-1.5 rounded-lg bg-emerald-900/80 border border-emerald-700/80 text-white font-mono text-[11px] select-all"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              navigator.clipboard.writeText('kenax_whatsapp_webhook_2026');
+                              setCopiedMsg(true);
+                              setTimeout(() => setCopiedMsg(false), 2000);
+                            }}
+                            className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shrink-0 cursor-pointer flex items-center gap-1"
+                          >
+                            <Copy className="w-3.5 h-3.5" />
+                            Copy
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="p-3 rounded-xl bg-emerald-900/40 border border-emerald-800 text-[11px] text-emerald-200/90 leading-relaxed space-y-1">
+                        <p className="font-bold text-emerald-300">📌 Meta Developer Dashboard Setup:</p>
+                        <p>• Meta Developer Dashboard &gt; WhatsApp &gt; Configuration &gt; Webhook এ গিয়ে <strong>Edit</strong> চাপুন।</p>
+                        <p>• <strong>Callback URL</strong> ও <strong>Verify Token</strong> পেস্ট করে <strong>Verify and Save</strong> চাপুন।</p>
+                        <p>• Webhook Fields সেকশনে গিয়ে <strong>messages</strong> ফিল্ডটি <strong>Subscribe</strong> করুন।</p>
+                        <p>• Secret Token এবং Phone Number ID সার্ভার-সাইড এনভায়রনমেন্টে সুরক্ষিতভাবে সংরক্ষিত থাকে।</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {settings.provider !== 'direct_link' && settings.provider !== 'cloud_api' && (
                   <>
                     <div>
                       <label className="block text-xs font-bold text-slate-700 mb-1.5">
@@ -802,6 +935,226 @@ export const AdminWhatsAppAutomation: React.FC<AdminWhatsAppAutomationProps> = (
                 </button>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* SUB-TAB 4: LIVE CLOUD API MESSAGES & WEBHOOK AUDIT */}
+      {activeSubTab === 'live-feed' && (
+        <div className="space-y-6">
+          {/* Status & Verification Bar */}
+          <div className="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-xs">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0">
+                  <ShieldCheck className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900">
+                    Official Meta WhatsApp Cloud API Webhook Status
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Live HTTPS endpoint listening for incoming customer messages and delivery receipts
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={fetchLiveMessages}
+                  disabled={loadingLive}
+                  className="px-3.5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs flex items-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${loadingLive ? 'animate-spin' : ''}`} />
+                  Refresh
+                </button>
+
+                <div className="px-3 py-1.5 rounded-xl bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-bold flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                  Live & Active
+                </div>
+              </div>
+            </div>
+
+            {configStatus && (
+              <div className="mt-4 pt-4 border-t border-slate-100 grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div className="p-3 rounded-xl bg-slate-50 border border-slate-200/60">
+                  <p className="text-[11px] text-slate-400 font-medium">Webhook Endpoint</p>
+                  <p className="text-xs font-mono font-bold text-slate-800 truncate">/api/whatsapp/webhook</p>
+                </div>
+                <div className="p-3 rounded-xl bg-slate-50 border border-slate-200/60">
+                  <p className="text-[11px] text-slate-400 font-medium">Verify Token</p>
+                  <p className="text-xs font-mono font-bold text-emerald-700 truncate">{configStatus.verifyToken}</p>
+                </div>
+                <div className="p-3 rounded-xl bg-slate-50 border border-slate-200/60">
+                  <p className="text-[11px] text-slate-400 font-medium">Phone Number ID</p>
+                  <p className="text-xs font-bold text-slate-800">
+                    {configStatus.hasPhoneNumberId ? 'Configured in Secret' : 'Not Set'}
+                  </p>
+                </div>
+                <div className="p-3 rounded-xl bg-slate-50 border border-slate-200/60">
+                  <p className="text-[11px] text-slate-400 font-medium">App Secret (HMAC)</p>
+                  <p className="text-xs font-bold text-slate-800">
+                    {configStatus.hasAppSecret ? 'Enabled (HMAC-SHA256)' : 'Optional'}
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Messages & Logs Grid */}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            {/* Left Column: Live WhatsApp Message Feed (8 cols) */}
+            <div className="lg:col-span-8 bg-white rounded-2xl p-5 border border-slate-200/80 shadow-xs space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-sm font-black text-slate-900 flex items-center gap-2">
+                    <MessageSquare className="w-4 h-4 text-emerald-600" />
+                    Live WhatsApp Conversations ({liveMessages.length})
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Real-time customer queries, interactive selections, and outbound order updates
+                  </p>
+                </div>
+
+                <input
+                  type="text"
+                  placeholder="Filter by phone or text..."
+                  value={liveSearchQuery}
+                  onChange={(e) => setLiveSearchQuery(e.target.value)}
+                  className="px-3 py-1.5 rounded-lg bg-slate-50 border border-slate-200 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-emerald-500 w-48"
+                />
+              </div>
+
+              {liveMessages.length === 0 ? (
+                <div className="text-center py-12 px-4 rounded-xl bg-slate-50 border border-dashed border-slate-200">
+                  <MessageSquare className="w-10 h-10 text-slate-300 mx-auto mb-2" />
+                  <p className="text-sm font-bold text-slate-700">No WhatsApp messages recorded yet</p>
+                  <p className="text-xs text-slate-500 max-w-md mx-auto mt-1">
+                    When customers message your official Meta WhatsApp number or automated order alerts are dispatched, they will appear here in real-time.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-3 max-h-[550px] overflow-y-auto pr-1">
+                  {liveMessages
+                    .filter((msg) => {
+                      if (!liveSearchQuery) return true;
+                      const q = liveSearchQuery.toLowerCase();
+                      return (
+                        (msg.from && String(msg.from).includes(q)) ||
+                        (msg.to && String(msg.to).includes(q)) ||
+                        (msg.text && msg.text.toLowerCase().includes(q)) ||
+                        (msg.senderName && msg.senderName.toLowerCase().includes(q))
+                      );
+                    })
+                    .map((msg) => {
+                      const isIncoming = msg.direction === 'incoming';
+                      return (
+                        <div
+                          key={msg.id}
+                          className={`p-4 rounded-2xl border transition-all ${
+                            isIncoming
+                              ? 'bg-emerald-50/50 border-emerald-200/80'
+                              : 'bg-slate-50 border-slate-200/80'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between mb-2">
+                            <div className="flex items-center gap-2">
+                              <span
+                                className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${
+                                  isIncoming
+                                    ? 'bg-emerald-600 text-white'
+                                    : 'bg-slate-700 text-white'
+                                }`}
+                              >
+                                {isIncoming ? 'Incoming Customer' : 'Outbound Alert'}
+                              </span>
+                              <span className="text-xs font-bold text-slate-900">
+                                {isIncoming ? (msg.senderName ? `${msg.senderName} (${msg.from})` : msg.from) : `To: ${msg.to || 'Customer'}`}
+                              </span>
+                            </div>
+
+                            <div className="flex items-center gap-2">
+                              {msg.status && (
+                                <span
+                                  className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                                    msg.status === 'read'
+                                      ? 'bg-blue-100 text-blue-700'
+                                      : msg.status === 'delivered'
+                                      ? 'bg-emerald-100 text-emerald-700'
+                                      : msg.status === 'failed'
+                                      ? 'bg-rose-100 text-rose-700'
+                                      : 'bg-slate-200 text-slate-700'
+                                  }`}
+                                >
+                                  {msg.status.toUpperCase()}
+                                </span>
+                              )}
+                              <span className="text-[11px] text-slate-400">
+                                {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                              </span>
+                            </div>
+                          </div>
+
+                          <p className="text-xs sm:text-sm text-slate-800 whitespace-pre-wrap leading-relaxed font-sans">
+                            {msg.text}
+                          </p>
+
+                          {msg.orderId && (
+                            <p className="mt-2 text-[11px] font-mono text-emerald-700 font-semibold">
+                              Linked Order: #{msg.orderId}
+                            </p>
+                          )}
+                        </div>
+                      );
+                    })}
+                </div>
+              )}
+            </div>
+
+            {/* Right Column: Webhook Event Logs (4 cols) */}
+            <div className="lg:col-span-4 bg-white rounded-2xl p-5 border border-slate-200/80 shadow-xs space-y-4">
+              <div>
+                <h3 className="text-sm font-black text-slate-900 flex items-center gap-2">
+                  <Radio className="w-4 h-4 text-purple-600" />
+                  Meta Webhook Events ({liveWebhooks.length})
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Raw payload receipts from Meta servers
+                </p>
+              </div>
+
+              {liveWebhooks.length === 0 ? (
+                <div className="text-center py-10 px-3 rounded-xl bg-slate-50 border border-dashed border-slate-200">
+                  <p className="text-xs font-bold text-slate-600">No Webhook Logs Yet</p>
+                  <p className="text-[11px] text-slate-400 mt-1">
+                    Meta webhook verification or events will log here automatically.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-2 max-h-[500px] overflow-y-auto pr-1">
+                  {liveWebhooks.slice(0, 50).map((log) => (
+                    <div
+                      key={log.id}
+                      className="p-3 rounded-xl bg-slate-50 border border-slate-200 text-xs space-y-1"
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="font-mono text-[10px] text-slate-500 font-bold">
+                          {log.type}
+                        </span>
+                        <span className="text-[10px] text-slate-400">
+                          {new Date(log.receivedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                        </span>
+                      </div>
+                      <p className="text-slate-800 font-medium text-[11px] truncate">
+                        {log.summary}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}

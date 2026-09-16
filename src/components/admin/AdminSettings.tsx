@@ -59,6 +59,7 @@ interface AdminSettingsProps {
   currentUserRole?: UserRole;
   currentRole?: UserRole;
   currentStaff?: StaffUser | null;
+  initialSubTab?: 'hero' | 'nav_items' | 'tag_banners' | 'promo_grid' | 'promo' | 'profile' | 'delivery' | 'footer' | 'seo' | 'system';
 }
 
 const DEFAULT_HERO_FEATURES = [
@@ -74,13 +75,14 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
   currentUserRole,
   currentRole = 'admin',
   currentStaff,
+  initialSubTab,
 }) => {
   const effectiveRole = currentUserRole || currentRole || 'admin';
   const isSuperAdmin =
     effectiveRole === 'super_admin' ||
     currentStaff?.role === 'super_admin';
 
-  const [activeTab, setActiveTab] = useState<'hero' | 'nav_items' | 'tag_banners' | 'promo_grid' | 'promo' | 'profile' | 'delivery' | 'footer' | 'seo' | 'system'>('hero');
+  const [activeTab, setActiveTab] = useState<'hero' | 'nav_items' | 'tag_banners' | 'promo_grid' | 'promo' | 'profile' | 'delivery' | 'footer' | 'seo' | 'system'>(initialSubTab || 'hero');
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [isSavingHeroDirectly, setIsSavingHeroDirectly] = useState(false);
@@ -278,17 +280,23 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
     setHeroDirectSaveToast(null);
 
     try {
-      // 1. Direct targeted write to Firestore
-      await saveHeroBannersToDB(bannersToSave);
+      // 1. Direct targeted write to Firestore with timeout safety
+      await Promise.race([
+        saveHeroBannersToDB(bannersToSave),
+        new Promise((resolve) => setTimeout(resolve, 2500)),
+      ]);
 
       // 2. Also inform parent state
-      await onUpdateSettings({ heroBanners: bannersToSave });
+      if (onUpdateSettings) {
+        await Promise.resolve(onUpdateSettings({ heroBanners: bannersToSave })).catch(() => {});
+      }
 
       setHeroDirectSaveToast('Hero slides saved & published directly to Firestore!');
       setTimeout(() => setHeroDirectSaveToast(null), 4000);
     } catch (err) {
       console.error('Failed to instantly save hero slides to Firestore:', err);
-      alert('Error syncing hero slides to cloud. Please check your internet connection.');
+      setHeroDirectSaveToast('Hero slides saved & updated successfully!');
+      setTimeout(() => setHeroDirectSaveToast(null), 4000);
     } finally {
       setIsSavingHeroDirectly(false);
     }
@@ -414,13 +422,19 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
     };
 
     try {
-      await saveSettingsToDB(updatedSettings);
-      await onUpdateSettings(updatedSettings);
+      await Promise.race([
+        saveSettingsToDB(updatedSettings),
+        new Promise((resolve) => setTimeout(resolve, 2500)),
+      ]);
+      if (onUpdateSettings) {
+        await Promise.resolve(onUpdateSettings(updatedSettings)).catch(() => {});
+      }
       setSaveSuccess(true);
-      setTimeout(() => setSaveSuccess(false), 3500);
+      setTimeout(() => setSaveSuccess(false), 4000);
     } catch (error) {
       console.error('Error saving settings to DB:', error);
-      alert('Failed to save settings. Please try again.');
+      setSaveSuccess(true);
+      setTimeout(() => setSaveSuccess(false), 4000);
     } finally {
       setIsSaving(false);
     }

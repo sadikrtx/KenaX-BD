@@ -28,12 +28,20 @@ import { AdminGmailAlerts } from './admin/AdminGmailAlerts';
 import { AdminSEOSettings } from './admin/AdminSEOSettings';
 import { AdminSMSGateway } from './admin/AdminSMSGateway';
 import { AdminWhatsAppAutomation } from './admin/AdminWhatsAppAutomation';
+import { AdminTelegramBot } from './admin/AdminTelegramBot';
+import { AdminDropshipping } from './admin/AdminDropshipping';
 import { InvoiceModal } from './admin/InvoiceModal';
 import { AdminLoginModal } from './admin/AdminLoginModal';
 import {
   triggerOrderStatusChangeWorkflow,
   triggerSuperAdminAuditAlert,
 } from '../lib/emailService';
+import {
+  triggerTelegramOrderStatusChange,
+  triggerTelegramNewProductWorkflow,
+  triggerTelegramProductDiscountWorkflow,
+  triggerTelegramCouponWorkflow,
+} from '../lib/telegramBotService';
 
 import {
   Product,
@@ -53,6 +61,8 @@ import {
   ExpenseRecord,
   OtherProfitRecord,
   isDemoOtherProfit,
+  Supplier,
+  SourcingLocation,
 } from '../types';
 import { hasPermission, DEFAULT_ROLE_PERMISSIONS } from '../lib/permissions';
 import { safeSetLocalStorage } from '../lib/storage';
@@ -102,6 +112,16 @@ import {
   subscribeToOtherProfits,
   saveReviewToDB,
   deleteReviewFromDB,
+  getSuppliersFromDB,
+  saveSupplierToDB,
+  updateSupplierInDB,
+  deleteSupplierFromDB,
+  subscribeToSuppliers,
+  getSourcingLocationsFromDB,
+  saveSourcingLocationToDB,
+  updateSourcingLocationInDB,
+  deleteSourcingLocationFromDB,
+  subscribeToSourcingLocations,
 } from '../lib/firebase';
 
 interface AdminPortalProps {
@@ -132,6 +152,8 @@ interface AdminPortalProps {
   onNavigateToStore?: () => void;
   onRoleChange?: (newRole: UserRole) => void;
   onLogout?: () => void;
+  initialTab?: AdminTab;
+  initialSettingsSubTab?: 'hero' | 'nav_items' | 'tag_banners' | 'promo_grid' | 'promo' | 'profile' | 'delivery' | 'footer' | 'seo' | 'system';
 }
 
 export const AdminPortal: React.FC<AdminPortalProps> = ({
@@ -157,9 +179,11 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   onNavigateToStore,
   onRoleChange,
   onLogout,
+  initialTab = 'overview',
+  initialSettingsSubTab,
 }) => {
   // Navigation & View States
-  const [currentTab, setCurrentTab] = useState<AdminTab>('overview');
+  const [currentTab, setCurrentTab] = useState<AdminTab>(initialTab);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
   const [selectedCustomerForAdmin, setSelectedCustomerForAdmin] = useState<CustomerRecord | null>(null);
@@ -489,6 +513,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   const handlePersistCategories = (updatedCats: Category[]) => {
     setInternalCategories(updatedCats);
     safeSetLocalStorage('kenax_categories', JSON.stringify(updatedCats));
+    safeSetLocalStorage('kenax_categories_cache', JSON.stringify(updatedCats));
   };
 
   const [reviews, setReviews] = useState<Review[]>([
@@ -578,6 +603,32 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     return [];
   });
 
+  // Dropshipping Suppliers state & cross-tab targeting
+  const [suppliers, setSuppliers] = useState<Supplier[]>(() => {
+    try {
+      const cached = localStorage.getItem('kenax_suppliers_cache');
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch {}
+    return [];
+  });
+
+  // Wholesalers & Sourcing Locations (Own Stock) State
+  const [sourcingLocations, setSourcingLocations] = useState<SourcingLocation[]>(() => {
+    try {
+      const cached = localStorage.getItem('kenax_sourcing_locations_cache');
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch {}
+    return [];
+  });
+  const [targetProductForEdit, setTargetProductForEdit] = useState<Product | null>(null);
+  const [targetSupplierForNewProduct, setTargetSupplierForNewProduct] = useState<Supplier | null>(null);
+
   // Invoice modal state
   const [selectedInvoiceOrder, setSelectedInvoiceOrder] = useState<Order | null>(null);
 
@@ -605,6 +656,18 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
       const validDbProfits = (dbOtherProfits || []).filter((p) => !isDemoOtherProfit(p));
       setOtherProfits(validDbProfits);
       safeSetLocalStorage('kenax_other_profits_cache', JSON.stringify(validDbProfits));
+
+      const dbSuppliers = await getSuppliersFromDB();
+      if (dbSuppliers && dbSuppliers.length > 0) {
+        setSuppliers(dbSuppliers);
+        safeSetLocalStorage('kenax_suppliers_cache', JSON.stringify(dbSuppliers));
+      }
+
+      const dbSourcing = await getSourcingLocationsFromDB();
+      if (dbSourcing && dbSourcing.length > 0) {
+        setSourcingLocations(dbSourcing);
+        safeSetLocalStorage('kenax_sourcing_locations_cache', JSON.stringify(dbSourcing));
+      }
     }
     loadAdminData();
 
@@ -636,11 +699,27 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
       }
     });
 
+    const unsubscribeSuppliers = subscribeToSuppliers((freshSuppliers) => {
+      if (freshSuppliers) {
+        setSuppliers(freshSuppliers);
+        safeSetLocalStorage('kenax_suppliers_cache', JSON.stringify(freshSuppliers));
+      }
+    });
+
+    const unsubscribeSourcing = subscribeToSourcingLocations((freshLocs) => {
+      if (freshLocs) {
+        setSourcingLocations(freshLocs);
+        safeSetLocalStorage('kenax_sourcing_locations_cache', JSON.stringify(freshLocs));
+      }
+    });
+
     return () => {
       unsubscribeLogs();
       unsubscribeCustomers();
       unsubscribeExpenses();
       unsubscribeOtherProfits();
+      unsubscribeSuppliers();
+      unsubscribeSourcing();
     };
   }, []);
 
@@ -804,6 +883,18 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
           `Order #${orderId} for ${targetOrder.customerName} (${targetOrder.customerMobile || 'N/A'}) changed from ${targetOrder.orderStatus} to ${newStatus}. Courier: ${courierName || 'N/A'}. Tracking: ${trackingNumber || 'N/A'}`
         ).catch((err) => console.error('[Super Admin Audit Alert Error]:', err));
       }
+
+      // 3. Telegram Bot Automation:
+      //    - Notifies Super Admin with Staff Information (who changed what status)
+      //    - Notifies Customer without Staff Information (clean order status update)
+      triggerTelegramOrderStatusChange({
+        order: updatedOrderSnapshot,
+        prevStatus: targetOrder.orderStatus,
+        newStatus,
+        staffUser: currentStaff,
+        courierName,
+        trackingNumber,
+      }).catch((tgErr) => console.error('[Telegram Order Status Alert Error]:', tgErr));
     }
   };
 
@@ -1083,6 +1174,117 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     handleUpdateStaff(updated);
   };
 
+  // Dropshipping & Supplier Management
+  const handleAddSupplier = async (supplier: Supplier) => {
+    setSuppliers((prev) => {
+      const next = [supplier, ...prev.filter((s) => s.id !== supplier.id)];
+      safeSetLocalStorage('kenax_suppliers_cache', JSON.stringify(next));
+      return next;
+    });
+    await saveSupplierToDB(supplier);
+    recordAuditLog(
+      'Supplier Added',
+      'products',
+      supplier.name,
+      `Registered sourcing supplier ${supplier.name} for dropshipping`
+    );
+  };
+
+  const handleUpdateSupplier = async (supplier: Supplier) => {
+    setSuppliers((prev) => {
+      const next = prev.map((s) => (s.id === supplier.id ? supplier : s));
+      safeSetLocalStorage('kenax_suppliers_cache', JSON.stringify(next));
+      return next;
+    });
+    await updateSupplierInDB(supplier);
+    recordAuditLog(
+      'Supplier Updated',
+      'products',
+      supplier.name,
+      `Updated supplier info for ${supplier.name}`
+    );
+  };
+
+  const handleDeleteSupplier = async (supplierId: string) => {
+    const supp = suppliers.find((s) => s.id === supplierId);
+    setSuppliers((prev) => {
+      const next = prev.filter((s) => s.id !== supplierId);
+      safeSetLocalStorage('kenax_suppliers_cache', JSON.stringify(next));
+      return next;
+    });
+    await deleteSupplierFromDB(supplierId);
+    if (supp) {
+      recordAuditLog(
+        'Supplier Deleted',
+        'products',
+        supp.name,
+        `Removed supplier ${supp.name} from dropshipping directory`
+      );
+    }
+  };
+
+  // Sourcing Location Handlers (Own Stock Wholesalers)
+  const handleAddSourcingLocation = async (location: SourcingLocation) => {
+    setSourcingLocations((prev) => {
+      const next = [location, ...prev.filter((l) => l.id !== location.id)];
+      safeSetLocalStorage('kenax_sourcing_locations_cache', JSON.stringify(next));
+      return next;
+    });
+    await saveSourcingLocationToDB(location);
+    recordAuditLog(
+      'Wholesaler Registered',
+      'products',
+      location.vendorName,
+      `Registered new wholesale sourcing location ${location.vendorName} (${location.marketName || location.address})`
+    );
+  };
+
+  const handleUpdateSourcingLocation = async (location: SourcingLocation) => {
+    setSourcingLocations((prev) => {
+      const exists = prev.some((l) => l.id === location.id);
+      const next = exists
+        ? prev.map((l) => (l.id === location.id ? location : l))
+        : [location, ...prev];
+      safeSetLocalStorage('kenax_sourcing_locations_cache', JSON.stringify(next));
+      return next;
+    });
+    await updateSourcingLocationInDB(location);
+    recordAuditLog(
+      'Wholesaler Updated',
+      'products',
+      location.vendorName,
+      `Updated wholesaler sourcing details for ${location.vendorName}`
+    );
+  };
+
+  const handleDeleteSourcingLocation = async (locationId: string) => {
+    const loc = sourcingLocations.find((l) => l.id === locationId);
+    setSourcingLocations((prev) => {
+      const next = prev.filter((l) => l.id !== locationId);
+      safeSetLocalStorage('kenax_sourcing_locations_cache', JSON.stringify(next));
+      return next;
+    });
+    await deleteSourcingLocationFromDB(locationId);
+    if (loc) {
+      recordAuditLog(
+        'Wholesaler Deleted',
+        'products',
+        loc.vendorName,
+        `Deleted wholesale sourcing location ${loc.vendorName} from directory`
+      );
+    }
+  };
+
+  const handleEditProductFromSupplier = (product: Product) => {
+    setTargetProductForEdit(product);
+    setCurrentTab('products');
+  };
+
+  const handleAddProductForSupplier = (supplier: Supplier) => {
+    setTargetSupplierForNewProduct(supplier);
+    setCurrentTab('products');
+  };
+
   // Quick Role switch: ONLY available to Super Admin account to preview manager/moderator permissions
   // Ensures the Super Admin tests the role using THEIR OWN identity without switching to or exposing other staff members' accounts
   const handleRoleChange = (newRole: UserRole) => {
@@ -1123,6 +1325,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
       'payment-gateways': 'settings.view',
       reports: 'reports.view',
       products: 'products.view',
+      dropshipping: 'products.view',
       categories: 'products.view',
       inventory: 'inventory.view',
       coupons: 'coupons.view',
@@ -1311,10 +1514,24 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
               onAddProduct={(p) => {
                 onAddProduct(p);
                 recordAuditLog('Product Created', 'products', p.sku, `Created product ${p.name} (${p.sku}) at ৳${p.price}`);
+                triggerTelegramNewProductWorkflow({
+                  product: p,
+                  staffUser: currentStaff,
+                  supplierName: p.supplierName,
+                }).catch((err) => console.error('[Telegram New Product Error]:', err));
               }}
               onUpdateProduct={(p) => {
+                const prevProd = products.find((old) => old.id === p.id || old.sku === p.sku);
+                const prevPrice = prevProd?.price || p.price;
                 onUpdateProduct(p);
                 recordAuditLog('Product Updated', 'products', p.sku, `Updated pricing/specs for ${p.name} (${p.sku})`);
+                if (prevProd && p.price < prevPrice) {
+                  triggerTelegramProductDiscountWorkflow({
+                    product: p,
+                    previousPrice: prevPrice,
+                    staffUser: currentStaff,
+                  }).catch((err) => console.error('[Telegram Discount Alert Error]:', err));
+                }
               }}
               onDeleteProduct={(id) => {
                 const prod = products.find((p) => p.id === id);
@@ -1323,6 +1540,31 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                   recordAuditLog('Product Deleted', 'products', prod.sku, `Removed product ${prod.name} from catalog`);
                 }
               }}
+              currentRole={activeRole}
+              currentStaff={currentStaff}
+              suppliers={suppliers}
+              onAddSupplier={handleAddSupplier}
+              targetProductForEdit={targetProductForEdit}
+              targetSupplierForNewProduct={targetSupplierForNewProduct}
+              onClearTargetProductForEdit={() => setTargetProductForEdit(null)}
+              onClearTargetSupplierForNewProduct={() => setTargetSupplierForNewProduct(null)}
+            />
+          )}
+
+          {currentTab === 'dropshipping' && (
+            <AdminDropshipping
+              products={products}
+              orders={orders}
+              suppliers={suppliers}
+              onAddSupplier={handleAddSupplier}
+              onUpdateSupplier={handleUpdateSupplier}
+              onDeleteSupplier={handleDeleteSupplier}
+              sourcingLocationsList={sourcingLocations}
+              onAddSourcingLocation={handleAddSourcingLocation}
+              onUpdateSourcingLocation={handleUpdateSourcingLocation}
+              onDeleteSourcingLocation={handleDeleteSourcingLocation}
+              onEditProduct={handleEditProductFromSupplier}
+              onAddProductForSupplier={handleAddProductForSupplier}
               currentRole={activeRole}
               currentStaff={currentStaff}
             />
@@ -1435,6 +1677,11 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
               onAddCoupon={(c) => {
                 setCoupons((prev) => [c, ...prev]);
                 recordAuditLog('Coupon Created', 'coupons', c.code, `Created coupon ${c.code} (${c.discountPercent}% discount)`);
+                triggerTelegramCouponWorkflow({
+                  coupon: c,
+                  action: 'create',
+                  staffUser: currentStaff,
+                }).catch((err) => console.error('[Telegram Coupon Workflow Error]:', err));
               }}
               onDeleteCoupon={(id) => {
                 const cpn = coupons.find((c) => c.id === id);
@@ -1533,6 +1780,16 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
             />
           )}
 
+          {currentTab === 'telegram-bot' && (
+            <AdminTelegramBot
+              currentRole={activeRole}
+              currentStaff={currentStaff}
+              orders={orders}
+              products={products}
+              onRecordAudit={recordAuditLog}
+            />
+          )}
+
           {currentTab === 'whatsapp-automation' && (
             <AdminWhatsAppAutomation
               currentRole={activeRole}
@@ -1590,6 +1847,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
               }}
               currentRole={activeRole}
               currentStaff={currentStaff}
+              initialSubTab={initialSettingsSubTab}
             />
           )}
         </main>
@@ -1598,6 +1856,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
       {/* Printable Invoice Modal */}
       <InvoiceModal
         order={selectedInvoiceOrder}
+        products={products}
         settings={settings}
         onClose={() => setSelectedInvoiceOrder(null)}
       />

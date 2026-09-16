@@ -395,7 +395,7 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
               </div>
               <div>
                 <h2 className="text-lg sm:text-xl font-black text-slate-900">
-                  Customer Dashboard & Saved Records
+                  Your Dashboard
                 </h2>
                 <p className="text-xs text-slate-500 mt-0.5">
                   {customerOrders.length > 0
@@ -1030,7 +1030,7 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
           {/* Add / Edit Address Modal */}
           {showAddressModal && (
             <div
-              className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-150"
+              className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 animate-in fade-in duration-150"
               onClick={(e) => {
                 if (e.target === e.currentTarget) {
                   setShowAddressModal(false);
@@ -1038,14 +1038,15 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                 }
               }}
             >
-              <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 animate-in zoom-in-95 duration-150">
-                <div className="flex justify-between items-center mb-5 pb-3 border-b border-slate-100">
+              <div className="bg-white rounded-3xl max-w-md w-full max-h-[88vh] sm:max-h-[85vh] flex flex-col shadow-2xl border border-slate-200 animate-in zoom-in-95 duration-150 overflow-hidden">
+                {/* Fixed Header */}
+                <div className="p-4 sm:p-5 pb-3 border-b border-slate-100 flex justify-between items-center shrink-0 bg-white z-10">
                   <div className="flex items-center gap-2">
-                    <div className="w-8 h-8 rounded-xl bg-sky-50 text-sky-600 flex items-center justify-center">
+                    <div className="w-8 h-8 rounded-xl bg-sky-50 text-sky-600 flex items-center justify-center shrink-0">
                       <MapPin className="w-4 h-4" />
                     </div>
                     <div>
-                      <h4 className="text-base font-bold text-slate-900">
+                      <h4 className="text-sm sm:text-base font-bold text-slate-900">
                         {editingAddressId ? 'Edit Delivery Address' : 'Add New Delivery Address'}
                       </h4>
                       <p className="text-[11px] text-slate-400">
@@ -1064,7 +1065,8 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                   </button>
                 </div>
 
-                <form onSubmit={handleSaveAddress} className="space-y-4 text-xs">
+                {/* Scrollable Form Body */}
+                <form onSubmit={handleSaveAddress} className="p-4 sm:p-6 space-y-3.5 text-xs overflow-y-auto flex-1">
                   <div>
                     <label className="font-bold text-slate-700 block mb-1.5">Address Label</label>
                     <div className="grid grid-cols-3 gap-2">
@@ -1159,11 +1161,11 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                   <div>
                     <label className="font-bold text-slate-700 block mb-1">Full Detailed Address</label>
                     <textarea
-                      rows={3}
+                      rows={2}
                       value={fullAddress}
                       onChange={(e) => setFullAddress(e.target.value)}
                       placeholder="e.g. House 45, Flat 4B, Road 27, Dhanmondi, Dhaka"
-                      className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-sky-500 text-xs"
+                      className="w-full px-3.5 py-2 rounded-xl border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-sky-500 text-xs"
                       required
                     />
                   </div>
@@ -1181,20 +1183,21 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                     </label>
                   </div>
 
-                  <div className="pt-3 border-t border-slate-100 flex justify-end gap-2.5">
+                  {/* Sticky Footer with Save / Cancel Buttons */}
+                  <div className="pt-3 border-t border-slate-100 flex items-center justify-end gap-2.5 bg-white sticky bottom-0 z-10">
                     <button
                       type="button"
                       onClick={() => {
                         setShowAddressModal(false);
                         setEditingAddressId(null);
                       }}
-                      className="px-4 py-2.5 rounded-xl border border-slate-300 text-slate-600 hover:bg-slate-50 transition-colors font-semibold cursor-pointer"
+                      className="px-4 py-2.5 rounded-xl border border-slate-300 text-slate-600 hover:bg-slate-50 transition-colors font-semibold cursor-pointer text-xs"
                     >
                       Cancel
                     </button>
                     <button
                       type="submit"
-                      className="px-5 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-bold transition-colors shadow-xs cursor-pointer"
+                      className="px-5 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-bold transition-colors shadow-xs cursor-pointer text-xs"
                     >
                       {editingAddressId ? 'Update Address' : 'Save Address'}
                     </button>
