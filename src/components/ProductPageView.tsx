@@ -223,7 +223,7 @@ export const ProductPageView: React.FC<ProductPageViewProps> = ({
           rating: r.rating || 5,
           date: formattedDate,
           comment: r.comment || '',
-          photos: r.photos || [],
+          photos: (r.photos || []).map((pUrl) => (typeof pUrl === 'string' ? resolveGoogleDriveUrl(pUrl) : pUrl)),
           verifiedPurchase: Boolean(r.verifiedPurchase || mySubmittedReviewIds.includes(r.id)),
           likes: 2,
         };
@@ -634,7 +634,8 @@ export const ProductPageView: React.FC<ProductPageViewProps> = ({
       const res = await uploadCustomerReviewPhoto(file, (p) => setReviewMediaUploadProgress(p));
       if (res && res.url) {
         setNewReviewPhotos((prev) => [...prev, res.url]);
-        setReviewMediaUploadMsg(t('ফটো সফলভাবে যুক্ত হয়েছে!', 'Photo attached successfully!'));
+        setPhotoInputUrl(res.url); // Automatically fill the photo URL input box with the Google Drive link!
+        setReviewMediaUploadMsg(t('ছবি সফলভাবে গুগল ড্রাইভে আপলোড ও লিংক যুক্ত হয়েছে!', 'Photo successfully uploaded to Google Drive & link attached!'));
       }
     } catch (err: any) {
       console.warn('[Customer Media Upload Error]:', err);
@@ -643,6 +644,7 @@ export const ProductPageView: React.FC<ProductPageViewProps> = ({
         const result = event.target?.result as string;
         if (result) {
           setNewReviewPhotos((prev) => [...prev, result]);
+          setPhotoInputUrl(result);
           setReviewMediaUploadMsg(t('ফটো সংযুক্ত হয়েছে', 'Photo attached'));
         }
       };
@@ -1674,18 +1676,46 @@ export const ProductPageView: React.FC<ProductPageViewProps> = ({
                   </div>
 
                   {reviewSubmitted ? (
-                    <div className="p-4 rounded-xl bg-emerald-50 dark:bg-emerald-950/80 border border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200 text-xs font-bold flex items-center gap-2">
-                      <CheckCircle className="w-5 h-5 text-emerald-600 dark:text-emerald-400 shrink-0" />
-                      <span>{t('আপনার রিভিউটির জন্য ধন্যবাদ! এটি অনুমোদনের পর প্রকাশিত হবে।', 'Thank you for your review! It will be published after review.')}</span>
-                    </div>
-                  ) : hasPurchasedAndDelivered ? (
-                    <form onSubmit={handleReviewSubmit} className="space-y-4">
-                      <div className="p-3 rounded-xl bg-emerald-50/60 dark:bg-emerald-950/40 border border-emerald-100 dark:border-emerald-800/60 flex items-center gap-2 text-xs text-emerald-800 dark:text-emerald-300">
-                        <CheckCircle className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
-                        <span>
-                          {t('আপনি সফলভাবে পণ্যটি গ্রহণ করেছেন। আপনার রিভিউটিতে ভেরিফাইড ক্রেতা ব্যাজ থাকবে।', `You purchased and received this product (${currentCustomer?.name || 'Customer'}). Your review will have a Verified Purchase badge.`)}
-                        </span>
+                    <div className="p-5 rounded-2xl bg-emerald-50 dark:bg-emerald-950/80 border border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200 text-xs sm:text-sm font-bold flex flex-col sm:flex-row items-center justify-between gap-4 shadow-sm">
+                      <div className="flex items-center gap-2.5">
+                        <CheckCircle className="w-6 h-6 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                        <div>
+                          <p className="font-black text-sm">{t('রিভিউ সফলভাবে জমা দেওয়া হয়েছে!', 'Review Submitted Successfully!')}</p>
+                          <p className="text-xs text-emerald-700 dark:text-emerald-300 font-medium mt-0.5">
+                            {t('ছবি ও বার্তা গুগল ড্রাইভে সেভ হয়েছে। অ্যাডমিন অনুমোদনের পর রিভিউটি এখানে প্রদর্শিত হবে।', 'Photos and comments saved to Google Drive. It will be published after admin approval.')}
+                          </p>
+                        </div>
                       </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setReviewSubmitted(false);
+                          setNewReviewComment('');
+                          setNewReviewPhotos([]);
+                          setPhotoInputUrl('');
+                        }}
+                        className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-xs transition-colors cursor-pointer shrink-0"
+                      >
+                        {t('+ আরেকটি রিভিউ দিন', '+ Add Another Review')}
+                      </button>
+                    </div>
+                  ) : (
+                    <form onSubmit={handleReviewSubmit} className="space-y-4">
+                      {hasPurchasedAndDelivered ? (
+                        <div className="p-3 rounded-xl bg-emerald-50/60 dark:bg-emerald-950/40 border border-emerald-100 dark:border-emerald-800/60 flex items-center gap-2 text-xs text-emerald-800 dark:text-emerald-300">
+                          <CheckCircle className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                          <span>
+                            {t('আপনি সফলভাবে পণ্যটি গ্রহণ করেছেন। আপনার রিভিউটিতে ভেরিফাইড ক্রেতা ব্যাজ থাকবে।', `You purchased and received this product (${currentCustomer?.name || 'Customer'}). Your review will have a Verified Purchase badge.`)}
+                          </span>
+                        </div>
+                      ) : (
+                        <div className="p-3 rounded-xl bg-sky-50/60 dark:bg-sky-950/40 border border-sky-100 dark:border-sky-800/60 flex items-center gap-2 text-xs text-sky-800 dark:text-sky-300">
+                          <MessageSquare className="w-4 h-4 text-sky-600 dark:text-sky-400 shrink-0" />
+                          <span>
+                            {t('আপনার মতামত বা অভিজ্ঞতা শেয়ার করুন। ফটো আপলোড করলে তা আপনার গুগল ড্রাইভে সংরক্ষিত হবে।', 'Share your feedback or product review. Uploaded photos will be saved to Google Drive.')}
+                          </span>
+                        </div>
+                      )}
 
                       <div>
                         <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">{t('আপনার রেটিং:', 'Your Rating:')}</label>
@@ -1870,58 +1900,6 @@ export const ProductPageView: React.FC<ProductPageViewProps> = ({
                         <span>{t('রিভিউ জমা দিন', 'Submit Review')}</span>
                       </button>
                     </form>
-                  ) : hasPendingOrInTransitOrder ? (
-                    <div className="p-4 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-amber-900 dark:text-amber-200">
-                      <div className="flex items-start gap-3">
-                        <Clock className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
-                        <div>
-                          <h5 className="text-xs sm:text-sm font-bold text-amber-950 dark:text-amber-300">
-                            {t('অর্ডারটি ডেলিভারি হওয়ার পর রিভিউ দিতে পারবেন', 'You can submit a review after order is delivered')}
-                          </h5>
-                          <p className="text-xs text-amber-800 dark:text-amber-300/80 mt-1 leading-relaxed">
-                            {t('আপনার এই প্রোডাক্টের অর্ডারটি বর্তমানে প্রক্রিয়াধীন রয়েছে। পণ্যটি আপনার কাছে সফলভাবে পৌঁছে দেওয়া হলে আপনি ভেরিফাইড রিভিউ প্রদান করতে পারবেন।', 'Your order for this product is currently being processed. Once delivered, you can provide a verified review.')}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  ) : currentCustomer ? (
-                    <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300">
-                      <div className="flex items-start gap-3">
-                        <ShieldCheck className="w-5 h-5 text-slate-500 dark:text-slate-400 shrink-0 mt-0.5" />
-                        <div className="flex-1">
-                          <h5 className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white">
-                            {t('শুধুমাত্র ভেরিফাইড ক্রেতারা রিভিউ দিতে পারবেন', 'Only Verified Buyers Can Write a Review')}
-                          </h5>
-                          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
-                            {t('শুধুমাত্র যারা এই প্রোডাক্টটি কিনেছেন এবং ডেলিভারি পেয়েছেন তারাই রিভিউ দিতে পারবেন। নির্ভরযোগ্য ও বাস্তবসম্মত মতামত বজায় রাখতে এই নিয়ম প্রযোজ্য।', 'Only customers who have purchased and received this product can write a review.')}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300">
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                        <div className="flex items-start gap-3">
-                          <ShieldCheck className="w-5 h-5 text-sky-600 dark:text-sky-400 shrink-0 mt-0.5" />
-                          <div>
-                            <h5 className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white">
-                              {t('ভেরিফাইড ক্রেতাদের রিভিউ', 'Verified Purchaser Reviews')}
-                            </h5>
-                            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                              {t('রিভিউ প্রদান করতে লগইন করুন। শুধুমাত্র ডেলিভারি সম্পন্ন হওয়া কাস্টমাররা রিভিউ লিখতে পারবেন।', 'Please login to submit a review. Only delivered purchasers can leave feedback.')}
-                            </p>
-                          </div>
-                        </div>
-                        {onOpenCustomerAuth && (
-                          <button
-                            onClick={onOpenCustomerAuth}
-                            className="px-4 py-2 bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs rounded-xl transition-colors cursor-pointer whitespace-nowrap shadow-xs"
-                          >
-                            {t('লগইন করুন', 'Login to Review')}
-                          </button>
-                        )}
-                      </div>
-                    </div>
                   )}
                 </div>
 

@@ -543,20 +543,22 @@ export async function getTelegramSettingsFromDB(): Promise<TelegramBotSettings> 
   let serverSettings: Partial<TelegramBotSettings> | null = null;
   let firestoreSettings: Partial<TelegramBotSettings> | null = null;
 
-  // 1. Fetch from Express Server API with 3s timeout
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 3000);
-    const res = await fetch('/api/telegram/settings', { signal: controller.signal });
-    clearTimeout(timeoutId);
-    if (res.ok) {
-      const data = await res.json();
-      if (data && data.success && data.settings) {
-        serverSettings = data.settings;
+  // 1. Fetch from Express Server API with fast timeout (or skip if static netlify)
+  if (typeof window !== 'undefined' && !window.location.hostname.includes('netlify.app')) {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 1200);
+      const res = await fetch('/api/telegram/settings', { signal: controller.signal });
+      clearTimeout(timeoutId);
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.success && data.settings) {
+          serverSettings = data.settings;
+        }
       }
+    } catch (e) {
+      // Non-blocking fallback
     }
-  } catch (e) {
-    // Non-blocking fallback
   }
 
   // 2. Fetch from Firestore with 3.5s timeout
