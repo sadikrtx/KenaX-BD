@@ -47,7 +47,7 @@ import {
   subscribeToReviews,
 } from '../lib/firebase';
 import { Review } from '../types';
-import { uploadCustomerReviewPhoto, resolveGoogleDriveUrl } from '../lib/googleDriveService';
+import { uploadCustomerReviewPhoto, resolveGoogleDriveUrl, getDriveDirectImageUrl } from '../lib/googleDriveService';
 import { ProductVideoPlayer } from './ProductVideoPlayer';
 import { getProductStockStatus, getStockStatusInfo } from '../utils/stockUtils';
 import { HighlightIcon } from './HighlightIcon';
@@ -1816,20 +1816,38 @@ export const ProductPageView: React.FC<ProductPageViewProps> = ({
                             className="hidden"
                           />
 
-                          <div className="flex-1 flex items-center gap-1.5 min-w-[200px]">
+                          <div className="flex-1 flex items-center gap-1.5 min-w-[240px]">
                             <input
                               type="url"
                               value={photoInputUrl}
                               onChange={(e) => setPhotoInputUrl(e.target.value)}
-                              placeholder={t('অথবা ছবির সরাসরি লিংক দিন...', 'Or paste image link...')}
-                              className="flex-1 px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs text-slate-800 dark:text-white focus:outline-hidden focus:border-sky-500"
+                              placeholder={t('গুগল ড্রাইভ বা ছবির সরাসরি লিংক...', 'Google Drive or image link...')}
+                              className="flex-1 px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs text-slate-800 dark:text-white focus:outline-hidden focus:border-sky-500 font-mono"
                             />
+                            {photoInputUrl && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (photoInputUrl) {
+                                    navigator.clipboard.writeText(photoInputUrl);
+                                    setReviewMediaUploadMsg(t('গুগল ড্রাইভ লিংক কপি হয়েছে!', 'Drive link copied!'));
+                                    setTimeout(() => setReviewMediaUploadMsg(null), 3000);
+                                  }
+                                }}
+                                className="px-2.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl transition-colors cursor-pointer shrink-0"
+                                title="Copy Drive Link"
+                              >
+                                {t('কপি লিংক', 'Copy Link')}
+                              </button>
+                            )}
                             <button
                               type="button"
                               onClick={() => {
                                 if (photoInputUrl.trim()) {
                                   const resolved = resolveGoogleDriveUrl(photoInputUrl.trim());
-                                  setNewReviewPhotos([...newReviewPhotos, resolved]);
+                                  if (!newReviewPhotos.includes(resolved)) {
+                                    setNewReviewPhotos([...newReviewPhotos, resolved]);
+                                  }
                                   setPhotoInputUrl('');
                                 }
                               }}
@@ -1875,7 +1893,7 @@ export const ProductPageView: React.FC<ProductPageViewProps> = ({
                                       <span className="text-[9px] font-bold">Video</span>
                                     </div>
                                   ) : (
-                                    <img src={pUrl} alt="Review upload" className="w-full h-full object-cover" />
+                                    <img src={getDriveDirectImageUrl(pUrl)} alt="Review upload" className="w-full h-full object-cover" />
                                   )}
                                   <button
                                     type="button"
@@ -1962,7 +1980,7 @@ export const ProductPageView: React.FC<ProductPageViewProps> = ({
                                   className="w-16 h-16 sm:w-20 sm:h-20 rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden bg-slate-100 dark:bg-slate-800 hover:opacity-90 transition-opacity block shadow-2xs"
                                   title="Click to view full photo"
                                 >
-                                  <img src={pImg} alt="Review attachment" className="w-full h-full object-cover" />
+                                  <img src={getDriveDirectImageUrl(pImg)} alt="Review attachment" className="w-full h-full object-cover" />
                                 </a>
                               );
                             })}

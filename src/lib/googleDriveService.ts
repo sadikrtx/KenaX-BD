@@ -252,24 +252,39 @@ export function extractDriveFileId(urlOrId?: string): string | null {
   return null;
 }
 
+export function getDriveStandardViewUrl(fileId: string): string {
+  return `https://drive.google.com/file/d/${fileId}/view?usp=drivesdk`;
+}
+
 /**
- * High-speed direct media CDN URL for any Google Drive file
- * Everyone can view this photo without any login, popup, or watermark.
+ * High-speed direct media CDN URL for HTML <img> tags
+ */
+export function getDriveDirectImageUrl(urlOrId: string): string {
+  if (!urlOrId) return '';
+  const fileId = extractDriveFileId(urlOrId);
+  if (fileId) {
+    return `https://lh3.googleusercontent.com/d/${fileId}`;
+  }
+  return urlOrId;
+}
+
+/**
+ * Standard Google Drive share URL
  */
 export function getDrivePermanentUrl(fileId: string): string {
-  return `https://lh3.googleusercontent.com/d/${fileId}`;
+  return `https://drive.google.com/file/d/${fileId}/view?usp=drivesdk`;
 }
 
 /**
  * Automatically resolves any user-pasted Google Drive link or image URL
- * into a permanent high-speed CDN Google Drive image link.
+ * into standard Google Drive share link format.
  */
 export function resolveGoogleDriveUrl(inputUrl: string): string {
   if (!inputUrl) return '';
   const trimmed = inputUrl.trim();
   const fileId = extractDriveFileId(trimmed);
   if (fileId) {
-    return getDrivePermanentUrl(fileId);
+    return getDriveStandardViewUrl(fileId);
   }
   return trimmed;
 }
