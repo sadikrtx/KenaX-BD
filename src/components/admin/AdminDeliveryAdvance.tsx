@@ -31,6 +31,7 @@ import {
   SlidersHorizontal,
 } from 'lucide-react';
 import { Order, UserRole, StaffUser, SiteSettings } from '../../types';
+import { ClickableOrderId } from '../common/ClickableOrderId';
 
 interface AdminDeliveryAdvanceProps {
   orders: Order[];
@@ -557,19 +558,19 @@ export const AdminDeliveryAdvance: React.FC<AdminDeliveryAdvanceProps> = ({
       </div>
 
       {/* 2. SUB-NAVIGATION TABS & FILTER BAR */}
-      <div className="bg-white rounded-3xl border border-slate-200 shadow-xs overflow-hidden">
+      <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-xs overflow-hidden">
         {/* Navigation Tabs Header */}
-        <div className="p-4 sm:p-5 border-b border-slate-200 space-y-4">
+        <div className="p-4 sm:p-5 border-b border-slate-200 dark:border-slate-800 space-y-4">
           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
             {/* View Mode Segmented Controls */}
-            <div className="flex flex-wrap items-center gap-1.5 p-1.5 bg-slate-100/90 rounded-2xl">
+            <div className="flex flex-wrap items-center gap-1.5 p-1.5 bg-slate-100/90 dark:bg-slate-800/90 rounded-2xl border border-slate-200/60 dark:border-slate-700/60">
               <button
                 type="button"
                 onClick={() => setActiveTab('all')}
                 className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
                   activeTab === 'all'
-                    ? 'bg-white text-slate-900 shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900'
+                    ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs border border-slate-200/80 dark:border-slate-700'
+                    : 'text-slate-700 dark:text-slate-200 hover:text-slate-900 dark:hover:text-white hover:bg-slate-200/60 dark:hover:bg-slate-700/60'
                 }`}
               >
                 All Advance ({allAdvanceOrders.length})
@@ -581,7 +582,7 @@ export const AdminDeliveryAdvance: React.FC<AdminDeliveryAdvanceProps> = ({
                 className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
                   activeTab === 'delivery'
                     ? 'bg-indigo-600 text-white shadow-xs'
-                    : 'text-slate-600 hover:text-indigo-700'
+                    : 'text-slate-700 dark:text-slate-200 hover:text-indigo-700 dark:hover:text-indigo-300 hover:bg-slate-200/60 dark:hover:bg-slate-700/60'
                 }`}
               >
                 <Truck className="w-3.5 h-3.5" />
@@ -594,7 +595,7 @@ export const AdminDeliveryAdvance: React.FC<AdminDeliveryAdvanceProps> = ({
                 className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
                   activeTab === 'full'
                     ? 'bg-emerald-600 text-white shadow-xs'
-                    : 'text-slate-600 hover:text-emerald-700'
+                    : 'text-slate-700 dark:text-slate-200 hover:text-emerald-700 dark:hover:text-emerald-300 hover:bg-slate-200/60 dark:hover:bg-slate-700/60'
                 }`}
               >
                 <Sparkles className="w-3.5 h-3.5" />
@@ -607,7 +608,7 @@ export const AdminDeliveryAdvance: React.FC<AdminDeliveryAdvanceProps> = ({
                 className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
                   activeTab === 'pending'
                     ? 'bg-amber-500 text-white shadow-xs'
-                    : 'text-slate-600 hover:text-amber-700'
+                    : 'text-slate-700 dark:text-slate-200 hover:text-amber-700 dark:hover:text-amber-300 hover:bg-slate-200/60 dark:hover:bg-slate-700/60'
                 }`}
               >
                 <Clock className="w-3.5 h-3.5" />
@@ -620,7 +621,7 @@ export const AdminDeliveryAdvance: React.FC<AdminDeliveryAdvanceProps> = ({
                 className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
                   activeTab === 'verified'
                     ? 'bg-teal-700 text-white shadow-xs'
-                    : 'text-slate-600 hover:text-teal-800'
+                    : 'text-slate-700 dark:text-slate-200 hover:text-teal-800 dark:hover:text-teal-300 hover:bg-slate-200/60 dark:hover:bg-slate-700/60'
                 }`}
               >
                 <CheckCircle className="w-3.5 h-3.5" />
@@ -628,8 +629,8 @@ export const AdminDeliveryAdvance: React.FC<AdminDeliveryAdvanceProps> = ({
               </button>
             </div>
 
-            <div className="flex items-center gap-2 self-start lg:self-auto text-xs text-slate-500">
-              <span className="font-semibold">{filteredOrders.length}</span> records shown
+            <div className="flex items-center gap-2 self-start lg:self-auto text-xs text-slate-500 dark:text-slate-400">
+              <span className="font-semibold text-slate-900 dark:text-slate-100">{filteredOrders.length}</span> records shown
             </div>
           </div>
 
@@ -637,13 +638,13 @@ export const AdminDeliveryAdvance: React.FC<AdminDeliveryAdvanceProps> = ({
           <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 pt-1">
             {/* Search Input */}
             <div className="sm:col-span-5 relative">
-              <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+              <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500" />
               <input
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Search by customer name, phone, order ID, TrxID, district..."
-                className="w-full pl-10 pr-8 py-2.5 rounded-2xl border border-slate-200 text-xs text-slate-900 placeholder:text-slate-400 focus:outline-hidden focus:ring-2 focus:ring-indigo-500 bg-slate-50/50"
+                className="w-full pl-10 pr-8 py-2.5 rounded-2xl border border-slate-200 dark:border-slate-700 text-xs text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-hidden focus:ring-2 focus:ring-indigo-500 bg-slate-50/50 dark:bg-slate-800/80"
               />
               {searchQuery && (
                 <button
@@ -729,17 +730,17 @@ export const AdminDeliveryAdvance: React.FC<AdminDeliveryAdvanceProps> = ({
           <>
             {/* Desktop Table View */}
             <div className="hidden md:block overflow-x-auto">
-              <table className="w-full text-left text-xs border-collapse">
+              <table className="w-full text-left text-xs border-collapse min-w-[1020px]">
                 <thead>
                   <tr className="bg-slate-50/80 border-b border-slate-200 text-slate-500 uppercase text-[10px] tracking-wider font-bold">
-                    <th className="py-3.5 px-4">Customer & Contact</th>
-                    <th className="py-3.5 px-4">Order & Date</th>
-                    <th className="py-3.5 px-4">Advance Type</th>
-                    <th className="py-3.5 px-4 text-emerald-700">Advance Paid</th>
-                    <th className="py-3.5 px-4">Total / COD Due</th>
-                    <th className="py-3.5 px-4">Gateway & TrxID</th>
-                    <th className="py-3.5 px-4">Verification</th>
-                    <th className="py-3.5 px-4 text-right">Actions</th>
+                    <th className="py-3.5 px-4 min-w-[190px]">Customer & Contact</th>
+                    <th className="py-3.5 px-4 w-[130px]">Order & Date</th>
+                    <th className="py-3.5 px-4 w-[160px]">Advance Type</th>
+                    <th className="py-3.5 px-4 w-[140px] text-emerald-700">Advance Paid</th>
+                    <th className="py-3.5 px-4 w-[140px]">Total / COD Due</th>
+                    <th className="py-3.5 px-4 min-w-[180px]">Gateway & TrxID</th>
+                    <th className="py-3.5 px-4 w-[140px]">Verification</th>
+                    <th className="py-3.5 px-4 w-[120px] text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -790,9 +791,7 @@ export const AdminDeliveryAdvance: React.FC<AdminDeliveryAdvanceProps> = ({
 
                         {/* Order ID & Date */}
                         <td className="py-3.5 px-4 font-mono">
-                          <span className="font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-lg border border-indigo-200">
-                            #{o.id}
-                          </span>
+                          <ClickableOrderId orderId={o.id} className="text-indigo-700 bg-indigo-50 border-indigo-200" />
                           <p className="text-[10px] text-slate-400 mt-1">
                             {new Date(o.createdAt).toLocaleDateString('en-GB', {
                               day: 'numeric',
@@ -964,9 +963,7 @@ export const AdminDeliveryAdvance: React.FC<AdminDeliveryAdvanceProps> = ({
                   >
                     <div className="flex items-center justify-between gap-2">
                       <div className="flex items-center gap-2">
-                        <span className="font-mono font-bold text-xs text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-md border border-indigo-200">
-                          #{o.id}
-                        </span>
+                        <ClickableOrderId orderId={o.id} className="text-indigo-700 bg-indigo-50 border-indigo-200" />
                         {isFull ? (
                           <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-100 text-emerald-800">
                             Full Advance
@@ -1236,41 +1233,81 @@ export const AdminDeliveryAdvance: React.FC<AdminDeliveryAdvanceProps> = ({
                   </div>
                 </div>
 
-                {/* Gateway & TrxID Info Card */}
-                <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-2 text-xs">
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-500 font-medium">Payment Gateway:</span>
-                    <span className="font-bold text-slate-900">{selectedOrder.paymentMethod}</span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-500 font-medium">Sender Mobile Number:</span>
-                    <span className="font-bold font-mono text-slate-900">
-                      {selectedOrder.senderMobileNumber || selectedOrder.customerMobile}
+                {/* Gateway & TrxID Info Card (Prominent Sender & TrxID Highlight) */}
+                <div className="p-4 rounded-2xl bg-indigo-50/70 border-2 border-indigo-200/80 space-y-3 text-xs">
+                  <div className="flex items-center justify-between pb-2 border-b border-indigo-100">
+                    <span className="text-slate-600 font-bold">পেমেন্ট গেটওয়ে (Payment Method):</span>
+                    <span className="font-extrabold text-indigo-900 bg-white px-2.5 py-0.5 rounded-lg border border-indigo-200">
+                      {selectedOrder.paymentMethod}
                     </span>
                   </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-500 font-medium">Transaction ID (TrxID):</span>
-                    <div className="flex items-center gap-1.5">
-                      <span className="font-black font-mono text-indigo-700">
-                        {selectedOrder.transactionId || 'N/A'}
+
+                  {/* Sender Mobile Number */}
+                  <div className="flex items-center justify-between bg-white p-2.5 rounded-xl border border-indigo-100">
+                    <div>
+                      <span className="text-[10px] font-bold uppercase text-slate-400 block">
+                        টাকা পাঠানোর সেন্ডার নাম্বার (Sender Mobile)
                       </span>
-                      {selectedOrder.transactionId && (
-                        <button
-                          type="button"
-                          onClick={() => handleCopyTrxId(selectedOrder.transactionId!)}
-                          className="p-1 text-slate-400 hover:text-indigo-600"
-                        >
-                          {copiedTrxId === selectedOrder.transactionId ? (
-                            <Check className="w-3.5 h-3.5 text-emerald-600" />
-                          ) : (
-                            <Copy className="w-3.5 h-3.5" />
-                          )}
-                        </button>
-                      )}
+                      <span className="font-mono font-black text-sm text-slate-900 mt-0.5 block">
+                        {selectedOrder.senderMobileNumber || selectedOrder.customerMobile || 'N/A'}
+                      </span>
                     </div>
+                    {(selectedOrder.senderMobileNumber || selectedOrder.customerMobile) && (
+                      <button
+                        type="button"
+                        onClick={() => handleCopyTrxId(selectedOrder.senderMobileNumber || selectedOrder.customerMobile!)}
+                        className="px-2.5 py-1.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold text-[11px] flex items-center gap-1 transition-colors cursor-pointer border border-indigo-200"
+                        title="কপি করুন"
+                      >
+                        {copiedTrxId === (selectedOrder.senderMobileNumber || selectedOrder.customerMobile) ? (
+                          <>
+                            <Check className="w-3.5 h-3.5 text-emerald-600" />
+                            <span className="text-emerald-700">কপি হয়েছে</span>
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="w-3.5 h-3.5" />
+                            <span>কপি</span>
+                          </>
+                        )}
+                      </button>
+                    )}
                   </div>
-                  <div className="flex items-center justify-between pt-1 border-t border-slate-200">
-                    <span className="text-slate-500 font-medium">Assigned Courier:</span>
+
+                  {/* Transaction ID (TrxID) */}
+                  <div className="flex items-center justify-between bg-white p-2.5 rounded-xl border border-indigo-100">
+                    <div>
+                      <span className="text-[10px] font-bold uppercase text-slate-400 block">
+                        পেমেন্ট ট্রানজেকশন আইডি (TrxID)
+                      </span>
+                      <span className="font-mono font-black text-sm text-indigo-700 mt-0.5 block">
+                        {selectedOrder.transactionId || 'No TrxID Provided'}
+                      </span>
+                    </div>
+                    {selectedOrder.transactionId && (
+                      <button
+                        type="button"
+                        onClick={() => handleCopyTrxId(selectedOrder.transactionId!)}
+                        className="px-2.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-[11px] flex items-center gap-1 transition-colors cursor-pointer shadow-2xs"
+                        title="TrxID কপি করুন"
+                      >
+                        {copiedTrxId === selectedOrder.transactionId ? (
+                          <>
+                            <Check className="w-3.5 h-3.5 text-white" />
+                            <span>কপি হয়েছে</span>
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="w-3.5 h-3.5" />
+                            <span>TrxID কপি</span>
+                          </>
+                        )}
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="flex items-center justify-between pt-1 border-t border-indigo-100 text-[11px]">
+                    <span className="text-slate-500 font-medium">কুরিয়ার ডেলিভারি পার্টনার:</span>
                     <span className="font-bold text-slate-800">{selectedOrder.courierName || 'Steadfast Courier'}</span>
                   </div>
                 </div>

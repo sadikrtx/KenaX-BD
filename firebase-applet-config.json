@@ -1,12 +1,11 @@
 {
-  "projectId": "galvanic-pursuit-vds98",
-  "appId": "1:563920607656:web:b7fa7a4f11e35c4103259d",
-  "apiKey": "AIzaSyD4Klm36KS1SGrGb5ARK2qnCIh8XUk-OpA",
-  "authDomain": "galvanic-pursuit-vds98.firebaseapp.com",
-  "firestoreDatabaseId": "ai-studio-kenaxbd-db227bcd-db17-47e7-9023-bbf12ea50418",
-  "storageBucket": "galvanic-pursuit-vds98.firebasestorage.app",
-  "messagingSenderId": "563920607656",
+  "projectId": "gen-lang-client-0077501500",
+  "appId": "1:719824276905:web:5ec96c62855c44a98848b8",
+  "apiKey": "AIzaSyAELJu6mjFPUhRVcztOaTbORD1Mi0FGtU0",
+  "authDomain": "gen-lang-client-0077501500.firebaseapp.com",
+  "storageBucket": "gen-lang-client-0077501500.firebasestorage.app",
+  "messagingSenderId": "719824276905",
   "measurementId": "",
-  "oAuthClientId": "563920607656-fka2isk3c54gsir6d096kh1vmulamvn2.apps.googleusercontent.com",
+  "oAuthClientId": "719824276905-vma2k0t1lgd64r3gbsd826iimapsfnja.apps.googleusercontent.com",
   "recaptchaSiteKey": ""
 }

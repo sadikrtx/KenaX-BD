@@ -94,11 +94,14 @@ service cloud.firestore {
     match /deletedStaff/{staffId} {
       allow read, write: if true;
     }
-    // Cart Activities & Wishlist & Live tracking
+    // Cart Activities & Wishlist & Live tracking & Newsletter Subscribers
     match /cartActivities/{activityId} {
       allow read, write: if true;
     }
     match /wishlistActivities/{activityId} {
+      allow read, write: if true;
+    }
+    match /newsletter_subscribers/{subscriberId} {
       allow read, write: if true;
     }
     // Users & Profiles

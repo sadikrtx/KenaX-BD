@@ -1,4 +1,4 @@
-import { FAQItem, FlashSaleBannerSettings } from '../types';
+import { FAQItem, FlashSaleBannerSettings, StorePolicy } from '../types/index.ts';
 
 export const DEFAULT_FLASH_SALE_BANNER: FlashSaleBannerSettings = {
   badge: 'MEGA GADGET FEST',
@@ -9,6 +9,45 @@ export const DEFAULT_FLASH_SALE_BANNER: FlashSaleBannerSettings = {
   image: 'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=1400&auto=format&fit=crop&q=85',
   enabled: true,
 };
+
+export const DEFAULT_RETURN_POLICY = `## 1. 7-Day Return & Replacement Guarantee
+At KenaX BD, customer satisfaction is our core commitment. Every product purchased from KenaX BD includes a 7-day hassle-free replacement and return guarantee.
+
+## 2. Eligible Return Conditions
+- **Damaged or Broken Item**: If the parcel or item arrives physically damaged or broken upon delivery.
+- **Wrong Product Delivered**: If the delivered product model, color, size, or specifications do not match your order.
+- **Manufacturing Defect**: If an internal hardware or technical manufacturing defect occurs within the first 7 days of use.
+- **Missing Accessories/Parts**: If the package is missing advertised original accessories or components.
+
+## 3. Return Guidelines & Requirements
+- Products must be returned in their original condition, complete with original box, warranty cards, user manuals, gifts, and accessories.
+- Products showing user-inflicted scratches, physical abuse, or liquid damage will not be eligible for return.
+- **Unboxing Video Recommendation**: We strongly recommend recording a clear unboxing video when opening your package to ensure instant claim processing.
+
+## 4. How to Request a Return
+1. Contact our customer helpline at **+880 1700-123456** or email **support@kenaxbd.com** within 7 days of delivery.
+2. Provide your **Order ID (#KB-XXXXX)** along with clear photos or a brief video demonstrating the issue.
+3. Our customer support team will verify your claim and schedule a doorstep courier pickup or guide you to send the package via courier.
+
+## 5. Shipping & Return Delivery Charges
+- If the return is due to our error or a defective item, KenaX BD covers 100% of the return courier shipping fees.`;
+
+export const DEFAULT_EXCHANGE_POLICY = `## 1. 7-Day Product Exchange Policy
+You can easily exchange any product purchased from KenaX BD within 7 days for a different size, color, or preferred model.
+
+## 2. Exchange Terms & Conditions
+- The product must be completely unused, with original tags, seals, and box intact.
+- In-ear earbuds, personal grooming, or hygiene items cannot be exchanged after opening due to health and safety regulations (unless defective).
+- Products can be exchanged for items of equal or higher value (paying the price difference for higher value items).
+
+## 3. How to Request an Exchange
+1. Message our WhatsApp support at **+880 1700-123456** with your **Order ID** and the product you wish to exchange.
+2. Our customer support team will check stock availability and process your exchange request.
+3. **Doorstep Parcel Swap**: Our courier agent will bring the new exchange item to your doorstep and collect the previous item from you simultaneously.
+
+## 4. Exchange Courier Fees
+- For personal preference or size change exchanges, the round-trip courier fee is borne by the customer.
+- For defective or wrong items sent by KenaX BD, all courier charges are covered by KenaX BD.`;
 
 export const DEFAULT_PRIVACY_POLICY = `## 1. Information We Collect
 At KenaX BD, we value your trust and privacy. When you visit our website, place an order, or register an account, we collect necessary personal information to process and fulfill your orders smoothly:
@@ -143,3 +182,62 @@ export const DEFAULT_FAQS: FAQItem[] = [
       'Click on "Track Order" in the top navigation or footer, enter your Order ID (e.g. KB-89241) or phone number, and you will see live status updates including packing, dispatch, courier consignment ID, and current location.',
   },
 ];
+
+export const DEFAULT_STORE_POLICIES: StorePolicy[] = [
+  {
+    id: 'pol-return',
+    slug: 'return',
+    title: 'Return Policy',
+    titleBn: '',
+    content: DEFAULT_RETURN_POLICY,
+    active: true,
+    badgeText: '7-Day Return Guarantee',
+    iconName: 'RotateCcw',
+    order: 1,
+  },
+  {
+    id: 'pol-exchange',
+    slug: 'exchange',
+    title: 'Exchange Policy',
+    titleBn: '',
+    content: DEFAULT_EXCHANGE_POLICY,
+    active: true,
+    badgeText: '7-Day Easy Exchange',
+    iconName: 'RefreshCw',
+    order: 2,
+  },
+  {
+    id: 'pol-privacy',
+    slug: 'privacy',
+    title: 'Privacy Policy',
+    titleBn: '',
+    content: DEFAULT_PRIVACY_POLICY,
+    active: true,
+    badgeText: '100% Data Confidentiality',
+    iconName: 'ShieldCheck',
+    order: 3,
+  },
+  {
+    id: 'pol-terms',
+    slug: 'terms',
+    title: 'Terms of Service',
+    titleBn: '',
+    content: DEFAULT_TERMS_OF_SERVICE,
+    active: true,
+    badgeText: 'Transparent E-Commerce',
+    iconName: 'FileText',
+    order: 4,
+  },
+  {
+    id: 'pol-refund',
+    slug: 'refund',
+    title: 'Refund Policy',
+    titleBn: '',
+    content: DEFAULT_REFUND_POLICY,
+    active: true,
+    badgeText: 'Fast Verified Refunds',
+    iconName: 'CreditCard',
+    order: 5,
+  },
+];
+

@@ -1,4 +1,4 @@
-import { Order } from '../types';
+import { Order } from '../types/index.ts';
 
 export const generateAndPrintInvoice = (order: Order) => {
   const invoiceWindow = window.open('', '_blank', 'width=900,height=800');

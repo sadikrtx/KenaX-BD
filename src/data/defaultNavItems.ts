@@ -1,4 +1,4 @@
-import { NavItem } from '../types';
+import { NavItem } from '../types/index.ts';
 
 export const DEFAULT_NAV_ITEMS: NavItem[] = [
   { id: 'nav-home', label: 'Home', targetView: 'home', priority: 1, enabled: true },

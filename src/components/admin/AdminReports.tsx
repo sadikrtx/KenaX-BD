@@ -712,24 +712,24 @@ export const AdminReports: React.FC<AdminReportsProps> = ({
   return (
     <div className="space-y-4 sm:space-y-6 pb-12">
       {/* Header & Controls */}
-      <div className="p-4 sm:p-5 rounded-2xl bg-white border border-slate-200 shadow-2xs flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
+      <div className="p-4 sm:p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xs flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
         <div>
           <div className="flex items-center gap-2">
-            <h2 className="text-base sm:text-lg font-black text-slate-900 tracking-tight">Financial & Sales Analytics</h2>
+            <h2 className="text-base sm:text-lg font-black text-slate-900 dark:text-white tracking-tight">Financial & Sales Analytics</h2>
             {isPinned && (
-              <span className="bg-amber-100 text-amber-800 text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1">
-                <Pin className="w-3 h-3 fill-amber-600 text-amber-600" />
+              <span className="bg-amber-100 dark:bg-amber-950/80 text-amber-800 dark:text-amber-300 text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1 border border-amber-200 dark:border-amber-800">
+                <Pin className="w-3 h-3 fill-amber-600 text-amber-600 dark:text-amber-400" />
                 Pinned
               </span>
             )}
           </div>
-          <p className="text-xs text-slate-500 mt-0.5">Real-time breakdown of revenue, courier costs, discounts, and payment gateways</p>
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">Real-time breakdown of revenue, courier costs, discounts, and payment gateways</p>
         </div>
 
         {/* Date Filters & Action Buttons */}
         <div className="flex flex-wrap items-center gap-2 w-full md:w-auto justify-between md:justify-end">
           {/* Filter Pills */}
-          <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl text-xs font-semibold overflow-x-auto max-w-full">
+          <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl text-xs font-semibold overflow-x-auto max-w-full border dark:border-slate-700">
             {(
               [
                 { id: 'all', label: 'All Time' },
@@ -743,7 +743,9 @@ export const AdminReports: React.FC<AdminReportsProps> = ({
                 key={f.id}
                 onClick={() => setDateFilter(f.id)}
                 className={`px-2.5 py-1 rounded-lg transition-colors cursor-pointer text-[11px] font-bold whitespace-nowrap ${
-                  dateFilter === f.id ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-600 hover:text-slate-900'
+                  dateFilter === f.id
+                    ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-2xs'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                 }`}
               >
                 {f.label}
@@ -757,12 +759,12 @@ export const AdminReports: React.FC<AdminReportsProps> = ({
               onClick={() => setIsPinned(!isPinned)}
               className={`px-3 py-1.5 sm:py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 border ${
                 isPinned
-                  ? 'bg-amber-50 text-amber-800 border-amber-300 shadow-2xs'
-                  : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                  ? 'bg-amber-50 dark:bg-amber-950/80 text-amber-800 dark:text-amber-300 border-amber-300 dark:border-amber-700 shadow-2xs'
+                  : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700'
               }`}
               title="Pin this report to quick view"
             >
-              <Pin className={`w-3.5 h-3.5 ${isPinned ? 'fill-amber-600 text-amber-600' : ''}`} />
+              <Pin className={`w-3.5 h-3.5 ${isPinned ? 'fill-amber-600 text-amber-600 dark:text-amber-400' : ''}`} />
               <span className="hidden sm:inline">{isPinned ? 'Pinned' : 'Pin Report'}</span>
             </button>
 
@@ -776,7 +778,7 @@ export const AdminReports: React.FC<AdminReportsProps> = ({
 
             <button
               onClick={handlePrint}
-              className="p-1.5 sm:p-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs transition-colors cursor-pointer"
+              className="p-1.5 sm:p-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-semibold text-xs transition-colors cursor-pointer border dark:border-slate-700"
               title="Print Report"
             >
               <Printer className="w-4 h-4" />
@@ -788,64 +790,64 @@ export const AdminReports: React.FC<AdminReportsProps> = ({
       {/* 1. Primary Financial KPIs (Mobile 2x2 Grid) */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-4">
         {/* Gross Total Sales */}
-        <div className="p-3.5 sm:p-5 rounded-xl sm:rounded-2xl bg-white border border-slate-200 shadow-2xs flex flex-col justify-between hover:border-sky-300 transition-colors">
+        <div className="p-3.5 sm:p-5 rounded-xl sm:rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xs flex flex-col justify-between hover:border-sky-300 dark:hover:border-sky-600 transition-colors">
           <div className="flex items-center justify-between gap-1">
-            <span className="text-[10px] sm:text-xs font-semibold text-slate-500 uppercase tracking-wider truncate">Gross Total Sales</span>
-            <div className="w-7 h-7 sm:w-9 sm:h-9 rounded-lg sm:rounded-xl bg-sky-50 text-sky-600 flex items-center justify-center font-bold text-xs sm:text-sm shrink-0">
+            <span className="text-[10px] sm:text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider truncate">Gross Total Sales</span>
+            <div className="w-7 h-7 sm:w-9 sm:h-9 rounded-lg sm:rounded-xl bg-sky-50 dark:bg-sky-950/80 text-sky-600 dark:text-sky-300 flex items-center justify-center font-bold text-xs sm:text-sm shrink-0 border dark:border-sky-800">
               ৳
             </div>
           </div>
           <div className="mt-2 sm:mt-3">
-            <h3 className="text-base sm:text-2xl font-black text-slate-900 tracking-tight truncate">৳{grossSales.toLocaleString()}</h3>
-            <p className="text-[10px] sm:text-xs text-slate-500 font-medium mt-1 truncate">
+            <h3 className="text-base sm:text-2xl font-black text-slate-900 dark:text-white tracking-tight truncate">৳{grossSales.toLocaleString()}</h3>
+            <p className="text-[10px] sm:text-xs text-slate-500 dark:text-slate-400 font-medium mt-1 truncate">
               From {validOrders.length} active orders
             </p>
           </div>
         </div>
 
         {/* Net Product Value */}
-        <div className="p-3.5 sm:p-5 rounded-xl sm:rounded-2xl bg-white border border-slate-200 shadow-2xs flex flex-col justify-between hover:border-emerald-300 transition-colors">
+        <div className="p-3.5 sm:p-5 rounded-xl sm:rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xs flex flex-col justify-between hover:border-emerald-300 dark:hover:border-emerald-600 transition-colors">
           <div className="flex items-center justify-between gap-1">
-            <span className="text-[10px] sm:text-xs font-semibold text-slate-500 uppercase tracking-wider truncate">Net Product Sales</span>
-            <div className="w-7 h-7 sm:w-9 sm:h-9 rounded-lg sm:rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center font-bold text-xs sm:text-sm shrink-0">
+            <span className="text-[10px] sm:text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider truncate">Net Product Sales</span>
+            <div className="w-7 h-7 sm:w-9 sm:h-9 rounded-lg sm:rounded-xl bg-emerald-50 dark:bg-emerald-950/80 text-emerald-600 dark:text-emerald-300 flex items-center justify-center font-bold text-xs sm:text-sm shrink-0 border dark:border-emerald-800">
               <ShoppingCart className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
             </div>
           </div>
           <div className="mt-2 sm:mt-3">
-            <h3 className="text-base sm:text-2xl font-black text-emerald-700 tracking-tight truncate">৳{netProductSales.toLocaleString()}</h3>
-            <p className="text-[10px] sm:text-xs text-slate-500 font-medium mt-1 truncate">
+            <h3 className="text-base sm:text-2xl font-black text-emerald-700 dark:text-emerald-400 tracking-tight truncate">৳{netProductSales.toLocaleString()}</h3>
+            <p className="text-[10px] sm:text-xs text-slate-500 dark:text-slate-400 font-medium mt-1 truncate">
               Excludes courier shipping
             </p>
           </div>
         </div>
 
         {/* Total Courier Delivery Collected */}
-        <div className="p-3.5 sm:p-5 rounded-xl sm:rounded-2xl bg-white border border-slate-200 shadow-2xs flex flex-col justify-between hover:border-indigo-300 transition-colors">
+        <div className="p-3.5 sm:p-5 rounded-xl sm:rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xs flex flex-col justify-between hover:border-indigo-300 dark:hover:border-indigo-600 transition-colors">
           <div className="flex items-center justify-between gap-1">
-            <span className="text-[10px] sm:text-xs font-semibold text-slate-500 uppercase tracking-wider truncate">Total Delivery Cost</span>
-            <div className="w-7 h-7 sm:w-9 sm:h-9 rounded-lg sm:rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0">
+            <span className="text-[10px] sm:text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider truncate">Total Delivery Cost</span>
+            <div className="w-7 h-7 sm:w-9 sm:h-9 rounded-lg sm:rounded-xl bg-indigo-50 dark:bg-indigo-950/80 text-indigo-600 dark:text-indigo-300 flex items-center justify-center shrink-0 border dark:border-indigo-800">
               <Truck className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
             </div>
           </div>
           <div className="mt-2 sm:mt-3">
-            <h3 className="text-base sm:text-2xl font-black text-indigo-600 tracking-tight truncate">৳{deliveryCharges.toLocaleString()}</h3>
-            <p className="text-[10px] sm:text-xs text-slate-500 font-medium mt-1 truncate">
+            <h3 className="text-base sm:text-2xl font-black text-indigo-600 dark:text-indigo-400 tracking-tight truncate">৳{deliveryCharges.toLocaleString()}</h3>
+            <p className="text-[10px] sm:text-xs text-slate-500 dark:text-slate-400 font-medium mt-1 truncate">
               Courier fee collected
             </p>
           </div>
         </div>
 
         {/* Promotional Discounts */}
-        <div className="p-3.5 sm:p-5 rounded-xl sm:rounded-2xl bg-white border border-slate-200 shadow-2xs flex flex-col justify-between hover:border-rose-300 transition-colors">
+        <div className="p-3.5 sm:p-5 rounded-xl sm:rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xs flex flex-col justify-between hover:border-rose-300 dark:hover:border-rose-600 transition-colors">
           <div className="flex items-center justify-between gap-1">
-            <span className="text-[10px] sm:text-xs font-semibold text-slate-500 uppercase tracking-wider truncate">Total Discounts</span>
-            <div className="w-7 h-7 sm:w-9 sm:h-9 rounded-lg sm:rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center shrink-0">
+            <span className="text-[10px] sm:text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider truncate">Total Discounts</span>
+            <div className="w-7 h-7 sm:w-9 sm:h-9 rounded-lg sm:rounded-xl bg-rose-50 dark:bg-rose-950/80 text-rose-600 dark:text-rose-300 flex items-center justify-center shrink-0 border dark:border-rose-800">
               <Tag className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
             </div>
           </div>
           <div className="mt-2 sm:mt-3">
-            <h3 className="text-base sm:text-2xl font-black text-rose-600 tracking-tight truncate">৳{discountsGiven.toLocaleString()}</h3>
-            <p className="text-[10px] sm:text-xs text-slate-500 font-medium mt-1 truncate">
+            <h3 className="text-base sm:text-2xl font-black text-rose-600 dark:text-rose-400 tracking-tight truncate">৳{discountsGiven.toLocaleString()}</h3>
+            <p className="text-[10px] sm:text-xs text-slate-500 dark:text-slate-400 font-medium mt-1 truncate">
               Coupons & promo savings
             </p>
           </div>
@@ -855,46 +857,46 @@ export const AdminReports: React.FC<AdminReportsProps> = ({
       {/* 2. Secondary Metrics (AOV, Paid vs COD, Regional, Cancelled) */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-4">
         {/* Average Order Value */}
-        <div className="p-3.5 sm:p-4 rounded-xl bg-slate-50 border border-slate-200/80 flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-purple-100 text-purple-700 flex items-center justify-center shrink-0 font-bold text-xs">
+        <div className="p-3.5 sm:p-4 rounded-xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200/80 dark:border-slate-700/80 flex items-center gap-3">
+          <div className="w-8 h-8 rounded-lg bg-purple-100 dark:bg-purple-950/80 text-purple-700 dark:text-purple-300 flex items-center justify-center shrink-0 font-bold text-xs border dark:border-purple-800">
             <TrendingUp className="w-4 h-4" />
           </div>
           <div className="min-w-0">
-            <span className="text-[10px] font-bold text-slate-500 uppercase block truncate">Avg Order Value</span>
-            <p className="text-sm sm:text-base font-black text-slate-900 truncate">৳{averageOrderValue.toLocaleString()}</p>
+            <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase block truncate">Avg Order Value</span>
+            <p className="text-sm sm:text-base font-black text-slate-900 dark:text-white truncate">৳{averageOrderValue.toLocaleString()}</p>
           </div>
         </div>
 
         {/* Paid Collection */}
-        <div className="p-3.5 sm:p-4 rounded-xl bg-slate-50 border border-slate-200/80 flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0 font-bold text-xs">
+        <div className="p-3.5 sm:p-4 rounded-xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200/80 dark:border-slate-700/80 flex items-center gap-3">
+          <div className="w-8 h-8 rounded-lg bg-emerald-100 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300 flex items-center justify-center shrink-0 font-bold text-xs border dark:border-emerald-800">
             <CheckCircle2 className="w-4 h-4" />
           </div>
           <div className="min-w-0">
-            <span className="text-[10px] font-bold text-slate-500 uppercase block truncate">Paid Amount</span>
-            <p className="text-sm sm:text-base font-black text-emerald-700 truncate">৳{totalPaidAmount.toLocaleString()}</p>
+            <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase block truncate">Paid Amount</span>
+            <p className="text-sm sm:text-base font-black text-emerald-700 dark:text-emerald-400 truncate">৳{totalPaidAmount.toLocaleString()}</p>
           </div>
         </div>
 
         {/* Pending COD Collection */}
-        <div className="p-3.5 sm:p-4 rounded-xl bg-slate-50 border border-slate-200/80 flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-amber-100 text-amber-700 flex items-center justify-center shrink-0 font-bold text-xs">
+        <div className="p-3.5 sm:p-4 rounded-xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200/80 dark:border-slate-700/80 flex items-center gap-3">
+          <div className="w-8 h-8 rounded-lg bg-amber-100 dark:bg-amber-950/80 text-amber-700 dark:text-amber-300 flex items-center justify-center shrink-0 font-bold text-xs border dark:border-amber-800">
             <DollarSign className="w-4 h-4" />
           </div>
           <div className="min-w-0">
-            <span className="text-[10px] font-bold text-slate-500 uppercase block truncate">Pending COD</span>
-            <p className="text-sm sm:text-base font-black text-amber-800 truncate">৳{pendingCollectionAmount.toLocaleString()}</p>
+            <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase block truncate">Pending COD</span>
+            <p className="text-sm sm:text-base font-black text-amber-800 dark:text-amber-400 truncate">৳{pendingCollectionAmount.toLocaleString()}</p>
           </div>
         </div>
 
         {/* Cancelled Loss */}
-        <div className="p-3.5 sm:p-4 rounded-xl bg-slate-50 border border-slate-200/80 flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-rose-100 text-rose-700 flex items-center justify-center shrink-0 font-bold text-xs">
+        <div className="p-3.5 sm:p-4 rounded-xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200/80 dark:border-slate-700/80 flex items-center gap-3">
+          <div className="w-8 h-8 rounded-lg bg-rose-100 dark:bg-rose-950/80 text-rose-700 dark:text-rose-300 flex items-center justify-center shrink-0 font-bold text-xs border dark:border-rose-800">
             <AlertTriangle className="w-4 h-4" />
           </div>
           <div className="min-w-0">
-            <span className="text-[10px] font-bold text-slate-500 uppercase block truncate">Cancelled Loss</span>
-            <p className="text-sm sm:text-base font-black text-rose-700 truncate">৳{cancelledRevenueLoss.toLocaleString()} ({cancelledOrders.length})</p>
+            <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase block truncate">Cancelled Loss</span>
+            <p className="text-sm sm:text-base font-black text-rose-700 dark:text-rose-400 truncate">৳{cancelledRevenueLoss.toLocaleString()} ({cancelledOrders.length})</p>
           </div>
         </div>
       </div>
@@ -902,40 +904,40 @@ export const AdminReports: React.FC<AdminReportsProps> = ({
       {/* 3. Detailed Regional & Gateway Breakdown */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
         {/* Payment Gateway Distribution */}
-        <div className="p-4 sm:p-6 rounded-2xl bg-white border border-slate-200 shadow-2xs">
+        <div className="p-4 sm:p-6 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xs">
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-2">
-              <CreditCard className="w-4 h-4 text-sky-600" />
-              <h3 className="font-bold text-sm text-slate-900">Payment Gateway Distribution</h3>
+              <CreditCard className="w-4 h-4 text-sky-600 dark:text-sky-400" />
+              <h3 className="font-bold text-sm text-slate-900 dark:text-white">Payment Gateway Distribution</h3>
             </div>
-            <span className="text-xs text-slate-500 font-medium">{filteredOrders.length} total checkouts</span>
+            <span className="text-xs text-slate-500 dark:text-slate-400 font-medium">{filteredOrders.length} total checkouts</span>
           </div>
 
           <div className="space-y-3">
             {[
-              { name: 'bKash', color: 'bg-pink-500', bg: 'bg-pink-50', text: 'text-pink-700' },
-              { name: 'Nagad', color: 'bg-orange-500', bg: 'bg-orange-50', text: 'text-orange-700' },
-              { name: 'Cash on Delivery', color: 'bg-emerald-600', bg: 'bg-emerald-50', text: 'text-emerald-800' },
+              { name: 'bKash', color: 'bg-pink-500', bg: 'bg-pink-50 dark:bg-pink-950/60', text: 'text-pink-700 dark:text-pink-300' },
+              { name: 'Nagad', color: 'bg-orange-500', bg: 'bg-orange-50 dark:bg-orange-950/60', text: 'text-orange-700 dark:text-orange-300' },
+              { name: 'Cash on Delivery', color: 'bg-emerald-600', bg: 'bg-emerald-50 dark:bg-emerald-950/60', text: 'text-emerald-800 dark:text-emerald-300' },
             ].map((gateway) => {
               const matchedOrders = filteredOrders.filter((o) =>
-                o.paymentMethod.toLowerCase().includes(gateway.name.toLowerCase().split(' ')[0])
+                (o.paymentMethod || "").toLowerCase().includes(gateway.name.toLowerCase().split(' ')[0])
               );
               const count = matchedOrders.length;
               const revenue = matchedOrders.filter((o) => o.orderStatus !== 'Cancelled').reduce((s, o) => s + (o.totalAmount || 0), 0);
               const percentage = filteredOrders.length > 0 ? Math.round((count / filteredOrders.length) * 100) : 0;
 
               return (
-                <div key={gateway.name} className="p-3 sm:p-4 rounded-xl bg-slate-50 border border-slate-200/80">
+                <div key={gateway.name} className="p-3 sm:p-4 rounded-xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200/80 dark:border-slate-700/70">
                   <div className="flex items-center justify-between text-xs sm:text-sm font-bold">
-                    <span className="text-slate-900">{gateway.name}</span>
+                    <span className="text-slate-900 dark:text-white">{gateway.name}</span>
                     <span className={gateway.text}>৳{revenue.toLocaleString()} ({count} orders)</span>
                   </div>
 
                   <div className="mt-2 flex items-center gap-3">
-                    <div className="flex-1 h-2 bg-slate-200 rounded-full overflow-hidden">
+                    <div className="flex-1 h-2 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
                       <div className={`h-full ${gateway.color} transition-all duration-500`} style={{ width: `${percentage}%` }} />
                     </div>
-                    <span className="text-[11px] font-extrabold text-slate-600 w-9 text-right">{percentage}%</span>
+                    <span className="text-[11px] font-extrabold text-slate-600 dark:text-slate-400 w-9 text-right">{percentage}%</span>
                   </div>
                 </div>
               );
@@ -944,26 +946,26 @@ export const AdminReports: React.FC<AdminReportsProps> = ({
         </div>
 
         {/* Regional Delivery Breakdown (Dhaka vs Outside Dhaka) */}
-        <div className="p-4 sm:p-6 rounded-2xl bg-white border border-slate-200 shadow-2xs">
+        <div className="p-4 sm:p-6 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xs">
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-2">
-              <MapPin className="w-4 h-4 text-emerald-600" />
-              <h3 className="font-bold text-sm text-slate-900">Regional Delivery Performance</h3>
+              <MapPin className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+              <h3 className="font-bold text-sm text-slate-900 dark:text-white">Regional Delivery Performance</h3>
             </div>
-            <span className="text-xs text-slate-500 font-medium">Inside vs Outside Dhaka</span>
+            <span className="text-xs text-slate-500 dark:text-slate-400 font-medium">Inside vs Outside Dhaka</span>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {/* Inside Dhaka */}
-            <div className="p-4 rounded-xl bg-sky-50/70 border border-sky-200">
+            <div className="p-4 rounded-xl bg-sky-50/70 dark:bg-sky-950/50 border border-sky-200 dark:border-sky-800">
               <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-sky-900">Inside Dhaka</span>
-                <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-sky-200 text-sky-800">
+                <span className="text-xs font-bold text-sky-900 dark:text-sky-200">Inside Dhaka</span>
+                <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-sky-200 dark:bg-sky-800 text-sky-800 dark:text-sky-200">
                   {dhakaOrders.length} Orders
                 </span>
               </div>
-              <p className="text-xl font-black text-sky-950 mt-2">৳{dhakaSales.toLocaleString()}</p>
-              <div className="mt-2 text-[11px] text-sky-800 space-y-0.5 border-t border-sky-200/60 pt-2">
+              <p className="text-xl font-black text-sky-950 dark:text-white mt-2">৳{dhakaSales.toLocaleString()}</p>
+              <div className="mt-2 text-[11px] text-sky-800 dark:text-sky-300 space-y-0.5 border-t border-sky-200/60 dark:border-sky-800/60 pt-2">
                 <div className="flex justify-between">
                   <span>Shipping Fee:</span>
                   <span className="font-bold">৳{dhakaDelivery.toLocaleString()}</span>
@@ -976,15 +978,15 @@ export const AdminReports: React.FC<AdminReportsProps> = ({
             </div>
 
             {/* Outside Dhaka */}
-            <div className="p-4 rounded-xl bg-indigo-50/70 border border-indigo-200">
+            <div className="p-4 rounded-xl bg-indigo-50/70 dark:bg-indigo-950/50 border border-indigo-200 dark:border-indigo-800">
               <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-indigo-900">Outside Dhaka</span>
-                <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-indigo-200 text-indigo-800">
+                <span className="text-xs font-bold text-indigo-900 dark:text-indigo-200">Outside Dhaka</span>
+                <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-indigo-200 dark:bg-indigo-800 text-indigo-800 dark:text-indigo-200">
                   {outsideDhakaOrders.length} Orders
                 </span>
               </div>
-              <p className="text-xl font-black text-indigo-950 mt-2">৳{outsideDhakaSales.toLocaleString()}</p>
-              <div className="mt-2 text-[11px] text-indigo-800 space-y-0.5 border-t border-indigo-200/60 pt-2">
+              <p className="text-xl font-black text-indigo-950 dark:text-white mt-2">৳{outsideDhakaSales.toLocaleString()}</p>
+              <div className="mt-2 text-[11px] text-indigo-800 dark:text-indigo-300 space-y-0.5 border-t border-indigo-200/60 dark:border-indigo-800/60 pt-2">
                 <div className="flex justify-between">
                   <span>Shipping Fee:</span>
                   <span className="font-bold">৳{outsideDhakaDelivery.toLocaleString()}</span>
@@ -1000,35 +1002,35 @@ export const AdminReports: React.FC<AdminReportsProps> = ({
       </div>
 
       {/* 4. Top Category Sales Performance */}
-      <div className="p-4 sm:p-6 rounded-2xl bg-white border border-slate-200 shadow-2xs">
+      <div className="p-4 sm:p-6 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xs">
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
-            <Layers className="w-4 h-4 text-purple-600" />
-            <h3 className="font-bold text-sm text-slate-900">Top Product Categories Contribution</h3>
+            <Layers className="w-4 h-4 text-purple-600 dark:text-purple-400" />
+            <h3 className="font-bold text-sm text-slate-900 dark:text-white">Top Product Categories Contribution</h3>
           </div>
-          <span className="text-xs text-slate-500 font-medium">Based on sales volume</span>
+          <span className="text-xs text-slate-500 dark:text-slate-400 font-medium">Based on sales volume</span>
         </div>
 
         {topCategories.length === 0 ? (
-          <p className="text-xs text-slate-400 italic py-4 text-center">No completed sales recorded for this period.</p>
+          <p className="text-xs text-slate-400 dark:text-slate-500 italic py-4 text-center">No completed sales recorded for this period.</p>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
             {topCategories.map((cat, i) => {
               const catPercent = grossSales > 0 ? Math.round((cat.revenue / grossSales) * 100) : 0;
               return (
-                <div key={cat.name} className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between">
+                <div key={cat.name} className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 flex items-center justify-between">
                   <div>
                     <div className="flex items-center gap-1.5">
-                      <span className="w-5 h-5 rounded-md bg-purple-100 text-purple-800 font-bold text-[10px] flex items-center justify-center">
+                      <span className="w-5 h-5 rounded-md bg-purple-100 dark:bg-purple-950/80 text-purple-800 dark:text-purple-300 font-bold text-[10px] flex items-center justify-center border dark:border-purple-800">
                         #{i + 1}
                       </span>
-                      <span className="text-xs font-bold text-slate-800 truncate max-w-[120px]">{cat.name}</span>
+                      <span className="text-xs font-bold text-slate-800 dark:text-slate-200 truncate max-w-[120px]">{cat.name}</span>
                     </div>
-                    <p className="text-xs text-slate-500 mt-1">{cat.count} items sold</p>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">{cat.count} items sold</p>
                   </div>
                   <div className="text-right">
-                    <p className="text-sm font-black text-slate-900">৳{cat.revenue.toLocaleString()}</p>
-                    <p className="text-[10px] font-bold text-purple-700">{catPercent}% share</p>
+                    <p className="text-sm font-black text-slate-900 dark:text-white">৳{cat.revenue.toLocaleString()}</p>
+                    <p className="text-[10px] font-bold text-purple-700 dark:text-purple-400">{catPercent}% share</p>
                   </div>
                 </div>
               );
@@ -1038,16 +1040,16 @@ export const AdminReports: React.FC<AdminReportsProps> = ({
       </div>
 
       {/* 5. Official Financial Statement & Executive Seal Preview */}
-      <div className="p-4 sm:p-6 rounded-2xl bg-white border border-slate-200 shadow-2xs">
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-5 border-b border-slate-100 pb-4">
+      <div className="p-4 sm:p-6 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xs">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-5 border-b border-slate-100 dark:border-slate-800 pb-4">
           <div>
             <div className="flex items-center gap-2">
-              <FileText className="w-4 h-4 text-sky-600" />
-              <h3 className="font-bold text-sm sm:text-base text-slate-900">
+              <FileText className="w-4 h-4 text-sky-600 dark:text-sky-400" />
+              <h3 className="font-bold text-sm sm:text-base text-slate-900 dark:text-white">
                 Official Statement &amp; Verified Seal Preview
               </h3>
             </div>
-            <p className="text-xs text-slate-500 mt-0.5">
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
               Official report downloads include this verified seal, Sadik's executive signature, and high-resolution branding
             </p>
           </div>
@@ -1061,10 +1063,10 @@ export const AdminReports: React.FC<AdminReportsProps> = ({
           </button>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-center bg-slate-50/80 p-4 sm:p-6 rounded-2xl border border-slate-200">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-center bg-slate-50/80 dark:bg-slate-800/60 p-4 sm:p-6 rounded-2xl border border-slate-200 dark:border-slate-700/80">
           {/* Left: Top Header Card Preview */}
           <div className="lg:col-span-7 space-y-3">
-            <span className="text-[11px] font-extrabold text-slate-400 uppercase tracking-wider block">
+            <span className="text-[11px] font-extrabold text-slate-400 dark:text-slate-400 uppercase tracking-wider block">
               1. Header Branding &amp; Layout Preview
             </span>
             <div className="p-4 sm:p-5 rounded-2xl bg-slate-900 text-white border border-slate-800 shadow-md">
@@ -1097,24 +1099,24 @@ export const AdminReports: React.FC<AdminReportsProps> = ({
               </div>
             </div>
 
-            <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600 bg-white p-3 rounded-xl border border-slate-200">
-              <span className="px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-800 font-bold text-[11px]">
+            <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600 dark:text-slate-300 bg-white dark:bg-slate-900 p-3 rounded-xl border border-slate-200 dark:border-slate-700">
+              <span className="px-2 py-0.5 rounded-md bg-emerald-100 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300 font-bold text-[11px] border dark:border-emerald-800">
                 ✓ VERIFIED &amp; CONFIRMED
               </span>
-              <span className="text-[11px] text-slate-500">
+              <span className="text-[11px] text-slate-500 dark:text-slate-400">
                 Official E-Commerce Financial Document of KenaX BD Platform
               </span>
             </div>
           </div>
 
           {/* Right: Official Seal with Small KenaX BD Logo + Cursive Sadik Signature */}
-          <div className="lg:col-span-5 flex flex-col items-center justify-center p-4 bg-white rounded-2xl border border-slate-200 shadow-2xs text-center">
-            <span className="text-[11px] font-extrabold text-slate-400 uppercase tracking-wider block mb-2">
+          <div className="lg:col-span-5 flex flex-col items-center justify-center p-4 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-2xs text-center">
+            <span className="text-[11px] font-extrabold text-slate-400 dark:text-slate-400 uppercase tracking-wider block mb-2">
               2. Executive Seal &amp; Authorized Signature
             </span>
 
             {/* Seal Vector Stamp */}
-            <div className="relative w-44 h-44 sm:w-48 sm:h-48 flex items-center justify-center p-1 rounded-full transition-transform hover:scale-105 duration-200">
+            <div className="relative w-44 h-44 sm:w-48 sm:h-48 flex items-center justify-center p-1 rounded-full transition-transform hover:scale-105 duration-200 bg-white dark:bg-slate-800/80 rounded-full border dark:border-slate-700">
               <img
                 src="/kenax-seal.svg"
                 alt="KenaX BD Official Seal with Sadik Signature"
@@ -1124,11 +1126,11 @@ export const AdminReports: React.FC<AdminReportsProps> = ({
 
             {/* Signature Underline Baseline & Clean Authority Labels (without plain text Sadik) */}
             <div className="mt-2 text-center w-full max-w-[220px]">
-              <div className="h-[1.5px] bg-slate-300 w-full mb-1.5" />
-              <p className="text-xs font-black text-slate-900 tracking-tight">
+              <div className="h-[1.5px] bg-slate-300 dark:bg-slate-700 w-full mb-1.5" />
+              <p className="text-xs font-black text-slate-900 dark:text-white tracking-tight">
                 Authorized Signature
               </p>
-              <p className="text-[11px] font-medium text-slate-500">
+              <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
                 KenaX BD Executive Authority
               </p>
             </div>

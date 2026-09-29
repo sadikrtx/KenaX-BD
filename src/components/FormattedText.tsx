@@ -1,4 +1,5 @@
 import React from 'react';
+import { HighlightIcon } from './HighlightIcon';
 
 interface FormattedTextProps {
   content?: string;
@@ -6,18 +7,41 @@ interface FormattedTextProps {
   className?: string;
 }
 
+// Icon helper mapping to determine icon name and color
+function getIconMeta(tag: string): { icon: string; color: string } | null {
+  const clean = tag.toLowerCase().replace(/[\[\]]/g, '').trim();
+  if (['check', 'check-circle', 'check_circle', 'verify', 'verified'].includes(clean)) return { icon: 'check-circle', color: 'emerald' };
+  if (['truck', 'delivery', 'shipping'].includes(clean)) return { icon: 'truck', color: 'sky' };
+  if (['shield', 'shield-check', 'warranty', 'guarantee', 'security'].includes(clean)) return { icon: 'shield-check', color: 'indigo' };
+  if (['star', 'rating', 'quality'].includes(clean)) return { icon: 'star', color: 'amber' };
+  if (['zap', 'fast', 'express'].includes(clean)) return { icon: 'zap', color: 'amber' };
+  if (['heart', 'love', 'favorite'].includes(clean)) return { icon: 'heart', color: 'rose' };
+  if (['flame', 'fire', 'hot', 'trending'].includes(clean)) return { icon: 'flame', color: 'amber' };
+  if (['award', 'original', 'authentic', 'top'].includes(clean)) return { icon: 'award', color: 'purple' };
+  if (['gift', 'offer', 'bonus'].includes(clean)) return { icon: 'gift', color: 'rose' };
+  if (['tag', 'price', 'badge'].includes(clean)) return { icon: 'tag', color: 'sky' };
+  if (['package', 'stock', 'box'].includes(clean)) return { icon: 'package-check', color: 'indigo' };
+  if (['clock', 'time', '24/7'].includes(clean)) return { icon: 'clock', color: 'sky' };
+  if (['sparkles', 'sparkle', 'magic', 'new'].includes(clean)) return { icon: 'sparkles', color: 'amber' };
+  if (['headphones', 'support', 'help'].includes(clean)) return { icon: 'headphones', color: 'emerald' };
+  if (['discount', 'percent'].includes(clean)) return { icon: 'badge-percent', color: 'rose' };
+  if (['refresh', 'return'].includes(clean)) return { icon: 'refresh-cw', color: 'sky' };
+  return null;
+}
+
 /**
  * Parses inline formatting:
- * **bold** or __bold__ -> <strong>
- * *italic* or _italic_ -> <em>
+ * **bold** or __bold__ or <b>bold</b> or <strong>bold</strong> -> <strong>
+ * *italic* or _italic_ or <i>italic</i> or <em>italic</em> -> <em>
  * ~~strike~~ -> <del>
  * `code` -> <code>
+ * [check], [truck], [shield], [star], etc. -> <HighlightIcon />
  */
 function parseInline(text: string): React.ReactNode[] {
   if (!text) return [];
 
-  // Match **bold**, __bold__, ~~strike~~, `code`, *italic*, _italic_
-  const regex = /(\*\*[^*]+\*\*|__[^_]+__|~~[^~]+~~|`[^`]+`|\*[^*]+\*|_[^_]+_)/g;
+  // Match **bold**, __bold__, <b>bold</b>, <strong>bold</strong>, ~~strike~~, `code`, *italic*, _italic_, <i>italic</i>, <em>italic</em>, [icon-tag]
+  const regex = /(\*\*[^*]+\*\*|__[^_]+__|<b>.*?<\/b>|<strong>.*?<\/strong>|~~[^~]+~~|`[^`]+`|\*[^*]+\*|_[^_]+_|<i>.*?<\/i>|<em>.*?<\/em>|\[[a-zA-Z0-9_\-]+\])/gi;
   const parts: React.ReactNode[] = [];
   let lastIndex = 0;
   let match: RegExpExecArray | null;
@@ -29,14 +53,25 @@ function parseInline(text: string): React.ReactNode[] {
 
     const token = match[0];
     const key = `${match.index}-${token}`;
+    const tokenLower = token.toLowerCase();
 
     if (
       (token.startsWith('**') && token.endsWith('**')) ||
-      (token.startsWith('__') && token.endsWith('__'))
+      (token.startsWith('__') && token.endsWith('__')) ||
+      (tokenLower.startsWith('<b>') && tokenLower.endsWith('</b>')) ||
+      (tokenLower.startsWith('<strong>') && tokenLower.endsWith('</strong>'))
     ) {
+      let innerText = token;
+      if (token.startsWith('**') || token.startsWith('__')) {
+        innerText = token.slice(2, -2);
+      } else if (tokenLower.startsWith('<b>')) {
+        innerText = token.slice(3, -4);
+      } else if (tokenLower.startsWith('<strong>')) {
+        innerText = token.slice(8, -9);
+      }
       parts.push(
         <strong key={key} className="font-extrabold text-slate-900">
-          {token.slice(2, -2)}
+          {innerText}
         </strong>
       );
     } else if (token.startsWith('~~') && token.endsWith('~~')) {
@@ -56,13 +91,37 @@ function parseInline(text: string): React.ReactNode[] {
       );
     } else if (
       (token.startsWith('*') && token.endsWith('*')) ||
-      (token.startsWith('_') && token.endsWith('_'))
+      (token.startsWith('_') && token.endsWith('_')) ||
+      (tokenLower.startsWith('<i>') && tokenLower.endsWith('</i>')) ||
+      (tokenLower.startsWith('<em>') && tokenLower.endsWith('</em>'))
     ) {
+      let innerText = token;
+      if (token.startsWith('*') || token.startsWith('_')) {
+        innerText = token.slice(1, -1);
+      } else if (tokenLower.startsWith('<i>')) {
+        innerText = token.slice(3, -4);
+      } else if (tokenLower.startsWith('<em>')) {
+        innerText = token.slice(4, -5);
+      }
       parts.push(
         <em key={key} className="italic text-slate-800">
-          {token.slice(1, -1)}
+          {innerText}
         </em>
       );
+    } else if (token.startsWith('[') && token.endsWith(']')) {
+      const meta = getIconMeta(token);
+      if (meta) {
+        parts.push(
+          <HighlightIcon
+            key={key}
+            icon={meta.icon}
+            iconColor={meta.color}
+            className="w-4 h-4 inline-block align-text-bottom mr-1 shrink-0"
+          />
+        );
+      } else {
+        parts.push(token);
+      }
     } else {
       parts.push(token);
     }

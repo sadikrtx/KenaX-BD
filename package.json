@@ -5,22 +5,26 @@
   "type": "module",
   "scripts": {
     "dev": "tsx server.ts",
-    "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
-    "start": "node dist/server.cjs",
+    "build": "vite build && esbuild server.ts --bundle --platform=node --format=esm --packages=external --outfile=dist/server.js",
+    "start": "node dist/server.js",
     "preview": "vite preview",
-    "clean": "rm -rf dist server.js",
+    "clean": "rm -rf dist build server.js",
     "lint": "tsc --noEmit"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
     "@tailwindcss/vite": "^4.1.14",
+    "@types/d3": "^7.4.3",
     "@types/pg": "^8.23.1",
     "@vercel/analytics": "^2.0.1",
     "@vercel/speed-insights": "^2.0.0",
     "@vitejs/plugin-react": "^5.0.4",
+    "autoprefixer": "^10.4.21",
+    "d3": "^7.9.0",
     "dotenv": "^17.2.3",
     "drizzle-kit": "^0.31.10",
     "drizzle-orm": "^0.45.2",
+    "esbuild": "^0.25.0",
     "express": "^4.21.2",
     "firebase": "^12.18.0",
     "firebase-admin": "^14.4.0",
@@ -31,7 +35,11 @@
     "pg": "^8.23.0",
     "react": "^19.0.1",
     "react-dom": "^19.0.1",
+    "react-icons": "^5.7.0",
     "sharp": "^0.35.4",
+    "tailwindcss": "^4.1.14",
+    "tsx": "^4.21.0",
+    "typescript": "~5.8.2",
     "vite": "^6.2.3"
   },
   "devDependencies": {
@@ -39,12 +47,6 @@
     "@types/node": "^22.14.0",
     "@types/nodemailer": "^8.0.1",
     "@types/react": "^19.3.0",
-    "@types/react-dom": "^19.3.0",
-    "autoprefixer": "^10.4.21",
-    "esbuild": "^0.25.0",
-    "tailwindcss": "^4.1.14",
-    "tsx": "^4.21.0",
-    "typescript": "~5.8.2",
-    "vite": "^6.2.3"
+    "@types/react-dom": "^19.3.0"
   }
 }

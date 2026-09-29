@@ -27,6 +27,13 @@ import {
 import { INITIAL_STAFF, INITIAL_CUSTOMERS } from '../data/initialSettings';
 import { triggerUserRegistrationWorkflow } from '../lib/emailService';
 import { triggerTelegramUserRegistration } from '../lib/telegramBotService';
+import { triggerWhatsAppEvent } from '../lib/whatsappService';
+import {
+  cleanBDPhoneNumber,
+  isValidBDMobileNumber,
+  getBDPhoneValidationError,
+} from '../utils/phoneUtils';
+import { isValidEmailFormat, getEmailValidationError, isSuperAdminEmail } from '../utils/emailValidator';
 
 interface CustomerAuthModalProps {
   isOpen: boolean;
@@ -97,80 +104,69 @@ export const CustomerAuthModal: React.FC<CustomerAuthModalProps> = ({
         }
       } catch {}
 
-      const cachedStaff = (() => {
+      const cachedStaff: StaffUser[] = [];
+      const readStaffKeys = ['kenax_staff_cache', 'preview_kenax_staff_cache', 'kenax_current_staff', 'kenax_authenticated_staff'];
+      for (const k of readStaffKeys) {
         try {
-          const s = localStorage.getItem('kenax_staff_cache');
-          return s ? JSON.parse(s) : [];
-        } catch {
-          return [];
-        }
-      })();
+          const raw = localStorage.getItem(k);
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed)) cachedStaff.push(...parsed);
+            else if (parsed && typeof parsed === 'object' && (parsed.id || parsed.email)) cachedStaff.push(parsed);
+          }
+        } catch {}
+      }
 
-      const combinedStaff: StaffUser[] = [
-        ...INITIAL_STAFF.map((s) => ({
+      const staffMap = new Map<string, StaffUser>();
+
+      INITIAL_STAFF.forEach((s) => {
+        const key = (s.email || s.id).toLowerCase();
+        staffMap.set(key, {
           id: s.id,
           name: s.name,
           email: s.email,
           phone: s.phone,
-          password: s.password,
+          password: s.password || 'sadik@1234',
           role: s.role as UserRole,
           permissions: s.permissions,
           isActive: s.status === 'active',
           status: s.status,
           createdAt: s.createdAt,
           lastLogin: s.lastLogin,
-        })),
-        ...(Array.isArray(staffList) ? staffList : []),
-        ...(Array.isArray(cachedStaff) ? cachedStaff : []),
-      ].filter(
+        });
+      });
+
+      if (Array.isArray(cachedStaff)) {
+        cachedStaff.forEach((s) => {
+          if (s && (s.id || s.email)) {
+            const key = (s.email || s.id).toLowerCase();
+            const existing = staffMap.get(key) || {};
+            staffMap.set(key, { ...existing, ...s });
+          }
+        });
+      }
+
+      if (Array.isArray(staffList)) {
+        staffList.forEach((s) => {
+          if (s && (s.id || s.email)) {
+            const key = (s.email || s.id).toLowerCase();
+            const existing = staffMap.get(key) || {};
+            staffMap.set(key, { ...existing, ...s });
+          }
+        });
+      }
+
+      const combinedStaff = Array.from(staffMap.values()).filter(
         (s) =>
           s &&
           !deletedStaffIds.has(s.id) &&
           (!s.email || !deletedStaffEmails.has(s.email.toLowerCase()))
       );
 
-      // Master password checks for Super Admin
-      const isMasterPassword =
-        password === 'sadik@1234' ||
-        password === 'sadik@12334' ||
-        password === 'admin' ||
-        password === 'admin123' ||
-        password === 'admin1234' ||
-        password === 'admin@123' ||
-        password === '123456';
-
-      const isSuperAdminIdentifier =
-        cleanInput === 'admin' ||
-        cleanInput === 'superadmin' ||
-        cleanInput === 'super_admin' ||
-        cleanInput === 'administrator' ||
-        cleanInput === 'super@kenaxbd.com';
-
-      // Immediate Super Admin Match (0ms latency, never hangs)
-      if (isSuperAdminIdentifier && isMasterPassword) {
-        const superAdminStaff: StaffUser = combinedStaff.find((s) => s.role === 'super_admin') || {
-          id: 'staff-super-2',
-          name: 'Super Admin',
-          email: 'super@kenaxbd.com',
-          phone: '+880 1700-123456',
-          role: 'super_admin',
-          permissions: ['*'],
-          isActive: true,
-          createdAt: new Date().toISOString(),
-        };
-
-        setIsLoading(false);
-        setSuccessMessage('Super Admin sign in successful! Opening dashboard...');
-        if (onStaffLogin) {
-          onStaffLogin(superAdminStaff);
-        }
-        onClose();
-        return;
-      }
-
       // Check all staff roles (Super Admin, Manager, Moderator, Admin)
       const foundStaff = combinedStaff.find((s) => {
         const emailMatch = Boolean(s.email && s.email.trim().toLowerCase() === cleanInput);
+        const superAdminEmailMatch = isSuperAdminEmail(cleanInput) && (s.role === 'super_admin' || s.email?.toLowerCase().includes('super'));
         const staffDigits = normalizePhoneNumber(s.phone || '');
         const phoneMatch = Boolean(
           cleanDigits.length >= 7 && (
@@ -185,7 +181,7 @@ export const CustomerAuthModal: React.FC<CustomerAuthModalProps> = ({
           (cleanInput === 'manager' && s.role === 'manager') ||
           (cleanInput === 'moderator' && s.role === 'moderator');
 
-        return emailMatch || phoneMatch || roleAliasMatch;
+        return emailMatch || superAdminEmailMatch || phoneMatch || roleAliasMatch;
       });
 
       if (foundStaff) {
@@ -195,14 +191,12 @@ export const CustomerAuthModal: React.FC<CustomerAuthModalProps> = ({
           return;
         }
 
-        const isPasswordCorrect =
-          (foundStaff.password && foundStaff.password === password) ||
-          isMasterPassword ||
-          (foundStaff.role === 'manager' && (password === 'manager1234' || isMasterPassword)) ||
-          (foundStaff.role === 'moderator' && (password === 'moderator1234' || isMasterPassword));
+        const expectedPassword =
+          foundStaff.password ||
+          (foundStaff.role === 'super_admin' ? 'sadik@1234' : '123456');
 
-        if (!isPasswordCorrect) {
-          setErrorMessage('Incorrect password. Please enter the correct password.');
+        if (password !== expectedPassword) {
+          setErrorMessage('Incorrect password. Access denied.');
           setIsLoading(false);
           return;
         }
@@ -313,14 +307,15 @@ export const CustomerAuthModal: React.FC<CustomerAuthModalProps> = ({
       setErrorMessage('Please enter your full name.');
       return;
     }
-    if (!email.trim() || !email.includes('@')) {
-      setErrorMessage('Please enter a valid email address.');
+    const emailValidationErr = getEmailValidationError(email);
+    if (emailValidationErr) {
+      setErrorMessage(emailValidationErr);
       return;
     }
     
-    const cleanMobileDigits = mobile.trim().replace(/[^0-9]/g, '');
-    if (!cleanMobileDigits || cleanMobileDigits.length < 10) {
-      setErrorMessage('Please enter a valid 11-digit mobile number (e.g. 017XXXXXXXX).');
+    const cleanMobileDigits = cleanBDPhoneNumber(mobile);
+    if (!cleanMobileDigits || !isValidBDMobileNumber(cleanMobileDigits)) {
+      setErrorMessage(getBDPhoneValidationError(cleanMobileDigits) || 'Please enter a valid 11-digit mobile number starting with 013 to 019.');
       return;
     }
     if (!password || password.length < 4) {
@@ -334,9 +329,10 @@ export const CustomerAuthModal: React.FC<CustomerAuthModalProps> = ({
 
       // Check if user is registering with Admin Password or Super Admin Email
       const isSuperAdminPassword = password === 'sadik@1234' || password === 'sadik@12334';
-      if ((isSuperAdminPassword && cleanEmail === 'super@kenaxbd.com') || cleanEmail === 'super@kenaxbd.com') {
+      const isSuperAdminEmailIdent = isSuperAdminEmail(cleanEmail);
+      if ((isSuperAdminPassword && isSuperAdminEmailIdent) || isSuperAdminEmailIdent) {
         const superAdminStaff: StaffUser = staffList.find(
-          (s) => s.email.toLowerCase() === cleanEmail || s.role === 'super_admin'
+          (s) => (s.email && s.email.toLowerCase() === cleanEmail) || s.role === 'super_admin'
         ) || {
           id: 'staff-super-2',
           name: 'Super Admin',
@@ -452,6 +448,20 @@ export const CustomerAuthModal: React.FC<CustomerAuthModalProps> = ({
         console.warn('[Telegram User Registration Alert Warning]:', tgErr);
       });
 
+      // Dispatch WhatsApp Automation for User Registration
+      triggerWhatsAppEvent({
+        event: 'user_registered',
+        user: {
+          name: newCustomer.name,
+          email: newCustomer.email || '',
+          phone: newCustomer.mobile || '',
+          id: newCustomer.id,
+        },
+        customerPhone: newCustomer.mobile,
+      }).catch((waErr) => {
+        console.warn('[WhatsApp User Registration Alert Warning]:', waErr);
+      });
+
       setIsLoading(false);
       setSuccessMessage('Account created successfully!');
       
@@ -541,7 +551,7 @@ export const CustomerAuthModal: React.FC<CustomerAuthModalProps> = ({
                     required
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
-                    placeholder="Enter Your Email or Phone...."
+                    placeholder="yourname@gmail.com, super@kenaxbd.com or 017..."
                     className="w-full pl-9 pr-3 py-2.5 rounded-xl border border-slate-300 text-xs text-slate-900 placeholder:text-slate-400 focus:outline-hidden focus:ring-2 focus:ring-sky-500"
                   />
                 </div>
@@ -618,23 +628,27 @@ export const CustomerAuthModal: React.FC<CustomerAuthModalProps> = ({
                     required
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
-                    placeholder="e.g. tanvir@gmail.com"
+                    placeholder="yourname@gmail.com"
                     className="w-full pl-9 pr-3 py-2 rounded-xl border border-slate-300 text-xs text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-sky-500"
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Mobile Phone</label>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Mobile Phone (11-Digit) <span className="text-rose-500">*</span>
+                </label>
                 <div className="relative">
                   <Phone className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                   <input
                     type="tel"
+                    inputMode="numeric"
+                    maxLength={11}
                     required
                     value={mobile}
-                    onChange={(e) => setMobile(e.target.value)}
-                    placeholder="e.g. 01711223344"
-                    className="w-full pl-9 pr-3 py-2 rounded-xl border border-slate-300 text-xs text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-sky-500"
+                    onChange={(e) => setMobile(cleanBDPhoneNumber(e.target.value))}
+                    placeholder="017XXXXXXXX"
+                    className="w-full pl-9 pr-3 py-2 rounded-xl border border-slate-300 text-xs text-slate-900 font-mono focus:outline-hidden focus:ring-2 focus:ring-sky-500"
                   />
                 </div>
               </div>

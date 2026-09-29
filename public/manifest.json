@@ -1,0 +1,25 @@
+{
+  "name": "KenaX BD - Smart Shopping & E-Commerce",
+  "short_name": "KenaX BD",
+  "description": "Smart Shopping, Better Living - Bangladesh E-commerce & Dropshipping Platform with real-time order tracking, delivery management, and secure payments.",
+  "start_url": "/",
+  "id": "/",
+  "display": "standalone",
+  "background_color": "#020617",
+  "theme_color": "#020617",
+  "dir": "ltr",
+  "lang": "en",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "/favicon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/favicon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

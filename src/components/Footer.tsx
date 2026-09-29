@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   Phone,
   Mail,
@@ -17,15 +17,20 @@ import {
   FileText,
   RotateCcw,
   Info,
+  Send,
+  CheckCircle2,
+  Store,
 } from 'lucide-react';
 import { KenaXLogo } from './KenaXLogo';
 import { SiteSettings } from '../types';
+import { saveNewsletterSubscriber } from '../lib/firebase';
+import { useLanguage } from '../context/LanguageContext';
 
 interface FooterProps {
   onNavigate: (view: string) => void;
   onSelectCategory: (cat: string) => void;
   customLogoUrl?: string;
-  onOpenPolicy?: (tab: 'privacy' | 'terms' | 'refund' | 'faq') => void;
+  onOpenPolicy?: (tab: string) => void;
   siteSettings?: SiteSettings;
 }
 
@@ -36,6 +41,41 @@ export const Footer: React.FC<FooterProps> = ({
   onOpenPolicy,
   siteSettings,
 }) => {
+  const { t } = useLanguage();
+  const [email, setEmail] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [status, setStatus] = useState<'idle' | 'success' | 'error'>('idle');
+  const [statusMessage, setStatusMessage] = useState('');
+
+  const handleSubscribe = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanEmail = email.trim().toLowerCase();
+    if (!cleanEmail || !cleanEmail.includes('@') || !cleanEmail.includes('.')) {
+      setStatus('error');
+      setStatusMessage(t('একটি সঠিক ইমেইল এড্রেস লিখুন', 'Please enter a valid email address'));
+      return;
+    }
+
+    setIsSubmitting(true);
+    setStatus('idle');
+    try {
+      const res = await saveNewsletterSubscriber(cleanEmail, 'footer');
+      if (res.success) {
+        setStatus('success');
+        setStatusMessage(t('ধন্যবাদ! সফলভাবে সাবস্ক্রাইব হয়েছে।', 'Thank you! Successfully subscribed.'));
+        setEmail('');
+      } else {
+        setStatus('error');
+        setStatusMessage(res.message || t('সাবস্ক্রাইব করতে সমস্যা হয়েছে', 'Subscription failed'));
+      }
+    } catch (err: any) {
+      setStatus('error');
+      setStatusMessage(t('ইন্টারনেটে সমস্যা হয়েছে। আবার চেষ্টা করুন।', 'Network issue. Please try again.'));
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   return (
     <footer className="bg-slate-950 text-slate-300 border-t border-slate-800/80 pt-8 sm:pt-10 pb-20 sm:pb-8">
       <div className="max-w-[1536px] mx-auto px-4 sm:px-6 lg:px-8">
@@ -55,7 +95,10 @@ export const Footer: React.FC<FooterProps> = ({
             </div>
 
             <p className="text-xs text-slate-400 leading-relaxed pr-1 sm:pr-4">
-              Smart Shopping, Better Living. Bangladesh's premier smart e-commerce platform offering 100% genuine electronics, gadgets, fashion, and home essentials with verified Cash on Delivery nationwide.
+              {t(
+                'স্মার্ট শপিং, উন্নত জীবন। বাংলাদেশের প্রিমিয়ার স্মার্ট ই-কমার্স প্ল্যাটফর্ম। সারাদেশে ক্যাশ অন ডেলিভারি সুবিধা ও জেনুইন পণ্যের নিশ্চয়তা।',
+                "Smart Shopping, Better Living. Bangladesh's premier smart e-commerce platform offering 100% genuine electronics, gadgets, fashion, and home essentials with verified Cash on Delivery nationwide."
+              )}
             </p>
 
             {/* Compact Contact Rows */}
@@ -196,7 +239,7 @@ export const Footer: React.FC<FooterProps> = ({
               <div className="space-y-2.5 md:space-y-3.5 min-w-0">
                 <h4 className="text-[11px] sm:text-xs md:text-sm font-black text-white uppercase tracking-wider flex items-center gap-1.5 md:gap-2 pb-1 md:pb-2 border-b border-slate-800/80 md:border-sky-500/30 truncate">
                   <span className="w-1.5 h-1.5 md:w-2 md:h-2 rounded-full bg-sky-500 shrink-0 inline-block shadow-xs shadow-sky-500/50"></span>
-                  <span className="truncate">Quick Links</span>
+                  <span className="truncate">{t('গুরুত্বপূর্ণ লিঙ্ক', 'Quick Links')}</span>
                 </h4>
                 <ul className="space-y-1.5 md:space-y-2.5 text-[11px] sm:text-xs md:text-sm">
                   <li>
@@ -208,7 +251,7 @@ export const Footer: React.FC<FooterProps> = ({
                       className="hover:text-sky-400 md:hover:text-white md:hover:bg-slate-800/60 transition-all duration-150 cursor-pointer flex items-center gap-1.5 md:gap-2 text-slate-300 hover:translate-x-1 py-0.5 md:py-1 md:px-2 md:rounded-lg w-full text-left truncate group"
                     >
                       <Home className="w-3.5 h-3.5 md:w-4 md:h-4 text-sky-400 group-hover:scale-110 transition-transform shrink-0" />
-                      <span className="truncate">Home</span>
+                      <span className="truncate">{t('হোম', 'Home')}</span>
                     </button>
                   </li>
                   <li>
@@ -220,7 +263,7 @@ export const Footer: React.FC<FooterProps> = ({
                       className="hover:text-sky-400 md:hover:text-white md:hover:bg-slate-800/60 transition-all duration-150 cursor-pointer flex items-center gap-1.5 md:gap-2 text-slate-300 hover:translate-x-1 py-0.5 md:py-1 md:px-2 md:rounded-lg w-full text-left truncate group"
                     >
                       <ShoppingBag className="w-3.5 h-3.5 md:w-4 md:h-4 text-sky-400 group-hover:scale-110 transition-transform shrink-0" />
-                      <span className="truncate">Shop</span>
+                      <span className="truncate">{t('শপ', 'Shop')}</span>
                     </button>
                   </li>
                   <li>
@@ -232,7 +275,7 @@ export const Footer: React.FC<FooterProps> = ({
                       className="hover:text-sky-400 md:hover:text-white md:hover:bg-slate-800/60 transition-all duration-150 cursor-pointer flex items-center gap-1.5 md:gap-2 text-slate-300 hover:translate-x-1 py-0.5 md:py-1 md:px-2 md:rounded-lg w-full text-left truncate group"
                     >
                       <Truck className="w-3.5 h-3.5 md:w-4 md:h-4 text-sky-400 group-hover:scale-110 transition-transform shrink-0" />
-                      <span className="truncate">Track Order</span>
+                      <span className="truncate">{t('অর্ডার ট্র্যাক', 'Track Order')}</span>
                     </button>
                   </li>
                   <li>
@@ -244,7 +287,7 @@ export const Footer: React.FC<FooterProps> = ({
                       className="hover:text-sky-400 md:hover:text-white md:hover:bg-slate-800/60 transition-all duration-150 cursor-pointer flex items-center gap-1.5 md:gap-2 text-slate-300 hover:translate-x-1 py-0.5 md:py-1 md:px-2 md:rounded-lg w-full text-left truncate group"
                     >
                       <User className="w-3.5 h-3.5 md:w-4 md:h-4 text-sky-400 group-hover:scale-110 transition-transform shrink-0" />
-                      <span className="truncate">Profile</span>
+                      <span className="truncate">{t('প্রোফাইল', 'Profile')}</span>
                     </button>
                   </li>
                   <li>
@@ -256,7 +299,7 @@ export const Footer: React.FC<FooterProps> = ({
                       className="hover:text-sky-400 md:hover:text-white md:hover:bg-slate-800/60 transition-all duration-150 cursor-pointer flex items-center gap-1.5 md:gap-2 text-slate-300 hover:translate-x-1 py-0.5 md:py-1 md:px-2 md:rounded-lg w-full text-left truncate group"
                     >
                       <HelpCircle className="w-3.5 h-3.5 md:w-4 md:h-4 text-emerald-400 group-hover:scale-110 transition-transform shrink-0" />
-                      <span className="truncate">Support</span>
+                      <span className="truncate">{t('সাপোর্ট', 'Support')}</span>
                     </button>
                   </li>
                   <li>
@@ -268,7 +311,7 @@ export const Footer: React.FC<FooterProps> = ({
                       className="hover:text-sky-400 md:hover:text-white md:hover:bg-slate-800/60 transition-all duration-150 cursor-pointer flex items-center gap-1.5 md:gap-2 text-slate-300 hover:translate-x-1 py-0.5 md:py-1 md:px-2 md:rounded-lg w-full text-left truncate group"
                     >
                       <Info className="w-3.5 h-3.5 md:w-4 md:h-4 text-sky-400 group-hover:scale-110 transition-transform shrink-0" />
-                      <span className="truncate">About Us</span>
+                      <span className="truncate">{t('আমাদের সম্পর্কে', 'About Us')}</span>
                     </button>
                   </li>
                 </ul>
@@ -278,7 +321,7 @@ export const Footer: React.FC<FooterProps> = ({
               <div className="space-y-2.5 md:space-y-3.5 min-w-0">
                 <h4 className="text-[11px] sm:text-xs md:text-sm font-black text-white uppercase tracking-wider flex items-center gap-1.5 md:gap-2 pb-1 md:pb-2 border-b border-slate-800/80 md:border-emerald-500/30 truncate">
                   <span className="w-1.5 h-1.5 md:w-2 md:h-2 rounded-full bg-emerald-500 shrink-0 inline-block shadow-xs shadow-emerald-500/50"></span>
-                  <span className="truncate">Categories</span>
+                  <span className="truncate">{t('ক্যাটাগরি', 'Categories')}</span>
                 </h4>
                 <ul className="space-y-1.5 md:space-y-2.5 text-[11px] sm:text-xs md:text-sm">
                   <li>
@@ -291,7 +334,7 @@ export const Footer: React.FC<FooterProps> = ({
                       className="hover:text-sky-400 md:hover:text-white md:hover:bg-slate-800/60 transition-all duration-150 cursor-pointer flex items-center gap-1.5 md:gap-2 text-slate-300 hover:translate-x-1 py-0.5 md:py-1 md:px-2 md:rounded-lg w-full text-left truncate group"
                     >
                       <Smartphone className="w-3.5 h-3.5 md:w-4 md:h-4 text-sky-400 group-hover:scale-110 transition-transform shrink-0" />
-                      <span className="truncate">Electronics</span>
+                      <span className="truncate">{t('ইলেকট্রনিক্স', 'Electronics')}</span>
                     </button>
                   </li>
                   <li>
@@ -304,7 +347,7 @@ export const Footer: React.FC<FooterProps> = ({
                       className="hover:text-sky-400 md:hover:text-white md:hover:bg-slate-800/60 transition-all duration-150 cursor-pointer flex items-center gap-1.5 md:gap-2 text-slate-300 hover:translate-x-1 py-0.5 md:py-1 md:px-2 md:rounded-lg w-full text-left truncate group"
                     >
                       <Shirt className="w-3.5 h-3.5 md:w-4 md:h-4 text-rose-400 group-hover:scale-110 transition-transform shrink-0" />
-                      <span className="truncate">Fashion</span>
+                      <span className="truncate">{t('ফ্যাশন', 'Fashion')}</span>
                     </button>
                   </li>
                   <li>
@@ -317,7 +360,7 @@ export const Footer: React.FC<FooterProps> = ({
                       className="hover:text-sky-400 md:hover:text-white md:hover:bg-slate-800/60 transition-all duration-150 cursor-pointer flex items-center gap-1.5 md:gap-2 text-slate-300 hover:translate-x-1 py-0.5 md:py-1 md:px-2 md:rounded-lg w-full text-left truncate group"
                     >
                       <Home className="w-3.5 h-3.5 md:w-4 md:h-4 text-amber-400 group-hover:scale-110 transition-transform shrink-0" />
-                      <span className="truncate">Home & Living</span>
+                      <span className="truncate">{t('হোম ও লিভিং', 'Home & Living')}</span>
                     </button>
                   </li>
                   <li>
@@ -330,7 +373,7 @@ export const Footer: React.FC<FooterProps> = ({
                       className="hover:text-sky-400 md:hover:text-white md:hover:bg-slate-800/60 transition-all duration-150 cursor-pointer flex items-center gap-1.5 md:gap-2 text-slate-300 hover:translate-x-1 py-0.5 md:py-1 md:px-2 md:rounded-lg w-full text-left truncate group"
                     >
                       <Sparkles className="w-3.5 h-3.5 md:w-4 md:h-4 text-purple-400 group-hover:scale-110 transition-transform shrink-0" />
-                      <span className="truncate">Beauty & Care</span>
+                      <span className="truncate">{t('বিউটি ও কেয়ার', 'Beauty & Care')}</span>
                     </button>
                   </li>
                   <li>
@@ -343,7 +386,7 @@ export const Footer: React.FC<FooterProps> = ({
                       className="hover:text-sky-400 md:hover:text-white md:hover:bg-slate-800/60 transition-all duration-150 cursor-pointer flex items-center gap-1.5 md:gap-2 text-slate-300 hover:translate-x-1 py-0.5 md:py-1 md:px-2 md:rounded-lg w-full text-left truncate group"
                     >
                       <Dumbbell className="w-3.5 h-3.5 md:w-4 md:h-4 text-emerald-400 group-hover:scale-110 transition-transform shrink-0" />
-                      <span className="truncate">Sports</span>
+                      <span className="truncate">{t('স্পোর্টস', 'Sports')}</span>
                     </button>
                   </li>
                 </ul>
@@ -353,9 +396,33 @@ export const Footer: React.FC<FooterProps> = ({
               <div className="space-y-2.5 md:space-y-3.5 min-w-0">
                 <h4 className="text-[11px] sm:text-xs md:text-sm font-black text-white uppercase tracking-wider flex items-center gap-1.5 md:gap-2 pb-1 md:pb-2 border-b border-slate-800/80 md:border-amber-500/30 truncate">
                   <span className="w-1.5 h-1.5 md:w-2 md:h-2 rounded-full bg-amber-400 shrink-0 inline-block shadow-xs shadow-amber-400/50"></span>
-                  <span className="truncate">Policies</span>
+                  <span className="truncate">{t('পলিসি ও শর্তাবলী', 'Policies')}</span>
                 </h4>
                 <ul className="space-y-1.5 md:space-y-2.5 text-[11px] sm:text-xs md:text-sm">
+                  <li>
+                    <button
+                      onClick={() => {
+                        onOpenPolicy?.('return');
+                        window.scrollTo({ top: 0, behavior: 'smooth' });
+                      }}
+                      className="hover:text-sky-400 md:hover:text-white md:hover:bg-slate-800/60 transition-all duration-150 cursor-pointer flex items-center gap-1.5 md:gap-2 text-slate-300 hover:translate-x-1 py-0.5 md:py-1 md:px-2 md:rounded-lg w-full text-left truncate group"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5 md:w-4 md:h-4 text-sky-400 group-hover:scale-110 transition-transform shrink-0" />
+                      <span className="truncate">{t('রিটার্ন পলিসি', 'Return Policy')}</span>
+                    </button>
+                  </li>
+                  <li>
+                    <button
+                      onClick={() => {
+                        onOpenPolicy?.('exchange');
+                        window.scrollTo({ top: 0, behavior: 'smooth' });
+                      }}
+                      className="hover:text-sky-400 md:hover:text-white md:hover:bg-slate-800/60 transition-all duration-150 cursor-pointer flex items-center gap-1.5 md:gap-2 text-slate-300 hover:translate-x-1 py-0.5 md:py-1 md:px-2 md:rounded-lg w-full text-left truncate group"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5 md:w-4 md:h-4 text-emerald-400 group-hover:scale-110 transition-transform shrink-0" />
+                      <span className="truncate">{t('এক্সচেঞ্জ পলিসি', 'Exchange Policy')}</span>
+                    </button>
+                  </li>
                   <li>
                     <button
                       onClick={() => {
@@ -365,7 +432,7 @@ export const Footer: React.FC<FooterProps> = ({
                       className="hover:text-sky-400 md:hover:text-white md:hover:bg-slate-800/60 transition-all duration-150 cursor-pointer flex items-center gap-1.5 md:gap-2 text-slate-300 hover:translate-x-1 py-0.5 md:py-1 md:px-2 md:rounded-lg w-full text-left truncate group"
                     >
                       <ShieldCheck className="w-3.5 h-3.5 md:w-4 md:h-4 text-sky-400 group-hover:scale-110 transition-transform shrink-0" />
-                      <span className="truncate">Privacy Policy</span>
+                      <span className="truncate">{t('প্রাইভেসি পলিসি', 'Privacy Policy')}</span>
                     </button>
                   </li>
                   <li>
@@ -377,7 +444,7 @@ export const Footer: React.FC<FooterProps> = ({
                       className="hover:text-sky-400 md:hover:text-white md:hover:bg-slate-800/60 transition-all duration-150 cursor-pointer flex items-center gap-1.5 md:gap-2 text-slate-300 hover:translate-x-1 py-0.5 md:py-1 md:px-2 md:rounded-lg w-full text-left truncate group"
                     >
                       <FileText className="w-3.5 h-3.5 md:w-4 md:h-4 text-amber-400 group-hover:scale-110 transition-transform shrink-0" />
-                      <span className="truncate">Terms of Service</span>
+                      <span className="truncate">{t('শর্তাবলী', 'Terms of Service')}</span>
                     </button>
                   </li>
                   <li>
@@ -388,8 +455,8 @@ export const Footer: React.FC<FooterProps> = ({
                       }}
                       className="hover:text-sky-400 md:hover:text-white md:hover:bg-slate-800/60 transition-all duration-150 cursor-pointer flex items-center gap-1.5 md:gap-2 text-slate-300 hover:translate-x-1 py-0.5 md:py-1 md:px-2 md:rounded-lg w-full text-left truncate group"
                     >
-                      <RotateCcw className="w-3.5 h-3.5 md:w-4 md:h-4 text-rose-400 group-hover:scale-110 transition-transform shrink-0" />
-                      <span className="truncate">Refund Policy</span>
+                      <RotateCcw className="w-3.5 h-3.5 md:w-4 md:h-4 text-sky-400 group-hover:scale-110 transition-transform shrink-0" />
+                      <span className="truncate">{t('রিফান্ড পলিসি', 'Refund Policy')}</span>
                     </button>
                   </li>
                   <li>
@@ -401,7 +468,7 @@ export const Footer: React.FC<FooterProps> = ({
                       className="hover:text-sky-400 md:hover:text-white md:hover:bg-slate-800/60 transition-all duration-150 cursor-pointer flex items-center gap-1.5 md:gap-2 text-slate-300 hover:translate-x-1 py-0.5 md:py-1 md:px-2 md:rounded-lg w-full text-left truncate group"
                     >
                       <HelpCircle className="w-3.5 h-3.5 md:w-4 md:h-4 text-emerald-400 group-hover:scale-110 transition-transform shrink-0" />
-                      <span className="truncate">FAQ & Help</span>
+                      <span className="truncate">{t('প্রশ্ন ও উত্তর', 'FAQ & Help')}</span>
                     </button>
                   </li>
                 </ul>
@@ -412,6 +479,76 @@ export const Footer: React.FC<FooterProps> = ({
           </div>
         </div>
 
+        {/* Compact 1-Line Newsletter Subscription Bar */}
+        <div className="py-3.5 px-4 sm:px-5 my-4 rounded-2xl bg-gradient-to-r from-slate-900/95 via-slate-900/90 to-sky-950/40 border border-slate-800/80 shadow-xs flex flex-col md:flex-row items-center justify-between gap-3 sm:gap-4">
+          {/* Left: Compact Icon & Text */}
+          <div className="flex items-center gap-2.5 text-center md:text-left w-full md:w-auto justify-center md:justify-start">
+            <div className="w-8 h-8 rounded-xl bg-sky-500/15 border border-sky-500/30 text-sky-400 flex items-center justify-center shrink-0">
+              <Mail className="w-4 h-4" />
+            </div>
+            <div>
+              <div className="flex flex-wrap items-center justify-center md:justify-start gap-x-2 gap-y-0.5">
+                <span className="text-xs sm:text-sm font-black text-white whitespace-nowrap">
+                  {t('সাবস্ক্রাইব করুন & এক্সক্লুসিভ অফার পান', 'Subscribe & Get Exclusive Offers')}
+                </span>
+                <span className="text-[11px] text-slate-400 font-medium hidden sm:inline">
+                  {t('(নতুন অফার ও ভাউচার সরাসরি ইনবক্সে)', '(Special deals & vouchers directly to inbox)')}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Right: Inline Form / Status */}
+          <div className="w-full md:w-auto shrink-0">
+            {status === 'success' ? (
+              <div className="flex items-center justify-center gap-2 py-1.5 px-3 rounded-xl bg-emerald-950/80 border border-emerald-500/40 text-emerald-300 text-xs font-bold">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span>{statusMessage}</span>
+                <button
+                  type="button"
+                  onClick={() => setStatus('idle')}
+                  className="text-[10px] text-slate-400 hover:text-white underline ml-2 cursor-pointer"
+                >
+                  {t('অন্য ইমেইল', 'Different Email')}
+                </button>
+              </div>
+            ) : (
+              <form onSubmit={handleSubscribe} className="flex items-center gap-1.5 w-full sm:w-auto">
+                <input
+                  type="email"
+                  required
+                  value={email}
+                  onChange={(e) => {
+                    setEmail(e.target.value);
+                    if (status === 'error') setStatus('idle');
+                  }}
+                  placeholder={t('আপনার ইমেইল এড্রেস লিখুন...', 'Enter your email address...')}
+                  className="flex-1 sm:w-56 md:w-64 px-3 py-2 text-xs rounded-xl bg-slate-950 border border-slate-700/80 text-white placeholder-slate-500 focus:outline-hidden focus:border-sky-500 focus:ring-1 focus:ring-sky-500/30 transition-all font-medium"
+                />
+                <button
+                  type="submit"
+                  disabled={isSubmitting}
+                  className="px-4 py-2 rounded-xl bg-gradient-to-r from-sky-500 to-indigo-600 hover:from-sky-400 hover:to-indigo-500 text-white font-bold text-xs shadow-xs flex items-center justify-center gap-1.5 transition-all active:scale-95 cursor-pointer disabled:opacity-50 shrink-0 whitespace-nowrap"
+                >
+                  {isSubmitting ? (
+                    <span>{t('অপেক্ষা...', 'Wait...')}</span>
+                  ) : (
+                    <>
+                      <Send className="w-3 h-3" />
+                      <span>{t('সাবস্ক্রাইব', 'Subscribe')}</span>
+                    </>
+                  )}
+                </button>
+              </form>
+            )}
+            {status === 'error' && (
+              <p className="text-[10px] font-bold text-rose-400 mt-1 text-center md:text-right">
+                ⚠️ {statusMessage}
+              </p>
+            )}
+          </div>
+        </div>
+
         {/* Bottom Bar: Secured Payment & Courier Badges */}
         <div className="pt-6 pb-2 border-t border-slate-800/80 flex flex-col lg:flex-row items-center justify-between gap-4">
           
@@ -419,7 +556,7 @@ export const Footer: React.FC<FooterProps> = ({
           <div className="flex items-center flex-nowrap overflow-x-auto scrollbar-none w-full lg:w-auto justify-start gap-1.5 sm:gap-2 py-1">
             <span className="text-xs sm:text-sm text-slate-400 font-bold tracking-wide flex items-center gap-1 sm:gap-1.5 mr-1 shrink-0 whitespace-nowrap">
               <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
-              Secured By:
+              {t('নিরাপদ পেমেন্ট:', 'Secured By:')}
             </span>
 
             {/* bKash */}
@@ -461,7 +598,7 @@ export const Footer: React.FC<FooterProps> = ({
           <div className="flex items-center flex-nowrap overflow-x-auto scrollbar-none w-full lg:w-auto justify-start lg:justify-end gap-2 sm:gap-2.5 py-1">
             <span className="text-xs sm:text-sm text-slate-400 font-bold tracking-wide flex items-center gap-1.5 mr-0.5 shrink-0 whitespace-nowrap">
               <Truck className="w-4 h-4 text-cyan-400 shrink-0" />
-              Couriers:
+              {t('কুরিয়ার পার্টনার:', 'Couriers:')}
             </span>
 
             {/* Steadfast Courier - Text Only without background */}

@@ -16,6 +16,7 @@ import {
   Sparkles,
   Upload,
   Video,
+  Play,
   Image as ImageIcon,
   Film,
   Palette,
@@ -62,6 +63,7 @@ import { ProductVideoPlayer } from '../ProductVideoPlayer';
 import { getProductStockStatus, getStockStatusInfo } from '../../utils/stockUtils';
 import { ProductKeyHighlightsEditor } from './ProductKeyHighlightsEditor';
 import { DEFAULT_PRODUCT_HIGHLIGHTS } from '../../utils/highlightConstants';
+import { getStoredPopularityStats } from '../../utils/productPopularity';
 
 interface AdminProductsProps {
   products: Product[];
@@ -103,6 +105,7 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [stockFilter, setStockFilter] = useState('all');
   const [baseTagFilter, setBaseTagFilter] = useState('all');
+  const [sortByPopularity, setSortByPopularity] = useState(false);
 
   // Modal & Priority Manager state
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -129,9 +132,12 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
   const [formImageInput, setFormImageInput] = useState('');
   const [formVideoUrl, setFormVideoUrl] = useState('');
   const [formVideoFile, setFormVideoFile] = useState('');
+  const [formVideoAspectRatio, setFormVideoAspectRatio] = useState<'auto' | '9:16' | '16:9' | '1:1' | '4:3'>('auto');
   const [formError, setFormError] = useState<string | null>(null);
   const [formDescription, setFormDescription] = useState('');
+  const [formShortDescription, setFormShortDescription] = useState('');
   const [descMode, setDescMode] = useState<'edit' | 'preview'>('edit');
+  const [shortDescMode, setShortDescMode] = useState<'edit' | 'preview'>('edit');
   const [formType, setFormType] = useState<ProductType>('own');
   const [formSupplierId, setFormSupplierId] = useState<string>('');
   const [formSupplierName, setFormSupplierName] = useState('');
@@ -279,38 +285,58 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState<number>(15);
 
-  const filteredProducts = products.filter((p) => {
-    const matchesSearch =
-      p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      p.sku.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      p.brand.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (p.subcategory || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (p.subSubcategory || '').toLowerCase().includes(searchQuery.toLowerCase());
+  const popularityStats = useMemo(() => getStoredPopularityStats(), [products, isModalOpen]);
 
-    const matchesCategory =
-      categoryFilter === 'all' || p.category.toLowerCase() === categoryFilter.toLowerCase();
+  const filteredProducts = useMemo(() => {
+    let list = products.filter((p) => {
+      const matchesSearch =
+        p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        p.sku.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        p.brand.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (p.subcategory || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (p.subSubcategory || '').toLowerCase().includes(searchQuery.toLowerCase());
 
-    let matchesStock = true;
-    const pStatus = getProductStockStatus(p);
-    if (stockFilter === 'in_stock') matchesStock = pStatus === 'in_stock';
-    else if (stockFilter === 'out_of_stock') matchesStock = pStatus === 'out_of_stock';
-    else if (stockFilter === 'upcoming') matchesStock = pStatus === 'upcoming';
+      const matchesCategory =
+        categoryFilter === 'all' || p.category.toLowerCase() === categoryFilter.toLowerCase();
 
-    let matchesBaseTag = true;
-    if (baseTagFilter === 'trending') matchesBaseTag = !!p.isTrending || p.saleBadge === 'Trending';
-    else if (baseTagFilter === 'new') matchesBaseTag = !!p.isNew || p.saleBadge === 'New';
-    else if (baseTagFilter === 'bestseller') matchesBaseTag = !!p.isBestSeller || p.saleBadge === 'Best Seller';
-    else if (baseTagFilter === 'hot') matchesBaseTag = !!p.isHot || p.saleBadge === 'Hot';
-    else if (baseTagFilter === 'featured') matchesBaseTag = !!p.isFeatured || p.saleBadge === 'Featured';
-    else if (baseTagFilter === 'discounted') matchesBaseTag = (p.originalPrice > p.price) || ((p.discountPercent || 0) > 0);
+      let matchesStock = true;
+      const pStatus = getProductStockStatus(p);
+      if (stockFilter === 'in_stock') matchesStock = pStatus === 'in_stock';
+      else if (stockFilter === 'out_of_stock') matchesStock = pStatus === 'out_of_stock';
+      else if (stockFilter === 'upcoming') matchesStock = pStatus === 'upcoming';
 
-    return matchesSearch && matchesCategory && matchesStock && matchesBaseTag;
-  });
+      let matchesBaseTag = true;
+      if (baseTagFilter === 'trending') matchesBaseTag = !!p.isTrending || p.saleBadge === 'Trending';
+      else if (baseTagFilter === 'new') matchesBaseTag = !!p.isNew || p.saleBadge === 'New';
+      else if (baseTagFilter === 'bestseller') matchesBaseTag = !!p.isBestSeller || p.saleBadge === 'Best Seller';
+      else if (baseTagFilter === 'hot') matchesBaseTag = !!p.isHot || p.saleBadge === 'Hot';
+      else if (baseTagFilter === 'featured') matchesBaseTag = !!p.isFeatured || p.saleBadge === 'Featured';
+      else if (baseTagFilter === 'discounted') matchesBaseTag = (p.originalPrice > p.price) || ((p.discountPercent || 0) > 0);
+
+      return matchesSearch && matchesCategory && matchesStock && matchesBaseTag;
+    });
+
+    if (sortByPopularity) {
+      list = [...list].sort((a, b) => {
+        const statA = popularityStats[a.id];
+        const statB = popularityStats[b.id];
+        const actionsA = (statA?.buyNowCount || 0) + (statA?.addToCartCount || 0);
+        const actionsB = (statB?.buyNowCount || 0) + (statB?.addToCartCount || 0);
+        if (actionsB !== actionsA) return actionsB - actionsA;
+        const scoreA = (statA?.popularityScore || 0);
+        const scoreB = (statB?.popularityScore || 0);
+        if (scoreB !== scoreA) return scoreB - scoreA;
+        return (b.rating || 0) - (a.rating || 0);
+      });
+    }
+
+    return list;
+  }, [products, searchQuery, categoryFilter, stockFilter, baseTagFilter, sortByPopularity, popularityStats]);
 
   // Reset page to 1 when filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, categoryFilter, stockFilter, baseTagFilter, pageSize]);
+  }, [searchQuery, categoryFilter, stockFilter, baseTagFilter, sortByPopularity, pageSize]);
 
   const totalFilteredCount = filteredProducts.length;
   const totalPages = Math.max(1, Math.ceil(totalFilteredCount / pageSize));
@@ -581,8 +607,10 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
     setFormImageInput('');
     setFormVideoUrl('');
     setFormVideoFile('');
+    setFormVideoAspectRatio('auto');
     setFormError(null);
     setFormDescription('Official genuine product with warranty and fast delivery across Bangladesh.');
+    setFormShortDescription('');
     setFormType('own');
     setFormSupplierId('');
     setFormSupplierName('');
@@ -661,12 +689,22 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
       setFormDiscountValue(0);
     }
 
-    setFormImages(p.images && p.images.length > 0 ? p.images : []);
+    setFormImages(
+      p.images && p.images.length > 0
+        ? p.images.filter((img) => {
+            if (!img || typeof img !== 'string') return false;
+            const lower = img.toLowerCase();
+            return !lower.includes('youtube.com') && !lower.includes('youtu.be') && !lower.includes('tiktok.com') && !lower.includes('.mp4') && !lower.includes('.webm') && !lower.includes('.m3u8');
+          })
+        : []
+    );
     setFormImageInput('');
     setFormVideoUrl(p.videoUrl || '');
     setFormVideoFile('');
+    setFormVideoAspectRatio(p.videoAspectRatio || 'auto');
     setFormError(null);
     setFormDescription(p.description);
+    setFormShortDescription(p.shortDescription || '');
     setFormType(p.productType);
     setFormSupplierId(p.supplierId || '');
     setFormSupplierName(p.supplierName || '');
@@ -736,12 +774,14 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
     const files = e.target.files;
     if (!files || files.length === 0) return;
     for (const file of Array.from(files) as File[]) {
-      const dataUrl = await compressImage(file);
+      // Preserve crystal-clear original resolution (up to 2560px with 0.95 quality)
+      const dataUrl = await compressImage(file, 2560, 2560, 0.95);
       if (dataUrl) {
         setFormImages((prev) => [...prev, dataUrl]);
         setFormError(null);
       }
     }
+    e.target.value = '';
   };
 
   const handleAddImageUrl = () => {
@@ -794,11 +834,20 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
     e.preventDefault();
     if (!formName.trim()) return;
 
-    // Check Photo Requirement
-    const finalImages = formImages.map((img) => getOptimizedImageUrl(img));
+    // Check Photo Requirement & sanitize out video links from images
+    const rawImages = [...formImages];
     if (formImageInput.trim()) {
-      finalImages.push(getOptimizedImageUrl(formImageInput.trim()));
+      rawImages.push(formImageInput.trim());
     }
+    const finalImages: string[] = [];
+    rawImages.forEach((img) => {
+      if (!img || typeof img !== 'string') return;
+      const lower = img.toLowerCase();
+      const isVideo = lower.includes('youtube.com') || lower.includes('youtu.be') || lower.includes('tiktok.com') || lower.includes('.mp4') || lower.includes('.webm') || lower.includes('.m3u8');
+      if (!isVideo) {
+        finalImages.push(getOptimizedImageUrl(img));
+      }
+    });
 
     if (finalImages.length === 0) {
       setFormError('Product photo is required! Please upload at least one photo from your device.');
@@ -866,6 +915,8 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
       stock: (formStockStatus === 'out_of_stock' ? 0 : 999),
       images: finalImages,
       videoUrl: formVideoUrl.trim() || undefined,
+      videoAspectRatio: formVideoAspectRatio,
+      shortDescription: formShortDescription.trim() || undefined,
       description: formDescription.trim(),
       colors: enableColors && formColors.length > 0 ? formColors : undefined,
       sizes: enableSizes && formSizes.length > 0 ? formSizes : undefined,
@@ -903,14 +954,14 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
           onClick={() => setStockFilter('all')}
           className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer border ${
             stockFilter === 'all'
-              ? 'bg-slate-900 text-white border-slate-900 shadow-xs'
-              : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+              ? 'bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900 border-slate-900 dark:border-slate-100 shadow-xs'
+              : 'bg-white text-slate-600 dark:bg-slate-900 dark:text-slate-300 border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800'
           }`}
         >
           <Package className="w-3.5 h-3.5" />
           <span>All Products</span>
           <span className={`ml-0.5 px-1.5 py-0.2 rounded-full text-[10px] ${
-            stockFilter === 'all' ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-600'
+            stockFilter === 'all' ? 'bg-white/20 dark:bg-slate-900/20 text-white dark:text-slate-900' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
           }`}>
             {stockMetrics.all}
           </span>
@@ -921,13 +972,13 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
           className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer border ${
             stockFilter === 'in_stock'
               ? 'bg-emerald-700 text-white border-emerald-700 shadow-xs'
-              : 'bg-white text-emerald-700 border-slate-200 hover:bg-emerald-50/50'
+              : 'bg-white dark:bg-slate-900 text-emerald-700 dark:text-emerald-400 border-slate-200 dark:border-slate-800 hover:bg-emerald-50/50 dark:hover:bg-emerald-950/30'
           }`}
         >
           <span className="w-2 h-2 rounded-full bg-emerald-500" />
           <span>In Stock</span>
           <span className={`ml-0.5 px-1.5 py-0.2 rounded-full text-[10px] ${
-            stockFilter === 'in_stock' ? 'bg-white/20 text-white' : 'bg-emerald-50 text-emerald-700 font-bold'
+            stockFilter === 'in_stock' ? 'bg-white/20 text-white' : 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 font-bold'
           }`}>
             {stockMetrics.inStock}
           </span>
@@ -938,13 +989,13 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
           className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer border ${
             stockFilter === 'out_of_stock'
               ? 'bg-rose-600 text-white border-rose-600 shadow-xs'
-              : 'bg-white text-rose-700 border-slate-200 hover:bg-rose-50/50'
+              : 'bg-white dark:bg-slate-900 text-rose-700 dark:text-rose-400 border-slate-200 dark:border-slate-800 hover:bg-rose-50/50 dark:hover:bg-rose-950/30'
           }`}
         >
           <span className="w-2 h-2 rounded-full bg-rose-500" />
           <span>Out of Stock</span>
           <span className={`ml-0.5 px-1.5 py-0.2 rounded-full text-[10px] ${
-            stockFilter === 'out_of_stock' ? 'bg-white/20 text-white' : 'bg-rose-50 text-rose-700 font-bold'
+            stockFilter === 'out_of_stock' ? 'bg-white/20 text-white' : 'bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 font-bold'
           }`}>
             {stockMetrics.outOfStock}
           </span>
@@ -955,13 +1006,13 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
           className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer border ${
             stockFilter === 'upcoming'
               ? 'bg-purple-600 text-white border-purple-600 shadow-xs'
-              : 'bg-white text-purple-700 border-slate-200 hover:bg-purple-50/50'
+              : 'bg-white dark:bg-slate-900 text-purple-700 dark:text-purple-400 border-slate-200 dark:border-slate-800 hover:bg-purple-50/50 dark:hover:bg-purple-950/30'
           }`}
         >
           <span className="w-2 h-2 rounded-full bg-purple-500" />
           <span>Upcoming</span>
           <span className={`ml-0.5 px-1.5 py-0.2 rounded-full text-[10px] ${
-            stockFilter === 'upcoming' ? 'bg-white/20 text-white' : 'bg-purple-50 text-purple-700 font-bold'
+            stockFilter === 'upcoming' ? 'bg-white/20 text-white' : 'bg-purple-50 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300 font-bold'
           }`}>
             {stockMetrics.upcoming}
           </span>
@@ -969,15 +1020,15 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
       </div>
 
       {/* Filters & Action Bar */}
-      <div className="p-3.5 sm:p-4 rounded-2xl bg-white border border-slate-200 shadow-2xs flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3">
+      <div className="p-3.5 sm:p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xs flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3">
         <div className="relative flex-1 max-w-full lg:max-w-md">
-          <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+          <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500" />
           <input
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Search by product title, SKU (#KB-...), brand..."
-            className="w-full pl-10 pr-4 py-2 rounded-xl border border-slate-200 text-xs text-slate-900 placeholder:text-slate-400 focus:outline-hidden focus:ring-2 focus:ring-sky-500"
+            className="w-full pl-10 pr-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-xs text-slate-900 dark:text-white dark:bg-slate-800 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-hidden focus:ring-2 focus:ring-sky-500"
           />
         </div>
 
@@ -985,7 +1036,7 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
           <select
             value={categoryFilter}
             onChange={(e) => setCategoryFilter(e.target.value)}
-            className="px-2.5 py-2 rounded-xl border border-slate-200 text-xs font-semibold text-slate-700 bg-white cursor-pointer focus:outline-hidden focus:ring-1 focus:ring-sky-500"
+            className="px-2.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-800 cursor-pointer focus:outline-hidden focus:ring-1 focus:ring-sky-500"
           >
             <option value="all">All Categories</option>
             {categories.map((c) => (
@@ -998,7 +1049,7 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
           <select
             value={stockFilter}
             onChange={(e) => setStockFilter(e.target.value)}
-            className="px-2.5 py-2 rounded-xl border border-slate-200 text-xs font-semibold text-slate-700 bg-white cursor-pointer focus:outline-hidden focus:ring-1 focus:ring-sky-500"
+            className="px-2.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-800 cursor-pointer focus:outline-hidden focus:ring-1 focus:ring-sky-500"
           >
             <option value="all">All Statuses</option>
             <option value="in_stock">In Stock</option>
@@ -1009,7 +1060,7 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
           <select
             value={baseTagFilter}
             onChange={(e) => setBaseTagFilter(e.target.value)}
-            className="px-2.5 py-2 rounded-xl border border-slate-200 text-xs font-semibold text-slate-700 bg-white cursor-pointer focus:outline-hidden focus:ring-1 focus:ring-sky-500"
+            className="px-2.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-800 cursor-pointer focus:outline-hidden focus:ring-1 focus:ring-sky-500"
           >
             <option value="all">All Badges</option>
             <option value="trending">🔥 Trending</option>
@@ -1019,6 +1070,32 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
             <option value="featured">⭐ Featured</option>
             <option value="discounted">🏷️ Has Discount</option>
           </select>
+
+          {/* Sort by Popularity Switch */}
+          <button
+            type="button"
+            onClick={() => setSortByPopularity((prev) => !prev)}
+            className={`px-3 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer border shadow-2xs ${
+              sortByPopularity
+                ? 'bg-gradient-to-r from-amber-500 to-orange-600 text-white border-orange-600 ring-2 ring-amber-300'
+                : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700'
+            }`}
+            title="Sort products by real customer Cart additions and Orders"
+          >
+            <Flame className={`w-3.5 h-3.5 ${sortByPopularity ? 'text-white fill-white' : 'text-amber-500'}`} />
+            <span>Sort by Popularity</span>
+            <div
+              className={`w-7 h-4 rounded-full transition-colors relative flex items-center px-0.5 ${
+                sortByPopularity ? 'bg-white/30' : 'bg-slate-200 dark:bg-slate-700'
+              }`}
+            >
+              <div
+                className={`w-3 h-3 rounded-full bg-white dark:bg-slate-200 transition-transform transform shadow-xs ${
+                  sortByPopularity ? 'translate-x-3' : 'translate-x-0'
+                }`}
+              />
+            </div>
+          </button>
 
           <button
             onClick={() => setShowPriorityManager(!showPriorityManager)}
@@ -1056,35 +1133,35 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
         </div>
       )}
 
-      {/* Products Table - Desktop-Optimized (Zero horizontal scroll on PC) / Mobile Cards */}
-      <div className="rounded-2xl bg-white border border-slate-200 shadow-2xs overflow-hidden">
+      {/* Products Table - Desktop-Optimized / Mobile Cards */}
+      <div className="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xs overflow-hidden">
         {/* Desktop View */}
-        <div className="hidden md:block overflow-x-auto lg:overflow-x-hidden">
-          <table className="w-full text-left text-xs border-collapse">
+        <div className="hidden md:block overflow-x-auto scrollbar-thin">
+          <table className="w-full text-left text-xs border-collapse min-w-[860px]">
             <thead>
-              <tr className="bg-slate-50/90 border-b border-slate-200 text-slate-500 uppercase text-[10px] tracking-wider font-bold sticky top-0 z-10 backdrop-blur-xs">
-                <th className="py-3 px-3 w-[28%] min-w-[185px]">Product & SKU</th>
+              <tr className="bg-slate-50/90 dark:bg-slate-800/90 border-b border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 uppercase text-[10px] tracking-wider font-bold sticky top-0 z-10 backdrop-blur-xs">
+                <th className="py-3 px-3 w-[26%] min-w-[200px] max-w-[280px]">Product & SKU</th>
                 <th className="py-3 px-2.5 w-[13%] min-w-[95px]">Category</th>
                 <th className="py-3 px-2.5 w-[10%] min-w-[80px]">Base Tag</th>
                 <th className="py-3 px-2.5 w-[13%] min-w-[95px]">Selling & Offer</th>
                 <th className="py-3 px-2.5 w-[14%] min-w-[105px]">
-                  <div className="flex items-center gap-1 text-slate-700">
+                  <div className="flex items-center gap-1 text-slate-700 dark:text-slate-300">
                     <span>Original Cost</span>
-                    <span className="px-1 py-0.2 rounded bg-amber-100 text-amber-800 text-[8px] font-black uppercase tracking-tight">🔒 Staff</span>
+                    <span className="px-1 py-0.2 rounded bg-amber-100 dark:bg-amber-950/80 text-amber-800 dark:text-amber-300 text-[8px] font-black uppercase tracking-tight">🔒 Staff</span>
                   </div>
                 </th>
                 <th className="py-3 px-2.5 w-[8%] min-w-[70px]">Stock</th>
                 <th className="py-3 px-2.5 w-[8%] min-w-[75px]">Source</th>
-                <th className="py-3 px-3 w-[6%] min-w-[60px] text-right">Actions</th>
+                <th className="py-3 px-3 w-[100px] min-w-[100px] text-right sticky right-0 bg-slate-50/95 dark:bg-slate-800/95 backdrop-blur-xs z-10 shadow-[-4px_0_6px_-2px_rgba(0,0,0,0.06)]">Actions</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100">
+            <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
               {paginatedProducts.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="py-12 text-center text-slate-400">
-                    <Package className="w-8 h-8 mx-auto text-slate-300 mb-2" />
-                    <p className="font-semibold text-sm text-slate-600">No products found</p>
-                    <p className="text-xs text-slate-400 mt-0.5">
+                  <td colSpan={8} className="py-12 text-center text-slate-400 dark:text-slate-500">
+                    <Package className="w-8 h-8 mx-auto text-slate-300 dark:text-slate-600 mb-2" />
+                    <p className="font-semibold text-sm text-slate-600 dark:text-slate-300">No products found</p>
+                    <p className="text-xs text-slate-400 dark:text-slate-500 mt-0.5">
                       Try adjusting your search or category filters.
                     </p>
                   </td>
@@ -1099,10 +1176,10 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                   return (
                     <tr
                       key={product.id}
-                      className="hover:bg-slate-50/70 transition-colors group"
+                      className="hover:bg-slate-50/70 dark:hover:bg-slate-800/50 transition-colors group"
                     >
                       {/* 1. Product & SKU (Image + Name + Monospace SKU & Brand) */}
-                      <td className="py-2.5 px-3">
+                      <td className="py-2.5 px-3 max-w-[260px]">
                         <div className="flex items-center gap-2.5 min-w-0">
                           <img
                             src={getOptimizedImageUrl(
@@ -1114,27 +1191,27 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                             alt={product.name}
                             referrerPolicy="no-referrer"
                             onError={(e) => handleImageError(e, product.images?.[0])}
-                            className="w-9 h-9 rounded-lg object-cover bg-slate-100 shrink-0 border border-slate-200/80 shadow-2xs"
+                            className="w-9 h-9 rounded-lg object-cover bg-slate-100 dark:bg-slate-800 shrink-0 border border-slate-200/80 dark:border-slate-700 shadow-2xs"
                           />
                           <div className="min-w-0 flex-1">
                             <p
-                              className="font-bold text-slate-900 truncate text-xs leading-tight"
+                              className="font-bold text-slate-900 dark:text-white line-clamp-2 text-xs leading-snug break-words"
                               title={product.name}
                             >
                               {product.name}
                             </p>
-                            <div className="flex items-center gap-1.5 mt-0.5 text-[10px] text-slate-500 truncate">
-                              <span className="font-mono font-bold text-slate-700 bg-slate-100 px-1.5 py-0.2 rounded border border-slate-200/80 shrink-0">
+                            <div className="flex items-center gap-1.5 mt-0.5 text-[10px] text-slate-500 dark:text-slate-400 truncate">
+                              <span className="font-mono font-bold text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 px-1.5 py-0.2 rounded border border-slate-200/80 dark:border-slate-700 shrink-0">
                                 #{product.sku}
                               </span>
                               {product.brand && (
-                                <span className="truncate text-slate-500 font-medium">
+                                <span className="truncate text-slate-500 dark:text-slate-400 font-medium">
                                   • {product.brand}
                                 </span>
                               )}
                               {(product.supplierName || product.supplierId || product.productType === 'dropshipping') && (
                                 <span
-                                  className="inline-flex items-center gap-1 font-bold text-indigo-700 bg-indigo-50 px-1.5 py-0.2 rounded border border-indigo-200 shrink-0 text-[9px]"
+                                  className="inline-flex items-center gap-1 font-bold text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/80 px-1.5 py-0.2 rounded border border-indigo-200 dark:border-indigo-800 shrink-0 text-[9px]"
                                   title={product.supplierUrl || 'Dropshipping Supplier'}
                                 >
                                   <Building2 className="w-2.5 h-2.5" />
@@ -1147,16 +1224,16 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                       </td>
 
                       {/* 2. Category & Subcategory */}
-                      <td className="py-2.5 px-2.5 text-slate-700">
+                      <td className="py-2.5 px-2.5 text-slate-700 dark:text-slate-300">
                         <div className="min-w-0">
-                          <div className="font-bold text-slate-800 truncate text-[11px] sm:text-xs">
+                          <div className="font-bold text-slate-800 dark:text-slate-200 truncate text-[11px] sm:text-xs">
                             {product.category}
                           </div>
                           {(product.subcategory || product.subSubcategory) && (
-                            <div className="text-[10px] text-slate-500 truncate mt-0.5 flex items-center gap-1 flex-wrap">
+                            <div className="text-[10px] text-slate-500 dark:text-slate-400 truncate mt-0.5 flex items-center gap-1 flex-wrap">
                               {product.subcategory && <span>› {product.subcategory}</span>}
                               {product.subSubcategory && (
-                                <span className="font-semibold text-sky-700 bg-sky-50 px-1 py-0.2 rounded border border-sky-200">
+                                <span className="font-semibold text-sky-700 dark:text-sky-300 bg-sky-50 dark:bg-sky-950/80 px-1 py-0.2 rounded border border-sky-200 dark:border-sky-800">
                                   › {product.subSubcategory}
                                 </span>
                               )}
@@ -1165,57 +1242,79 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                         </div>
                       </td>
 
-                      {/* 3. Base Tag */}
+                      {/* 3. Base Tag & Popularity Metric */}
                       <td className="py-2.5 px-2.5 whitespace-nowrap">
-                        {product.saleBadge === 'Trending' || product.isTrending ? (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-purple-100 text-purple-800 border border-purple-200">
-                            <Flame className="w-2.5 h-2.5 text-purple-600 shrink-0" />
-                            <span>Trending</span>
-                          </span>
-                        ) : product.saleBadge === 'New' || product.isNew ? (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-sky-100 text-sky-800 border border-sky-200">
-                            <Sparkles className="w-2.5 h-2.5 text-sky-600 shrink-0" />
-                            <span>New</span>
-                          </span>
-                        ) : product.saleBadge === 'Best Seller' || product.isBestSeller ? (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-100 text-emerald-800 border border-emerald-200">
-                            <Award className="w-2.5 h-2.5 text-emerald-600 shrink-0" />
-                            <span>Best Seller</span>
-                          </span>
-                        ) : product.saleBadge === 'Hot' || product.isHot ? (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-rose-100 text-rose-800 border border-rose-200">
-                            <Zap className="w-2.5 h-2.5 text-rose-600 shrink-0" />
-                            <span>Hot Deal</span>
-                          </span>
-                        ) : product.saleBadge === 'Featured' || product.isFeatured ? (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-100 text-amber-800 border border-amber-200">
-                            <Star className="w-2.5 h-2.5 text-amber-500 shrink-0 fill-amber-400" />
-                            <span>Featured</span>
-                          </span>
-                        ) : (
-                          <span className="inline-block px-2 py-0.5 rounded text-[10px] font-medium text-slate-400 bg-slate-100">
-                            Regular
-                          </span>
-                        )}
+                        <div className="flex flex-col gap-1">
+                          {product.saleBadge === 'Trending' || product.isTrending ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-purple-100 dark:bg-purple-950/80 text-purple-800 dark:text-purple-300 border border-purple-200 dark:border-purple-800">
+                              <Flame className="w-2.5 h-2.5 text-purple-600 dark:text-purple-400 shrink-0" />
+                              <span>Trending</span>
+                            </span>
+                          ) : product.saleBadge === 'New' || product.isNew ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-sky-100 dark:bg-sky-950/80 text-sky-800 dark:text-sky-300 border border-sky-200 dark:border-sky-800">
+                              <Sparkles className="w-2.5 h-2.5 text-sky-600 dark:text-sky-400 shrink-0" />
+                              <span>New</span>
+                            </span>
+                          ) : product.saleBadge === 'Best Seller' || product.isBestSeller ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-100 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+                              <Award className="w-2.5 h-2.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                              <span>Best Seller</span>
+                            </span>
+                          ) : product.saleBadge === 'Hot' || product.isHot ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-rose-100 dark:bg-rose-950/80 text-rose-800 dark:text-rose-300 border border-rose-200 dark:border-rose-800">
+                              <Zap className="w-2.5 h-2.5 text-rose-600 dark:text-rose-400 shrink-0" />
+                              <span>Hot Deal</span>
+                            </span>
+                          ) : product.saleBadge === 'Featured' || product.isFeatured ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-100 dark:bg-amber-950/80 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
+                              <Star className="w-2.5 h-2.5 text-amber-500 shrink-0 fill-amber-400" />
+                              <span>Featured</span>
+                            </span>
+                          ) : (
+                            <span className="inline-block px-2 py-0.5 rounded text-[10px] font-medium text-slate-400 dark:text-slate-400 bg-slate-100 dark:bg-slate-800">
+                              Regular
+                            </span>
+                          )}
+
+                          {/* Popularity Action Metrics Pill */}
+                          {(() => {
+                            const stat = popularityStats[product.id];
+                            const cartQty = stat?.addToCartCount || 0;
+                            const buyQty = stat?.buyNowCount || 0;
+                            const total = cartQty + buyQty;
+                            if (total === 0 && !sortByPopularity) return null;
+                            return (
+                              <span
+                                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-50 dark:bg-amber-950/80 text-amber-900 dark:text-amber-300 border border-amber-200 dark:border-amber-800 text-[9px] font-bold"
+                                title={`User Actions: ${cartQty} Cart additions, ${buyQty} Orders`}
+                              >
+                                <Flame className="w-2.5 h-2.5 text-amber-600 shrink-0" />
+                                <span>🛒 {cartQty}</span>
+                                <span className="text-amber-300 dark:text-amber-700">•</span>
+                                <span>🛍️ {buyQty}</span>
+                              </span>
+                            );
+                          })()}
+                        </div>
                       </td>
 
                       {/* 4. Price & Discount Offer */}
                       <td className="py-2.5 px-2.5 whitespace-nowrap">
                         <div className="flex flex-col">
-                          <span className="text-xs font-black text-slate-900">
+                          <span className="text-xs font-black text-slate-900 dark:text-white">
                             ৳{product.price.toLocaleString('en-BD')}
                           </span>
                           {product.originalPrice > product.price && (
                             <div className="flex items-center gap-1 mt-0.5 text-[10px]">
-                              <span className="text-slate-400 line-through">
+                              <span className="text-slate-400 dark:text-slate-500 line-through">
                                 ৳{product.originalPrice.toLocaleString('en-BD')}
                               </span>
                               {product.discountType === 'flat' && product.discountValue ? (
-                                <span className="px-1 py-0.2 rounded font-bold bg-rose-50 text-rose-700 border border-rose-200 text-[9px]">
+                                <span className="px-1 py-0.2 rounded font-bold bg-rose-50 dark:bg-rose-950/80 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800 text-[9px]">
                                   -৳{product.discountValue.toLocaleString('en-BD')}
                                 </span>
                               ) : product.discountPercent ? (
-                                <span className="px-1 py-0.2 rounded font-bold bg-rose-50 text-rose-700 border border-rose-200 text-[9px]">
+                                <span className="px-1 py-0.2 rounded font-bold bg-rose-50 dark:bg-rose-950/80 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800 text-[9px]">
                                   -{product.discountPercent}%
                                 </span>
                               ) : null}
@@ -1228,12 +1327,12 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                       <td className="py-2.5 px-2.5 whitespace-nowrap">
                         <div className="flex flex-col text-[11px]">
                           <div className="flex items-center gap-1">
-                            <span className="text-slate-900 font-bold">
+                            <span className="text-slate-900 dark:text-white font-bold">
                               ৳{(product.costPrice || Math.round(product.price * 0.75)).toLocaleString('en-BD')}
                             </span>
-                            <span className="text-[9px] text-amber-600 font-semibold" title="Visible only to Staff">🔒</span>
+                            <span className="text-[9px] text-amber-600 dark:text-amber-400 font-semibold" title="Visible only to Staff">🔒</span>
                           </div>
-                          <span className="text-[10px] font-bold text-emerald-600">
+                          <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400">
                             +৳{(product.price - (product.costPrice || Math.round(product.price * 0.75))).toLocaleString('en-BD')} ({marginPercent}%)
                           </span>
                         </div>
@@ -1273,8 +1372,8 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                         )}
                       </td>
 
-                      {/* 8. Quick Actions (Always visible without scrolling) */}
-                      <td className="py-2.5 px-3 text-right whitespace-nowrap">
+                      {/* 8. Quick Actions (Sticky right - always visible even with long titles) */}
+                      <td className="py-2.5 px-3 text-right whitespace-nowrap sticky right-0 bg-white/95 dark:bg-slate-900/95 group-hover:bg-slate-50/95 dark:group-hover:bg-slate-800/95 backdrop-blur-xs z-10 shadow-[-4px_0_6px_-2px_rgba(0,0,0,0.06)]">
                         <div className="flex items-center justify-end gap-1">
                           <button
                             onClick={() => {
@@ -1391,6 +1490,23 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                         </span>
                       ) : null}
 
+                      {/* Mobile Popularity Pill */}
+                      {(() => {
+                        const stat = popularityStats[product.id];
+                        const cartQty = stat?.addToCartCount || 0;
+                        const buyQty = stat?.buyNowCount || 0;
+                        const total = cartQty + buyQty;
+                        if (total === 0 && !sortByPopularity) return null;
+                        return (
+                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-50 text-amber-900 border border-amber-200 text-[9px] font-bold">
+                            <Flame className="w-2.5 h-2.5 text-amber-600" />
+                            <span>🛒 {cartQty}</span>
+                            <span className="text-amber-300">•</span>
+                            <span>🛍️ {buyQty}</span>
+                          </span>
+                        );
+                      })()}
+
                       {product.supplierUrl ? (
                         <a
                           href={product.supplierUrl}
@@ -1496,21 +1612,21 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
         </div>
 
         {/* Compact Pagination & Count Footer */}
-        <div className="p-3 sm:px-4 bg-slate-50/80 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-600">
-          <div className="flex items-center gap-3">
+        <div className="p-3 sm:px-4 bg-slate-50/80 dark:bg-slate-800/90 border-t border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-600 dark:text-slate-300">
+          <div className="flex items-center gap-3 flex-wrap">
             <span>
               Showing{' '}
-              <strong className="font-bold text-slate-800">
+              <strong className="font-bold text-slate-900 dark:text-white">
                 {totalFilteredCount === 0 ? 0 : (safeCurrentPage - 1) * pageSize + 1}
               </strong>{' '}
               to{' '}
-              <strong className="font-bold text-slate-800">
+              <strong className="font-bold text-slate-900 dark:text-white">
                 {Math.min(safeCurrentPage * pageSize, totalFilteredCount)}
               </strong>{' '}
-              of <strong className="font-bold text-slate-800">{totalFilteredCount}</strong> products
+              of <strong className="font-bold text-slate-900 dark:text-white">{totalFilteredCount}</strong> products
             </span>
 
-            <div className="hidden sm:flex items-center gap-1.5 pl-3 border-l border-slate-200 text-slate-500">
+            <div className="flex items-center gap-1.5 sm:pl-3 sm:border-l border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400">
               <span>Per page:</span>
               <select
                 value={pageSize}
@@ -1518,7 +1634,7 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                   setPageSize(Number(e.target.value));
                   setCurrentPage(1);
                 }}
-                className="px-2 py-1 rounded-lg border border-slate-200 bg-white text-xs font-semibold text-slate-700 cursor-pointer focus:outline-hidden focus:ring-1 focus:ring-sky-500"
+                className="px-2 py-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-semibold text-slate-800 dark:text-slate-200 cursor-pointer focus:outline-hidden focus:ring-1 focus:ring-sky-500"
               >
                 <option value={15}>15</option>
                 <option value={30}>30</option>
@@ -1533,21 +1649,21 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
               <button
                 onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
                 disabled={safeCurrentPage === 1}
-                className="px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed font-medium text-xs flex items-center gap-1 transition-colors cursor-pointer"
+                className="px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed font-medium text-xs flex items-center gap-1 transition-colors cursor-pointer"
                 title="Previous Page"
               >
                 <ChevronLeft className="w-3.5 h-3.5" />
                 <span>Prev</span>
               </button>
 
-              <span className="px-2.5 py-1 font-bold text-slate-700">
+              <span className="px-2.5 py-1 font-bold text-slate-800 dark:text-slate-200 bg-slate-100 dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-700">
                 Page {safeCurrentPage} of {totalPages}
               </span>
 
               <button
                 onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
                 disabled={safeCurrentPage === totalPages}
-                className="px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed font-medium text-xs flex items-center gap-1 transition-colors cursor-pointer"
+                className="px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed font-medium text-xs flex items-center gap-1 transition-colors cursor-pointer"
                 title="Next Page"
               >
                 <span>Next</span>
@@ -1700,7 +1816,7 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                               setFormSubSubcategory(e.target.value);
                             }
                           }}
-                          className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs text-slate-900 bg-white focus:ring-2 focus:ring-sky-500 font-medium"
+                          className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 text-xs text-slate-900 dark:text-white bg-white dark:bg-slate-800 focus:ring-2 focus:ring-sky-500 font-medium"
                         >
                           <option value="">-- None / General Child Subcategory --</option>
                           {childSubList.map((csName, idx) => (
@@ -1717,7 +1833,7 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                           value={formSubSubcategory}
                           onChange={(e) => setFormSubSubcategory(e.target.value)}
                           placeholder="Or type custom child subcategory (e.g. T-Shirts & Polos)"
-                          className="w-full px-3 py-1.5 rounded-xl border border-slate-200 text-xs text-slate-900 bg-slate-50 focus:bg-white focus:ring-2 focus:ring-sky-500 placeholder:text-slate-400 font-medium"
+                          className="w-full px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 text-xs text-slate-900 dark:text-white bg-slate-50 dark:bg-slate-800 focus:bg-white dark:focus:bg-slate-800 focus:ring-2 focus:ring-sky-500 placeholder:text-slate-400 dark:placeholder:text-slate-500 font-medium"
                         />
                       </div>
                     );
@@ -1725,18 +1841,18 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Brand</label>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Brand</label>
                   <input
                     type="text"
                     value={formBrand}
                     onChange={(e) => setFormBrand(e.target.value)}
                     placeholder="Xiaomi / Apple / Haylou"
-                    className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs text-slate-900 focus:ring-2 focus:ring-sky-500 bg-white"
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 text-xs text-slate-900 dark:text-white focus:ring-2 focus:ring-sky-500 bg-white dark:bg-slate-800"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
                     Custom Ad Link Slug (Optional)
                   </label>
                   <input
@@ -1744,33 +1860,33 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                     value={formSlug}
                     onChange={(e) => setFormSlug(e.target.value)}
                     placeholder="e.g. t800-smart-watch-offer"
-                    className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs text-slate-900 focus:ring-2 focus:ring-sky-500 bg-white"
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 text-xs text-slate-900 dark:text-white focus:ring-2 focus:ring-sky-500 bg-white dark:bg-slate-800"
                   />
-                  <p className="text-[10px] text-slate-500 mt-0.5">
-                    Ad URL: <span className="font-mono text-emerald-700 font-semibold">?product={formSlug.trim() || (editingProduct ? editingProduct.id : 'custom-slug')}</span>
+                  <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
+                    Ad URL: <span className="font-mono text-emerald-700 dark:text-emerald-400 font-semibold">?product={formSlug.trim() || (editingProduct ? editingProduct.id : 'custom-slug')}</span>
                   </p>
                 </div>
 
                 {/* Product Base / Sale Badge Selection */}
-                <div className="sm:col-span-2 p-3 rounded-xl bg-slate-50 border border-slate-200 space-y-2">
+                <div className="sm:col-span-2 p-3 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-2">
                   <div className="flex items-center justify-between">
-                    <label className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                    <label className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
                       <Flame className="w-3.5 h-3.5 text-amber-500" />
                       <span>Sale Badge / Highlight</span>
                     </label>
-                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-sky-100 text-sky-800">
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-sky-100 dark:bg-sky-950 text-sky-800 dark:text-sky-300 border border-sky-300 dark:border-sky-700">
                       {formSaleBadge}
                     </span>
                   </div>
 
                   <div className="grid grid-cols-3 sm:grid-cols-6 gap-1.5">
                     {[
-                      { id: 'Trending', label: 'Trending', icon: Flame, color: 'border-purple-200 bg-purple-50/70 text-purple-800', active: 'ring-2 ring-purple-500 bg-purple-100 text-purple-900 font-bold' },
-                      { id: 'New', label: 'New', icon: Sparkles, color: 'border-sky-200 bg-sky-50/70 text-sky-800', active: 'ring-2 ring-sky-500 bg-sky-100 text-sky-900 font-bold' },
-                      { id: 'Best Seller', label: 'Best Seller', icon: Award, color: 'border-emerald-200 bg-emerald-50/70 text-emerald-800', active: 'ring-2 ring-emerald-500 bg-emerald-100 text-emerald-900 font-bold' },
-                      { id: 'Hot', label: 'Hot Deals', icon: Zap, color: 'border-rose-200 bg-rose-50/70 text-rose-800', active: 'ring-2 ring-rose-500 bg-rose-100 text-rose-900 font-bold' },
-                      { id: 'Featured', label: 'Featured', icon: TrendingUp, color: 'border-amber-200 bg-amber-50/70 text-amber-800', active: 'ring-2 ring-amber-500 bg-amber-100 text-amber-900 font-bold' },
-                      { id: 'None', label: 'Regular', icon: Check, color: 'border-slate-200 bg-white text-slate-600', active: 'ring-2 ring-slate-400 bg-slate-100 text-slate-900 font-bold' },
+                      { id: 'Trending', label: 'Trending', icon: Flame, color: 'border-purple-200 dark:border-purple-800 bg-purple-50/70 dark:bg-purple-950/60 text-purple-800 dark:text-purple-300', active: 'ring-2 ring-purple-500 bg-purple-100 dark:bg-purple-900 text-purple-900 dark:text-purple-100 font-bold' },
+                      { id: 'New', label: 'New', icon: Sparkles, color: 'border-sky-200 dark:border-sky-800 bg-sky-50/70 dark:bg-sky-950/60 text-sky-800 dark:text-sky-300', active: 'ring-2 ring-sky-500 bg-sky-100 dark:bg-sky-900 text-sky-900 dark:text-sky-100 font-bold' },
+                      { id: 'Best Seller', label: 'Best Seller', icon: Award, color: 'border-emerald-200 dark:border-emerald-800 bg-emerald-50/70 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300', active: 'ring-2 ring-emerald-500 bg-emerald-100 dark:bg-emerald-900 text-emerald-900 dark:text-emerald-100 font-bold' },
+                      { id: 'Hot', label: 'Hot Deals', icon: Zap, color: 'border-rose-200 dark:border-rose-800 bg-rose-50/70 dark:bg-rose-950/60 text-rose-800 dark:text-rose-300', active: 'ring-2 ring-rose-500 bg-rose-100 dark:bg-rose-900 text-rose-900 dark:text-rose-100 font-bold' },
+                      { id: 'Featured', label: 'Featured', icon: TrendingUp, color: 'border-amber-200 dark:border-amber-800 bg-amber-50/70 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300', active: 'ring-2 ring-amber-500 bg-amber-100 dark:bg-amber-900 text-amber-900 dark:text-amber-100 font-bold' },
+                      { id: 'None', label: 'Regular', icon: Check, color: 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300', active: 'ring-2 ring-slate-400 bg-slate-100 dark:bg-slate-700 text-slate-900 dark:text-white font-bold' },
                     ].map((badge) => {
                       const IconComponent = badge.icon;
                       const isSelected = formSaleBadge === badge.id;
@@ -1792,10 +1908,10 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                 </div>
 
                 {/* Product Navigation & Admin Tags Section */}
-                <div className="sm:col-span-2 p-3.5 rounded-xl bg-sky-50/70 border border-sky-200/80 space-y-3">
+                <div className="sm:col-span-2 p-3.5 rounded-xl bg-sky-50/70 dark:bg-slate-900 border border-sky-200/80 dark:border-slate-800 space-y-3">
                   <div className="flex items-center justify-between">
-                    <label className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
-                      <Tag className="w-4 h-4 text-sky-600" />
+                    <label className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
+                      <Tag className="w-4 h-4 text-sky-600 dark:text-sky-400" />
                       <span>Admin Navigation Tags</span>
                     </label>
                     <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-sky-600 text-white">
@@ -1829,12 +1945,12 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                           }}
                           className={`px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
                             isChecked
-                              ? 'bg-slate-900 text-white border-slate-900 shadow-xs ring-2 ring-sky-400'
-                              : 'bg-white text-slate-700 border-slate-300 hover:border-slate-400'
+                              ? 'bg-slate-900 dark:bg-sky-600 text-white border-slate-900 dark:border-sky-500 shadow-xs ring-2 ring-sky-400'
+                              : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-slate-300 dark:border-slate-700 hover:border-slate-400'
                           }`}
                         >
                           <span className={`w-3.5 h-3.5 rounded-md flex items-center justify-center border text-[9px] ${
-                            isChecked ? 'bg-sky-400 border-sky-300 text-slate-950 font-black' : 'border-slate-300 bg-slate-50'
+                            isChecked ? 'bg-sky-400 dark:bg-sky-300 border-sky-300 text-slate-950 font-black' : 'border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-700'
                           }`}>
                             {isChecked ? '✓' : ''}
                           </span>
@@ -1845,8 +1961,8 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                   </div>
 
                   {/* Add Custom Admin Tag Input */}
-                  <div className="pt-2 border-t border-sky-200/60 space-y-2">
-                    <label className="text-[11px] font-bold text-slate-700 block">
+                  <div className="pt-2 border-t border-sky-200/60 dark:border-slate-800 space-y-2">
+                    <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 block">
                       + Add Custom Admin Tag
                     </label>
                     <div className="flex items-center gap-2">
@@ -1865,7 +1981,7 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                           }
                         }}
                         placeholder="e.g. Ramadan Offer, Winter Offer, Clearance Sale..."
-                        className="flex-1 px-3 py-1.5 rounded-xl border border-slate-300 bg-white text-slate-900 text-xs focus:ring-2 focus:ring-sky-500 focus:outline-none"
+                        className="flex-1 px-3 py-1.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-xs focus:ring-2 focus:ring-sky-500 focus:outline-none"
                       />
                       <button
                         type="button"
@@ -1888,13 +2004,13 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                         {formTags.map((t, idx) => (
                           <span
                             key={`tag_pill_${idx}`}
-                            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white border border-slate-300 text-slate-800 text-[11px] font-bold shadow-2xs"
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-800 dark:text-slate-200 text-[11px] font-bold shadow-2xs"
                           >
                             <span>🏷️ {t}</span>
                             <button
                               type="button"
                               onClick={() => setFormTags((prev) => prev.filter((item) => item !== t))}
-                              className="w-4 h-4 rounded-full bg-slate-100 hover:bg-rose-500 hover:text-white text-slate-500 flex items-center justify-center text-[10px] transition-colors cursor-pointer"
+                              className="w-4 h-4 rounded-full bg-slate-100 dark:bg-slate-700 hover:bg-rose-500 hover:text-white text-slate-500 dark:text-slate-400 flex items-center justify-center text-[10px] transition-colors cursor-pointer"
                             >
                               ✕
                             </button>
@@ -1906,10 +2022,10 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                 </div>
 
                 {/* Pricing & Discount Engine */}
-                <div className="sm:col-span-2 p-3.5 rounded-xl bg-slate-50/80 border border-slate-200 space-y-3">
+                <div className="sm:col-span-2 p-3.5 rounded-xl bg-slate-50/80 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-3">
                   <div className="flex items-center justify-between">
-                    <h4 className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
-                      <Percent className="w-3.5 h-3.5 text-sky-600" />
+                    <h4 className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
+                      <Percent className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400" />
                       <span>Pricing & Inventory</span>
                     </h4>
                   </div>
@@ -1917,7 +2033,7 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
                     {/* Regular / Strike Price */}
                     <div>
-                      <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                      <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
                         Regular Price (৳) *
                       </label>
                       <div className="relative">
@@ -1930,24 +2046,24 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                           value={formOriginalPrice}
                           onChange={(e) => handleOriginalPriceChange(e.target.value === '' ? '' : Number(e.target.value))}
                           placeholder="e.g. 3000"
-                          className="w-full pl-6 pr-2.5 py-1.5 rounded-lg border border-slate-300 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-sky-500 bg-white"
+                          className="w-full pl-6 pr-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-bold text-slate-900 dark:text-white focus:ring-2 focus:ring-sky-500 bg-white dark:bg-slate-800"
                         />
                       </div>
                     </div>
 
                     {/* Discount Type Selector */}
                     <div>
-                      <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                      <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
                         Discount Type
                       </label>
-                      <div className="grid grid-cols-3 gap-1 bg-slate-200/80 p-0.5 rounded-lg">
+                      <div className="grid grid-cols-3 gap-1 bg-slate-200/80 dark:bg-slate-800 p-0.5 rounded-lg">
                         <button
                           type="button"
                           onClick={() => handleDiscountTypeChange('percentage')}
                           className={`py-1 text-[10px] font-bold rounded transition-all cursor-pointer ${
                             formDiscountType === 'percentage'
                               ? 'bg-sky-600 text-white shadow-2xs'
-                              : 'text-slate-600 hover:text-slate-900'
+                              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                           }`}
                         >
                           % Percent
@@ -1958,7 +2074,7 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                           className={`py-1 text-[10px] font-bold rounded transition-all cursor-pointer ${
                             formDiscountType === 'flat'
                               ? 'bg-rose-600 text-white shadow-2xs'
-                              : 'text-slate-600 hover:text-slate-900'
+                              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                           }`}
                         >
                           ৳ Flat
@@ -1968,8 +2084,8 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                           onClick={() => handleDiscountTypeChange('none')}
                           className={`py-1 text-[10px] font-bold rounded transition-all cursor-pointer ${
                             formDiscountType === 'none'
-                              ? 'bg-slate-700 text-white shadow-2xs'
-                              : 'text-slate-600 hover:text-slate-900'
+                              ? 'bg-slate-700 dark:bg-slate-600 text-white shadow-2xs'
+                              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                           }`}
                         >
                           None
@@ -1979,7 +2095,7 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
 
                     {/* Discount Value */}
                     <div>
-                      <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                      <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
                         Discount Value {formDiscountType === 'percentage' ? '(%)' : formDiscountType === 'flat' ? '(৳)' : ''}
                       </label>
                       <div className="relative">
@@ -1990,10 +2106,10 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                           value={formDiscountValue}
                           onChange={(e) => handleDiscountValueChange(e.target.value === '' ? '' : Number(e.target.value))}
                           placeholder={formDiscountType === 'percentage' ? '10' : '500'}
-                          className={`w-full pr-7 pl-2.5 py-1.5 rounded-lg border text-xs font-bold focus:ring-2 focus:ring-sky-500 bg-white ${
+                          className={`w-full pr-7 pl-2.5 py-1.5 rounded-lg border text-xs font-bold focus:ring-2 focus:ring-sky-500 bg-white dark:bg-slate-800 ${
                             formDiscountType === 'none'
-                              ? 'border-slate-200 bg-slate-100 text-slate-400 cursor-not-allowed'
-                              : 'border-slate-300 text-slate-900'
+                              ? 'border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-900 text-slate-400 cursor-not-allowed'
+                              : 'border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white'
                           }`}
                         />
                         <span className="absolute right-2.5 top-1/2 -translate-y-1/2 font-bold text-slate-400 text-xs">
@@ -2004,20 +2120,20 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                   </div>
 
                   {/* Pricing Result & Cost/Stock Grid */}
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1 border-t border-slate-200">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1 border-t border-slate-200 dark:border-slate-800">
                     <div>
                       <div className="flex items-center justify-between mb-1">
-                        <label className="block text-[11px] font-bold text-emerald-800">
+                        <label className="block text-[11px] font-bold text-emerald-800 dark:text-emerald-300">
                           Final Selling Price (৳) *
                         </label>
                         {priceLockedByAdmin && Number(formPrice) > 0 && (
-                          <span className="text-[9px] font-extrabold text-emerald-700 bg-emerald-100/90 px-1.5 py-0.2 rounded border border-emerald-300">
+                          <span className="text-[9px] font-extrabold text-emerald-700 dark:text-emerald-300 bg-emerald-100/90 dark:bg-emerald-950 px-1.5 py-0.2 rounded border border-emerald-300 dark:border-emerald-700">
                             Exact Locked
                           </span>
                         )}
                       </div>
                       <div className="relative">
-                        <span className="absolute left-2.5 top-1/2 -translate-y-1/2 font-bold text-emerald-600 text-xs">
+                        <span className="absolute left-2.5 top-1/2 -translate-y-1/2 font-bold text-emerald-600 dark:text-emerald-400 text-xs">
                           ৳
                         </span>
                         <input
@@ -2026,13 +2142,13 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                           value={formPrice}
                           onChange={(e) => handleSellingPriceChange(e.target.value === '' ? '' : Number(e.target.value))}
                           placeholder="e.g. 2700"
-                          className="w-full pl-6 pr-2.5 py-1.5 rounded-lg border border-emerald-300 text-xs font-bold text-emerald-800 bg-white focus:ring-2 focus:ring-emerald-500"
+                          className="w-full pl-6 pr-2.5 py-1.5 rounded-lg border border-emerald-300 dark:border-emerald-700 text-xs font-bold text-emerald-800 dark:text-emerald-200 bg-white dark:bg-slate-800 focus:ring-2 focus:ring-emerald-500"
                         />
                       </div>
                     </div>
 
                     <div>
-                      <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                      <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
                         Cost Price (৳)
                       </label>
                       <div className="relative">
@@ -2045,13 +2161,13 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                           value={formCostPrice}
                           onChange={(e) => setFormCostPrice(e.target.value === '' ? '' : Number(e.target.value))}
                           placeholder="e.g. 1500"
-                          className="w-full pl-6 pr-2.5 py-1.5 rounded-lg border border-slate-300 text-xs font-bold text-slate-900 bg-white focus:ring-2 focus:ring-sky-500"
+                          className="w-full pl-6 pr-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-bold text-slate-900 dark:text-white bg-white dark:bg-slate-800 focus:ring-2 focus:ring-sky-500"
                         />
                       </div>
                     </div>
 
                     <div>
-                      <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                      <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
                         Product Stock Status *
                       </label>
                       <select
@@ -2060,7 +2176,7 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                           const val = e.target.value as 'in_stock' | 'out_of_stock' | 'upcoming';
                           setFormStockStatus(val || 'in_stock');
                         }}
-                        className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 text-xs font-bold text-slate-900 bg-white focus:ring-2 focus:ring-sky-500 cursor-pointer"
+                        className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-bold text-slate-900 dark:text-white bg-white dark:bg-slate-800 focus:ring-2 focus:ring-sky-500 cursor-pointer"
                       >
                         <option value="in_stock">In Stock</option>
                         <option value="out_of_stock">Out of Stock</option>
@@ -2070,9 +2186,9 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                   </div>
 
                   {/* Live Pricing Summary & Customer Store Display Guarantee */}
-                  <div className="p-2.5 rounded-xl bg-emerald-50/70 border border-emerald-200/80 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
-                    <div className="flex items-center gap-1.5 font-bold text-slate-800">
-                      <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <div className="p-2.5 rounded-xl bg-emerald-50/70 dark:bg-emerald-950/40 border border-emerald-200/80 dark:border-emerald-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+                    <div className="flex items-center gap-1.5 font-bold text-slate-800 dark:text-slate-200">
+                      <CheckCircle className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
                       <span>Customer Store Price Preview:</span>
                     </div>
                     <div className="flex flex-wrap items-center gap-2 font-bold text-xs">
@@ -2081,11 +2197,11 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                           ৳{Number(formOriginalPrice).toLocaleString('en-BD')}
                         </span>
                       )}
-                      <span className="text-emerald-800 font-black text-sm bg-emerald-100 border border-emerald-300 px-2.5 py-0.5 rounded-lg shadow-2xs">
+                      <span className="text-emerald-800 dark:text-emerald-300 font-black text-sm bg-emerald-100 dark:bg-emerald-950 border border-emerald-300 dark:border-emerald-700 px-2.5 py-0.5 rounded-lg shadow-2xs">
                         ৳{Number(formPrice || 0).toLocaleString('en-BD')} (Customer Pays)
                       </span>
                       {Number(formOriginalPrice) > Number(formPrice) && (
-                        <span className="bg-rose-100 text-rose-700 px-2 py-0.5 rounded-md border border-rose-200 text-[11px] font-extrabold">
+                        <span className="bg-rose-100 dark:bg-rose-950 text-rose-700 dark:text-rose-300 px-2 py-0.5 rounded-md border border-rose-200 dark:border-rose-800 text-[11px] font-extrabold">
                           {formDiscountType === 'percentage'
                             ? `${Math.round(((Number(formOriginalPrice) - Number(formPrice)) / Number(formOriginalPrice)) * 100)}% OFF`
                             : `-৳${(Number(formOriginalPrice) - Number(formPrice)).toLocaleString('en-BD')} Flat OFF`}
@@ -2095,20 +2211,20 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                   </div>
 
                   {/* Product Priority & Page Ranking Configuration */}
-                  <div className="p-3.5 bg-gradient-to-r from-purple-50/70 to-indigo-50/70 border border-purple-200/80 rounded-xl space-y-3">
+                  <div className="p-3.5 bg-gradient-to-r from-purple-50/70 to-indigo-50/70 dark:from-purple-950/80 dark:to-indigo-950/80 border border-purple-200/80 dark:border-purple-800 rounded-xl space-y-3">
                     <div className="flex items-center justify-between flex-wrap gap-2">
-                      <div className="flex items-center gap-1.5 font-extrabold text-xs text-purple-950">
-                        <ArrowUpDown className="w-4 h-4 text-purple-600 shrink-0" />
+                      <div className="flex items-center gap-1.5 font-extrabold text-xs text-purple-950 dark:text-purple-200">
+                        <ArrowUpDown className="w-4 h-4 text-purple-600 dark:text-purple-400 shrink-0" />
                         <span>Product Page Priorities (Set Position per Store Page)</span>
                       </div>
-                      <span className="text-[10px] font-bold bg-white text-purple-800 px-2 py-0.5 rounded-md border border-purple-200">
+                      <span className="text-[10px] font-bold bg-white dark:bg-slate-800 text-purple-800 dark:text-purple-300 px-2 py-0.5 rounded-md border border-purple-200 dark:border-purple-800">
                         1 = Top Priority (#1 Position)
                       </span>
                     </div>
 
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-xs">
                       <div>
-                        <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                        <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
                           Home Page Rank
                         </label>
                         <input
@@ -2120,12 +2236,12 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                             setFormPagePriorities((prev) => ({ ...prev, home: val }));
                           }}
                           placeholder="Auto / Default"
-                          className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 font-bold text-slate-900 bg-white focus:ring-2 focus:ring-purple-500"
+                          className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 font-bold text-slate-900 dark:text-white bg-white dark:bg-slate-800 focus:ring-2 focus:ring-purple-500"
                         />
                       </div>
 
                       <div>
-                        <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                        <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
                           Shop Page Rank
                         </label>
                         <input
@@ -2137,12 +2253,12 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                             setFormPagePriorities((prev) => ({ ...prev, shop: val }));
                           }}
                           placeholder="Auto / Default"
-                          className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 font-bold text-slate-900 bg-white focus:ring-2 focus:ring-purple-500"
+                          className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 font-bold text-slate-900 dark:text-white bg-white dark:bg-slate-800 focus:ring-2 focus:ring-purple-500"
                         />
                       </div>
 
                       <div>
-                        <label className="block text-[11px] font-bold text-slate-700 mb-1 truncate" title={`Category: ${formCategory}`}>
+                        <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1 truncate" title={`Category: ${formCategory}`}>
                           Category Rank
                         </label>
                         <input
@@ -2154,12 +2270,12 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                             setFormPagePriorities((prev) => ({ ...prev, [`category:${formCategory}`]: val }));
                           }}
                           placeholder="Auto / Default"
-                          className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 font-bold text-slate-900 bg-white focus:ring-2 focus:ring-purple-500"
+                          className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 font-bold text-slate-900 dark:text-white bg-white dark:bg-slate-800 focus:ring-2 focus:ring-purple-500"
                         />
                       </div>
 
                       <div>
-                        <label className="block text-[11px] font-bold text-slate-700 mb-1 truncate" title={`Tag: ${formSaleBadge}`}>
+                        <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1 truncate" title={`Tag: ${formSaleBadge}`}>
                           Tag Page Rank
                         </label>
                         <input
@@ -2171,30 +2287,144 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                             setFormPagePriorities((prev) => ({ ...prev, [`tag:${formSaleBadge}`]: val }));
                           }}
                           placeholder="Auto / Default"
-                          className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 font-bold text-slate-900 bg-white focus:ring-2 focus:ring-purple-500"
+                          className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 font-bold text-slate-900 dark:text-white bg-white dark:bg-slate-800 focus:ring-2 focus:ring-purple-500"
                         />
                       </div>
                     </div>
                   </div>
                 </div>
 
+                {/* Short Description (2-3 Lines Quick View Overview with Rich Formatting & Icons) */}
+                <div className="sm:col-span-2 p-3.5 bg-gradient-to-r from-sky-50/60 to-slate-50 dark:from-slate-900 dark:to-slate-900 border border-sky-100 dark:border-slate-800 rounded-xl space-y-2">
+                  <div className="flex items-center justify-between flex-wrap gap-1.5">
+                    <label className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                      <Sparkles className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400" />
+                      <span>Short Description (Bold, Italic & Benefit Icons Supported)</span>
+                      <span className="text-[10px] font-medium text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-md border border-slate-200 dark:border-slate-700">
+                        Optional
+                      </span>
+                    </label>
+                    <div className="flex items-center gap-1 bg-slate-200/70 dark:bg-slate-800 p-0.5 rounded-lg text-[10px] font-bold">
+                      <button
+                        type="button"
+                        onClick={() => setShortDescMode('edit')}
+                        className={`px-2 py-0.5 rounded-md transition-colors cursor-pointer ${
+                          shortDescMode === 'edit'
+                            ? 'bg-white dark:bg-slate-900 text-sky-700 dark:text-sky-400 shadow-xs'
+                            : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+                        }`}
+                      >
+                        ✏️ Edit
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setShortDescMode('preview')}
+                        className={`px-2 py-0.5 rounded-md transition-colors cursor-pointer ${
+                          shortDescMode === 'preview'
+                            ? 'bg-white dark:bg-slate-900 text-sky-700 dark:text-sky-400 shadow-xs'
+                            : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+                        }`}
+                      >
+                        👁️ Live Preview
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Formatting Toolbar for Bold, Italic & Highlight Icons */}
+                  {shortDescMode === 'edit' && (
+                    <div className="flex items-center flex-wrap gap-1 bg-white dark:bg-slate-900 p-1.5 rounded-lg border border-slate-200 dark:border-slate-800 text-xs shadow-2xs">
+                      <span className="text-[10px] font-bold text-slate-400 dark:text-slate-500 px-1 uppercase tracking-wider">Format:</span>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setFormShortDescription((prev) => (prev ? `${prev} **bold text**` : '**bold text**'))
+                        }
+                        className="px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-extrabold cursor-pointer transition-colors"
+                        title="Add Bold Text (**bold**)"
+                      >
+                        B
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setFormShortDescription((prev) => (prev ? `${prev} *italic text*` : '*italic text*'))
+                        }
+                        className="px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 italic font-serif cursor-pointer transition-colors"
+                        title="Add Italic Text (*italic*)"
+                      >
+                        I
+                      </button>
+
+                      <div className="h-3 w-px bg-slate-200 dark:bg-slate-700 mx-1" />
+
+                      <span className="text-[10px] font-bold text-slate-400 dark:text-slate-500 px-1 uppercase tracking-wider">Icons:</span>
+                      {[
+                        { tag: '[check]', label: '✓ Check', icon: 'check-circle', color: 'text-emerald-600' },
+                        { tag: '[truck]', label: '🚚 Delivery', icon: 'truck', color: 'text-sky-600' },
+                        { tag: '[shield]', label: '🛡️ Warranty', icon: 'shield-check', color: 'text-indigo-600' },
+                        { tag: '[star]', label: '⭐ Quality', icon: 'star', color: 'text-amber-500' },
+                        { tag: '[zap]', label: '⚡ Fast', icon: 'zap', color: 'text-amber-600' },
+                        { tag: '[heart]', label: '❤️ Favorite', icon: 'heart', color: 'text-rose-500' },
+                        { tag: '[flame]', label: '🔥 Hot', icon: 'flame', color: 'text-orange-500' },
+                        { tag: '[award]', label: '🏆 Original', icon: 'award', color: 'text-purple-600' },
+                        { tag: '[gift]', label: '🎁 Offer', icon: 'gift', color: 'text-pink-600' },
+                        { tag: '[tag]', label: '🏷️ Tag', icon: 'tag', color: 'text-sky-600' },
+                      ].map((btn) => (
+                        <button
+                          key={btn.tag}
+                          type="button"
+                          onClick={() =>
+                            setFormShortDescription((prev) => (prev ? `${prev}\n${btn.tag} ` : `${btn.tag} `))
+                          }
+                          className="px-1.5 py-0.5 rounded bg-slate-50 dark:bg-slate-800 hover:bg-sky-50 dark:hover:bg-sky-950/50 text-slate-700 dark:text-slate-300 hover:text-sky-800 dark:hover:text-sky-300 text-[11px] border border-slate-200 dark:border-slate-700 flex items-center gap-1 transition-all cursor-pointer"
+                          title={`Insert ${btn.tag}`}
+                        >
+                          <span>{btn.label}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  {shortDescMode === 'edit' ? (
+                    <textarea
+                      rows={3}
+                      value={formShortDescription}
+                      onChange={(e) => setFormShortDescription(e.target.value)}
+                      placeholder="Short summary with bold/italic and icons e.g.&#10;[check] **100% Original** product with *official warranty*&#10;[truck] **Fast home delivery** within 24-48 hours across Bangladesh&#10;[shield] **Cash on delivery** available"
+                      className="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 text-xs text-slate-900 dark:text-slate-100 leading-relaxed bg-white dark:bg-slate-950 focus:ring-2 focus:ring-sky-500 font-sans"
+                    />
+                  ) : (
+                    <div className="bg-white dark:bg-slate-950 p-3 rounded-lg border border-slate-200 dark:border-slate-800 min-h-[70px]">
+                      {formShortDescription.trim() ? (
+                        <FormattedText content={formShortDescription} className="text-xs text-slate-800 dark:text-slate-200" />
+                      ) : (
+                        <p className="text-xs text-slate-400 italic">Short description is empty.</p>
+                      )}
+                    </div>
+                  )}
+
+                  <p className="text-[10px] text-slate-500 dark:text-slate-400 flex items-center gap-1">
+                    <span>💡 Use buttons above or type tags like <code className="bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded text-slate-800 dark:text-slate-200 font-mono">**bold**</code>, <code className="bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded text-slate-800 dark:text-slate-200 font-mono">*italic*</code> for benefit icons in Quick View!</span>
+                  </p>
+                </div>
+
                 {/* Description & Specifications Side-by-Side Compact Layout */}
                 <div className="sm:col-span-2 grid grid-cols-1 lg:grid-cols-2 gap-3.5">
                   {/* Left: Product Description */}
-                  <div className="p-3.5 bg-slate-50/80 border border-slate-200 rounded-xl space-y-2 flex flex-col">
+                  <div className="p-3.5 bg-slate-50/80 dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 rounded-xl space-y-2 flex flex-col">
                     <div className="flex items-center justify-between flex-wrap gap-1.5">
-                      <label className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
-                        <FileText className="w-3.5 h-3.5 text-sky-600" />
+                      <label className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                        <FileText className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400" />
                         <span>Description (Formatting Supported)</span>
                       </label>
-                      <div className="flex items-center gap-1 bg-slate-200/70 p-0.5 rounded-lg text-[10px] font-bold">
+                      <div className="flex items-center gap-1 bg-slate-200/70 dark:bg-slate-800 p-0.5 rounded-lg text-[10px] font-bold">
                         <button
                           type="button"
                           onClick={() => setDescMode('edit')}
                           className={`px-2 py-0.5 rounded-md transition-colors cursor-pointer ${
                             descMode === 'edit'
-                              ? 'bg-white text-sky-700 shadow-xs'
-                              : 'text-slate-600 hover:text-slate-900'
+                              ? 'bg-white dark:bg-slate-900 text-sky-700 dark:text-sky-400 shadow-xs'
+                              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
                           }`}
                         >
                           ✏️ Edit
@@ -2204,8 +2434,8 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                           onClick={() => setDescMode('preview')}
                           className={`px-2 py-0.5 rounded-md transition-colors cursor-pointer ${
                             descMode === 'preview'
-                              ? 'bg-white text-sky-700 shadow-xs'
-                              : 'text-slate-600 hover:text-slate-900'
+                              ? 'bg-white dark:bg-slate-900 text-sky-700 dark:text-sky-400 shadow-xs'
+                              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
                           }`}
                         >
                           👁️ Live Preview
@@ -2217,39 +2447,39 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                       <>
                         {/* Format helper buttons */}
                         <div className="flex items-center gap-1.5 flex-wrap text-[10px]">
-                          <span className="text-slate-500 font-medium">Format:</span>
+                          <span className="text-slate-500 dark:text-slate-400 font-medium">Format:</span>
                           <button
                             type="button"
                             onClick={() => setFormDescription((prev) => prev + ' **Bold Text** ')}
-                            className="px-1.5 py-0.5 bg-white border border-slate-300 rounded hover:bg-sky-50 hover:border-sky-300 text-slate-800 font-extrabold cursor-pointer"
+                            className="px-1.5 py-0.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded hover:bg-sky-50 dark:hover:bg-sky-950 hover:border-sky-300 text-slate-800 dark:text-slate-200 font-extrabold cursor-pointer"
                           >
                             **B** Bold
                           </button>
                           <button
                             type="button"
                             onClick={() => setFormDescription((prev) => prev + ' *Italic Text* ')}
-                            className="px-1.5 py-0.5 bg-white border border-slate-300 rounded hover:bg-sky-50 hover:border-sky-300 text-slate-800 italic cursor-pointer"
+                            className="px-1.5 py-0.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded hover:bg-sky-50 dark:hover:bg-sky-950 hover:border-sky-300 text-slate-800 dark:text-slate-200 italic cursor-pointer"
                           >
                             *I* Italic
                           </button>
                           <button
                             type="button"
                             onClick={() => setFormDescription((prev) => prev + '\n# Heading 1\n')}
-                            className="px-1.5 py-0.5 bg-white border border-slate-300 rounded hover:bg-sky-50 hover:border-sky-300 text-slate-800 font-black cursor-pointer"
+                            className="px-1.5 py-0.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded hover:bg-sky-50 dark:hover:bg-sky-950 hover:border-sky-300 text-slate-800 dark:text-slate-200 font-black cursor-pointer"
                           >
                             # H1
                           </button>
                           <button
                             type="button"
                             onClick={() => setFormDescription((prev) => prev + '\n## Heading 2\n')}
-                            className="px-1.5 py-0.5 bg-white border border-slate-300 rounded hover:bg-sky-50 hover:border-sky-300 text-slate-800 font-bold cursor-pointer"
+                            className="px-1.5 py-0.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded hover:bg-sky-50 dark:hover:bg-sky-950 hover:border-sky-300 text-slate-800 dark:text-slate-200 font-bold cursor-pointer"
                           >
                             ## H2
                           </button>
                           <button
                             type="button"
                             onClick={() => setFormDescription((prev) => prev + '\n- Item 1\n- Item 2\n')}
-                            className="px-1.5 py-0.5 bg-white border border-slate-300 rounded hover:bg-sky-50 hover:border-sky-300 text-slate-800 font-semibold cursor-pointer"
+                            className="px-1.5 py-0.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded hover:bg-sky-50 dark:hover:bg-sky-950 hover:border-sky-300 text-slate-800 dark:text-slate-200 font-semibold cursor-pointer"
                           >
                             • List
                           </button>
@@ -2260,16 +2490,16 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                           value={formDescription}
                           onChange={(e) => setFormDescription(e.target.value)}
                           placeholder="Example: **Product Features:**\n- 100% Original Brand Product\n- 1 Year Warranty\n# Key Specifications"
-                          className="w-full flex-1 px-3 py-2 rounded-lg border border-slate-300 text-xs text-slate-900 leading-relaxed bg-white focus:ring-2 focus:ring-sky-500 font-sans"
+                          className="w-full flex-1 px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 text-xs text-slate-900 dark:text-slate-100 leading-relaxed bg-white dark:bg-slate-950 focus:ring-2 focus:ring-sky-500 font-sans"
                         />
-                        <p className="text-[10px] text-slate-500 italic">
-                          💡 Wrap text with <code className="bg-slate-200 px-1 py-0.5 rounded text-slate-800 font-mono">**</code> for Bold, use <code className="bg-slate-200 px-1 py-0.5 rounded text-slate-800 font-mono">#</code> for Headings, and <code className="bg-slate-200 px-1 py-0.5 rounded text-slate-800 font-mono">-</code> for Bullet lists.
+                        <p className="text-[10px] text-slate-500 dark:text-slate-400 italic">
+                          💡 Wrap text with <code className="bg-slate-200 dark:bg-slate-800 px-1 py-0.5 rounded text-slate-800 dark:text-slate-200 font-mono">**</code> for Bold, use <code className="bg-slate-200 dark:bg-slate-800 px-1 py-0.5 rounded text-slate-800 dark:text-slate-200 font-mono">#</code> for Headings, and <code className="bg-slate-200 dark:bg-slate-800 px-1 py-0.5 rounded text-slate-800 dark:text-slate-200 font-mono">-</code> for Bullet lists.
                         </p>
                       </>
                     ) : (
-                      <div className="p-3 bg-white border border-slate-200 rounded-lg min-h-[140px] max-h-[220px] overflow-y-auto text-xs">
+                      <div className="p-3 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg min-h-[140px] max-h-[220px] overflow-y-auto text-xs">
                         {formDescription.trim() ? (
-                          <FormattedText content={formDescription} className="text-xs text-slate-800" />
+                          <FormattedText content={formDescription} className="text-xs text-slate-800 dark:text-slate-200" />
                         ) : (
                           <span className="text-slate-400 italic">No description written yet. Switch to "Edit" tab to write one.</span>
                         )}
@@ -2278,18 +2508,18 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                   </div>
 
                   {/* Right: Product Specifications */}
-                  <div className="p-3.5 bg-slate-50/80 border border-slate-200 rounded-xl space-y-2.5 flex flex-col justify-between">
+                  <div className="p-3.5 bg-slate-50/80 dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 rounded-xl space-y-2.5 flex flex-col justify-between">
                     <div className="space-y-2">
                       <div className="flex items-center justify-between">
-                        <label className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
-                          <Award className="w-3.5 h-3.5 text-sky-600" />
+                        <label className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                          <Award className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400" />
                           <span>Product Specifications</span>
                         </label>
                         {Object.keys(formSpecifications).length > 0 && (
                           <button
                             type="button"
                             onClick={() => setFormSpecifications({})}
-                            className="text-[10px] font-bold text-rose-600 hover:underline cursor-pointer"
+                            className="text-[10px] font-bold text-rose-600 dark:text-rose-400 hover:underline cursor-pointer"
                           >
                             Clear All
                           </button>
@@ -2303,7 +2533,7 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                             value={newSpecKey}
                             onChange={(e) => setNewSpecKey(e.target.value)}
                             placeholder="Key (e.g. Warranty)"
-                            className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 text-xs text-slate-900 bg-white"
+                            className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-xs text-slate-900 dark:text-slate-100 bg-white dark:bg-slate-950"
                           />
                         </div>
                         <div className="sm:col-span-5">
@@ -2312,7 +2542,7 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                             value={newSpecVal}
                             onChange={(e) => setNewSpecVal(e.target.value)}
                             placeholder="Value (e.g. 1 Year)"
-                            className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 text-xs text-slate-900 bg-white"
+                            className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-xs text-slate-900 dark:text-slate-100 bg-white dark:bg-slate-950"
                           />
                         </div>
                         <div className="sm:col-span-2">
@@ -2320,7 +2550,7 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                             type="button"
                             onClick={handleAddSpecification}
                             disabled={!newSpecKey.trim() || !newSpecVal.trim()}
-                            className="w-full py-1.5 px-2 bg-sky-600 hover:bg-sky-500 disabled:bg-slate-200 disabled:text-slate-400 text-white text-xs font-bold rounded-lg transition-all cursor-pointer"
+                            className="w-full py-1.5 px-2 bg-sky-600 hover:bg-sky-500 disabled:bg-slate-200 dark:disabled:bg-slate-800 disabled:text-slate-400 text-white text-xs font-bold rounded-lg transition-all cursor-pointer"
                           >
                             + Add
                           </button>
@@ -2332,10 +2562,10 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                     {Object.keys(formSpecifications).length > 0 ? (
                       <div className="max-h-28 overflow-y-auto space-y-1 pr-1">
                         {Object.entries(formSpecifications).map(([k, v]) => (
-                          <div key={k} className="flex items-center justify-between px-2 py-1 rounded-md bg-white border border-slate-200 text-xs">
+                          <div key={k} className="flex items-center justify-between px-2 py-1 rounded-md bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs">
                             <div className="min-w-0 pr-1 truncate">
-                              <span className="font-bold text-slate-800">{k}: </span>
-                              <span className="text-slate-600">{v}</span>
+                              <span className="font-bold text-slate-800 dark:text-slate-200">{k}: </span>
+                              <span className="text-slate-600 dark:text-slate-400">{v}</span>
                             </div>
                             <button
                               type="button"
@@ -2348,7 +2578,7 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                         ))}
                       </div>
                     ) : (
-                      <div className="py-2 text-center text-slate-400 text-[11px] italic bg-white/60 rounded-lg border border-dashed border-slate-200">
+                      <div className="py-2 text-center text-slate-400 dark:text-slate-500 text-[11px] italic bg-white/60 dark:bg-slate-950/60 rounded-lg border border-dashed border-slate-200 dark:border-slate-800">
                         No specifications added yet
                       </div>
                     )}
@@ -2373,25 +2603,25 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                   )}
 
                   {/* 1. Product Photos */}
-                  <div className="p-3.5 bg-slate-50/80 border border-slate-200 rounded-xl space-y-2.5">
+                  <div className="p-3.5 bg-slate-50/80 dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 rounded-xl space-y-2.5">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-1.5">
-                        <ImageIcon className="w-3.5 h-3.5 text-sky-600" />
-                        <span className="text-xs font-bold text-slate-800">
+                        <ImageIcon className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400" />
+                        <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
                           Product Photos *
                         </span>
                       </div>
-                      <span className="text-[10px] font-bold text-slate-500">
+                      <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400">
                         {formImages.length} uploaded
                       </span>
                     </div>
 
-                    {/* Compact Upload & URL input side by side */}
+                    {/* Compact Upload & Camera & URL inputs */}
                     <div className="grid grid-cols-1 sm:grid-cols-12 gap-2">
-                      <label className="sm:col-span-6 flex items-center justify-center gap-2 border border-dashed border-sky-300 hover:border-sky-500 bg-white hover:bg-sky-50/40 rounded-lg py-2 px-3 cursor-pointer transition-colors group">
-                        <Upload className="w-4 h-4 text-sky-500 group-hover:scale-110 transition-transform" />
-                        <span className="text-xs font-bold text-slate-700">
-                          Upload Photos from Device
+                      <label className="sm:col-span-4 flex items-center justify-center gap-2 border border-dashed border-sky-300 dark:border-sky-800 hover:border-sky-500 dark:hover:border-sky-600 bg-white dark:bg-slate-950 hover:bg-sky-50/40 dark:hover:bg-sky-950/40 rounded-lg py-2 px-3 cursor-pointer transition-colors group">
+                        <Upload className="w-4 h-4 text-sky-500 dark:text-sky-400 group-hover:scale-110 transition-transform" />
+                        <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                          Upload Photos
                         </span>
                         <input
                           type="file"
@@ -2402,18 +2632,32 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                         />
                       </label>
 
-                      <div className="sm:col-span-6 flex items-center gap-1.5">
+                      <label className="sm:col-span-3 flex items-center justify-center gap-1.5 border border-dashed border-emerald-300 dark:border-emerald-800 hover:border-emerald-500 dark:hover:border-emerald-600 bg-white dark:bg-slate-950 hover:bg-emerald-50/40 dark:hover:bg-emerald-950/40 rounded-lg py-2 px-2.5 cursor-pointer transition-colors group" title="Capture high-definition photo with camera">
+                        <Camera className="w-4 h-4 text-emerald-600 dark:text-emerald-400 group-hover:scale-110 transition-transform" />
+                        <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                          Take Photo
+                        </span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          capture="environment"
+                          onChange={handlePhotoUploadFromDevice}
+                          className="hidden"
+                        />
+                      </label>
+
+                      <div className="sm:col-span-5 flex items-center gap-1.5">
                         <input
                           type="url"
                           value={formImageInput}
                           onChange={(e) => setFormImageInput(e.target.value)}
                           placeholder="Or paste image URL"
-                          className="flex-1 px-2.5 py-1.5 rounded-lg border border-slate-300 text-xs text-slate-900 bg-white"
+                          className="flex-1 px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-xs text-slate-900 dark:text-slate-100 bg-white dark:bg-slate-950"
                         />
                         <button
                           type="button"
                           onClick={handleAddImageUrl}
-                          className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold rounded-lg transition-colors shrink-0 cursor-pointer"
+                          className="px-3 py-1.5 bg-slate-800 dark:bg-slate-700 hover:bg-slate-700 dark:hover:bg-slate-600 text-white text-xs font-bold rounded-lg transition-colors shrink-0 cursor-pointer"
                         >
                           Add URL
                         </button>
@@ -2422,18 +2666,18 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
 
                     {/* Uploaded Photos Thumbnails Grid */}
                     {formImages.length > 0 && (
-                      <div className="pt-2 border-t border-slate-200/80">
+                      <div className="pt-2 border-t border-slate-200/80 dark:border-slate-800">
                         <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-2">
                           {formImages.map((imgUrl, index) => {
                             const isFirst = index === 0;
                             return (
                               <div
                                 key={index}
-                                className={`relative rounded-lg overflow-hidden border p-1 bg-white flex flex-col justify-between shadow-2xs ${
-                                  isFirst ? 'border-amber-400 ring-2 ring-amber-300/40 bg-amber-50/20' : 'border-slate-200'
+                                className={`relative rounded-lg overflow-hidden border p-1 bg-white dark:bg-slate-950 flex flex-col justify-between shadow-2xs ${
+                                  isFirst ? 'border-amber-400 ring-2 ring-amber-300/40 bg-amber-50/20 dark:bg-amber-950/20' : 'border-slate-200 dark:border-slate-800'
                                 }`}
                               >
-                                <div className="relative aspect-square rounded overflow-hidden bg-slate-50">
+                                <div className="relative aspect-square rounded overflow-hidden bg-slate-50 dark:bg-slate-900">
                                   <img
                                     src={getOptimizedImageUrl(
                                       (imgUrl && imgUrl.trim() !== '') ? imgUrl : 'https://images.unsplash.com/photo-1546868871-7041f2a55e12?w=120',
@@ -2463,7 +2707,7 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                                     <button
                                       type="button"
                                       onClick={() => handleSetFirstImage(index)}
-                                      className="w-full py-0.5 rounded bg-slate-100 hover:bg-sky-600 hover:text-white text-slate-700 text-[9px] font-semibold transition-colors cursor-pointer"
+                                      className="w-full py-0.5 rounded bg-slate-100 dark:bg-slate-800 hover:bg-sky-600 dark:hover:bg-sky-600 text-slate-700 dark:text-slate-300 hover:text-white text-[9px] font-semibold transition-colors cursor-pointer"
                                     >
                                       Set as Cover
                                     </button>
@@ -2474,7 +2718,7 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                                       disabled={index === 0}
                                       onClick={() => handleMoveImage(index, index - 1)}
                                       className={`flex-1 py-0.5 rounded text-[8px] font-bold border ${
-                                        index === 0 ? 'opacity-30 border-slate-200' : 'border-slate-200 hover:bg-slate-100 cursor-pointer'
+                                        index === 0 ? 'opacity-30 border-slate-200 dark:border-slate-800' : 'border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer text-slate-700 dark:text-slate-300'
                                       }`}
                                     >
                                       ←
@@ -2484,7 +2728,7 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                                       disabled={index === formImages.length - 1}
                                       onClick={() => handleMoveImage(index, index + 1)}
                                       className={`flex-1 py-0.5 rounded text-[8px] font-bold border ${
-                                        index === formImages.length - 1 ? 'opacity-30 border-slate-200' : 'border-slate-200 hover:bg-slate-100 cursor-pointer'
+                                        index === formImages.length - 1 ? 'opacity-30 border-slate-200 dark:border-slate-800' : 'border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer text-slate-700 dark:text-slate-300'
                                       }`}
                                     >
                                       →
@@ -2500,11 +2744,11 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                   </div>
 
                   {/* 2. Product Video (Compact) */}
-                  <div className="p-3 bg-slate-50/80 border border-slate-200 rounded-xl space-y-2">
+                  <div className="p-3 bg-slate-50/80 dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 rounded-xl space-y-2">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-1.5">
-                        <Video className="w-3.5 h-3.5 text-indigo-600" />
-                        <span className="text-xs font-bold text-slate-800">
+                        <Video className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                        <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
                           Product Video (Optional)
                         </span>
                       </div>
@@ -2515,7 +2759,7 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                             setFormVideoUrl('');
                             setFormVideoFile('');
                           }}
-                          className="text-[10px] font-bold text-rose-600 hover:underline cursor-pointer"
+                          className="text-[10px] font-bold text-rose-600 dark:text-rose-400 hover:underline cursor-pointer"
                         >
                           Remove Video
                         </button>
@@ -2523,8 +2767,8 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                     </div>
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                      <label className="flex items-center justify-center gap-1.5 border border-dashed border-indigo-200 hover:border-indigo-400 bg-white rounded-lg py-1.5 px-3 cursor-pointer text-xs font-bold text-indigo-900 transition-colors">
-                        <Film className="w-3.5 h-3.5 text-indigo-600" />
+                      <label className="flex items-center justify-center gap-1.5 border border-dashed border-indigo-200 dark:border-indigo-800 hover:border-indigo-400 dark:hover:border-indigo-600 bg-white dark:bg-slate-950 rounded-lg py-1.5 px-3 cursor-pointer text-xs font-bold text-indigo-900 dark:text-indigo-300 transition-colors">
+                        <Film className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
                         <span>Upload Video File</span>
                         <input
                           type="file"
@@ -2538,31 +2782,88 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                         value={formVideoUrl}
                         onChange={(e) => setFormVideoUrl(e.target.value)}
                         placeholder="TikTok, YouTube, Google Drive, or MP4 link..."
-                        className="px-2.5 py-1.5 rounded-lg border border-slate-300 text-xs text-slate-900 bg-white"
+                        className="px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-xs text-slate-900 dark:text-slate-100 bg-white dark:bg-slate-950"
                       />
                     </div>
 
-                    <p className="text-[10px] text-slate-500 font-medium">
-                      ✨ Supports <strong>TikTok</strong>, <strong>YouTube</strong>, <strong>Google Drive</strong>, or MP4 files. Plays natively in HD without YouTube titles/logos or skip buttons.
+                    {/* Video Aspect Ratio Selector */}
+                    <div className="pt-2 border-t border-slate-200 dark:border-slate-800">
+                      <div className="flex items-center justify-between mb-1.5">
+                        <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300">
+                          ভিডিও রেশিও (Aspect Ratio):
+                        </label>
+                        <span className="text-[10px] text-slate-500 dark:text-slate-400">
+                          TikTok / Reels / Shorts হলে ৯:১৬ নির্বাচন করুন
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-2 sm:grid-cols-5 gap-1.5">
+                        {[
+                          { value: 'auto', label: '🔄 অটো-ডিটেক্ট', desc: 'আসল রেশিও' },
+                          { value: '9:16', label: '📱 ৯:১৬', desc: 'TikTok / Shorts' },
+                          { value: '16:9', label: '🖥️ ১৬:৯', desc: 'YouTube / ওয়াইড' },
+                          { value: '1:1', label: '🔲 ১:১', desc: 'স্কয়ার / চারকোনা' },
+                          { value: '4:3', label: '📺 ৪:৩', desc: 'স্ট্যান্ডার্ড' },
+                        ].map((opt) => {
+                          const isSelected = formVideoAspectRatio === opt.value;
+                          return (
+                            <button
+                              key={opt.value}
+                              type="button"
+                              onClick={() => setFormVideoAspectRatio(opt.value as any)}
+                              className={`px-2 py-1.5 rounded-lg text-left border transition-all cursor-pointer ${
+                                isSelected
+                                  ? 'bg-indigo-50 dark:bg-indigo-950/80 border-indigo-500 dark:border-indigo-600 text-indigo-900 dark:text-indigo-200 shadow-xs font-bold'
+                                  : 'bg-white dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:border-slate-300 dark:hover:border-slate-700'
+                              }`}
+                            >
+                              <div className="text-[11px] leading-tight font-bold">{opt.label}</div>
+                              <div className="text-[9px] text-slate-500 dark:text-slate-400">{opt.desc}</div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    <p className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">
+                      ✨ Supports <strong>TikTok</strong>, <strong>YouTube Shorts</strong>, <strong>YouTube</strong>, <strong>Google Drive</strong>, or MP4 files. Plays natively in HD with original aspect ratio.
                     </p>
 
                     {formVideoUrl && formVideoUrl.trim() !== '' && (
-                      <div className="mt-2.5 relative aspect-video w-full rounded-xl overflow-hidden border border-slate-300 bg-black shadow-inner">
-                        <ProductVideoPlayer
-                          videoUrl={formVideoUrl}
-                          title="Admin Product Video Preview"
-                          className="w-full h-full object-contain bg-black"
-                        />
+                      <div className="pt-2">
+                        <p className="text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1 flex items-center gap-1.5">
+                          <Play className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
+                          <span>ভিডিও লাইভ প্রিভিউ (অরিজিনাল কোয়ালিটি):</span>
+                        </p>
+                        <div
+                          className={`mx-auto rounded-xl overflow-hidden border border-slate-300 dark:border-slate-800 bg-black shadow-inner ${
+                            formVideoAspectRatio === '9:16'
+                              ? 'max-w-[240px] aspect-[9/16]'
+                              : formVideoAspectRatio === '1:1'
+                              ? 'max-w-[280px] aspect-square'
+                              : formVideoAspectRatio === '4:3'
+                              ? 'max-w-md aspect-[4/3]'
+                              : 'w-full aspect-video'
+                          }`}
+                        >
+                          <ProductVideoPlayer
+                            videoUrl={formVideoUrl}
+                            title="Admin Product Video Preview"
+                            aspectRatio={formVideoAspectRatio}
+                            autoPlay={false}
+                            loop={true}
+                            className="w-full h-full object-contain bg-black"
+                          />
+                        </div>
                       </div>
                     )}
                   </div>
 
                   {/* 3. Product Variations Section (Dynamic on toggle) */}
-                  <div className="p-3.5 bg-slate-50/80 border border-slate-200 rounded-xl space-y-3">
+                  <div className="p-3.5 bg-slate-50/80 dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 rounded-xl space-y-3">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-1.5">
-                        <Layers className="w-3.5 h-3.5 text-sky-600" />
-                        <span className="text-xs font-bold text-slate-800">
+                        <Layers className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400" />
+                        <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
                           Product Variations
                         </span>
                       </div>
@@ -2573,7 +2874,7 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                           className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all flex items-center gap-1 cursor-pointer border ${
                             enableColors
                               ? 'bg-sky-600 text-white border-sky-600 shadow-2xs'
-                              : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
+                              : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700'
                           }`}
                         >
                           <Palette className="w-3 h-3" />
@@ -2585,7 +2886,7 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                           className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all flex items-center gap-1 cursor-pointer border ${
                             enableSizes
                               ? 'bg-indigo-600 text-white border-indigo-600 shadow-2xs'
-                              : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
+                              : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700'
                           }`}
                         >
                           <Tag className="w-3 h-3" />
@@ -2596,13 +2897,13 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
 
                     {/* A. COLOR VARIATIONS (Visible ONLY when enableColors is TRUE) */}
                     {enableColors && (
-                      <div className="p-3 bg-white border border-sky-200 rounded-xl space-y-2.5 shadow-2xs">
+                      <div className="p-3 bg-white dark:bg-slate-950 border border-sky-200 dark:border-slate-800 rounded-xl space-y-2.5 shadow-2xs">
                         <div className="flex items-center justify-between">
-                          <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
-                            <Palette className="w-3.5 h-3.5 text-sky-600" />
+                          <span className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                            <Palette className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400" />
                             <span>Color Variations</span>
                           </span>
-                          <span className="text-[10px] font-bold text-sky-700 bg-sky-50 px-2 py-0.5 rounded">
+                          <span className="text-[10px] font-bold text-sky-700 dark:text-sky-300 bg-sky-50 dark:bg-sky-950/80 px-2 py-0.5 rounded border border-sky-200 dark:border-sky-800">
                             {formColors.length} Colors
                           </span>
                         </div>
@@ -2610,30 +2911,30 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                         {/* Color Input */}
                         <div className="grid grid-cols-1 sm:grid-cols-12 gap-2 items-end">
                           <div className="sm:col-span-5">
-                            <label className="block text-[10px] font-bold text-slate-600 mb-0.5">Color Name *</label>
+                            <label className="block text-[10px] font-bold text-slate-600 dark:text-slate-400 mb-0.5">Color Name *</label>
                             <input
                               type="text"
                               value={newColorName}
                               onChange={(e) => setNewColorName(e.target.value)}
                               placeholder="e.g. Midnight Black"
-                              className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 text-xs text-slate-900"
+                              className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-xs text-slate-900 dark:text-slate-100 bg-white dark:bg-slate-900"
                             />
                           </div>
 
                           <div className="sm:col-span-4">
-                            <label className="block text-[10px] font-bold text-slate-600 mb-0.5">Color Code</label>
+                            <label className="block text-[10px] font-bold text-slate-600 dark:text-slate-400 mb-0.5">Color Code</label>
                             <div className="flex items-center gap-1.5">
                               <input
                                 type="color"
                                 value={newColorHex}
                                 onChange={(e) => setNewColorHex(e.target.value)}
-                                className="w-7 h-7 rounded border border-slate-300 cursor-pointer p-0.5"
+                                className="w-7 h-7 rounded border border-slate-300 dark:border-slate-700 cursor-pointer p-0.5 bg-white dark:bg-slate-900"
                               />
                               <input
                                 type="text"
                                 value={newColorHex}
                                 onChange={(e) => setNewColorHex(e.target.value)}
-                                className="w-full px-2 py-1 rounded-lg border border-slate-300 text-xs font-mono text-slate-800"
+                                className="w-full px-2 py-1 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-mono text-slate-800 dark:text-slate-200 bg-white dark:bg-slate-900"
                               />
                             </div>
                           </div>
@@ -2643,7 +2944,7 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                               type="button"
                               onClick={handleAddColor}
                               disabled={!newColorName.trim()}
-                              className="w-full py-1.5 px-3 bg-sky-600 hover:bg-sky-500 disabled:bg-slate-200 disabled:text-slate-400 text-white text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1 cursor-pointer"
+                              className="w-full py-1.5 px-3 bg-sky-600 hover:bg-sky-500 disabled:bg-slate-200 dark:disabled:bg-slate-800 disabled:text-slate-400 text-white text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1 cursor-pointer"
                             >
                               <PlusCircle className="w-3.5 h-3.5" />
                               <span>Add Color</span>
@@ -2652,17 +2953,17 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                         </div>
 
                         {/* Match photo with uploaded product images */}
-                        <div className="pt-2 border-t border-slate-100 space-y-1.5">
+                        <div className="pt-2 border-t border-slate-100 dark:border-slate-800 space-y-1.5">
                           <div className="flex items-center justify-between">
-                            <label className="text-[10px] font-bold text-slate-700 flex items-center gap-1">
-                              <ImageIcon className="w-3 h-3 text-sky-600" />
+                            <label className="text-[10px] font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1">
+                              <ImageIcon className="w-3 h-3 text-sky-600 dark:text-sky-400" />
                               <span>Select Matching Photo from Uploaded Gallery:</span>
                             </label>
                             {newColorImage && (
                               <button
                                 type="button"
                                 onClick={() => setNewColorImage('')}
-                                className="text-[10px] font-bold text-rose-600 hover:underline cursor-pointer"
+                                className="text-[10px] font-bold text-rose-600 dark:text-rose-400 hover:underline cursor-pointer"
                               >
                                 Clear Photo Selection
                               </button>
@@ -2670,11 +2971,11 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                           </div>
 
                           {formImages.length === 0 ? (
-                            <p className="text-[11px] text-amber-700 bg-amber-50 p-2 rounded-lg border border-amber-200">
+                            <p className="text-[11px] text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/60 p-2 rounded-lg border border-amber-200 dark:border-amber-800">
                               💡 Upload product photos above first. Then click any photo here to link it to this color variation.
                             </p>
                           ) : (
-                            <div className="flex items-center gap-2 overflow-x-auto py-1">
+                            <div className="flex items-center gap-2 overflow-x-auto py-1 scrollbar-none [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
                               {formImages.filter((img) => typeof img === 'string' && img.trim() !== '').map((img, idx) => {
                                 const isSelected = newColorImage === img;
                                 return (
@@ -2682,10 +2983,10 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                                     key={idx}
                                     type="button"
                                     onClick={() => handleSelectColorImage(img)}
-                                    className={`relative w-12 h-12 rounded-lg overflow-hidden border-2 shrink-0 transition-all p-0.5 bg-white cursor-pointer ${
+                                    className={`relative w-12 h-12 rounded-lg overflow-hidden border-2 shrink-0 transition-all p-0.5 bg-white dark:bg-slate-900 cursor-pointer ${
                                       isSelected
                                         ? 'border-sky-600 ring-2 ring-sky-400 shadow-sm'
-                                        : 'border-slate-200 hover:border-sky-300 opacity-80 hover:opacity-100'
+                                        : 'border-slate-200 dark:border-slate-800 hover:border-sky-300 opacity-80 hover:opacity-100'
                                     }`}
                                     title={`Match image ${idx + 1}`}
                                   >
@@ -2710,7 +3011,7 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                           )}
 
                           {newColorImage && newColorImage.trim() !== '' && (
-                            <div className="flex items-center gap-1.5 px-2 py-1 bg-emerald-50 border border-emerald-200 rounded-md w-fit">
+                            <div className="flex items-center gap-1.5 px-2 py-1 bg-emerald-50 dark:bg-emerald-950/80 border border-emerald-200 dark:border-emerald-800 rounded-md w-fit">
                               <img
                                 src={getOptimizedImageUrl(newColorImage, 100)}
                                 alt="Color"
@@ -2718,11 +3019,11 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                                 onError={(e) => handleImageError(e, newColorImage)}
                                 className="w-5 h-5 rounded object-cover"
                               />
-                              <span className="text-[10px] text-emerald-700 font-bold">Photo Attached to this Color</span>
+                              <span className="text-[10px] text-emerald-700 dark:text-emerald-300 font-bold">Photo Attached to this Color</span>
                               <button
                                 type="button"
                                 onClick={() => setNewColorImage('')}
-                                className="text-rose-600 hover:underline text-[10px] ml-1 font-bold"
+                                className="text-rose-600 dark:text-rose-400 hover:underline text-[10px] ml-1 font-bold"
                               >
                                 ×
                               </button>
@@ -2736,21 +3037,21 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                             {formColors.map((col, idx) => (
                               <div
                                 key={idx}
-                                className="flex items-center justify-between p-2 rounded-lg bg-slate-50 border border-slate-200"
+                                className="flex items-center justify-between p-2 rounded-lg bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800"
                               >
                                 <div className="flex items-center gap-2 min-w-0">
                                   <span
-                                    className="w-4 h-4 rounded-full border border-slate-300 shrink-0"
+                                    className="w-4 h-4 rounded-full border border-slate-300 dark:border-slate-700 shrink-0"
                                     style={{ backgroundColor: col.hexCode || '#94a3b8' }}
                                   />
-                                  <span className="text-xs font-bold text-slate-900 truncate">{col.name}</span>
+                                  <span className="text-xs font-bold text-slate-900 dark:text-slate-100 truncate">{col.name}</span>
                                   {col.imageUrl && col.imageUrl.trim() !== '' && (
                                     <img
                                       src={getOptimizedImageUrl(col.imageUrl, 100)}
                                       alt={col.name}
                                       referrerPolicy="no-referrer"
                                       onError={(e) => handleImageError(e, col.imageUrl)}
-                                      className="w-5 h-5 rounded object-cover border"
+                                      className="w-5 h-5 rounded object-cover border dark:border-slate-700"
                                     />
                                   )}
                                 </div>
@@ -2763,7 +3064,7 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                                           type="button"
                                           onClick={() => handleUpdateColorImageByIndex(idx, img)}
                                           className={`w-4 h-4 rounded overflow-hidden border ${
-                                            col.imageUrl === img ? 'ring-1 ring-sky-500 border-sky-500' : 'border-slate-300 opacity-60 hover:opacity-100'
+                                            col.imageUrl === img ? 'ring-1 ring-sky-500 border-sky-500' : 'border-slate-300 dark:border-slate-700 opacity-60 hover:opacity-100'
                                           }`}
                                           title="Set or switch photo"
                                         >
@@ -2795,13 +3096,13 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
 
                     {/* B. SIZE VARIATIONS (Visible ONLY when enableSizes is TRUE) */}
                     {enableSizes && (
-                      <div className="p-3 bg-white border border-indigo-200 rounded-xl space-y-2.5 shadow-2xs">
+                      <div className="p-3 bg-white dark:bg-slate-950 border border-indigo-200 dark:border-slate-800 rounded-xl space-y-2.5 shadow-2xs">
                         <div className="flex items-center justify-between">
-                          <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
-                            <Tag className="w-3.5 h-3.5 text-indigo-600" />
+                          <span className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                            <Tag className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
                             <span>Size Variations</span>
                           </span>
-                          <span className="text-[10px] font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded">
+                          <span className="text-[10px] font-bold text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/80 px-2 py-0.5 rounded border border-indigo-200 dark:border-indigo-800">
                             {formSizes.length} Sizes
                           </span>
                         </div>
@@ -2821,7 +3122,7 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                                   className={`px-2 py-0.5 rounded border text-[11px] font-bold transition-all cursor-pointer ${
                                     isAdded
                                       ? 'bg-indigo-600 text-white border-indigo-600'
-                                      : 'bg-slate-50 hover:bg-white text-slate-700 border-slate-200'
+                                      : 'bg-slate-50 dark:bg-slate-900 hover:bg-white dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700'
                                   }`}
                                 >
                                   {isAdded ? `✓ ${presetSize}` : `+ ${presetSize}`}
@@ -2832,13 +3133,13 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                         </div>
 
                         {/* Custom Size Input */}
-                        <div className="flex items-center gap-1.5 pt-1 border-t border-slate-100">
+                        <div className="flex items-center gap-1.5 pt-1 border-t border-slate-100 dark:border-slate-800">
                           <input
                             type="text"
                             value={newSizeInput}
                             onChange={(e) => setNewSizeInput(e.target.value)}
                             placeholder="Custom size (e.g. 32-Inch, Combo Pack)"
-                            className="flex-1 px-2.5 py-1 rounded-lg border border-slate-300 text-xs text-slate-900"
+                            className="flex-1 px-2.5 py-1 rounded-lg border border-slate-300 dark:border-slate-700 text-xs text-slate-900 dark:text-slate-100 bg-white dark:bg-slate-900"
                           />
                           <button
                             type="button"
@@ -2847,7 +3148,7 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                               setNewSizeInput('');
                             }}
                             disabled={!newSizeInput.trim()}
-                            className="px-3 py-1 bg-slate-800 hover:bg-slate-700 disabled:bg-slate-200 disabled:text-slate-400 text-white text-xs font-bold rounded-lg transition-all shrink-0 cursor-pointer"
+                            className="px-3 py-1 bg-slate-800 dark:bg-slate-700 hover:bg-slate-700 dark:hover:bg-slate-600 disabled:bg-slate-200 dark:disabled:bg-slate-800 disabled:text-slate-400 text-white text-xs font-bold rounded-lg transition-all shrink-0 cursor-pointer"
                           >
                             + Add Size
                           </button>
@@ -2859,13 +3160,13 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                             {formSizes.map((s) => (
                               <span
                                 key={s}
-                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-indigo-50 border border-indigo-200 text-xs font-bold text-indigo-900"
+                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-indigo-50 dark:bg-indigo-950/80 border border-indigo-200 dark:border-indigo-800 text-xs font-bold text-indigo-900 dark:text-indigo-200"
                               >
                                 <span>{s}</span>
                                 <button
                                   type="button"
                                   onClick={() => handleRemoveSize(s)}
-                                  className="text-indigo-400 hover:text-rose-600 cursor-pointer"
+                                  className="text-indigo-400 dark:text-indigo-300 hover:text-rose-600 cursor-pointer"
                                 >
                                   <X className="w-3 h-3" />
                                 </button>
@@ -2877,10 +3178,10 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                     )}
 
                     {/* C. OTHER CUSTOM VARIATIONS */}
-                    <div className="p-3 bg-white border border-slate-200 rounded-xl space-y-2 shadow-2xs">
+                    <div className="p-3 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl space-y-2 shadow-2xs">
                       <div className="flex items-center justify-between">
-                        <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
-                          <Sparkles className="w-3.5 h-3.5 text-amber-600" />
+                        <span className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                          <Sparkles className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
                           <span>Other Custom Options (e.g. RAM / Material)</span>
                         </span>
                       </div>
@@ -2892,7 +3193,7 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                             value={newVariationName}
                             onChange={(e) => setNewVariationName(e.target.value)}
                             placeholder="Title (e.g. RAM)"
-                            className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 text-xs text-slate-900"
+                            className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-xs text-slate-900 dark:text-slate-100 bg-white dark:bg-slate-900"
                           />
                         </div>
 
@@ -2902,7 +3203,7 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                             value={newVariationOptions}
                             onChange={(e) => setNewVariationOptions(e.target.value)}
                             placeholder="Options comma-separated (e.g. 8GB, 16GB)"
-                            className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 text-xs text-slate-900"
+                            className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-xs text-slate-900 dark:text-slate-100 bg-white dark:bg-slate-900"
                           />
                         </div>
 
@@ -2911,7 +3212,7 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                             type="button"
                             onClick={handleAddCustomVariation}
                             disabled={!newVariationName.trim() || !newVariationOptions.trim()}
-                            className="w-full py-1.5 px-2 bg-amber-600 hover:bg-amber-500 disabled:bg-slate-200 disabled:text-slate-400 text-white text-xs font-bold rounded-lg transition-all cursor-pointer"
+                            className="w-full py-1.5 px-2 bg-amber-600 hover:bg-amber-500 disabled:bg-slate-200 dark:disabled:bg-slate-800 disabled:text-slate-400 text-white text-xs font-bold rounded-lg transition-all cursor-pointer"
                           >
                             + Add
                           </button>
@@ -2924,15 +3225,15 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                           {formVariations.map((v) => (
                             <div
                               key={v.id}
-                              className="flex items-center justify-between px-2 py-1 rounded-lg bg-slate-50 border border-slate-200 text-xs"
+                              className="flex items-center justify-between px-2 py-1 rounded-lg bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-xs"
                             >
                               <div className="flex items-center gap-1.5">
-                                <span className="font-bold text-slate-800">{v.name}:</span>
+                                <span className="font-bold text-slate-800 dark:text-slate-200">{v.name}:</span>
                                 <div className="flex flex-wrap gap-1">
                                   {v.options.map((opt) => (
                                     <span
                                       key={opt}
-                                      className="px-1.5 py-0.5 rounded bg-white border border-slate-200 text-[10px] font-semibold text-slate-700"
+                                      className="px-1.5 py-0.5 rounded bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-[10px] font-semibold text-slate-700 dark:text-slate-300"
                                     >
                                       {opt}
                                     </span>
@@ -2954,15 +3255,15 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                   </div>
 
                   {/* 4. Product Sourcing & External Supplier Link (Compact & Clean) */}
-                  <div className="p-3.5 bg-amber-50/50 border border-amber-200/90 rounded-xl space-y-2.5">
+                  <div className="p-3.5 bg-amber-50/50 dark:bg-slate-900/90 border border-amber-200/90 dark:border-slate-800 rounded-xl space-y-2.5">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-1.5">
-                        <ExternalLink className="w-3.5 h-3.5 text-amber-700" />
-                        <span className="text-xs font-bold text-slate-800">
+                        <ExternalLink className="w-3.5 h-3.5 text-amber-700 dark:text-amber-400" />
+                        <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
                           Product Sourcing & Supplier
                         </span>
                       </div>
-                      <span className="text-[10px] font-bold text-amber-900 bg-amber-100 px-2 py-0.5 rounded">
+                      <span className="text-[10px] font-bold text-amber-900 dark:text-amber-300 bg-amber-100 dark:bg-amber-950/80 px-2 py-0.5 rounded border border-amber-200 dark:border-amber-800">
                         🔒 Staff Only
                       </span>
                     </div>
@@ -2973,13 +3274,13 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                         onClick={() => setFormType('own')}
                         className={`p-2 rounded-lg border text-left cursor-pointer transition-all ${
                           formType === 'own'
-                            ? 'bg-white border-sky-500 ring-2 ring-sky-200'
-                            : 'bg-white/70 border-slate-200 hover:bg-white'
+                            ? 'bg-white dark:bg-slate-950 border-sky-500 ring-2 ring-sky-200 dark:ring-sky-900'
+                            : 'bg-white/70 dark:bg-slate-950/60 border-slate-200 dark:border-slate-800 hover:bg-white dark:hover:bg-slate-950'
                         }`}
                       >
                         <div className="flex items-center justify-between">
-                          <span className="text-xs font-bold text-slate-900">📦 Own Stock</span>
-                          {formType === 'own' && <CheckCircle className="w-3.5 h-3.5 text-sky-600" />}
+                          <span className="text-xs font-bold text-slate-900 dark:text-slate-100">📦 Own Stock</span>
+                          {formType === 'own' && <CheckCircle className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400" />}
                         </div>
                       </button>
 
@@ -2988,13 +3289,13 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                         onClick={() => setFormType('dropshipping')}
                         className={`p-2 rounded-lg border text-left cursor-pointer transition-all ${
                           formType === 'dropshipping'
-                            ? 'bg-white border-amber-500 ring-2 ring-amber-200'
-                            : 'bg-white/70 border-slate-200 hover:bg-white'
+                            ? 'bg-white dark:bg-slate-950 border-amber-500 ring-2 ring-amber-200 dark:ring-amber-900'
+                            : 'bg-white/70 dark:bg-slate-950/60 border-slate-200 dark:border-slate-800 hover:bg-white dark:hover:bg-slate-950'
                         }`}
                       >
                         <div className="flex items-center justify-between">
-                          <span className="text-xs font-bold text-slate-900">🌐 Dropshipping / Sourced</span>
-                          {formType === 'dropshipping' && <CheckCircle className="w-3.5 h-3.5 text-amber-600" />}
+                          <span className="text-xs font-bold text-slate-900 dark:text-slate-100">🌐 Dropshipping / Sourced</span>
+                          {formType === 'dropshipping' && <CheckCircle className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />}
                         </div>
                       </button>
                     </div>
@@ -3002,13 +3303,13 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                     <div className="pt-2 space-y-3">
                       {formType === 'own' ? (
                         /* Own Stock Sourcing Details */
-                        <div className="p-3.5 rounded-xl bg-sky-50/70 border border-sky-200/80 space-y-3">
+                        <div className="p-3.5 rounded-xl bg-sky-50/70 dark:bg-slate-950 border border-sky-200/80 dark:border-slate-800 space-y-3">
                           <div className="flex items-center justify-between">
-                            <label className="text-xs font-black text-sky-950 flex items-center gap-1.5">
-                              <MapPin className="w-3.5 h-3.5 text-sky-600" />
+                            <label className="text-xs font-black text-sky-950 dark:text-sky-300 flex items-center gap-1.5">
+                              <MapPin className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400" />
                               <span>Own Stock Sourcing Information (In-House Inventory)</span>
                             </label>
-                            <span className="text-[10px] font-bold text-sky-800 bg-sky-100/90 px-2 py-0.5 rounded">
+                            <span className="text-[10px] font-bold text-sky-800 dark:text-sky-300 bg-sky-100/90 dark:bg-sky-950/80 px-2 py-0.5 rounded border border-sky-200 dark:border-sky-800">
                               📦 On Stock Sourcing
                             </span>
                           </div>
@@ -3016,35 +3317,35 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                             {/* Sourcing Location / Address */}
                             <div>
-                              <label className="block text-[10px] font-bold text-slate-700 uppercase tracking-wider mb-1">
-                                Sourcing Location / Shop Address <span className="text-sky-600 font-normal">(Where product was brought from)</span>
+                              <label className="block text-[10px] font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1">
+                                Sourcing Location / Shop Address <span className="text-sky-600 dark:text-sky-400 font-normal">(Where product was brought from)</span>
                               </label>
                               <input
                                 type="text"
                                 value={formSourcingAddress}
                                 onChange={(e) => setFormSourcingAddress(e.target.value)}
                                 placeholder="e.g. Chawkbazar Wholesale Market, Shop #14, Dhaka"
-                                className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 text-xs text-slate-900 bg-white placeholder:text-slate-400 focus:ring-2 focus:ring-sky-500"
+                                className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-xs text-slate-900 dark:text-slate-100 bg-white dark:bg-slate-900 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:ring-2 focus:ring-sky-500"
                               />
                             </div>
 
                             {/* Vendor / Contact Phone */}
                             <div>
-                              <label className="block text-[10px] font-bold text-slate-700 uppercase tracking-wider mb-1">
-                                Vendor Contact Number <span className="text-sky-600 font-normal">(Wholesaler / Person phone)</span>
+                              <label className="block text-[10px] font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1">
+                                Vendor Contact Number <span className="text-sky-600 dark:text-sky-400 font-normal">(Wholesaler / Person phone)</span>
                               </label>
                               <input
                                 type="text"
                                 value={formSourcingPhone}
                                 onChange={(e) => setFormSourcingPhone(e.target.value)}
                                 placeholder="e.g. 01712-345678"
-                                className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 text-xs text-slate-900 bg-white placeholder:text-slate-400 focus:ring-2 focus:ring-sky-500"
+                                className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-xs text-slate-900 dark:text-slate-100 bg-white dark:bg-slate-900 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:ring-2 focus:ring-sky-500"
                               />
                             </div>
 
                             {/* Wholesaler / Merchant Name */}
                             <div>
-                              <label className="block text-[10px] font-bold text-slate-700 uppercase tracking-wider mb-1">
+                              <label className="block text-[10px] font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1">
                                 Merchant / Wholesaler Name (Optional)
                               </label>
                               <input
@@ -3052,13 +3353,13 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                                 value={formSourcingVendorName}
                                 onChange={(e) => setFormSourcingVendorName(e.target.value)}
                                 placeholder="e.g. Haji Traders, Al-Madina Wholesale"
-                                className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 text-xs text-slate-900 bg-white placeholder:text-slate-400 focus:ring-2 focus:ring-sky-500"
+                                className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-xs text-slate-900 dark:text-slate-100 bg-white dark:bg-slate-900 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:ring-2 focus:ring-sky-500"
                               />
                             </div>
 
                             {/* Memo / Invoice No */}
                             <div>
-                              <label className="block text-[10px] font-bold text-slate-700 uppercase tracking-wider mb-1">
+                              <label className="block text-[10px] font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1">
                                 Purchase Memo / Receipt / Notes (Optional)
                               </label>
                               <input
@@ -3066,17 +3367,17 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                                 value={formSourcingMemo}
                                 onChange={(e) => setFormSourcingMemo(e.target.value)}
                                 placeholder="e.g. Memo #7482 or Direct Cash Purchase"
-                                className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 text-xs text-slate-900 bg-white placeholder:text-slate-400 focus:ring-2 focus:ring-sky-500"
+                                className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-xs text-slate-900 dark:text-slate-100 bg-white dark:bg-slate-900 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:ring-2 focus:ring-sky-500"
                               />
                             </div>
                           </div>
                         </div>
                       ) : (
                         /* Dropshipping Supplier Selection Row */
-                        <div className="p-3.5 rounded-xl bg-indigo-50/60 border border-indigo-100/80 space-y-3">
+                        <div className="p-3.5 rounded-xl bg-indigo-50/60 dark:bg-slate-950 border border-indigo-100/80 dark:border-slate-800 space-y-3">
                           <div className="flex items-center justify-between">
-                            <label className="text-xs font-black text-indigo-950 flex items-center gap-1.5">
-                              <Building2 className="w-3.5 h-3.5 text-indigo-600" />
+                            <label className="text-xs font-black text-indigo-950 dark:text-indigo-300 flex items-center gap-1.5">
+                              <Building2 className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
                               <span>Sourcing Supplier / Drop-shipper</span>
                             </label>
                             <button
@@ -3095,7 +3396,7 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                             {/* Supplier Dropdown */}
                             <div>
-                              <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">
+                              <label className="block text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">
                                 Select Registered Supplier
                               </label>
                               <select
@@ -3113,7 +3414,7 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                                     setFormSupplierName('');
                                   }
                                 }}
-                                className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 text-xs text-slate-900 bg-white font-medium focus:ring-2 focus:ring-indigo-500"
+                                className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-xs text-slate-900 dark:text-slate-100 bg-white dark:bg-slate-900 font-medium focus:ring-2 focus:ring-indigo-500"
                               >
                                 <option value="">-- Choose Registered Supplier --</option>
                                 {suppliers?.map((s) => (
@@ -3127,7 +3428,7 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
 
                             {/* Supplier Display Name */}
                             <div>
-                              <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">
+                              <label className="block text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">
                                 Supplier / Business Name
                               </label>
                               <input
@@ -3135,7 +3436,7 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                                 value={formSupplierName}
                                 onChange={(e) => setFormSupplierName(e.target.value)}
                                 placeholder="e.g. Shopbase Reseller, BD Sourcing"
-                                className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 text-xs text-slate-900 bg-white placeholder:text-slate-400 focus:ring-2 focus:ring-indigo-500"
+                                className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-xs text-slate-900 dark:text-slate-100 bg-white dark:bg-slate-900 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:ring-2 focus:ring-indigo-500"
                               />
                             </div>
                           </div>
@@ -3145,14 +3446,14 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                             (() => {
                               const supp = suppliers.find((s) => s.id === formSupplierId)!;
                               return (
-                                <div className="flex items-center justify-between p-2 rounded-lg bg-white border border-indigo-100 text-[11px] text-slate-600">
-                                  <span className="font-bold text-indigo-900 flex items-center gap-1.5 truncate">
-                                    <Building2 className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                                <div className="flex items-center justify-between p-2 rounded-lg bg-white dark:bg-slate-900 border border-indigo-100 dark:border-slate-800 text-[11px] text-slate-600 dark:text-slate-300">
+                                  <span className="font-bold text-indigo-900 dark:text-indigo-300 flex items-center gap-1.5 truncate">
+                                    <Building2 className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400 shrink-0" />
                                     {supp.name}
                                   </span>
                                   <div className="flex items-center gap-2 shrink-0">
                                     {supp.whatsapp && (
-                                      <span className="text-emerald-700 font-mono font-bold flex items-center gap-1">
+                                      <span className="text-emerald-700 dark:text-emerald-400 font-mono font-bold flex items-center gap-1">
                                         <MessageCircle className="w-3 h-3" />
                                         {supp.whatsapp}
                                       </span>
@@ -3162,7 +3463,7 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                                         href={supp.websiteUrl}
                                         target="_blank"
                                         rel="noopener noreferrer"
-                                        className="text-indigo-600 hover:underline flex items-center gap-0.5"
+                                        className="text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-0.5"
                                       >
                                         <Globe className="w-3 h-3" />
                                         <span>Portal</span>
@@ -3176,7 +3477,7 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
 
                           {/* Exact Product Link on Supplier's Site */}
                           <div>
-                            <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">
+                            <label className="block text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">
                               Product Sourcing Link (Supplier Item URL)
                             </label>
                             <div className="flex items-center gap-2">
@@ -3185,14 +3486,14 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                                 value={formSupplierUrl}
                                 onChange={(e) => setFormSupplierUrl(e.target.value)}
                                 placeholder="https://shopbasebd.com/store/products/details/... or supplier item link"
-                                className="flex-1 px-2.5 py-1.5 rounded-lg border border-slate-300 text-xs text-slate-900 bg-white placeholder:text-slate-400 focus:ring-2 focus:ring-indigo-500"
+                                className="flex-1 px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-xs text-slate-900 dark:text-slate-100 bg-white dark:bg-slate-900 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:ring-2 focus:ring-indigo-500"
                               />
                               {formSupplierUrl && (
                                 <a
                                   href={formSupplierUrl}
                                   target="_blank"
                                   rel="noopener noreferrer"
-                                  className="px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-black text-white text-[11px] font-bold flex items-center gap-1 shrink-0"
+                                  className="px-2.5 py-1.5 rounded-lg bg-slate-900 dark:bg-slate-800 hover:bg-black dark:hover:bg-slate-700 text-white text-[11px] font-bold flex items-center gap-1 shrink-0"
                                   title="Open supplier link"
                                 >
                                   <span>Test Link</span>

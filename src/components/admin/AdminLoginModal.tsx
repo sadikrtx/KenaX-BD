@@ -35,37 +35,37 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const cleanInput = inputVal.trim().toLowerCase();
-    const isSuperAdmin = cleanInput === 'super@kenaxbd.com' || cleanInput.includes('01700123456');
+    const cleanDigits = cleanInput.replace(/[\s\-\+\(\)]/g, '');
 
-    if (isSuperAdmin) {
-      if (password !== 'sadik@1234' && password !== 'sadik@12334' && password !== '123456') {
-        const adminMatch = staffList.find((s) => s.email.toLowerCase() === cleanInput && s.password === password);
-        if (!adminMatch) {
-          setErrorMsg('Incorrect password. Access denied.');
-          return;
-        }
-      }
-      const superAdminStaff = staffList.find((s) => s.email.toLowerCase() === cleanInput) ||
-        staffList.find((s) => s.role === 'super_admin') || {
+    // Find staff account from staffList (by email, phone, or super_admin role)
+    let foundStaff = staffList.find(
+      (s) =>
+        (s.email && s.email.trim().toLowerCase() === cleanInput) ||
+        (s.phone && s.phone.replace(/[\s\-\+\(\)]/g, '').toLowerCase() === cleanDigits)
+    );
+
+    const isSuperAdminIdentifier =
+      cleanInput === 'super@kenaxbd.com' ||
+      cleanInput === 'super@gmail.com' ||
+      cleanInput === 'sadikrtx3060@gmail.com' ||
+      cleanInput === 'admin' ||
+      cleanInput === 'superadmin' ||
+      cleanInput === 'super_admin' ||
+      cleanDigits === '01700123456';
+
+    if (!foundStaff && isSuperAdminIdentifier) {
+      foundStaff = staffList.find((s) => s.role === 'super_admin') || {
         id: 'staff-super-2',
         name: 'Super Admin',
         email: cleanInput.includes('@') ? cleanInput : 'super@kenaxbd.com',
         phone: '+880 1700-123456',
+        password: 'sadik@1234',
         role: 'super_admin' as const,
         permissions: ['*'],
         isActive: true,
         createdAt: new Date().toISOString(),
       };
-      onLoginSuccess(superAdminStaff);
-      onClose();
-      return;
     }
-
-    const foundStaff = staffList.find(
-      (s) =>
-        s.email.toLowerCase() === cleanInput ||
-        (s.phone && s.phone.replace(/[\s\-\+\(\)]/g, '').toLowerCase() === cleanInput.replace(/[\s\-\+\(\)]/g, '').toLowerCase())
-    );
 
     if (!foundStaff) {
       setErrorMsg('No staff account found for this Email or Mobile Number.');
@@ -84,8 +84,12 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
       return;
     }
 
-    if (foundStaff.password && foundStaff.password !== password) {
-      setErrorMsg('Incorrect password. Please enter the assigned password.');
+    const expectedPassword =
+      foundStaff.password ||
+      (foundStaff.role === 'super_admin' ? 'sadik@1234' : '123456');
+
+    if (password !== expectedPassword) {
+      setErrorMsg('Incorrect password. Access denied.');
       return;
     }
 
@@ -95,9 +99,9 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
-      <div className="bg-white rounded-3xl max-w-md w-full shadow-2xl overflow-hidden border border-slate-200">
+      <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-md w-full shadow-2xl overflow-hidden border border-slate-200 dark:border-slate-800">
         {/* Header */}
-        <div className="bg-slate-950 text-white p-6 relative">
+        <div className="bg-slate-950 text-white p-6 relative border-b border-slate-800">
           <button
             onClick={onClose}
             className="absolute top-4 right-4 p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
@@ -118,7 +122,7 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
 
         <div className="p-6 space-y-5">
           {errorMsg && (
-            <div className="p-3.5 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs flex items-center gap-2">
+            <div className="p-3.5 rounded-xl bg-red-50 dark:bg-red-950/60 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 text-xs flex items-center gap-2">
               <AlertCircle className="w-4 h-4 shrink-0" />
               <span>{errorMsg}</span>
             </div>
@@ -126,7 +130,7 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">Staff Email or Mobile Number</label>
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Staff Email or Mobile Number</label>
               <div className="relative">
                 <Mail className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                 <input
@@ -137,14 +141,14 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
                     setInputVal(e.target.value);
                     setErrorMsg(null);
                   }}
-                  placeholder="e.g. staff@kenaxbd.com or 017..."
-                  className="w-full pl-9 pr-3 py-2.5 rounded-xl border border-slate-300 text-xs text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-sky-500"
+                  placeholder="e.g. yourname@gmail.com, super@kenaxbd.com or 017..."
+                  className="w-full pl-9 pr-3 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs text-slate-900 dark:text-slate-100 placeholder-slate-400 focus:outline-hidden focus:ring-2 focus:ring-sky-500"
                 />
               </div>
             </div>
 
             <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">Staff Password</label>
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Staff Password</label>
               <div className="relative">
                 <Lock className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                 <input
@@ -156,23 +160,23 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
                     setErrorMsg(null);
                   }}
                   placeholder="Enter staff security password"
-                  className="w-full pl-9 pr-3 py-2.5 rounded-xl border border-slate-300 text-xs text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-sky-500"
+                  className="w-full pl-9 pr-3 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs text-slate-900 dark:text-slate-100 placeholder-slate-400 focus:outline-hidden focus:ring-2 focus:ring-sky-500"
                 />
               </div>
             </div>
 
             <button
               type="submit"
-              className="w-full py-2.5 rounded-xl bg-slate-900 hover:bg-black text-white font-bold text-xs shadow-md transition-colors cursor-pointer flex items-center justify-center gap-1.5"
+              className="w-full py-2.5 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs shadow-md transition-colors cursor-pointer flex items-center justify-center gap-1.5"
             >
               <span>Authenticate & Enter Portal</span>
               <ArrowRight className="w-4 h-4" />
             </button>
           </form>
 
-          <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-center">
-            <p className="text-[11px] text-slate-500">
-              🔒 <span className="font-semibold text-slate-700">Security Protected:</span> General visitors and customers cannot access management areas.
+          <div className="p-3 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-xl text-center">
+            <p className="text-[11px] text-slate-500 dark:text-slate-400">
+              🔒 <span className="font-semibold text-slate-700 dark:text-slate-300">Security Protected:</span> General visitors and customers cannot access management areas.
             </p>
           </div>
         </div>

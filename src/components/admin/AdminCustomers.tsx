@@ -32,8 +32,14 @@ import {
   Edit,
   Trash2,
 } from 'lucide-react';
-import { CustomerRecord, Order, UserRole, StaffUser } from '../../types';
+import { CustomerRecord, Order, UserRole, StaffUser, NewsletterSubscriber } from '../../types';
+import { subscribeToNewsletterSubscribers, deleteNewsletterSubscriber } from '../../lib/firebase';
 import { getOptimizedImageUrl, handleImageError } from '../../utils/imageOptimizer';
+import {
+  cleanBDPhoneNumber,
+  validateBangladeshMobile,
+  isValidBDMobileNumber,
+} from '../../utils/phoneUtils';
 
 interface AdminCustomersProps {
   customers: CustomerRecord[];
@@ -48,7 +54,7 @@ interface AdminCustomersProps {
   onCloseCustomerModal?: () => void;
 }
 
-export type CustomerSegment = 'all' | 'registered' | 'panel_buyers' | 'active_buyers' | 'wishlist';
+export type CustomerSegment = 'all' | 'registered' | 'panel_buyers' | 'active_buyers' | 'wishlist' | 'subscribers';
 
 export const AdminCustomers: React.FC<AdminCustomersProps> = ({
   customers,
@@ -65,6 +71,20 @@ export const AdminCustomers: React.FC<AdminCustomersProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [activeSegment, setActiveSegment] = useState<CustomerSegment>('all');
   const [selectedCustomer, setSelectedCustomer] = useState<CustomerRecord | null>(initialSelectedCustomer || null);
+
+  // Newsletter Subscribers State
+  const [subscribers, setSubscribers] = useState<NewsletterSubscriber[]>([]);
+  const [copiedSubscriberEmail, setCopiedSubscriberEmail] = useState<string | null>(null);
+  const [isDeletingSubscriber, setIsDeletingSubscriber] = useState<string | null>(null);
+
+  useEffect(() => {
+    const unsub = subscribeToNewsletterSubscribers((list) => {
+      setSubscribers(list);
+    });
+    return () => {
+      if (unsub) unsub();
+    };
+  }, []);
 
   useEffect(() => {
     if (initialSelectedCustomer) {
@@ -118,14 +138,16 @@ export const AdminCustomers: React.FC<AdminCustomersProps> = ({
       alert('Please enter a valid customer name.');
       return;
     }
-    if (!editMobile.trim()) {
-      alert('Please enter a valid customer mobile number.');
+    const cleanMobile = cleanBDPhoneNumber(editMobile);
+    const phoneVal = validateBangladeshMobile(cleanMobile, { lang: 'en' });
+    if (!phoneVal.isValid) {
+      alert(phoneVal.error || 'Please enter a valid 11-digit Bangladesh mobile number.');
       return;
     }
 
     const updatedData: Partial<CustomerRecord> = {
       name: editName.trim(),
-      mobile: editMobile.trim(),
+      mobile: cleanMobile,
       email: editEmail.trim(),
       isBlocked: editIsBlocked,
       blockReason: editIsBlocked ? (editBlockReason.trim() || 'Manual restriction by admin') : undefined,
@@ -322,8 +344,67 @@ export const AdminCustomers: React.FC<AdminCustomersProps> = ({
     setBlockingTarget(null);
   };
 
+  const filteredSubscribers = subscribers.filter((s) => {
+    const q = searchQuery.toLowerCase().trim();
+    if (!q) return true;
+    return (
+      s.email.toLowerCase().includes(q) ||
+      (s.subscribedAt && s.subscribedAt.toLowerCase().includes(q)) ||
+      (s.source && s.source.toLowerCase().includes(q))
+    );
+  });
+
+  const handleDeleteSubscriber = async (subId: string, email: string) => {
+    if (!window.confirm(`Are you sure you want to remove subscriber: ${email}?`)) return;
+    setIsDeletingSubscriber(subId);
+    try {
+      await deleteNewsletterSubscriber(subId);
+      setSubscribers((prev) => prev.filter((s) => s.id !== subId));
+    } finally {
+      setIsDeletingSubscriber(null);
+    }
+  };
+
+  const handleCopyAllSubscriberEmails = () => {
+    if (subscribers.length === 0) return;
+    const allEmails = subscribers.map((s) => s.email).join(', ');
+    navigator.clipboard.writeText(allEmails);
+    setCopiedSubscriberEmail('ALL');
+    setTimeout(() => setCopiedSubscriberEmail(null), 2500);
+  };
+
+  const handleCopySingleEmail = (email: string) => {
+    navigator.clipboard.writeText(email);
+    setCopiedSubscriberEmail(email);
+    setTimeout(() => setCopiedSubscriberEmail(null), 2000);
+  };
+
   // Export Customer CSV Function
   const handleExportCSV = () => {
+    if (activeSegment === 'subscribers') {
+      if (filteredSubscribers.length === 0) {
+        alert('No subscriber records to export.');
+        return;
+      }
+      const headers = ['Subscriber ID', 'Email Address', 'Subscribed Date', 'Source', 'Status'];
+      const rows = filteredSubscribers.map((s) => [
+        `"${s.id}"`,
+        `"${s.email}"`,
+        `"${new Date(s.subscribedAt || Date.now()).toLocaleString('en-GB')}"`,
+        `"${s.source || 'footer'}"`,
+        `"${s.status || 'active'}"`,
+      ].join(','));
+      const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows].join('\n');
+      const encodedUri = encodeURI(csvContent);
+      const link = document.createElement('a');
+      link.setAttribute('href', encodedUri);
+      link.setAttribute('download', `KenaX_Newsletter_Subscribers_${Date.now()}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      return;
+    }
+
     if (filteredCustomers.length === 0) {
       alert('No customer records to export.');
       return;
@@ -381,7 +462,7 @@ export const AdminCustomers: React.FC<AdminCustomersProps> = ({
   return (
     <div className="space-y-6">
       {/* Top Quick Stats Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
         {/* Card 1: Total Customers */}
         <div
           onClick={() => setActiveSegment('all')}
@@ -481,6 +562,31 @@ export const AdminCustomers: React.FC<AdminCustomersProps> = ({
             </span>
           </div>
         </div>
+
+        {/* Card 5: Newsletter Subscribers */}
+        <div
+          onClick={() => setActiveSegment('subscribers')}
+          className={`p-4 rounded-2xl border transition-all cursor-pointer ${
+            activeSegment === 'subscribers'
+              ? 'bg-amber-900 text-white border-amber-900 shadow-md ring-2 ring-amber-700'
+              : 'bg-white text-slate-900 border-slate-200 shadow-2xs hover:border-amber-200'
+          }`}
+        >
+          <div className="flex items-center justify-between mb-2">
+            <span className={`text-xs font-bold uppercase tracking-wider ${activeSegment === 'subscribers' ? 'text-amber-200' : 'text-slate-500'}`}>
+              Subscribers
+            </span>
+            <div className={`w-9 h-9 rounded-xl flex items-center justify-center font-bold ${activeSegment === 'subscribers' ? 'bg-amber-800 text-amber-300' : 'bg-amber-50 text-amber-600'}`}>
+              <Mail className="w-5 h-5" />
+            </div>
+          </div>
+          <div className="flex items-baseline justify-between">
+            <span className="text-2xl font-black">{subscribers.length}</span>
+            <span className={`text-xs font-semibold ${activeSegment === 'subscribers' ? 'text-amber-200' : 'text-amber-600'}`}>
+              Email Signups
+            </span>
+          </div>
+        </div>
       </div>
 
       {/* Segment Switcher Bar & Search / Actions */}
@@ -551,9 +657,23 @@ export const AdminCustomers: React.FC<AdminCustomersProps> = ({
             <Heart className="w-4 h-4 fill-current" />
             <span>Wishlist Saved ({wishlistCustomersCount})</span>
           </button>
+
+          {/* Subscribers Subtag Button */}
+          <button
+            type="button"
+            onClick={() => setActiveSegment('subscribers')}
+            className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap ${
+              activeSegment === 'subscribers'
+                ? 'bg-amber-600 text-white shadow-xs'
+                : 'bg-amber-50 text-amber-900 hover:bg-amber-100 border border-amber-200'
+            }`}
+          >
+            <Mail className="w-4 h-4" />
+            <span>Subscribers ({subscribers.length})</span>
+          </button>
         </div>
 
-        {/* Search Input & CSV Export Button */}
+        {/* Search Input & Actions */}
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
           <div className="relative flex-1 max-w-md">
             <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
@@ -561,12 +681,37 @@ export const AdminCustomers: React.FC<AdminCustomersProps> = ({
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search by customer name, BD mobile, email, panel..."
+              placeholder={
+                activeSegment === 'subscribers'
+                  ? 'Search by subscriber email or date...'
+                  : 'Search by customer name, BD mobile, email, panel...'
+              }
               className="w-full pl-10 pr-4 py-2 rounded-xl border border-slate-200 text-xs text-slate-900 placeholder:text-slate-400 focus:outline-hidden focus:ring-2 focus:ring-sky-500"
             />
           </div>
 
-          <div className="hidden sm:flex items-center gap-2 shrink-0">
+          <div className="flex items-center gap-2 shrink-0">
+            {activeSegment === 'subscribers' && (
+              <button
+                type="button"
+                onClick={handleCopyAllSubscriberEmails}
+                className="px-3.5 py-2 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-900 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer border border-amber-200 shadow-2xs"
+                title="Copy all subscriber email addresses to clipboard"
+              >
+                {copiedSubscriberEmail === 'ALL' ? (
+                  <>
+                    <Check className="w-4 h-4 text-emerald-600" />
+                    <span className="text-emerald-700">Copied All Emails!</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-4 h-4 text-amber-700" />
+                    <span>Copy All Emails</span>
+                  </>
+                )}
+              </button>
+            )}
+
             <button
               type="button"
               onClick={handleExportCSV}
@@ -582,8 +727,149 @@ export const AdminCustomers: React.FC<AdminCustomersProps> = ({
 
       {/* Customers Table / Mobile Cards */}
       <div className="rounded-2xl bg-white border border-slate-200 shadow-2xs overflow-hidden">
-        {/* Desktop View (Unchanged table) */}
-        <div className="hidden md:block overflow-x-auto">
+        {activeSegment === 'subscribers' ? (
+          <div>
+            {/* Desktop View */}
+            <div className="hidden md:block overflow-x-auto">
+              <table className="w-full text-left text-xs border-collapse">
+                <thead>
+                  <tr className="bg-slate-50/80 border-b border-slate-200 text-slate-500 uppercase text-[10px] tracking-wider font-bold">
+                    <th className="py-3.5 px-4">#</th>
+                    <th className="py-3.5 px-4">Subscriber Email</th>
+                    <th className="py-3.5 px-4">Subscribed Date &amp; Time</th>
+                    <th className="py-3.5 px-4">Source Tag</th>
+                    <th className="py-3.5 px-4 text-center">Status</th>
+                    <th className="py-3.5 px-4 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {filteredSubscribers.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="py-12 text-center text-slate-400">
+                        <Mail className="w-10 h-10 mx-auto mb-2 opacity-30 text-amber-500" />
+                        <p className="font-bold text-slate-700">কোনো সাবস্ক্রাইবার পাওয়া যায়নি</p>
+                        <p className="text-xs text-slate-400 mt-1">
+                          কাস্টমাররা ফুটার থেকে সাবস্ক্রাইব করলে এখানে সরাসরি দেখতে পাবেন।
+                        </p>
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredSubscribers.map((sub, idx) => (
+                      <tr key={sub.id || idx} className="hover:bg-slate-50/60 transition-colors">
+                        <td className="py-3.5 px-4 font-mono text-slate-400 text-[11px]">
+                          {idx + 1}
+                        </td>
+                        <td className="py-3.5 px-4 font-bold text-slate-900">
+                          <div className="flex items-center gap-2">
+                            <span className="font-mono text-xs text-slate-800">{sub.email}</span>
+                            <button
+                              type="button"
+                              onClick={() => handleCopySingleEmail(sub.email)}
+                              className="p-1 rounded-md text-slate-400 hover:text-sky-600 hover:bg-sky-50 transition-colors cursor-pointer"
+                              title="Copy email"
+                            >
+                              {copiedSubscriberEmail === sub.email ? (
+                                <Check className="w-3.5 h-3.5 text-emerald-600" />
+                              ) : (
+                                <Copy className="w-3.5 h-3.5" />
+                              )}
+                            </button>
+                          </div>
+                        </td>
+                        <td className="py-3.5 px-4 text-slate-600 text-xs whitespace-nowrap">
+                          {new Date(sub.subscribedAt || Date.now()).toLocaleString('en-GB', {
+                            day: 'numeric',
+                            month: 'short',
+                            year: 'numeric',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })}
+                        </td>
+                        <td className="py-3.5 px-4">
+                          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 uppercase tracking-wider">
+                            {sub.source || 'footer'}
+                          </span>
+                        </td>
+                        <td className="py-3.5 px-4 text-center">
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
+                            Active
+                          </span>
+                        </td>
+                        <td className="py-3.5 px-4 text-right">
+                          <button
+                            type="button"
+                            disabled={isDeletingSubscriber === sub.id}
+                            onClick={() => handleDeleteSubscriber(sub.id, sub.email)}
+                            className="p-1.5 rounded-lg text-rose-500 hover:text-rose-700 hover:bg-rose-50 transition-colors cursor-pointer disabled:opacity-50"
+                            title="Delete subscriber"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Mobile View */}
+            <div className="md:hidden divide-y divide-slate-100">
+              {filteredSubscribers.length === 0 ? (
+                <div className="py-12 text-center text-slate-400 text-xs">
+                  <Mail className="w-8 h-8 mx-auto mb-2 opacity-30 text-amber-500" />
+                  <p className="font-bold text-slate-700">কোনো সাবস্ক্রাইবার পাওয়া যায়নি</p>
+                  <p className="text-[11px] text-slate-400 mt-1">কাস্টমাররা সাবস্ক্রাইব করলে এখানে দেখা যাবে।</p>
+                </div>
+              ) : (
+                filteredSubscribers.map((sub, idx) => (
+                  <div key={sub.id || idx} className="p-3.5 space-y-2 hover:bg-slate-50/50 transition-colors">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <div className="w-7 h-7 rounded-full bg-amber-100 text-amber-800 font-bold flex items-center justify-center text-xs shrink-0">
+                          <Mail className="w-3.5 h-3.5" />
+                        </div>
+                        <span className="font-mono text-xs font-bold text-slate-900 truncate">{sub.email}</span>
+                      </div>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => handleCopySingleEmail(sub.email)}
+                          className="p-1.5 rounded-lg text-slate-500 hover:text-sky-600 hover:bg-sky-50 transition-colors cursor-pointer"
+                          title="Copy email"
+                        >
+                          {copiedSubscriberEmail === sub.email ? (
+                            <Check className="w-3.5 h-3.5 text-emerald-600" />
+                          ) : (
+                            <Copy className="w-3.5 h-3.5" />
+                          )}
+                        </button>
+                        <button
+                          type="button"
+                          disabled={isDeletingSubscriber === sub.id}
+                          onClick={() => handleDeleteSubscriber(sub.id, sub.email)}
+                          className="p-1.5 rounded-lg text-rose-500 hover:text-rose-700 hover:bg-rose-50 transition-colors cursor-pointer disabled:opacity-50"
+                          title="Delete subscriber"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between text-[11px] text-slate-500 pt-1 border-t border-slate-100">
+                      <span>{new Date(sub.subscribedAt || Date.now()).toLocaleDateString('en-GB')}</span>
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 uppercase">
+                        {sub.source || 'footer'}
+                      </span>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        ) : (
+          <>
+            {/* Desktop View (Unchanged table) */}
+            <div className="hidden md:block overflow-x-auto">
           <table className="w-full text-left text-xs border-collapse">
             <thead>
               <tr className="bg-slate-50/80 border-b border-slate-200 text-slate-500 uppercase text-[10px] tracking-wider font-bold">
@@ -983,6 +1269,8 @@ export const AdminCustomers: React.FC<AdminCustomersProps> = ({
             })
           )}
         </div>
+          </>
+        )}
       </div>
 
       {/* View Customer Details Modal */}
@@ -1485,10 +1773,12 @@ export const AdminCustomers: React.FC<AdminCustomersProps> = ({
                 <div className="relative">
                   <Phone className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                   <input
-                    type="text"
+                    type="tel"
+                    inputMode="numeric"
+                    maxLength={11}
                     value={editMobile}
-                    onChange={(e) => setEditMobile(e.target.value)}
-                    placeholder="e.g. 01711223344"
+                    onChange={(e) => setEditMobile(cleanBDPhoneNumber(e.target.value))}
+                    placeholder="01XXXXXXXXX"
                     className="w-full pl-9 pr-3 py-2.5 rounded-xl border border-slate-300 text-xs font-mono text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-blue-500"
                   />
                 </div>

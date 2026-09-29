@@ -15,6 +15,8 @@ import {
   Tag,
 } from 'lucide-react';
 import { Category, Product, CustomerRecord, StaffUser } from '../types';
+import { useLanguage } from '../context/LanguageContext';
+import { getOptimizedImageUrl } from '../utils/imageOptimizer';
 
 const formatBDT = (amount: number) => `৳ ${amount.toLocaleString('en-BD')}`;
 
@@ -53,6 +55,7 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
   onOpenProductDetail,
   onAddToCart,
 }) => {
+  const { t } = useLanguage();
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isCategoriesOpen, setIsCategoriesOpen] = useState(false);
   const [expandedCategories, setExpandedCategories] = useState<Record<string, boolean>>({});
@@ -137,7 +140,12 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
   };
 
   const isHomeActive = currentView === 'home';
-  const isAccountActive = currentView === 'customer-dashboard' || currentView === 'admin-dashboard';
+  const isAccountActive =
+    currentView === 'customer-dashboard' ||
+    currentView === 'admin-dashboard' ||
+    currentView === 'auth' ||
+    currentView === 'login' ||
+    currentView === 'register';
   const isLoggedIn = !!currentCustomer || !!currentStaff;
 
   return (
@@ -175,7 +183,7 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
               <span className="absolute -top-1 w-7 h-0.5 bg-sky-400 rounded-full shadow-[0_0_8px_rgba(56,189,248,0.8)]" />
             )}
             <LayoutGrid className="w-5 h-5 mb-0.5 transition-transform active:scale-90" />
-            <span className="text-[10px] tracking-tight leading-none">Categories</span>
+            <span className="text-[10px] tracking-tight leading-none">{t('ক্যাটাগরি', 'Categories')}</span>
           </button>
 
           {/* 2. Search Tab (Left of Home) */}
@@ -195,7 +203,7 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
               <span className="absolute -top-1 w-7 h-0.5 bg-sky-400 rounded-full shadow-[0_0_8px_rgba(56,189,248,0.8)]" />
             )}
             <Search className="w-5 h-5 mb-0.5 transition-transform active:scale-90" />
-            <span className="text-[10px] tracking-tight leading-none">Search</span>
+            <span className="text-[10px] tracking-tight leading-none">{t('সার্চ', 'Search')}</span>
           </button>
 
           {/* 3. Home Tab (Center - where Search used to be) */}
@@ -217,7 +225,7 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
               <span className="absolute -top-1 w-7 h-0.5 bg-sky-400 rounded-full shadow-[0_0_8px_rgba(56,189,248,0.8)]" />
             )}
             <Home className="w-5 h-5 mb-0.5 transition-transform active:scale-90" />
-            <span className="text-[10px] tracking-tight leading-none">Home</span>
+            <span className="text-[10px] tracking-tight leading-none">{t('হোম', 'Home')}</span>
           </button>
 
           {/* 4. Cart Tab with Live Counter Badge (Right Side) */}
@@ -245,7 +253,7 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
                 </span>
               )}
             </div>
-            <span className="text-[10px] tracking-tight leading-none">Cart</span>
+            <span className="text-[10px] tracking-tight leading-none">{t('কার্ট', 'Cart')}</span>
           </button>
 
           {/* 5. Dashboard / Login Tab (Far Right Corner - Role-Based Routing) */}
@@ -281,7 +289,7 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
               <LogIn className="w-5 h-5 mb-0.5 transition-transform active:scale-90" />
             )}
             <span className="text-[10px] tracking-tight leading-none truncate max-w-[60px]">
-              {currentStaff ? 'Admin' : currentCustomer ? 'Dashboard' : 'Login'}
+              {currentStaff ? t('অ্যাডমিন', 'Admin') : currentCustomer ? t('প্রোফাইল', 'Dashboard') : t('লগইন', 'Login')}
             </span>
           </button>
         </div>
@@ -311,7 +319,7 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
                   type="text"
                   value={localSearchInput}
                   onChange={(e) => setLocalSearchInput(e.target.value)}
-                  placeholder="Search by name, category, or SKU/serial..."
+                  placeholder={t('পণ্য, ক্যাটাগরি বা মডেল দিয়ে খুঁজুন...', 'Search by name, category, or SKU/serial...')}
                   className="w-full pl-9 pr-8 py-2.5 bg-slate-100 rounded-xl text-xs sm:text-sm text-slate-900 placeholder-slate-400 focus:outline-hidden focus:ring-2 focus:ring-sky-500 focus:bg-white transition-all"
                 />
                 {localSearchInput && (
@@ -329,7 +337,7 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
                 onClick={() => setIsSearchOpen(false)}
                 className="px-3 py-2 text-xs font-bold text-slate-600 hover:text-slate-900 shrink-0 cursor-pointer"
               >
-                Cancel
+                {t('বাতিল', 'Cancel')}
               </button>
             </div>
 
@@ -458,9 +466,9 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
                         >
                           <div className="w-14 h-14 rounded-lg bg-slate-50 border border-slate-100 overflow-hidden shrink-0 flex items-center justify-center p-1">
                             <img
-                              src={prod.images?.[0] || 'https://images.unsplash.com/photo-1598327105666-5b89351aff97?w=120'}
+                              src={getOptimizedImageUrl(prod.images?.[0], 200)}
                               alt={prod.name}
-                              className="w-full h-full object-contain mix-blend-multiply"
+                              className="w-full h-full object-contain"
                             />
                           </div>
                           <div className="flex-1 min-w-0">

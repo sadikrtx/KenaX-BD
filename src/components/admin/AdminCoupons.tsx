@@ -77,10 +77,10 @@ export const AdminCoupons: React.FC<AdminCouponsProps> = ({
         </div>
       )}
 
-      <div className="p-5 rounded-2xl bg-white border border-slate-200 shadow-2xs flex items-center justify-between">
+      <div className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xs flex items-center justify-between">
         <div>
-          <h2 className="text-sm sm:text-base font-bold text-slate-900">Promotions & Coupons ({coupons.length})</h2>
-          <p className="hidden sm:block text-xs text-slate-500">Create discount codes for marketing campaigns</p>
+          <h2 className="text-sm sm:text-base font-bold text-slate-900 dark:text-white">Promotions & Coupons ({coupons.length})</h2>
+          <p className="hidden sm:block text-xs text-slate-500 dark:text-slate-400">Create discount codes for marketing campaigns</p>
         </div>
         <button
           onClick={() => {
@@ -103,42 +103,42 @@ export const AdminCoupons: React.FC<AdminCouponsProps> = ({
         {coupons.map((c) => (
           <div
             key={c.id}
-            className="p-5 rounded-2xl bg-white border border-slate-200 shadow-2xs flex flex-col justify-between hover:border-slate-300 transition-colors"
+            className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xs flex flex-col justify-between hover:border-slate-300 dark:hover:border-slate-700 transition-colors"
           >
             <div>
               <div className="flex items-center justify-between">
-                <span className="font-mono font-black text-base text-sky-700 bg-sky-50 px-3 py-1 rounded-xl border border-sky-200/60">
+                <span className="font-mono font-black text-base text-sky-700 dark:text-sky-300 bg-sky-50 dark:bg-sky-950/80 px-3 py-1 rounded-xl border border-sky-200/60 dark:border-sky-800">
                   {c.code}
                 </span>
                 <span
                   className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                    c.isActive ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-600'
+                    c.isActive ? 'bg-emerald-100 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
                   }`}
                 >
                   {c.isActive ? 'Active' : 'Inactive'}
                 </span>
               </div>
 
-              <div className="mt-4 space-y-1.5 text-xs text-slate-600">
-                <p className="font-bold text-slate-900 text-sm">
+              <div className="mt-4 space-y-1.5 text-xs text-slate-600 dark:text-slate-300">
+                <p className="font-bold text-slate-900 dark:text-white text-sm">
                   {c.discountAmount ? `৳${c.discountAmount} Flat Discount` : `${c.discountPercent}% Off`}
                 </p>
-                <p>Min Purchase: <strong className="text-slate-800">৳{c.minPurchase.toLocaleString()}</strong></p>
+                <p>Min Purchase: <strong className="text-slate-800 dark:text-slate-200">৳{c.minPurchase.toLocaleString()}</strong></p>
                 {c.maxDiscount && (
-                  <p>Max Discount: <strong className="text-slate-800">৳{c.maxDiscount.toLocaleString()}</strong></p>
+                  <p>Max Discount: <strong className="text-slate-800 dark:text-slate-200">৳{c.maxDiscount.toLocaleString()}</strong></p>
                 )}
-                <p className="flex items-center gap-1 text-[11px] text-slate-400 mt-2">
+                <p className="flex items-center gap-1 text-[11px] text-slate-400 dark:text-slate-500 mt-2">
                   <Calendar className="w-3 h-3" />
                   <span>Valid until: {c.validUntil}</span>
                 </p>
               </div>
             </div>
 
-            <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-xs">
-              <span className="text-slate-400 text-[11px]">{c.usageCount || 0} times used</span>
+            <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs">
+              <span className="text-slate-400 dark:text-slate-500 text-[11px]">{c.usageCount || 0} times used</span>
               <button
                 onClick={() => onDeleteCoupon(c.id)}
-                className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
+                className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/50 transition-colors cursor-pointer"
                 title="Delete Coupon"
               >
                 <Trash2 className="w-4 h-4" />

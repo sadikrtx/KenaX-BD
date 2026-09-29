@@ -30,29 +30,463 @@ export const InvoiceModal: React.FC<InvoiceModalProps> = ({ order, products = []
     window.print();
   };
 
+  const downloadBlob = (blob: Blob, filename: string) => {
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    setTimeout(() => {
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    }, 500);
+  };
+
+  // Direct 2D Canvas Fallback for 100% Guaranteed Image Generation & Download
+  const downloadViaDirectCanvas = async (currentOrder: Order, currentSettings: SiteSettings) => {
+    const items = currentOrder.items || [];
+    const width = 1200;
+    const baseHeight = 1100;
+    const dynamicHeight = Math.max(1400, baseHeight + items.length * 60);
+    const height = dynamicHeight;
+
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    // White Background
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, width, height);
+
+    // Subtle Outer Frame
+    ctx.strokeStyle = '#e2e8f0';
+    ctx.lineWidth = 3;
+    ctx.strokeRect(20, 20, width - 40, height - 40);
+
+    // Top Brand Accent Line
+    const brandGrad = ctx.createLinearGradient(20, 20, width - 20, 20);
+    brandGrad.addColorStop(0, '#0284c7');
+    brandGrad.addColorStop(0.5, '#0f172a');
+    brandGrad.addColorStop(1, '#0284c7');
+    ctx.fillStyle = brandGrad;
+    ctx.fillRect(20, 20, width - 40, 10);
+
+    // 1. Header (Logo & Store Meta)
+    ctx.fillStyle = '#0f172a';
+    ctx.font = '900 36px system-ui, -apple-system, sans-serif';
+    ctx.fillText('KENAX BD', 70, 95);
+
+    ctx.fillStyle = '#0284c7';
+    ctx.font = 'bold 15px system-ui, -apple-system, sans-serif';
+    ctx.fillText('SMART SHOPPING, BETTER LIVING', 70, 122);
+
+    ctx.fillStyle = '#64748b';
+    ctx.font = '13px system-ui, -apple-system, sans-serif';
+    ctx.fillText(`${currentSettings.siteName || 'KenaX BD'} • Dhaka, Bangladesh`, 70, 150);
+    ctx.fillText(`Support: ${currentSettings.phone || '+880 1700-123456'} | Email: ${currentSettings.email || 'support@kenaxbd.com'}`, 70, 172);
+
+    // 2. Invoice Details Badge on Right
+    ctx.fillStyle = '#e0f2fe';
+    if (ctx.roundRect) {
+      ctx.beginPath();
+      ctx.roundRect(width - 340, 60, 270, 40, 8);
+      ctx.fill();
+    } else {
+      ctx.fillRect(width - 340, 60, 270, 40);
+    }
+    ctx.fillStyle = '#0369a1';
+    ctx.font = '900 16px system-ui, -apple-system, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('OFFICIAL INVOICE / BILL', width - 205, 86);
+    ctx.textAlign = 'left';
+
+    ctx.fillStyle = '#64748b';
+    ctx.font = '13px system-ui, -apple-system, sans-serif';
+    ctx.fillText('Invoice No:', width - 340, 125);
+    ctx.fillStyle = '#0f172a';
+    ctx.font = 'bold 14px monospace';
+    ctx.fillText(`INV-${currentOrder.id}`, width - 240, 125);
+
+    ctx.fillStyle = '#64748b';
+    ctx.font = '13px system-ui, -apple-system, sans-serif';
+    ctx.fillText('Issue Date:', width - 340, 150);
+    ctx.fillStyle = '#0f172a';
+    ctx.font = 'bold 13px system-ui, -apple-system, sans-serif';
+    ctx.fillText(formattedDate, width - 240, 150);
+
+    // Helper to format payment method and advance details
+    const isFullAdv = currentOrder.paymentOptionType === 'full' || (currentOrder.paidAmount !== undefined && currentOrder.paidAmount >= currentOrder.totalAmount && currentOrder.totalAmount > 0);
+    const isDelivAdv = currentOrder.paymentOptionType === 'delivery_only' || currentOrder.paymentMethod === 'Delivery Charge Only' || (!isFullAdv && currentOrder.paidAmount !== undefined && currentOrder.paidAmount > 0);
+    const isCOD = !isFullAdv && !isDelivAdv;
+
+    const advPaid = currentOrder.paidAmount && currentOrder.paidAmount > 0
+      ? currentOrder.paidAmount
+      : isDelivAdv
+      ? (currentOrder.deliveryCharge || 0)
+      : isFullAdv
+      ? currentOrder.totalAmount
+      : 0;
+
+    const dueAmt = isFullAdv
+      ? 0
+      : currentOrder.dueAmount !== undefined
+      ? currentOrder.dueAmount
+      : Math.max(0, currentOrder.totalAmount - advPaid);
+
+    let paymentMethodDisplay = currentOrder.paymentMethod || 'Cash on Delivery';
+    if (isFullAdv) {
+      paymentMethodDisplay = `Full Advance (${currentOrder.paymentMethod || 'Prepaid'}) - ৳${advPaid.toLocaleString('en-BD')}`;
+    } else if (isDelivAdv) {
+      paymentMethodDisplay = `Delivery Advance (${currentOrder.paymentMethod || 'Prepaid'}) - ৳${advPaid.toLocaleString('en-BD')}`;
+    } else {
+      paymentMethodDisplay = `Cash on Delivery (COD)`;
+    }
+
+    ctx.fillStyle = '#64748b';
+    ctx.font = '13px system-ui, -apple-system, sans-serif';
+    ctx.fillText('Payment:', width - 340, 175);
+    ctx.fillStyle = isFullAdv ? '#059669' : isDelivAdv ? '#4338ca' : '#d97706';
+    ctx.font = 'bold 12px system-ui, -apple-system, sans-serif';
+    ctx.fillText(paymentMethodDisplay.slice(0, 32), width - 240, 175);
+
+    // Divider
+    ctx.strokeStyle = '#e2e8f0';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(70, 205);
+    ctx.lineTo(width - 70, 205);
+    ctx.stroke();
+
+    // 3. Customer & Address Details
+    ctx.fillStyle = '#64748b';
+    ctx.font = 'bold 12px system-ui, -apple-system, sans-serif';
+    ctx.fillText('BILLED TO (CUSTOMER):', 70, 235);
+    ctx.fillText('DELIVERY ADDRESS:', width / 2 + 30, 235);
+
+    ctx.fillStyle = '#0f172a';
+    ctx.font = 'bold 16px system-ui, -apple-system, sans-serif';
+    ctx.fillText(currentOrder.customerName || 'Customer', 70, 260);
+
+    ctx.fillStyle = '#475569';
+    ctx.font = '13px system-ui, -apple-system, sans-serif';
+    ctx.fillText(`Mobile: ${currentOrder.customerMobile || currentOrder.deliveryMobile || 'N/A'}`, 70, 285);
+    if (currentOrder.customerEmail) {
+      ctx.fillText(`Email: ${currentOrder.customerEmail}`, 70, 307);
+    }
+
+    const fullAddr = currentOrder.fullAddress || 
+      (typeof currentOrder.deliveryAddress === 'object' ? (currentOrder.deliveryAddress as any)?.fullAddress : currentOrder.deliveryAddress) || 
+      `${currentOrder.division || currentOrder.customerDivision || 'Dhaka'}, Bangladesh`;
+    
+    ctx.fillStyle = '#1e293b';
+    ctx.font = '14px system-ui, -apple-system, sans-serif';
+    // Wrap address lines cleanly
+    const words = fullAddr.split(' ');
+    let line = '';
+    let addrY = 260;
+    for (let n = 0; n < words.length; n++) {
+      const testLine = line + words[n] + ' ';
+      const metrics = ctx.measureText(testLine);
+      if (metrics.width > 440 && n > 0) {
+        ctx.fillText(line, width / 2 + 30, addrY);
+        line = words[n] + ' ';
+        addrY += 22;
+      } else {
+        line = testLine;
+      }
+    }
+    ctx.fillText(line, width / 2 + 30, addrY);
+
+    // 4. Order Items Table
+    const tableTop = 345;
+    ctx.fillStyle = '#0f172a';
+    if (ctx.roundRect) {
+      ctx.beginPath();
+      ctx.roundRect(70, tableTop, width - 140, 38, 6);
+      ctx.fill();
+    } else {
+      ctx.fillRect(70, tableTop, width - 140, 38);
+    }
+
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 12px system-ui, -apple-system, sans-serif';
+    ctx.fillText('#', 90, tableTop + 24);
+    ctx.fillText('PRODUCT DESCRIPTION', 130, tableTop + 24);
+    ctx.textAlign = 'right';
+    ctx.fillText('UNIT PRICE', width - 360, tableTop + 24);
+    ctx.fillText('QTY', width - 240, tableTop + 24);
+    ctx.fillText('TOTAL AMOUNT', width - 90, tableTop + 24);
+    ctx.textAlign = 'left';
+
+    let itemY = tableTop + 40;
+    items.forEach((item: any, idx: number) => {
+      // Row zebra background
+      if (idx % 2 === 0) {
+        ctx.fillStyle = '#f8fafc';
+        ctx.fillRect(70, itemY, width - 140, 48);
+      }
+
+      ctx.fillStyle = '#64748b';
+      ctx.font = 'bold 12px monospace';
+      ctx.fillText(String(idx + 1), 90, itemY + 30);
+
+      ctx.fillStyle = '#0f172a';
+      ctx.font = 'bold 14px system-ui, -apple-system, sans-serif';
+      const prodTitle = item.productName || item.name || 'Product Item';
+      const truncatedTitle = prodTitle.length > 42 ? prodTitle.slice(0, 40) + '...' : prodTitle;
+      ctx.fillText(truncatedTitle, 130, itemY + 28);
+
+      if (item.selectedColor || item.selectedSize || item.variant || item.variantName) {
+        ctx.fillStyle = '#64748b';
+        ctx.font = '11px system-ui, -apple-system, sans-serif';
+        const variantText = [item.selectedColor ? `Color: ${item.selectedColor}` : null, item.selectedSize ? `Size: ${item.selectedSize}` : null, item.variant || item.variantName].filter(Boolean).join(' • ');
+        ctx.fillText(variantText, 130, itemY + 44);
+      }
+
+      ctx.textAlign = 'right';
+      ctx.fillStyle = '#334155';
+      ctx.font = '13px system-ui, -apple-system, sans-serif';
+      ctx.fillText(`৳${Number(item.price || 0).toLocaleString('en-BD')}`, width - 360, itemY + 30);
+
+      ctx.fillStyle = '#0f172a';
+      ctx.font = 'bold 14px system-ui, -apple-system, sans-serif';
+      ctx.fillText(String(item.quantity || 1), width - 240, itemY + 30);
+
+      ctx.font = 'bold 14px system-ui, -apple-system, sans-serif';
+      ctx.fillText(`৳${(Number(item.price || 0) * Number(item.quantity || 1)).toLocaleString('en-BD')}`, width - 90, itemY + 30);
+      ctx.textAlign = 'left';
+
+      itemY += 50;
+    });
+
+    // Divider under table
+    ctx.strokeStyle = '#e2e8f0';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(70, itemY + 10);
+    ctx.lineTo(width - 70, itemY + 10);
+    ctx.stroke();
+
+    // 5. Bottom Section: Terms & Conditions on Left, Totals & Seal on Right
+    const summaryTop = itemY + 30;
+
+    // Terms (Left)
+    ctx.fillStyle = '#0f172a';
+    ctx.font = 'bold 13px system-ui, -apple-system, sans-serif';
+    ctx.fillText('TERMS & CONDITIONS:', 70, summaryTop);
+
+    ctx.fillStyle = '#64748b';
+    ctx.font = '12px system-ui, -apple-system, sans-serif';
+    ctx.fillText('• 7-day hassle-free replacement warranty on eligible defective items.', 70, summaryTop + 24);
+    ctx.fillText('• Please inspect parcel thoroughly in front of the delivery rider.', 70, summaryTop + 44);
+    ctx.fillText(`• For any assistance, call ${currentSettings.phone || '+880 1700-123456'} or visit kenaxbd.com.`, 70, summaryTop + 64);
+
+    // Totals (Right)
+    const totalsLeft = width - 420;
+    ctx.fillStyle = '#475569';
+    ctx.font = '14px system-ui, -apple-system, sans-serif';
+    ctx.fillText('Subtotal:', totalsLeft, summaryTop);
+    ctx.textAlign = 'right';
+    ctx.fillStyle = '#0f172a';
+    ctx.font = 'bold 14px system-ui, -apple-system, sans-serif';
+    ctx.fillText(`৳${Number(currentOrder.subtotal || 0).toLocaleString('en-BD')}`, width - 90, summaryTop);
+    ctx.textAlign = 'left';
+
+    ctx.fillStyle = '#475569';
+    ctx.font = '14px system-ui, -apple-system, sans-serif';
+    ctx.fillText('Delivery Charge:', totalsLeft, summaryTop + 26);
+    ctx.textAlign = 'right';
+    ctx.fillStyle = '#0f172a';
+    ctx.font = 'bold 14px system-ui, -apple-system, sans-serif';
+    ctx.fillText(`৳${Number(currentOrder.deliveryCharge || 0).toLocaleString('en-BD')}`, width - 90, summaryTop + 26);
+    ctx.textAlign = 'left';
+
+    if (currentOrder.discountAmount > 0) {
+      ctx.fillStyle = '#059669';
+      ctx.font = '14px system-ui, -apple-system, sans-serif';
+      ctx.fillText(`Coupon Discount (${currentOrder.couponCode || 'PROMO'}):`, totalsLeft, summaryTop + 52);
+      ctx.textAlign = 'right';
+      ctx.font = 'bold 14px system-ui, -apple-system, sans-serif';
+      ctx.fillText(`-৳${Number(currentOrder.discountAmount).toLocaleString('en-BD')}`, width - 90, summaryTop + 52);
+      ctx.textAlign = 'left';
+    }
+
+    const grandTotalY = summaryTop + (currentOrder.discountAmount > 0 ? 86 : 64);
+    ctx.strokeStyle = '#0f172a';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(totalsLeft, grandTotalY - 14);
+    ctx.lineTo(width - 90, grandTotalY - 14);
+    ctx.stroke();
+
+    ctx.fillStyle = '#0f172a';
+    ctx.font = '900 17px system-ui, -apple-system, sans-serif';
+    ctx.fillText('Grand Total:', totalsLeft, grandTotalY + 8);
+    ctx.textAlign = 'right';
+    ctx.fillStyle = '#0284c7';
+    ctx.font = '900 22px system-ui, -apple-system, sans-serif';
+    ctx.fillText(`৳${Number(currentOrder.totalAmount || 0).toLocaleString('en-BD')}`, width - 90, grandTotalY + 8);
+    ctx.textAlign = 'left';
+
+    let extraOffset = 36;
+    if (advPaid > 0) {
+      ctx.fillStyle = '#059669';
+      ctx.font = 'bold 13px system-ui, -apple-system, sans-serif';
+      ctx.fillText(isFullAdv ? 'Full Advance Paid:' : 'Delivery Advance Paid:', totalsLeft, grandTotalY + extraOffset);
+      ctx.textAlign = 'right';
+      ctx.fillText(`-৳${advPaid.toLocaleString('en-BD')}`, width - 90, grandTotalY + extraOffset);
+      ctx.textAlign = 'left';
+      extraOffset += 24;
+
+      ctx.fillStyle = '#b45309';
+      ctx.font = '900 14px system-ui, -apple-system, sans-serif';
+      ctx.fillText('Due to Collect (COD):', totalsLeft, grandTotalY + extraOffset);
+      ctx.textAlign = 'right';
+      ctx.fillText(`৳${dueAmt.toLocaleString('en-BD')}`, width - 90, grandTotalY + extraOffset);
+      ctx.textAlign = 'left';
+      extraOffset += 28;
+    }
+
+    if (currentOrder.transactionId || currentOrder.senderMobileNumber) {
+      ctx.fillStyle = '#64748b';
+      ctx.font = '11px monospace';
+      const txInfo = `Sender: ${currentOrder.senderMobileNumber || 'N/A'} | TrxID: ${currentOrder.transactionId || 'N/A'}`;
+      ctx.fillText(txInfo.slice(0, 48), totalsLeft, grandTotalY + extraOffset);
+      extraOffset += 22;
+    }
+
+    // Payment Status Pill
+    const isPaid = currentOrder.paymentStatus === 'Verified' || currentOrder.paymentStatus === 'Paid' || currentOrder.orderStatus === 'Completed' || (isFullAdv && currentOrder.paymentStatus === 'Verified');
+    ctx.fillStyle = isPaid ? '#dcfce7' : '#fef3c7';
+    if (ctx.roundRect) {
+      ctx.beginPath();
+      ctx.roundRect(totalsLeft, grandTotalY + extraOffset, 180, 28, 6);
+      ctx.fill();
+    } else {
+      ctx.fillRect(totalsLeft, grandTotalY + extraOffset, 180, 28);
+    }
+    ctx.fillStyle = isPaid ? '#166534' : '#92400e';
+    ctx.font = 'bold 12px system-ui, -apple-system, sans-serif';
+    ctx.fillText(`Status: ${isPaid ? 'Paid' : (currentOrder.paymentStatus || 'Pending')}`, totalsLeft + 12, grandTotalY + extraOffset + 19);
+
+    // Authorized Stamp (Seal Graphic)
+    const sealX = width - 180;
+    const sealY = grandTotalY + extraOffset + 80;
+    const sealR = 54;
+
+    ctx.strokeStyle = '#0284c7';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(sealX, sealY, sealR, 0, Math.PI * 2);
+    ctx.stroke();
+
+    ctx.strokeStyle = '#0284c7';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 3]);
+    ctx.beginPath();
+    ctx.arc(sealX, sealY, sealR - 6, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    ctx.fillStyle = '#0369a1';
+    ctx.textAlign = 'center';
+    ctx.font = '900 10px system-ui, -apple-system, sans-serif';
+    ctx.fillText('KENAX BD', sealX, sealY - 14);
+    ctx.font = 'bold 9px system-ui, -apple-system, sans-serif';
+    ctx.fillText('OFFICIAL SEAL', sealX, sealY);
+    ctx.fillStyle = '#059669';
+    ctx.font = 'bold 8px system-ui, -apple-system, sans-serif';
+    ctx.fillText('✓ VERIFIED', sealX, sealY + 14);
+    ctx.fillStyle = '#64748b';
+    ctx.font = '8px monospace';
+    ctx.fillText(`INV-${currentOrder.id}`, sealX, sealY + 26);
+    ctx.textAlign = 'left';
+
+    // 6. Footer Thank You
+    ctx.strokeStyle = '#e2e8f0';
+    ctx.setLineDash([6, 6]);
+    ctx.beginPath();
+    ctx.moveTo(70, height - 70);
+    ctx.lineTo(width - 70, height - 70);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    ctx.fillStyle = '#94a3b8';
+    ctx.font = '12px system-ui, -apple-system, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('Thank you for choosing KenaX BD! We value your business & guarantee authentic quality products.', width / 2, height - 42);
+    ctx.textAlign = 'left';
+
+    await new Promise<void>((resolve) => {
+      canvas.toBlob((blob) => {
+        if (blob) {
+          downloadBlob(blob, `KenaX_Invoice_INV-${currentOrder.id}.png`);
+        }
+        resolve();
+      }, 'image/png', 1.0);
+    });
+  };
+
   const handleDownloadInvoiceImage = async () => {
-    if (!invoiceRef.current) return;
+    if (!order) return;
     try {
       setIsGeneratingImage(true);
-      const canvas = await html2canvas(invoiceRef.current, {
-        scale: 2.5, // 2.5x High Resolution for crystal clear text and seal
-        useCORS: true,
-        backgroundColor: '#ffffff',
-        logging: false,
-      });
+      let downloaded = false;
 
-      const image = canvas.toDataURL('image/png', 1.0);
-      const link = document.createElement('a');
-      link.href = image;
-      link.download = `KenaX_Invoice_INV-${order.id}.png`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
+      // 1. Attempt html2canvas capture first
+      if (invoiceRef.current) {
+        try {
+          const canvas = await html2canvas(invoiceRef.current, {
+            scale: 2,
+            useCORS: true,
+            allowTaint: false,
+            backgroundColor: '#ffffff',
+            logging: false,
+            imageTimeout: 5000,
+            onclone: (clonedDoc) => {
+              const imgs = clonedDoc.querySelectorAll('img');
+              imgs.forEach((img) => {
+                img.crossOrigin = 'anonymous';
+              });
+            },
+          });
+
+          await new Promise<void>((resolve, reject) => {
+            canvas.toBlob((blob) => {
+              if (blob) {
+                downloadBlob(blob, `KenaX_Invoice_INV-${order.id}.png`);
+                downloaded = true;
+                resolve();
+              } else {
+                reject(new Error('Canvas Blob creation failed'));
+              }
+            }, 'image/png', 1.0);
+          });
+        } catch (h2cErr) {
+          console.warn('html2canvas capture failed or tainted, triggering high-res 2D Canvas invoice:', h2cErr);
+        }
+      }
+
+      // 2. Guaranteed Fallback if html2canvas was blocked or tainted
+      if (!downloaded) {
+        await downloadViaDirectCanvas(order, settings);
+      }
 
       setIsDownloaded(true);
       setTimeout(() => setIsDownloaded(false), 3000);
     } catch (error) {
       console.error('Failed to generate invoice image:', error);
+      // Last-ditch direct download guarantee
+      try {
+        await downloadViaDirectCanvas(order, settings);
+        setIsDownloaded(true);
+        setTimeout(() => setIsDownloaded(false), 3000);
+      } catch (lastErr) {
+        console.error('Direct canvas fallback also encountered an error:', lastErr);
+      }
     } finally {
       setIsGeneratingImage(false);
     }
@@ -146,9 +580,18 @@ export const InvoiceModal: React.FC<InvoiceModalProps> = ({ order, products = []
               <p className="text-xs text-slate-500">
                 Date: <span className="font-semibold text-slate-800">{formattedDate}</span>
               </p>
-              <p className="text-xs text-slate-500">
-                Payment: <span className="font-semibold text-slate-800">{order.paymentMethod}</span>
-              </p>
+              {(() => {
+                const isFull = order.paymentOptionType === 'full' || (order.paidAmount !== undefined && order.paidAmount >= order.totalAmount && order.totalAmount > 0);
+                const isDeliv = order.paymentOptionType === 'delivery_only' || order.paymentMethod === 'Delivery Charge Only' || (!isFull && order.paidAmount !== undefined && order.paidAmount > 0);
+                const advanceAmt = order.paidAmount && order.paidAmount > 0 ? order.paidAmount : isDeliv ? order.deliveryCharge : isFull ? order.totalAmount : 0;
+                return (
+                  <p className="text-xs text-slate-500">
+                    Payment: <span className="font-bold text-slate-800">
+                      {isFull ? `Full Advance (${order.paymentMethod || 'Prepaid'}) - ৳${advanceAmt.toLocaleString('en-BD')}` : isDeliv ? `Delivery Advance (${order.paymentMethod || 'Prepaid'}) - ৳${advanceAmt.toLocaleString('en-BD')}` : (order.paymentMethod || 'Cash on Delivery')}
+                    </span>
+                  </p>
+                );
+              })()}
             </div>
           </div>
 
@@ -251,16 +694,48 @@ export const InvoiceModal: React.FC<InvoiceModalProps> = ({ order, products = []
                 <span>Grand Total:</span>
                 <span className="text-sky-700">৳{order.totalAmount.toLocaleString()}</span>
               </div>
+              {(() => {
+                const isFull = order.paymentOptionType === 'full' || (order.paidAmount !== undefined && order.paidAmount >= order.totalAmount && order.totalAmount > 0);
+                const isDeliv = order.paymentOptionType === 'delivery_only' || order.paymentMethod === 'Delivery Charge Only' || (!isFull && order.paidAmount !== undefined && order.paidAmount > 0);
+                const advanceAmt = order.paidAmount && order.paidAmount > 0 ? order.paidAmount : isDeliv ? order.deliveryCharge : isFull ? order.totalAmount : 0;
+                const due = isFull ? 0 : order.dueAmount !== undefined ? order.dueAmount : Math.max(0, order.totalAmount - advanceAmt);
+
+                if (advanceAmt > 0) {
+                  return (
+                    <div className="space-y-1.5 pt-1.5 border-t border-dashed border-slate-200">
+                      <div className="flex justify-between text-emerald-700 font-bold">
+                        <span>{isFull ? 'Full Advance Paid:' : 'Delivery Advance Paid:'}</span>
+                        <span>-৳{advanceAmt.toLocaleString()}</span>
+                      </div>
+                      <div className="flex justify-between text-amber-800 font-black text-sm">
+                        <span>Due to Collect (COD):</span>
+                        <span>৳{due.toLocaleString()}</span>
+                      </div>
+                      {(order.senderMobileNumber || order.transactionId) && (
+                        <div className="p-2 rounded-lg bg-slate-50 border border-slate-200 text-[10px] space-y-0.5 font-mono text-slate-600">
+                          {order.senderMobileNumber && (
+                            <div>Sender Mobile: <strong className="text-slate-800">{order.senderMobileNumber}</strong></div>
+                          )}
+                          {order.transactionId && (
+                            <div>TrxID: <strong className="text-slate-800">{order.transactionId}</strong></div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                }
+                return null;
+              })()}
               <div className="pt-1.5 flex items-center justify-between">
                 <span className="text-[11px] text-slate-500 font-medium">Payment Status:</span>
                 <span
                   className={`inline-block px-2.5 py-0.5 text-[11px] font-bold rounded-md ${
-                    order.paymentStatus === 'Verified' || order.paymentStatus === 'Paid'
+                    order.paymentStatus === 'Verified' || order.paymentStatus === 'Paid' || order.orderStatus === 'Completed'
                       ? 'bg-emerald-100 text-emerald-800'
                       : 'bg-amber-100 text-amber-800'
                   }`}
                 >
-                  {order.paymentStatus}
+                  {order.orderStatus === 'Completed' ? 'Paid' : order.paymentStatus}
                 </span>
               </div>
 

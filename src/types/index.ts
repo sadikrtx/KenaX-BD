@@ -60,6 +60,7 @@ export interface Product {
   sku: string;
   images: string[];
   videoUrl?: string;
+  shortDescription?: string;
   description: string;
   specifications?: Record<string, string>;
   productType: ProductType;
@@ -87,13 +88,126 @@ export interface Product {
   pagePriorities?: Record<string, number>; // Page-specific priority rankings (e.g. { 'home': 1, 'shop': 2, 'category:Smartphones': 1, 'tag:Trending': 3 })
   createdAt?: string;
   updatedAt?: string;
+  // Multi-vendor seller & Reseller marketplace fields
+  sellerId?: string;
+  sellerName?: string;
+  sellerShopName?: string;
+  sellerRating?: number;
+  sellerReviewsCount?: number;
+  sellerVerified?: boolean;
+  allowReselling?: boolean; // When true, resellers can sell this product
+  resellerPrice?: number; // Wholesale cost for resellers (e.g. ৳950)
+  suggestedResellerRetailPrice?: number; // Suggested customer price (e.g. ৳1450)
+  minResellerRetailPrice?: number; // Minimum price reseller can sell at (e.g. ৳1200)
+  resellerCommissionRate?: number; // Estimated profit % or commission
   // Variations & Color-linked images
   variations?: ProductVariationOption[];
   colors?: ColorVariation[];
   sizes?: string[];
   variants?: ProductVariant[];
+  videoAspectRatio?: 'auto' | '9:16' | '16:9' | '1:1' | '4:3';
   keyHighlights?: ProductHighlight[];
+  landingPage?: LandingPageConfig;
   [key: string]: any;
+}
+
+export interface LandingPageFeature {
+  id: string;
+  title: string;
+  desc: string;
+  icon?: string; // 'check-circle', 'shield-check', 'zap', 'truck', 'star', 'sparkles', 'heart', 'award', 'refresh-cw'
+}
+
+export interface LandingPageReview {
+  id: string;
+  name: string;
+  rating: number;
+  comment: string;
+  location?: string;
+  date?: string;
+  photo?: string;
+}
+
+export interface LandingPageTrustBadge {
+  id: string;
+  title: string;
+  subtitle?: string;
+  icon?: string;
+}
+
+export interface LandingPageConfig {
+  enabled: boolean;
+  slug?: string;
+  headline?: string;
+  subHeadline?: string;
+  accentColor?: 'emerald' | 'sky' | 'indigo' | 'rose' | 'amber' | 'purple' | 'slate' | string;
+  topBannerText?: string;
+  topBadgeText?: string;
+  showCountdown?: boolean;
+  countdownHours?: number;
+  countdownEndDate?: string;
+  countdownTitle?: string;
+  countdownSubtitle?: string;
+  priceSectionTitle?: string;
+  stockStatusText?: string;
+  savingsBadgeText?: string;
+  colorSelectLabel?: string;
+  variantSelectLabel?: string;
+  customColors?: ColorVariation[];
+  descriptionSectionTitle?: string;
+  descriptionSectionSubtitle?: string;
+  customDescription?: string;
+  showProductOverview?: boolean;
+  videoUrl?: string;
+  videoTitle?: string;
+  videoSubtitle?: string;
+  videoAspectRatio?: 'auto' | '9:16' | '16:9' | '1:1' | '4:3';
+  galleryImages?: string[];
+  showFeatures?: boolean;
+  featuresSectionTitle?: string;
+  featuresSectionSubtitle?: string;
+  features?: LandingPageFeature[];
+  whyUsSectionTitle?: string;
+  whyUsSectionSubtitle?: string;
+  whyChooseUs?: string[];
+  badges?: string[];
+  customTrustBadges?: LandingPageTrustBadge[];
+  reviewsSectionTitle?: string;
+  reviewsSectionSubtitle?: string;
+  customReviews?: LandingPageReview[];
+  customOrderTitle?: string;
+  customOrderSubtitle?: string;
+  orderFormBadgeText?: string;
+  step1Title?: string;
+  step2Title?: string;
+  step3Title?: string;
+  insideDhakaLabel?: string;
+  outsideDhakaLabel?: string;
+  nameInputLabel?: string;
+  nameInputPlaceholder?: string;
+  phoneInputLabel?: string;
+  phoneInputPlaceholder?: string;
+  addressInputLabel?: string;
+  addressInputPlaceholder?: string;
+  noteInputLabel?: string;
+  noteInputPlaceholder?: string;
+  customButtonText?: string;
+  orderSecurityNotice?: string;
+  orderSuccessTitle?: string;
+  orderSuccessSubtitle?: string;
+  freeDeliveryNote?: string;
+  showSimilarProducts?: boolean;
+  similarSectionTitle?: string;
+  similarSectionSubtitle?: string;
+  similarProductIds?: string[];
+  guaranteeText?: string;
+  stickyBarButtonText?: string;
+  stickyBarSubtext?: string;
+  deliveryInsideDhakaFee?: number;
+  deliveryOutsideDhakaFee?: number;
+  viewsCount?: number;
+  ordersCount?: number;
+  updatedAt?: string;
 }
 
 export interface SubCategoryItem {
@@ -180,6 +294,7 @@ export type OrderStatus =
   | 'Returned'
   | 'Refunded'
   | 'Rejected'
+  | 'Fake Order'
   | string;
 
 export type PaymentMethod = 'Cash on Delivery' | 'bKash' | 'Nagad' | 'Rocket' | string;
@@ -217,6 +332,8 @@ export interface OrderItem {
   productName: string;
   name?: string;
   productImage: string;
+  image?: string;
+  sku?: string;
   variant?: string;
   selectedColor?: string;
   selectedSize?: string;
@@ -225,6 +342,10 @@ export interface OrderItem {
   quantity: number;
   price: number; // in BDT
   total: number;
+  costPrice?: number;
+  supplierName?: string;
+  supplierUrl?: string;
+  supplierId?: string;
 }
 
 export interface OrderTimelineEvent {
@@ -240,6 +361,11 @@ export interface Order {
   customerName: string;
   customerEmail: string;
   customerMobile: string;
+  customerPhone?: string;
+  phone?: string;
+  mobile?: string;
+  address?: string;
+  shippingAddress?: string;
   
   // Delivery Address Snapshot (immutable)
   deliveryName: string;
@@ -276,6 +402,7 @@ export interface Order {
   
   // Shipping & Courier
   orderStatus: OrderStatus;
+  isFakeOrder?: boolean;
   courierName?: string; // Steadfast, Pathao, RedX, eCourier, Paperfly
   courierOrderId?: string;
   trackingNumber?: string;
@@ -283,10 +410,13 @@ export interface Order {
   estimatedDelivery?: string;
   
   timeline: OrderTimelineEvent[];
+  adminNotes?: string;
   createdAt: string;
   updatedAt: string;
   
   // Staff attribution fields for order creation & processing
+  orderSource?: 'chatbot' | 'manual' | string;
+  isAiBotOrder?: boolean;
   createdByStaffId?: string;
   createdByStaffName?: string;
   isV2Order?: boolean;
@@ -294,6 +424,10 @@ export interface Order {
   handledByStaffId?: string;
   handledByStaffName?: string;
   handledByStaffRole?: string;
+  confirmedByStaffId?: string;
+  confirmedByStaffName?: string;
+  confirmedByStaffRole?: string;
+  confirmedAt?: string;
   telegramChatId?: string;
   telegramUsername?: string;
   [key: string]: any;
@@ -349,6 +483,7 @@ export type EmailTemplateType =
   | 'user_order_confirmed'
   | 'user_order_processing'
   | 'user_order_picked'
+  | 'user_order_delivered'
   | 'staff_new_user_registered'
   | 'staff_cart_wishlist_alert'
   | 'staff_new_order_alert'
@@ -421,6 +556,100 @@ export interface AuditLog {
   action: string;
   details: string;
   timestamp: string;
+}
+
+export interface MetaPixelEventToggles {
+  pageView: boolean;
+  viewContent: boolean;
+  addToCart: boolean;
+  initiateCheckout: boolean;
+  purchase: boolean;
+  search: boolean;
+  contact: boolean;
+}
+
+export interface MetaPixelSettings {
+  enabled: boolean;
+  pixelId: string;
+  additionalPixelIds?: string[];
+  capiToken?: string;
+  testEventCode?: string;
+  datasetId?: string;
+  domainVerification?: string;
+  enableAdvancedMatching?: boolean;
+  events?: MetaPixelEventToggles;
+}
+
+export interface TikTokAdsSettings {
+  enabled: boolean;
+  pixelId: string;
+  eventsApiToken?: string;
+  testEventCode?: string;
+  enableAdvancedMatching?: boolean;
+  events?: {
+    pageView: boolean;
+    viewContent: boolean;
+    addToCart: boolean;
+    initiateCheckout: boolean;
+    purchase: boolean;
+    search: boolean;
+    contact: boolean;
+  };
+}
+
+export interface GoogleAdsSettings {
+  enabled: boolean;
+  gtmContainerId?: string; // GTM-XXXXXX
+  ga4MeasurementId?: string; // G-XXXXXXXXXX
+  googleAdsConversionId?: string; // AW-XXXXXXXXX
+  googleAdsPurchaseLabel?: string;
+  enableEnhancedEcommerce?: boolean;
+  enableRemarketingTag?: boolean;
+}
+
+export interface CustomScriptsSettings {
+  headerScript?: string;
+  footerScript?: string;
+}
+
+export interface CampaignAdSpend {
+  id: string;
+  name: string;
+  platform: 'facebook' | 'tiktok' | 'google' | 'youtube' | 'influencer' | 'sms' | 'other';
+  spendBDT: number;
+  startDate: string;
+  endDate?: string;
+  targetUrl?: string;
+  productId?: string;
+  productName?: string;
+  utmCampaign?: string;
+  notes?: string;
+  status: 'active' | 'completed' | 'paused';
+  createdAt?: string;
+}
+
+export interface SavedUTMLink {
+  id: string;
+  name: string;
+  fullUrl: string;
+  platform: string;
+  productOrPage: string;
+  utmSource: string;
+  utmMedium: string;
+  utmCampaign: string;
+  utmContent?: string;
+  utmTerm?: string;
+  createdAt: string;
+  clicksCount?: number;
+}
+
+export interface AdvertiserSettings {
+  meta?: MetaPixelSettings;
+  tiktok?: TikTokAdsSettings;
+  google?: GoogleAdsSettings;
+  customScripts?: CustomScriptsSettings;
+  adSpends?: CampaignAdSpend[];
+  savedUTMs?: SavedUTMLink[];
 }
 
 export interface SEOSettings {
@@ -515,6 +744,18 @@ export interface PromoGridSettings {
   placements?: PromoGridPlacementSettings;
 }
 
+export interface HomeTabCustomLabels {
+  sectionTitle?: string;
+  sectionSubtitle?: string;
+  all?: string;
+  trending?: string;
+  bestsellers?: string;
+  electronics?: string;
+  fashion?: string;
+  home?: string;
+  hiddenTabs?: string[];
+}
+
 export interface WebsiteSettings {
   id?: string;
   siteName: string;
@@ -551,6 +792,7 @@ export interface WebsiteSettings {
   seoSettings?: SEOSettings;
   tagCollectionBanners?: Record<string, TagCollectionSlide[]>;
   navigationItems?: NavItem[];
+  homeTabs?: HomeTabCustomLabels;
   [key: string]: any;
 }
 
@@ -586,7 +828,7 @@ export interface TagCollectionSlide {
   // Banner Height & Size Customization (Desktop vs Mobile)
   desktopHeight?: 'compact' | 'standard' | 'tall' | 'extra_tall' | 'custom';
   desktopCustomHeight?: number; // e.g. 150-600 px
-  mobileHeight?: 'compact' | 'standard' | 'tall' | 'extra_tall' | 'custom';
+  mobileHeight?: 'compact' | 'standard' | 'tall' | 'extra_tall' | 'hd_16_9' | 'custom';
   mobileCustomHeight?: number; // e.g. 100-400 px
   
   // Position, Spacing & Alignment Controls (X, Y, Top, Bottom, Left, Right)
@@ -769,6 +1011,38 @@ export interface MaintenanceModeSettings {
   allowStaffBypass?: boolean;
 }
 
+export interface StorePolicy {
+  id: string;
+  slug: string; // e.g. 'return', 'exchange', 'privacy', 'terms', 'refund'
+  title: string;
+  titleBn?: string;
+  content: string;
+  active: boolean;
+  badgeText?: string;
+  iconName?: string;
+  order: number;
+  updatedAt?: string;
+}
+
+export interface CustomOrderStepName {
+  title: string;
+  descBn?: string;
+}
+
+export const DEFAULT_ORDER_STEP_NAMES: Record<string, CustomOrderStepName> = {
+  Pending: { title: 'Pending', descBn: 'অর্ডার জমা' },
+  'Payment Verification': { title: 'Payment Check', descBn: 'পেমেন্ট যাচাই' },
+  Confirmed: { title: 'Confirmed', descBn: 'অর্ডার কনফার্মড' },
+  Processing: { title: 'Processing', descBn: 'প্রসেসিং করা হচ্ছে' },
+  Packed: { title: 'Packed / Picked', descBn: 'প্যাকিং/পিকড সম্পন্ন' },
+  Shipped: { title: 'Shipped', descBn: 'কুরিয়ার শিপড' },
+  'Out for Delivery': { title: 'Out for Delivery', descBn: 'ডেলিভারির পথে' },
+  Delivered: { title: 'Delivered', descBn: 'ডেলিভারি সম্পন্ন' },
+  Completed: { title: 'Completed', descBn: 'অর্ডার কমপ্লিট' },
+  Cancelled: { title: 'Cancelled', descBn: 'অর্ডার বাতিল' },
+  Returned: { title: 'Returned', descBn: 'অর্ডার রিটার্ন' },
+};
+
 export interface SiteSettings {
   id?: string;
   siteName: string;
@@ -778,6 +1052,10 @@ export interface SiteSettings {
   insideDhakaDeliveryCharge?: number;
   outsideDhakaDeliveryCharge?: number;
   sheetsSyncEnabled?: boolean;
+  googleSpreadsheetId?: string;
+  googleSpreadsheetUrl?: string;
+  autoSyncGoogleSheets?: boolean;
+  googleSheetsLastSyncedAt?: string;
   emailNotificationsEnabled?: boolean;
   announcementBarText: string;
   phone?: string;
@@ -809,6 +1087,9 @@ export interface SiteSettings {
   privacyPolicy?: string;
   termsOfService?: string;
   refundPolicy?: string;
+  returnPolicy?: string;
+  exchangePolicy?: string;
+  storePolicies?: StorePolicy[];
   faqs?: FAQItem[];
   metaTitle?: string;
   metaDescription?: string;
@@ -827,7 +1108,89 @@ export interface SiteSettings {
   emailFooterEmail?: string;
   emailFooterAddress?: string;
   emailFooterTrustText?: string;
+  messengerLink?: string;
+  whatsappNumber?: string;
+  telegramBotUsername?: string;
+  // KenaX AI Bot & Channel Numbers Configuration
+  aiBotEnabled?: boolean;
+  aiBotName?: string;
+  aiBotWelcomeMessage?: string;
+  aiBotPrompt?: string;
+  aiBotAllowOrdering?: boolean;
+  officialWhatsAppAgentNumber?: string;
+  whatsappSuperAdminNumber?: string;
+  chatBotRules?: ChatBotRule[];
+  customOrderStepNames?: Record<string, CustomOrderStepName>;
+  homeTabs?: HomeTabCustomLabels;
+  advertiserSettings?: AdvertiserSettings;
+  // Courier Fraud & Integration Settings
+  steadfastApiKey?: string;
+  steadfastSecretKey?: string;
+  steadfastWebhookEnabled?: boolean;
+  steadfastWebhookSecret?: string;
+  autoUpdateOrderStatusFromWebhook?: boolean;
+  pathaoApiKey?: string;
+  pathaoSecretKey?: string;
+  pathaoStoreId?: string;
+  fraudAlertThresholdPercent?: number; // e.g. 70 (if success rate < 70%, trigger high risk alert)
+  autoFraudCheckOnOrder?: boolean;
+  advanceDeliveryFeeAmount?: number;
   [key: string]: any;
+}
+
+export interface CourierFraudReport {
+  phone: string;
+  totalOrders: number;
+  deliveredOrders: number;
+  cancelledOrders: number;
+  returnedOrders?: number;
+  successRate: number; // percentage (0 to 100)
+  riskLevel: 'safe' | 'moderate' | 'high_risk' | 'unknown';
+  riskReason?: string;
+  courierSource?: string;
+  checkedAt: string;
+  rawDetails?: any;
+}
+
+export interface ChatBotRuleActionData {
+  suggestedProductIds?: string[];
+  couponCode?: string;
+  targetUrl?: string;
+  agentPhone?: string;
+  telegramUsername?: string;
+  prefilledOrderProductId?: string;
+  quickButtons?: Array<{
+    label: string;
+    action: 'open_order' | 'suggest_products' | 'connect_whatsapp' | 'connect_telegram' | 'view_policy' | 'custom_url';
+    payload?: string;
+    icon?: string;
+  }>;
+}
+
+export interface ChatBotRule {
+  id: string;
+  name: string;
+  nameBn?: string;
+  description?: string;
+  enabled: boolean;
+  priority: number; // Lower numbers have higher priority (1 is highest)
+  matchType: 'contains_any' | 'contains_all' | 'exact' | 'regex' | 'intent';
+  keywords: string[]; // List of trigger keywords/phrases
+  actionType:
+    | 'auto_reply'
+    | 'suggest_products'
+    | 'open_order_form'
+    | 'connect_whatsapp'
+    | 'connect_telegram'
+    | 'apply_coupon'
+    | 'view_policy'
+    | 'quick_buttons';
+  replyMessage: string;
+  replyMessageBn?: string;
+  actionData?: ChatBotRuleActionData;
+  triggerCount?: number;
+  lastTriggeredAt?: string;
+  category?: 'Orders' | 'Delivery' | 'Payment' | 'Support' | 'Discount' | 'General';
 }
 
 export interface StaffUser {
@@ -987,7 +1350,7 @@ export interface RolePermissions {
   permissions: string[];
 }
 
-export type PolicyTab = 'privacy' | 'terms' | 'refund' | 'faq';
+export type PolicyTab = 'return' | 'exchange' | 'privacy' | 'terms' | 'refund' | 'faq' | string;
 
 export type SMSServiceProvider = 'android_sim' | 'greenweb' | 'mimsms' | 'reve' | 'bulksmsbd' | 'custom';
 
@@ -1157,7 +1520,11 @@ export interface WhatsAppMessageRecord {
   to?: string;
   senderName?: string;
   text?: string;
-  messageType: 'text' | 'interactive' | 'template' | 'image' | 'button' | 'location' | 'document' | 'other';
+  messageType: 'text' | 'interactive' | 'template' | 'image' | 'video' | 'audio' | 'voice' | 'button' | 'location' | 'document' | 'other';
+  mediaUrl?: string;
+  mediaType?: 'image' | 'video' | 'audio' | 'voice' | 'document';
+  mediaCaption?: string;
+  filename?: string;
   rawPayload?: any;
   status?: 'sending' | 'sent' | 'delivered' | 'read' | 'failed' | 'received';
   timestamp: string;
@@ -1166,11 +1533,15 @@ export interface WhatsAppMessageRecord {
   staffMember?: string;
   staffId?: string;
   staffRole?: string;
+  readAt?: string;
+  readBy?: string;
+  updatedAt?: string;
 }
 
 export interface WhatsAppConversation {
   phoneNumber: string;
   customerName?: string;
+  isPinned?: boolean;
   lastMessage?: WhatsAppMessageRecord;
   unreadCount: number;
   totalMessages: number;
@@ -1180,12 +1551,19 @@ export interface WhatsAppConversation {
 }
 
 export type WhatsAppEventType =
+  | 'user_registered'
   | 'order_placed'
   | 'order_confirmed'
   | 'order_shipped'
   | 'out_for_delivery'
   | 'order_delivered'
+  | 'order_cancelled'
   | 'payment_received'
+  | 'payment_number_updated'
+  | 'admin_pinned_order_alert'
+  | 'admin_pinned_status_alert'
+  | 'admin_pinned_fake_order_alert'
+  | 'admin_pinned_registration_alert'
   | 'cart_recovery'
   | 'marketing_broadcast';
 
@@ -1202,15 +1580,20 @@ export interface WhatsAppTemplate {
 export interface WhatsAppSettings {
   enabled: boolean;
   businessNumber: string; // e.g., "8801800000000"
+  pinnedAdminNumber?: string; // Pinned WhatsApp number for Admin Alerts
   senderName: string; // e.g. "KenaX BD Official"
   provider: 'direct_link' | 'ultramsg' | 'wasender' | 'green_api' | 'cloud_api';
   instanceId?: string;
   apiKey?: string;
   webhookUrl?: string;
+  autoSendOnRegistration?: boolean;
   autoSendOnNewOrder: boolean;
+  autoSendOnStatusChange?: boolean;
   autoSendOnShipped: boolean;
   autoSendOnDelivered: boolean;
   autoSendOnPayment: boolean;
+  autoSendOnPaymentUpdate?: boolean;
+  autoSendToPinnedAdmin?: boolean;
   templates: Record<WhatsAppEventType, WhatsAppTemplate>;
 }
 
@@ -1221,11 +1604,13 @@ export type TelegramEventType =
   | 'super_admin_staff_activity'
   | 'customer_order_placed'
   | 'customer_order_status_update'
+  | 'customer_order_delivered'
   | 'channel_new_product'
   | 'super_admin_product_created'
   | 'channel_discount_alert'
   | 'channel_coupon_alert'
-  | 'super_admin_discount_coupon_activity';
+  | 'super_admin_discount_coupon_activity'
+  | 'admin_fake_order_alert';
 
 export interface TelegramTemplate {
   id: TelegramEventType;
@@ -1286,7 +1671,108 @@ export interface TelegramBotSettings {
     refunded: boolean;
   };
 
+  // Telegram Mini App Integration Settings
+  telegramMiniAppEnabled?: boolean;
+  telegramMiniAppButtonTitle?: string;
+  telegramMiniAppAutoFill?: boolean;
+  telegramMiniAppHaptics?: boolean;
+  telegramMiniAppThemeSync?: boolean;
+  telegramMiniAppTrackOrderButton?: boolean;
+
   templates: Record<TelegramEventType, TelegramTemplate>;
 }
+
+export interface ProductHistoryEntry {
+  type: 'product' | 'view';
+  view: string;
+  productId?: string;
+  productName?: string;
+  category?: string;
+  subcategory?: string;
+  subSubcategory?: string;
+  tag?: string;
+  searchQuery?: string;
+  scrollY?: number;
+}
+
+export interface NewsletterSubscriber {
+  id: string;
+  email: string;
+  subscribedAt: string;
+  source?: string;
+  status: 'active' | 'unsubscribed';
+}
+
+export type PartnerRole = 'seller' | 'reseller';
+
+export interface PartnerUser {
+  id: string;
+  type: PartnerRole;
+  name: string;
+  shopName: string;
+  phone: string;
+  email: string;
+  username: string;
+  password?: string;
+  status: 'active' | 'suspended' | 'pending';
+  planId?: string;
+  selectedPlanId?: string;
+  billingCycle?: 'monthly' | 'yearly';
+  subscriptionStatus?: 'active' | 'expired' | 'pending_renewal' | 'trial';
+  subscriptionEndDate?: string;
+  paymentMethod?: 'bkash' | 'nagad' | 'rocket' | 'bank' | 'none';
+  paymentSenderNumber?: string;
+  paymentTxId?: string;
+  paymentAmount?: number;
+  paymentProofNote?: string;
+  paymentSubmittedAt?: string;
+  renewalTxId?: string;
+  renewalPaymentMethod?: string;
+  renewalAmount?: number;
+  renewalSubmittedAt?: string;
+  isVip?: boolean;
+  resellerTier?: 'bronze' | 'silver' | 'gold_vip';
+  rejectionReason?: string;
+  commissionRate: number; // For seller: commission deduction %; For reseller: wholesale discount or markup %
+  walletBalance: number;
+  balance?: number;
+  totalEarnings: number;
+  totalSales?: number;
+  orderCount?: number;
+  totalWithdrawn: number;
+  paymentDetails: {
+    bkash?: string;
+    nagad?: string;
+    rocket?: string;
+    bankName?: string;
+    bankAccount?: string;
+    bankBranch?: string;
+    accountHolderName?: string;
+  };
+  address?: string;
+  city?: string;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export interface PartnerPayout {
+  id: string;
+  partnerId: string;
+  partnerName: string;
+  partnerType: PartnerRole;
+  amount: number;
+  method: 'bkash' | 'nagad' | 'rocket' | 'bank';
+  accountNumber: string;
+  status: 'pending' | 'approved' | 'rejected';
+  requestedAt: string;
+  date?: string;
+  processedAt?: string;
+  approvedAt?: string;
+  txId?: string;
+  transactionId?: string;
+  note?: string;
+  adminNote?: string;
+}
+
 
 

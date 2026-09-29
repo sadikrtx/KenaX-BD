@@ -1,5 +1,42 @@
-import { Category, WebsiteSettings, DeliveryZone, Coupon, EmailTemplate, Order, HeroFeatureTag, DEFAULT_HERO_BANNERS, DEFAULT_HERO_SIDE_BANNER, CustomerRecord, ExpenseRecord, OtherProfitRecord, Review } from '../types';
-import { DEFAULT_PROMO_GRID_SETTINGS } from './defaultPromoBanners';
+import { Category, WebsiteSettings, DeliveryZone, Coupon, EmailTemplate, Order, HeroFeatureTag, DEFAULT_HERO_BANNERS, DEFAULT_HERO_SIDE_BANNER, CustomerRecord, ExpenseRecord, OtherProfitRecord, Review, PaymentGatewayConfig } from '../types/index.ts';
+import { DEFAULT_PROMO_GRID_SETTINGS } from './defaultPromoBanners.ts';
+import { DEFAULT_NAV_ITEMS } from './defaultNavItems.ts';
+
+export const DEFAULT_PAYMENT_GATEWAYS: PaymentGatewayConfig[] = [
+  {
+    id: 'bkash',
+    name: 'bKash',
+    accountNumber: '01719143897',
+    accountType: 'Personal',
+    txType: 'Send Money',
+    instructions:
+      'Send Money from your bKash App or dial *247#. Enter your bKash mobile number and Transaction ID (TrxID) below.',
+    isEnabled: true,
+    assignedTo: 'all',
+  },
+  {
+    id: 'nagad',
+    name: 'Nagad',
+    accountNumber: '01887713212',
+    accountType: 'Merchant',
+    txType: 'Payment',
+    instructions:
+      'Make Payment or Send Money from your Nagad App or dial *167#. Enter your mobile number and Transaction ID (TrxID) below.',
+    isEnabled: true,
+    assignedTo: 'all',
+  },
+  {
+    id: 'rocket',
+    name: 'Rocket',
+    accountNumber: '01912-345678-9',
+    accountType: 'Personal',
+    txType: 'Send Money',
+    instructions:
+      'Send Money from your Rocket App or dial *322#. Enter your Rocket account number and Transaction ID (TrxID) below.',
+    isEnabled: true,
+    assignedTo: 'all',
+  },
+];
 
 export const DEFAULT_HERO_FEATURES: HeroFeatureTag[] = [
   { id: 'feat-1', text: 'Premium Quality Products', icon: 'shield', enabled: true },
@@ -387,15 +424,40 @@ export const INITIAL_WEBSITE_SETTINGS: WebsiteSettings = {
   deliveryInsideDhaka: 60,
   deliveryOutsideDhaka: 120,
   freeDeliveryThreshold: 5000,
-  bkashNumber: '01712-345678 (Personal / Merchant)',
-  nagadNumber: '01812-345678 (Merchant)',
-  rocketNumber: '01912-345678-9 (Personal)',
+  bkashNumber: '01719143897',
+  bkashType: 'Personal',
+  nagadNumber: '01887713212',
+  nagadType: 'Merchant',
+  rocketNumber: '01912-345678-9',
+  paymentGateways: DEFAULT_PAYMENT_GATEWAYS,
+  enableCod: true,
+  enableFullPayment: true,
+  enableDeliveryOnlyPayment: true,
   sheetsSyncEnabled: true,
   emailNotificationsEnabled: true,
   heroBanners: DEFAULT_HERO_BANNERS,
   heroSideBanner: DEFAULT_HERO_SIDE_BANNER,
   promoGrid: DEFAULT_PROMO_GRID_SETTINGS,
   seoSettings: DEFAULT_SEO_SETTINGS,
+  navigationItems: DEFAULT_NAV_ITEMS,
+  // KenaX AI Bot & Official Contact Numbers
+  aiBotEnabled: true,
+  aiBotName: 'KenaX AI Bot',
+  aiBotWelcomeMessage: 'হ্যালো! আমি KenaX AI Bot। যেকোনো প্রোডাক্ট তথ্য, অর্ডার বুকিং বা অফিশিয়াল প্রতিনিধির সাথে সরাসরি কথা বলতে আমাকে বলুন!',
+  aiBotAllowOrdering: true,
+  officialWhatsAppAgentNumber: '01719143897',
+  whatsappSuperAdminNumber: '01887713212',
+  whatsappNumber: '01719143897',
+  telegramBotUsername: 'kenaxbd_bot',
+  messengerLink: 'https://m.me/kenaxbd',
+  // Steadfast Courier & Live Fraud Checker
+  steadfastApiKey: 'xfzizfogajtskvtyurjofrrlsdznmjff',
+  steadfastSecretKey: 'wwegm30unwgnsqv6eiepby7r',
+  steadfastWebhookEnabled: false, // Default: Analog mode active currently
+  steadfastWebhookSecret: 'knx_wh_sf_8f93a12d',
+  autoUpdateOrderStatusFromWebhook: true,
+  fraudAlertThresholdPercent: 70,
+  advanceDeliveryFeeAmount: 120,
 };
 
 export const INITIAL_DELIVERY_ZONES: DeliveryZone[] = [

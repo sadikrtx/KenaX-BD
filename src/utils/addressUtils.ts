@@ -1,5 +1,5 @@
-import { DeliveryAddress } from '../types';
-import { normalizePhoneNumber } from '../lib/firebase';
+import { DeliveryAddress } from '../types/index.ts';
+import { normalizePhoneNumber } from '../lib/firebase.ts';
 
 /**
  * Normalizes a string for clean comparison (lowercased, trimmed, collapsed whitespace)

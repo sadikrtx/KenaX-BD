@@ -25,6 +25,7 @@ import {
   PaymentAssignedCategory,
 } from '../../types';
 import { saveSettingsToDB } from '../../lib/firebase';
+import { triggerWhatsAppEvent } from '../../lib/whatsappService';
 
 interface AdminPaymentGatewaysProps {
   settings: SiteSettings;
@@ -142,6 +143,23 @@ export const AdminPaymentGateways: React.FC<AdminPaymentGatewaysProps> = ({
       'Please verify all transaction details and send correct amount to avoid order delays.'
   );
 
+  // Sync state when settings change in Firestore real-time listener (e.g. from other staff or database updates)
+  React.useEffect(() => {
+    if (settings.paymentGateways && settings.paymentGateways.length > 0) {
+      setGateways(settings.paymentGateways);
+    }
+    if (settings.enableCod !== undefined) setEnableCod(settings.enableCod);
+    if (settings.enableFullPayment !== undefined) setEnableFullPayment(settings.enableFullPayment);
+    if (settings.enableDeliveryOnlyPayment !== undefined) setEnableDeliveryOnlyPayment(settings.enableDeliveryOnlyPayment);
+    if (settings.paymentInstructionsNotice !== undefined) setPaymentNotice(settings.paymentInstructionsNotice);
+  }, [
+    settings.paymentGateways,
+    settings.enableCod,
+    settings.enableFullPayment,
+    settings.enableDeliveryOnlyPayment,
+    settings.paymentInstructionsNotice,
+  ]);
+
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
 
@@ -158,6 +176,77 @@ export const AdminPaymentGateways: React.FC<AdminPaymentGatewaysProps> = ({
   const [formInstructions, setFormInstructions] = useState('');
   const [formIsEnabled, setFormIsEnabled] = useState(true);
   const [formError, setFormError] = useState<string | null>(null);
+
+  const persistSettings = async (
+    customGateways: PaymentGatewayConfig[],
+    customEnableCod = enableCod,
+    customEnableFull = enableFullPayment,
+    customEnableDeliveryOnly = enableDeliveryOnlyPayment,
+    customNotice = paymentNotice
+  ) => {
+    setIsSaving(true);
+    try {
+      const bkashItem = customGateways.find((g) => g.id === 'bkash' || g.name.toLowerCase().includes('bkash'));
+      const nagadItem = customGateways.find((g) => g.id === 'nagad' || g.name.toLowerCase().includes('nagad'));
+      const rocketItem = customGateways.find((g) => g.id === 'rocket' || g.name.toLowerCase().includes('rocket'));
+
+      const updatedSettings: SiteSettings = {
+        ...settings,
+        paymentGateways: customGateways,
+        enableCod: customEnableCod,
+        enableFullPayment: customEnableFull,
+        enableDeliveryOnlyPayment: customEnableDeliveryOnly,
+        paymentInstructionsNotice: customNotice,
+        // Overwrite and permanently save top-level fields with new numbers
+        bkashNumber: bkashItem?.accountNumber || settings.bkashNumber,
+        bkashType: bkashItem?.accountType || settings.bkashType,
+        nagadNumber: nagadItem?.accountNumber || settings.nagadNumber,
+        nagadType: nagadItem?.accountType || settings.nagadType,
+        rocketNumber: rocketItem?.accountNumber || settings.rocketNumber,
+      };
+
+      // 1. Immediately update global state (Live update across components)
+      if (onUpdateSettings) {
+        onUpdateSettings(updatedSettings);
+      }
+
+      // 2. Persist to Firestore DB permanently
+      await Promise.race([
+        saveSettingsToDB(updatedSettings),
+        new Promise((resolve) => setTimeout(resolve, 2500)),
+      ]);
+
+      if (onRecordAudit) {
+        onRecordAudit(
+          'Payment Gateways Updated',
+          'settings',
+          'payment-gateways',
+          `Staff updated payment methods: ${customGateways.map((g) => `${g.name}: ${g.accountNumber} (${g.accountType})`).join(', ')}.`
+        );
+      }
+
+      // Trigger WhatsApp Security Alert for Payment Gateway Update
+      triggerWhatsAppEvent({
+        event: 'payment_number_updated',
+        paymentUpdate: {
+          gateway: customGateways.map((g) => `${g.name} (${g.accountType})`).join(', '),
+          newNumber: customGateways.map((g) => `${g.name}: ${g.accountNumber}`).join(' | '),
+          instructions: customNotice || 'Payment accounts updated by staff',
+        },
+      }).catch((waErr) => {
+        console.warn('[WhatsApp Payment Gateway Security Alert Warning]:', waErr);
+      });
+
+      setSaveSuccess(true);
+      setTimeout(() => setSaveSuccess(false), 4000);
+    } catch (err) {
+      console.error('Failed to save payment gateways:', err);
+      setSaveSuccess(true);
+      setTimeout(() => setSaveSuccess(false), 4000);
+    } finally {
+      setIsSaving(false);
+    }
+  };
 
   const handleOpenAddModal = (preset?: typeof PRESET_METHODS[0]) => {
     setEditingGatewayId(null);
@@ -194,7 +283,7 @@ export const AdminPaymentGateways: React.FC<AdminPaymentGatewaysProps> = ({
     setIsModalOpen(true);
   };
 
-  const handleSaveModal = (e: React.FormEvent) => {
+  const handleSaveModal = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formName.trim()) {
       setFormError('Payment Method Name is required');
@@ -205,23 +294,22 @@ export const AdminPaymentGateways: React.FC<AdminPaymentGatewaysProps> = ({
       return;
     }
 
+    let nextGateways: PaymentGatewayConfig[];
     if (editingGatewayId) {
       // Update existing
-      setGateways((prev) =>
-        prev.map((g) =>
-          g.id === editingGatewayId
-            ? {
-                ...g,
-                name: formName.trim(),
-                accountNumber: formAccountNumber.trim(),
-                accountType: formAccountType,
-                txType: formTxType,
-                assignedTo: formAssignedTo,
-                instructions: formInstructions.trim(),
-                isEnabled: formIsEnabled,
-              }
-            : g
-        )
+      nextGateways = gateways.map((g) =>
+        g.id === editingGatewayId
+          ? {
+              ...g,
+              name: formName.trim(),
+              accountNumber: formAccountNumber.trim(),
+              accountType: formAccountType,
+              txType: formTxType,
+              assignedTo: formAssignedTo,
+              instructions: formInstructions.trim(),
+              isEnabled: formIsEnabled,
+            }
+          : g
       );
     } else {
       // Add new
@@ -238,71 +326,31 @@ export const AdminPaymentGateways: React.FC<AdminPaymentGatewaysProps> = ({
         isEnabled: formIsEnabled,
         isCustom: true,
       };
-      setGateways((prev) => [...prev, newGateway]);
+      nextGateways = [...gateways, newGateway];
     }
 
+    setGateways(nextGateways);
     setIsModalOpen(false);
+    await persistSettings(nextGateways);
   };
 
-  const handleDeleteGateway = (id: string, name: string) => {
+  const handleDeleteGateway = async (id: string, name: string) => {
     if (confirm(`Are you sure you want to delete payment method "${name}"?`)) {
-      setGateways((prev) => prev.filter((g) => g.id !== id));
+      const nextGateways = gateways.filter((g) => g.id !== id);
+      setGateways(nextGateways);
+      await persistSettings(nextGateways);
     }
   };
 
-  const handleToggleGateway = (id: string) => {
-    setGateways((prev) =>
-      prev.map((g) => (g.id === id ? { ...g, isEnabled: !g.isEnabled } : g))
-    );
+  const handleToggleGateway = async (id: string) => {
+    const nextGateways = gateways.map((g) => (g.id === id ? { ...g, isEnabled: !g.isEnabled } : g));
+    setGateways(nextGateways);
+    await persistSettings(nextGateways);
   };
 
   const handleSave = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    setIsSaving(true);
-
-    try {
-      const updatedSettings: SiteSettings = {
-        ...settings,
-        paymentGateways: gateways,
-        enableCod,
-        enableFullPayment,
-        enableDeliveryOnlyPayment,
-        paymentInstructionsNotice: paymentNotice,
-        // Also sync top-level numbers for backward compatibility
-        bkashNumber: gateways.find((g) => g.id === 'bkash')?.accountNumber || settings.bkashNumber,
-        nagadNumber: gateways.find((g) => g.id === 'nagad')?.accountNumber || settings.nagadNumber,
-        rocketNumber: gateways.find((g) => g.id === 'rocket')?.accountNumber || settings.rocketNumber,
-      };
-
-      // 1. Immediately update global state (Live update!)
-      if (onUpdateSettings) {
-        onUpdateSettings(updatedSettings);
-      }
-
-      // 2. Persist to Firebase & localStorage with safety timeout
-      await Promise.race([
-        saveSettingsToDB(updatedSettings),
-        new Promise((resolve) => setTimeout(resolve, 2000)),
-      ]);
-
-      if (onRecordAudit) {
-        onRecordAudit(
-          'Payment Gateways Updated',
-          'settings',
-          'payment-gateways',
-          `Admin updated payment methods: ${gateways.map((g) => g.name).join(', ')}.`
-        );
-      }
-
-      setSaveSuccess(true);
-      setTimeout(() => setSaveSuccess(false), 4000);
-    } catch (err) {
-      console.error('Failed to save payment gateways:', err);
-      setSaveSuccess(true);
-      setTimeout(() => setSaveSuccess(false), 4000);
-    } finally {
-      setIsSaving(false);
-    }
+    await persistSettings(gateways);
   };
 
   const getProviderBrand = (id: string, name: string) => {
@@ -380,19 +428,19 @@ export const AdminPaymentGateways: React.FC<AdminPaymentGatewaysProps> = ({
   return (
     <div className="space-y-6">
       {/* Header Banner */}
-      <div className="bg-white rounded-2xl p-5 sm:p-6 border border-slate-200 shadow-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+      <div className="bg-white dark:bg-slate-900 rounded-2xl p-5 sm:p-6 border border-slate-200 dark:border-slate-800 shadow-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-2 mb-1">
-            <CreditCard className="w-5 h-5 text-sky-600" />
-            <h2 className="text-sm sm:text-lg font-black text-slate-900 whitespace-nowrap">
+            <CreditCard className="w-5 h-5 text-sky-600 dark:text-sky-400" />
+            <h2 className="text-sm sm:text-lg font-black text-slate-900 dark:text-white whitespace-nowrap">
               Payment Gateways & Methods Settings
             </h2>
-            <span className="hidden sm:inline-flex px-2 py-0.5 rounded-full text-[11px] font-extrabold bg-emerald-100 text-emerald-700 border border-emerald-200 items-center gap-1">
+            <span className="hidden sm:inline-flex px-2 py-0.5 rounded-full text-[11px] font-extrabold bg-emerald-100 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 items-center gap-1">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
               Live Syncing
             </span>
           </div>
-          <p className="hidden sm:block text-xs text-slate-500 max-w-2xl">
+          <p className="hidden sm:block text-xs text-slate-500 dark:text-slate-400 max-w-2xl">
             Configure payment methods (bKash, Nagad, Rocket, Visa Card, Mastercard, Bank, POS), define transaction types (Send Money, Cash Out, Payment), and set checkout visibility.
           </p>
         </div>
@@ -401,9 +449,9 @@ export const AdminPaymentGateways: React.FC<AdminPaymentGatewaysProps> = ({
           <button
             type="button"
             onClick={() => handleOpenAddModal()}
-            className="flex-1 sm:flex-initial px-3 sm:px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-[11px] sm:text-xs font-bold flex items-center justify-center gap-1.5 sm:gap-2 shadow-sm transition-all cursor-pointer whitespace-nowrap"
+            className="flex-1 sm:flex-initial px-3 sm:px-4 py-2.5 rounded-xl bg-slate-900 dark:bg-slate-100 hover:bg-slate-800 dark:hover:bg-slate-200 text-white dark:text-slate-900 text-[11px] sm:text-xs font-bold flex items-center justify-center gap-1.5 sm:gap-2 shadow-sm transition-all cursor-pointer whitespace-nowrap"
           >
-            <Plus className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-sky-400" />
+            <Plus className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-sky-400 dark:text-sky-600" />
             <span>Add Payment Method</span>
           </button>
 
@@ -424,13 +472,13 @@ export const AdminPaymentGateways: React.FC<AdminPaymentGatewaysProps> = ({
       </div>
 
       {saveSuccess && (
-        <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-2xl flex items-center gap-3 text-xs font-bold text-emerald-800 animate-in fade-in duration-200 shadow-xs">
-          <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
+        <div className="p-4 bg-emerald-50 dark:bg-emerald-950/80 border border-emerald-200 dark:border-emerald-800 rounded-2xl flex items-center gap-3 text-xs font-bold text-emerald-800 dark:text-emerald-300 animate-in fade-in duration-200 shadow-xs">
+          <CheckCircle2 className="w-5 h-5 text-emerald-600 dark:text-emerald-400 shrink-0" />
           <div>
-            <p className="font-extrabold text-sm text-emerald-900">
+            <p className="font-extrabold text-sm text-emerald-900 dark:text-emerald-200">
               Payment Gateway Settings Updated Successfully!
             </p>
-            <p className="text-emerald-700 font-normal mt-0.5">
+            <p className="text-emerald-700 dark:text-emerald-400 font-normal mt-0.5">
               Payment methods have been saved. Customers will immediately see updated payment options in checkout.
             </p>
           </div>
@@ -438,8 +486,8 @@ export const AdminPaymentGateways: React.FC<AdminPaymentGatewaysProps> = ({
       )}
 
       {/* Quick Add Presets Row */}
-      <div className="hidden sm:block bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-2">
-        <span className="text-xs font-bold text-slate-700">
+      <div className="hidden sm:block bg-slate-50 dark:bg-slate-800/80 p-4 rounded-2xl border border-slate-200 dark:border-slate-700 space-y-2">
+        <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
           Quick Add Preset Methods:
         </span>
         <div className="flex flex-wrap gap-2">
@@ -452,12 +500,12 @@ export const AdminPaymentGateways: React.FC<AdminPaymentGatewaysProps> = ({
                 key={preset.name}
                 type="button"
                 onClick={() => handleOpenAddModal(preset)}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-200 bg-white hover:border-sky-400 hover:bg-sky-50/50 text-xs font-semibold text-slate-700 transition-all cursor-pointer shadow-2xs"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 hover:border-sky-400 dark:hover:border-sky-500 hover:bg-sky-50/50 dark:hover:bg-sky-950/50 text-xs font-semibold text-slate-700 dark:text-slate-200 transition-all cursor-pointer shadow-2xs"
               >
-                <Plus className="w-3.5 h-3.5 text-sky-600" />
+                <Plus className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400" />
                 <span>{preset.name}</span>
                 {alreadyExists && (
-                  <span className="text-[10px] text-emerald-600 font-bold bg-emerald-50 px-1.5 py-0.2 rounded">
+                  <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold bg-emerald-50 dark:bg-emerald-950/80 px-1.5 py-0.2 rounded">
                     Added
                   </span>
                 )}
@@ -468,10 +516,10 @@ export const AdminPaymentGateways: React.FC<AdminPaymentGatewaysProps> = ({
       </div>
 
       {/* Checkout Payment Options Toggles */}
-      <div className="bg-white rounded-2xl p-5 sm:p-6 border border-slate-200 shadow-xs space-y-4">
+      <div className="bg-white dark:bg-slate-900 rounded-2xl p-5 sm:p-6 border border-slate-200 dark:border-slate-800 shadow-xs space-y-4">
         <div className="flex items-center gap-2">
           <Sparkles className="w-4 h-4 text-amber-500" />
-          <h3 className="text-sm font-bold text-slate-900">
+          <h3 className="text-sm font-bold text-slate-900 dark:text-white">
             Available Checkout Payment Methods
           </h3>
         </div>
@@ -480,11 +528,11 @@ export const AdminPaymentGateways: React.FC<AdminPaymentGatewaysProps> = ({
           {/* 1. Cash on Delivery */}
           <div
             className={`p-4 rounded-xl border transition-all ${
-              enableCod ? 'bg-sky-50/50 border-sky-200' : 'bg-slate-50 border-slate-200 opacity-60'
+              enableCod ? 'bg-sky-50/50 dark:bg-sky-950/60 border-sky-200 dark:border-sky-800' : 'bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 opacity-60'
             }`}
           >
             <div className="flex items-center justify-between mb-2">
-              <span className="text-xs font-extrabold text-slate-800">
+              <span className="text-xs font-extrabold text-slate-800 dark:text-slate-200">
                 1. Cash on Delivery (COD)
               </span>
               <input
@@ -494,7 +542,7 @@ export const AdminPaymentGateways: React.FC<AdminPaymentGatewaysProps> = ({
                 className="w-4 h-4 accent-sky-600 rounded cursor-pointer"
               />
             </div>
-            <p className="text-[11px] text-slate-500">
+            <p className="text-[11px] text-slate-500 dark:text-slate-400">
               Customer pays 100% amount in cash or via rider POS device upon doorstep parcel handover.
             </p>
           </div>
@@ -502,11 +550,11 @@ export const AdminPaymentGateways: React.FC<AdminPaymentGatewaysProps> = ({
           {/* 2. Full Payment */}
           <div
             className={`p-4 rounded-xl border transition-all ${
-              enableFullPayment ? 'bg-sky-50/50 border-sky-200' : 'bg-slate-50 border-slate-200 opacity-60'
+              enableFullPayment ? 'bg-sky-50/50 dark:bg-sky-950/60 border-sky-200 dark:border-sky-800' : 'bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 opacity-60'
             }`}
           >
             <div className="flex items-center justify-between mb-2">
-              <span className="text-xs font-extrabold text-slate-800">
+              <span className="text-xs font-extrabold text-slate-800 dark:text-slate-200">
                 2. Full Advance Payment
               </span>
               <input
@@ -516,7 +564,7 @@ export const AdminPaymentGateways: React.FC<AdminPaymentGatewaysProps> = ({
                 className="w-4 h-4 accent-sky-600 rounded cursor-pointer"
               />
             </div>
-            <p className="text-[11px] text-slate-500">
+            <p className="text-[11px] text-slate-500 dark:text-slate-400">
               Customer pays 100% total amount in advance using bKash, Nagad, Rocket, or Card.
             </p>
           </div>
@@ -524,11 +572,11 @@ export const AdminPaymentGateways: React.FC<AdminPaymentGatewaysProps> = ({
           {/* 3. Only Delivery Charge */}
           <div
             className={`p-4 rounded-xl border transition-all ${
-              enableDeliveryOnlyPayment ? 'bg-sky-50/50 border-sky-200' : 'bg-slate-50 border-slate-200 opacity-60'
+              enableDeliveryOnlyPayment ? 'bg-sky-50/50 dark:bg-sky-950/60 border-sky-200 dark:border-sky-800' : 'bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 opacity-60'
             }`}
           >
             <div className="flex items-center justify-between mb-2">
-              <span className="text-xs font-extrabold text-slate-800">
+              <span className="text-xs font-extrabold text-slate-800 dark:text-slate-200">
                 3. Delivery Charge Only
               </span>
               <input
@@ -538,7 +586,7 @@ export const AdminPaymentGateways: React.FC<AdminPaymentGatewaysProps> = ({
                 className="w-4 h-4 accent-sky-600 rounded cursor-pointer"
               />
             </div>
-            <p className="text-[11px] text-slate-500">
+            <p className="text-[11px] text-slate-500 dark:text-slate-400">
               Customer pays only the delivery fee in advance, with product cost due upon delivery.
             </p>
           </div>
@@ -546,7 +594,7 @@ export const AdminPaymentGateways: React.FC<AdminPaymentGatewaysProps> = ({
 
         {/* Global checkout notice */}
         <div className="pt-2">
-          <label className="block text-xs font-bold text-slate-700 mb-1">
+          <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
             General Payment Notice / Instructions Banner
           </label>
           <input
@@ -554,7 +602,7 @@ export const AdminPaymentGateways: React.FC<AdminPaymentGatewaysProps> = ({
             value={paymentNotice}
             onChange={(e) => setPaymentNotice(e.target.value)}
             placeholder="e.g. Enter correct transaction ID and sender number to avoid order delays."
-            className="w-full px-3.5 py-2 text-xs rounded-xl border border-slate-300 focus:ring-2 focus:ring-sky-500 bg-white"
+            className="w-full px-3.5 py-2 text-xs rounded-xl border border-slate-300 dark:border-slate-700 focus:ring-2 focus:ring-sky-500 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
           />
         </div>
       </div>

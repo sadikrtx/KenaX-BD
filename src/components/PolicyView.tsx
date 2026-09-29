@@ -23,14 +23,18 @@ import {
   Info,
   Clock,
   Sparkles,
+  CreditCard,
   MapPin,
   Smartphone,
 } from 'lucide-react';
-import { FAQItem, PolicyTab } from '../types';
+import { FAQItem, PolicyTab, SiteSettings, StorePolicy } from '../types';
 import {
   DEFAULT_PRIVACY_POLICY,
   DEFAULT_TERMS_OF_SERVICE,
   DEFAULT_REFUND_POLICY,
+  DEFAULT_RETURN_POLICY,
+  DEFAULT_EXCHANGE_POLICY,
+  DEFAULT_STORE_POLICIES,
   DEFAULT_FAQS,
 } from '../data/defaultPolicies';
 
@@ -39,27 +43,60 @@ interface PolicyViewProps {
   privacyPolicyText?: string;
   termsOfServiceText?: string;
   refundPolicyText?: string;
+  returnPolicyText?: string;
+  exchangePolicyText?: string;
+  storePolicies?: StorePolicy[];
+  siteSettings?: SiteSettings;
   faqs?: FAQItem[];
   onNavigate: (view: string) => void;
   onSelectCategory?: (category: string) => void;
 }
 
 export const PolicyView: React.FC<PolicyViewProps> = ({
-  initialTab = 'privacy',
+  initialTab = 'return',
   privacyPolicyText,
   termsOfServiceText,
   refundPolicyText,
+  returnPolicyText,
+  exchangePolicyText,
+  storePolicies,
+  siteSettings,
   faqs,
   onNavigate,
 }) => {
-  const [activeTab, setActiveTab] = useState<PolicyTab>(initialTab);
+  const [activeTab, setActiveTab] = useState<string>(initialTab);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedFaqCategory, setSelectedFaqCategory] = useState<string>('All');
   const [expandedFaqIds, setExpandedFaqIds] = useState<Set<string>>(new Set());
 
-  const effectivePrivacyText = (privacyPolicyText && privacyPolicyText.trim()) ? privacyPolicyText : DEFAULT_PRIVACY_POLICY;
-  const effectiveTermsText = (termsOfServiceText && termsOfServiceText.trim()) ? termsOfServiceText : DEFAULT_TERMS_OF_SERVICE;
-  const effectiveRefundText = (refundPolicyText && refundPolicyText.trim()) ? refundPolicyText : DEFAULT_REFUND_POLICY;
+  // Effective Store Policies
+  const effectiveStorePolicies = useMemo(() => {
+    let list = storePolicies && storePolicies.length > 0 ? storePolicies : siteSettings?.storePolicies;
+    if (!list || list.length === 0) {
+      list = DEFAULT_STORE_POLICIES;
+    }
+
+    // Merge individual prop overrides if provided
+    return list.map((p) => {
+      if (p.slug === 'return' && returnPolicyText && returnPolicyText.trim()) {
+        return { ...p, content: returnPolicyText };
+      }
+      if (p.slug === 'exchange' && exchangePolicyText && exchangePolicyText.trim()) {
+        return { ...p, content: exchangePolicyText };
+      }
+      if (p.slug === 'privacy' && privacyPolicyText && privacyPolicyText.trim()) {
+        return { ...p, content: privacyPolicyText };
+      }
+      if (p.slug === 'terms' && termsOfServiceText && termsOfServiceText.trim()) {
+        return { ...p, content: termsOfServiceText };
+      }
+      if (p.slug === 'refund' && refundPolicyText && refundPolicyText.trim()) {
+        return { ...p, content: refundPolicyText };
+      }
+      return p;
+    }).filter((p) => p.active !== false);
+  }, [storePolicies, siteSettings, returnPolicyText, exchangePolicyText, privacyPolicyText, termsOfServiceText, refundPolicyText]);
+
   const effectiveFaqs = (faqs && faqs.length > 0) ? faqs : DEFAULT_FAQS;
 
   // Keep active tab in sync if initialTab changes externally
@@ -70,51 +107,54 @@ export const PolicyView: React.FC<PolicyViewProps> = ({
     }
   }, [initialTab]);
 
-  // Tab configurations
-  const tabConfig: Record<
-    PolicyTab,
-    {
-      title: string;
-      description: string;
-      icon: React.ComponentType<{ className?: string }>;
-      color: string;
-      activeBg: string;
-      badgeText: string;
+  const getIconForPolicy = (iconName?: string) => {
+    switch (iconName) {
+      case 'RotateCcw':
+        return RotateCcw;
+      case 'RefreshCw':
+        return RefreshCw;
+      case 'ShieldCheck':
+        return ShieldCheck;
+      case 'FileText':
+        return FileText;
+      case 'CreditCard':
+        return CreditCard;
+      case 'Truck':
+        return Truck;
+      case 'HelpCircle':
+        return HelpCircle;
+      default:
+        return FileText;
     }
-  > = {
-    privacy: {
-      title: 'Privacy Policy',
-      description: 'How KenaX BD collects, safeguards, and respects your personal data and shopping information.',
-      icon: ShieldCheck,
-      color: 'text-sky-600',
-      activeBg: 'bg-sky-50 text-sky-700 border-sky-300',
-      badgeText: '100% Data Confidentiality',
-    },
-    terms: {
-      title: 'Terms of Service',
-      description: 'The standard terms, conditions, and rules governing order placement and services on KenaX BD.',
-      icon: FileText,
-      color: 'text-amber-600',
-      activeBg: 'bg-amber-50 text-amber-700 border-amber-300',
-      badgeText: 'Transparent E-Commerce',
-    },
-    refund: {
-      title: 'Refund & Return Policy',
-      description: 'Our hassle-free 7-day return, replacement, and verified refund guidelines across Bangladesh.',
-      icon: RotateCcw,
-      color: 'text-rose-600',
-      activeBg: 'bg-rose-50 text-rose-700 border-rose-300',
-      badgeText: '7-Day Return Guarantee',
-    },
-    faq: {
-      title: 'FAQ & Help Center',
-      description: 'Frequently asked questions, common shopping issues, delivery timelines, and quick help answers.',
-      icon: HelpCircle,
-      color: 'text-emerald-600',
-      activeBg: 'bg-emerald-50 text-emerald-700 border-emerald-300',
-      badgeText: 'Instant Answers',
-    },
   };
+
+  const activePolicyObj = effectiveStorePolicies.find((p) => p.slug === activeTab);
+
+  const currentTabInfo = useMemo(() => {
+    if (activeTab === 'faq') {
+      return {
+        title: 'FAQ & Help Center',
+        description: 'Frequently asked questions, delivery timelines, and shopping help.',
+        icon: HelpCircle,
+        badgeText: 'Instant Answers',
+      };
+    }
+    if (activePolicyObj) {
+      return {
+        title: activePolicyObj.title + (activePolicyObj.titleBn ? ` (${activePolicyObj.titleBn})` : ''),
+        description: `Official ${activePolicyObj.title} guidelines for KenaX BD customers across Bangladesh.`,
+        icon: getIconForPolicy(activePolicyObj.iconName),
+        badgeText: activePolicyObj.badgeText || 'KenaX Verified Policy',
+      };
+    }
+    return {
+      title: 'Customer Policy',
+      description: 'Official store policies and customer protection guidelines.',
+      icon: ShieldCheck,
+      badgeText: 'Verified Standard',
+    };
+  }, [activeTab, activePolicyObj]);
+
 
   // FAQ Categories
   const faqCategories = useMemo(() => {
@@ -159,8 +199,6 @@ export const PolicyView: React.FC<PolicyViewProps> = ({
   const collapseAllFaqs = () => {
     setExpandedFaqIds(new Set());
   };
-
-  const currentTabInfo = tabConfig[activeTab];
 
   // Helper to render markdown-like text formatted beautifully
   const renderFormattedPolicyContent = (text: string) => {
@@ -339,18 +377,17 @@ export const PolicyView: React.FC<PolicyViewProps> = ({
       {/* 3. Main Content Container */}
       <div className="max-w-[1536px] mx-auto px-4 sm:px-6 lg:px-8 pt-8">
         
-        {/* Mobile Horizontal Tab Navigation (Sticky or prominent on mobile) */}
+        {/* Mobile Horizontal Tab Navigation */}
         <div className="lg:hidden mb-6 overflow-x-auto pb-2 scrollbar-none flex gap-2">
-          {(['privacy', 'terms', 'refund', 'faq'] as PolicyTab[]).map((tabKey) => {
-            const config = tabConfig[tabKey];
-            const Icon = config.icon;
-            const isActive = activeTab === tabKey;
+          {effectiveStorePolicies.map((p) => {
+            const Icon = getIconForPolicy(p.iconName);
+            const isActive = activeTab === p.slug;
 
             return (
               <button
-                key={tabKey}
+                key={p.slug}
                 onClick={() => {
-                  setActiveTab(tabKey);
+                  setActiveTab(p.slug);
                   window.scrollTo({ top: 260, behavior: 'smooth' });
                 }}
                 className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold text-xs whitespace-nowrap transition-all border shrink-0 cursor-pointer ${
@@ -359,11 +396,25 @@ export const PolicyView: React.FC<PolicyViewProps> = ({
                     : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
                 }`}
               >
-                <Icon className={`w-4 h-4 ${isActive ? 'text-white' : config.color}`} />
-                <span>{config.title}</span>
+                <Icon className={`w-4 h-4 ${isActive ? 'text-white' : 'text-sky-600'}`} />
+                <span>{p.title}</span>
               </button>
             );
           })}
+          <button
+            onClick={() => {
+              setActiveTab('faq');
+              window.scrollTo({ top: 260, behavior: 'smooth' });
+            }}
+            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold text-xs whitespace-nowrap transition-all border shrink-0 cursor-pointer ${
+              activeTab === 'faq'
+                ? 'bg-sky-600 text-white border-sky-600 shadow-md shadow-sky-600/20'
+                : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+            }`}
+          >
+            <HelpCircle className={`w-4 h-4 ${activeTab === 'faq' ? 'text-white' : 'text-emerald-600'}`} />
+            <span>FAQ & Help</span>
+          </button>
         </div>
 
         {/* 2-Column Grid Layout: Left Sidebar + Right Policy Content */}
@@ -378,16 +429,15 @@ export const PolicyView: React.FC<PolicyViewProps> = ({
                 Select Policy / Help Section
               </div>
 
-              {(['privacy', 'terms', 'refund', 'faq'] as PolicyTab[]).map((tabKey) => {
-                const config = tabConfig[tabKey];
-                const Icon = config.icon;
-                const isActive = activeTab === tabKey;
+              {effectiveStorePolicies.map((p) => {
+                const Icon = getIconForPolicy(p.iconName);
+                const isActive = activeTab === p.slug;
 
                 return (
                   <button
-                    key={tabKey}
+                    key={p.slug}
                     onClick={() => {
-                      setActiveTab(tabKey);
+                      setActiveTab(p.slug);
                       window.scrollTo({ top: 220, behavior: 'smooth' });
                     }}
                     className={`w-full text-left p-3 rounded-xl transition-all flex items-start gap-3 cursor-pointer group ${
@@ -408,7 +458,7 @@ export const PolicyView: React.FC<PolicyViewProps> = ({
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between">
                         <span className={`font-bold text-xs sm:text-sm ${isActive ? 'text-sky-900 font-black' : 'text-slate-800'}`}>
-                          {config.title}
+                          {p.title}
                         </span>
                         {isActive && <span className="w-1.5 h-1.5 rounded-full bg-sky-600"></span>}
                       </div>
@@ -416,6 +466,36 @@ export const PolicyView: React.FC<PolicyViewProps> = ({
                   </button>
                 );
               })}
+
+              <button
+                onClick={() => {
+                  setActiveTab('faq');
+                  window.scrollTo({ top: 220, behavior: 'smooth' });
+                }}
+                className={`w-full text-left p-3 rounded-xl transition-all flex items-start gap-3 cursor-pointer group ${
+                  activeTab === 'faq'
+                    ? 'bg-sky-50 border border-sky-200 shadow-xs text-slate-900'
+                    : 'hover:bg-slate-50 text-slate-600 hover:text-slate-900 border border-transparent'
+                }`}
+              >
+                <div
+                  className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 transition-colors ${
+                    activeTab === 'faq'
+                      ? 'bg-sky-600 text-white shadow-xs'
+                      : 'bg-slate-100 text-slate-500 group-hover:bg-sky-100 group-hover:text-sky-600'
+                  }`}
+                >
+                  <HelpCircle className="w-5 h-5" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between">
+                    <span className={`font-bold text-xs sm:text-sm ${activeTab === 'faq' ? 'text-sky-900 font-black' : 'text-slate-800'}`}>
+                      FAQ & Help Center
+                    </span>
+                    {activeTab === 'faq' && <span className="w-1.5 h-1.5 rounded-full bg-sky-600"></span>}
+                  </div>
+                </div>
+              </button>
             </div>
 
             {/* Quick 24/7 Support Assistance Box */}
@@ -549,131 +629,45 @@ export const PolicyView: React.FC<PolicyViewProps> = ({
                 </div>
               </div>
 
-              {/* TAB 1: Privacy Policy Content */}
-              {activeTab === 'privacy' && (
+              {/* STORE POLICY CONTENT */}
+              {activeTab !== 'faq' && activePolicyObj && (
                 <div className="space-y-6">
                   {/* Highlights Banner */}
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <div className="p-3.5 rounded-2xl bg-sky-50/70 border border-sky-100">
                       <div className="flex items-center gap-2 text-sky-800 font-bold text-xs mb-1">
-                        <Lock className="w-3.5 h-3.5 text-sky-600" />
-                        <span>Encrypted & Safe</span>
+                        <CheckCircle2 className="w-3.5 h-3.5 text-sky-600" />
+                        <span>KenaX BD Guarantee</span>
                       </div>
                       <p className="text-[11px] text-slate-600 leading-normal">
-                        All contact details & passwords protected via SSL encryption protocols.
+                        100% verified authentic policies for your peace of mind.
                       </p>
                     </div>
 
                     <div className="p-3.5 rounded-2xl bg-emerald-50/70 border border-emerald-100">
                       <div className="flex items-center gap-2 text-emerald-800 font-bold text-xs mb-1">
                         <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
-                        <span>No Data Selling</span>
+                        <span>Customer Protection</span>
                       </div>
                       <p className="text-[11px] text-slate-600 leading-normal">
-                        We never sell, rent, or trade your data with external third parties.
+                        Fair guidelines designed for hassle-free shopping across BD.
                       </p>
                     </div>
 
                     <div className="p-3.5 rounded-2xl bg-purple-50/70 border border-purple-100">
                       <div className="flex items-center gap-2 text-purple-800 font-bold text-xs mb-1">
-                        <CheckCircle2 className="w-3.5 h-3.5 text-purple-600" />
-                        <span>Strict Verification</span>
+                        <Headphones className="w-3.5 h-3.5 text-purple-600" />
+                        <span>24/7 Support</span>
                       </div>
                       <p className="text-[11px] text-slate-600 leading-normal">
-                        Courier partners receive only essential recipient details for delivery.
+                        Contact us anytime for assistance or clarification on policies.
                       </p>
                     </div>
                   </div>
 
                   {/* Render Markdown Text */}
                   <div className="pt-2">
-                    {renderFormattedPolicyContent(effectivePrivacyText)}
-                  </div>
-                </div>
-              )}
-
-              {/* TAB 2: Terms of Service Content */}
-              {activeTab === 'terms' && (
-                <div className="space-y-6">
-                  {/* Highlights Banner */}
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                    <div className="p-3.5 rounded-2xl bg-amber-50/70 border border-amber-100">
-                      <div className="flex items-center gap-2 text-amber-800 font-bold text-xs mb-1">
-                        <CheckCircle2 className="w-3.5 h-3.5 text-amber-600" />
-                        <span>100% Genuine Items</span>
-                      </div>
-                      <p className="text-[11px] text-slate-600 leading-normal">
-                        All items are imported directly and backed by authentic warranties.
-                      </p>
-                    </div>
-
-                    <div className="p-3.5 rounded-2xl bg-sky-50/70 border border-sky-100">
-                      <div className="flex items-center gap-2 text-sky-800 font-bold text-xs mb-1">
-                        <Truck className="w-3.5 h-3.5 text-sky-600" />
-                        <span>Nationwide COD</span>
-                      </div>
-                      <p className="text-[11px] text-slate-600 leading-normal">
-                        Cash on Delivery available across all 64 districts in Bangladesh.
-                      </p>
-                    </div>
-
-                    <div className="p-3.5 rounded-2xl bg-emerald-50/70 border border-emerald-100">
-                      <div className="flex items-center gap-2 text-emerald-800 font-bold text-xs mb-1">
-                        <FileText className="w-3.5 h-3.5 text-emerald-600" />
-                        <span>Fair Pricing</span>
-                      </div>
-                      <p className="text-[11px] text-slate-600 leading-normal">
-                        Transparent pricing in Bangladeshi Taka (৳ BDT) with clear receipts.
-                      </p>
-                    </div>
-                  </div>
-
-                  {/* Render Markdown Text */}
-                  <div className="pt-2">
-                    {renderFormattedPolicyContent(effectiveTermsText)}
-                  </div>
-                </div>
-              )}
-
-              {/* TAB 3: Refund & Return Policy Content */}
-              {activeTab === 'refund' && (
-                <div className="space-y-6">
-                  {/* Highlights Banner */}
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                    <div className="p-3.5 rounded-2xl bg-rose-50/70 border border-rose-100">
-                      <div className="flex items-center gap-2 text-rose-800 font-bold text-xs mb-1">
-                        <RotateCcw className="w-3.5 h-3.5 text-rose-600" />
-                        <span>7-Day Easy Return</span>
-                      </div>
-                      <p className="text-[11px] text-slate-600 leading-normal">
-                        Report any defect or mismatch within 7 days of package delivery.
-                      </p>
-                    </div>
-
-                    <div className="p-3.5 rounded-2xl bg-emerald-50/70 border border-emerald-100">
-                      <div className="flex items-center gap-2 text-emerald-800 font-bold text-xs mb-1">
-                        <RefreshCw className="w-3.5 h-3.5 text-emerald-600" />
-                        <span>Fast Refund Processing</span>
-                      </div>
-                      <p className="text-[11px] text-slate-600 leading-normal">
-                        bKash, Nagad, and Rocket refunds processed within 24–48 hours.
-                      </p>
-                    </div>
-
-                    <div className="p-3.5 rounded-2xl bg-sky-50/70 border border-sky-100">
-                      <div className="flex items-center gap-2 text-sky-800 font-bold text-xs mb-1">
-                        <Truck className="w-3.5 h-3.5 text-sky-600" />
-                        <span>Free Return Pickup</span>
-                      </div>
-                      <p className="text-[11px] text-slate-600 leading-normal">
-                        No return courier fee if the product received was damaged or incorrect.
-                      </p>
-                    </div>
-                  </div>
-
-                  {/* Render Markdown Text */}
-                  <div className="pt-2">
-                    {renderFormattedPolicyContent(effectiveRefundText)}
+                    {renderFormattedPolicyContent(activePolicyObj.content)}
                   </div>
                 </div>
               )}

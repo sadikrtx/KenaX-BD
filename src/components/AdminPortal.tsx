@@ -7,10 +7,12 @@ import { AdminHeader } from './admin/AdminHeader';
 import { AdminOverview } from './admin/AdminOverview';
 import { AdminOrders } from './admin/AdminOrders';
 import { AdminProducts } from './admin/AdminProducts';
+import { AdminLandingPages } from './admin/AdminLandingPages';
 import { AdminCategories } from './admin/AdminCategories';
 import { AdminInventory } from './admin/AdminInventory';
 import { AdminCustomers } from './admin/AdminCustomers';
 import { AdminDelivery } from './admin/AdminDelivery';
+import { AdminCourierFraudChecker } from './admin/AdminCourierFraudChecker';
 import { AdminPayments } from './admin/AdminPayments';
 import { AdminDeliveryAdvance } from './admin/AdminDeliveryAdvance';
 import { AdminCoupons } from './admin/AdminCoupons';
@@ -20,16 +22,25 @@ import { AdminActivityLogs } from './admin/AdminActivityLogs';
 import { AdminReports } from './admin/AdminReports';
 import { AdminCosts } from './admin/AdminCosts';
 import { AdminPerformanceOverview } from './admin/AdminPerformanceOverview';
+import { AdminMyDashboard } from './admin/AdminMyDashboard';
 import { AdminSettings } from './admin/AdminSettings';
 import { AdminPaymentGateways } from './admin/AdminPaymentGateways';
 import { AdminCartActivities } from './admin/AdminCartActivities';
 import { AdminWishlistActivities } from './admin/AdminWishlistActivities';
 import { AdminGmailAlerts } from './admin/AdminGmailAlerts';
 import { AdminSEOSettings } from './admin/AdminSEOSettings';
+import { AdminPoliciesSettings } from './admin/AdminPoliciesSettings';
+import { AdminGoogleSheets } from './admin/AdminGoogleSheets';
 import { AdminSMSGateway } from './admin/AdminSMSGateway';
 import { AdminWhatsAppAutomation } from './admin/AdminWhatsAppAutomation';
 import { AdminTelegramBot } from './admin/AdminTelegramBot';
+import { AdminChatBot } from './admin/AdminChatBot';
 import { AdminDropshipping } from './admin/AdminDropshipping';
+import { AdminAdvertiser } from './admin/AdminAdvertiser';
+import { AdminPartners } from './admin/AdminPartners';
+import { AdminSellerManagement } from './admin/AdminSellerManagement';
+import { AdminResellerManagement } from './admin/AdminResellerManagement';
+import { PermissionMatrix } from './admin/PermissionMatrix';
 import { InvoiceModal } from './admin/InvoiceModal';
 import { AdminLoginModal } from './admin/AdminLoginModal';
 import {
@@ -42,6 +53,7 @@ import {
   triggerTelegramProductDiscountWorkflow,
   triggerTelegramCouponWorkflow,
 } from '../lib/telegramBotService';
+import { triggerWhatsAppEvent } from '../lib/whatsappService';
 
 import {
   Product,
@@ -63,6 +75,7 @@ import {
   isDemoOtherProfit,
   Supplier,
   SourcingLocation,
+  PartnerUser,
 } from '../types';
 import { hasPermission, DEFAULT_ROLE_PERMISSIONS } from '../lib/permissions';
 import { safeSetLocalStorage } from '../lib/storage';
@@ -77,6 +90,7 @@ import {
   INITIAL_CATEGORIES,
   INITIAL_EXPENSES,
   INITIAL_OTHER_PROFITS,
+  INITIAL_REVIEWS,
 } from '../data/initialSettings';
 
 import {
@@ -110,8 +124,10 @@ import {
   saveOtherProfitToDB,
   deleteOtherProfitFromDB,
   subscribeToOtherProfits,
+  getReviewsFromDB,
   saveReviewToDB,
   deleteReviewFromDB,
+  subscribeToReviews,
   getSuppliersFromDB,
   saveSupplierToDB,
   updateSupplierInDB,
@@ -143,7 +159,8 @@ interface AdminPortalProps {
     orderId: string,
     status: OrderStatus,
     courier?: string,
-    tracking?: string
+    tracking?: string,
+    staff?: { id?: string; name?: string; role?: string }
   ) => void;
   onAddOrder?: (newOrder: Order) => void;
   onUpdateSettings: (settings: Partial<SiteSettings> | SiteSettings) => void | Promise<void>;
@@ -154,6 +171,10 @@ interface AdminPortalProps {
   onLogout?: () => void;
   initialTab?: AdminTab;
   initialSettingsSubTab?: 'hero' | 'nav_items' | 'tag_banners' | 'promo_grid' | 'promo' | 'profile' | 'delivery' | 'footer' | 'seo' | 'system';
+  staffList?: StaffUser[];
+  onUpdateStaffList?: (newList: StaffUser[]) => void;
+  onUpdateCurrentStaff?: (staff: StaffUser) => void;
+  onNavigateToPartnerPortal?: (partner: PartnerUser) => void;
 }
 
 export const AdminPortal: React.FC<AdminPortalProps> = ({
@@ -181,18 +202,64 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   onLogout,
   initialTab = 'overview',
   initialSettingsSubTab,
+  staffList: passedStaffList,
+  onUpdateStaffList,
+  onUpdateCurrentStaff,
+  onNavigateToPartnerPortal,
 }) => {
   // Navigation & View States
-  const [currentTab, setCurrentTab] = useState<AdminTab>(initialTab);
+  const [currentTab, setCurrentTab] = useState<AdminTab>(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const urlTab = params.get('tab') as AdminTab;
+      if (urlTab) return urlTab;
+      const savedTab = localStorage.getItem('kenax_admin_active_tab') as AdminTab;
+      if (savedTab) return savedTab;
+    } catch {}
+    return initialTab || 'overview';
+  });
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('kenax_admin_sidebar_collapsed') === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  const handleToggleSidebarCollapse = () => {
+    setIsSidebarCollapsed((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem('kenax_admin_sidebar_collapsed', String(next));
+      } catch {}
+      return next;
+    });
+  };
+
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
   const [selectedCustomerForAdmin, setSelectedCustomerForAdmin] = useState<CustomerRecord | null>(null);
 
-  // Always scroll to top when switching admin tabs
+  // Sync initialTab prop when passed explicitly
+  useEffect(() => {
+    if (initialTab && initialTab !== currentTab) {
+      setCurrentTab(initialTab);
+    }
+  }, [initialTab]);
+
+  // Always scroll to top when switching admin tabs & persist active tab across refreshes
   useEffect(() => {
     window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
     const mainEl = document.querySelector('main');
     if (mainEl) mainEl.scrollTop = 0;
+
+    try {
+      localStorage.setItem('kenax_admin_active_tab', currentTab);
+      const url = new URL(window.location.href);
+      url.searchParams.set('tab', currentTab);
+      url.searchParams.set('view', 'admin');
+      window.history.replaceState(null, '', url.pathname + '?' + url.searchParams.toString() + '#admin');
+    } catch {}
   }, [currentTab]);
 
   // Cart Activities state
@@ -263,7 +330,8 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   const handleConvertCartToManualOrder = (cart: CartActivity) => {
     const newOrderId = `ORD-${Date.now().toString().slice(-6)}`;
     const deliveryFee = settings.insideDhakaDeliveryFee || 70;
-    const itemsTotal = cart.items.reduce((sum, it) => sum + it.price * it.quantity, 0);
+    const cartItemsList = Array.isArray(cart?.items) ? cart.items : [];
+    const itemsTotal = cartItemsList.reduce((sum, it) => sum + (it.price || 0) * (it.quantity || 1), 0);
 
     const newOrder: Order = {
       id: newOrderId,
@@ -278,7 +346,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
       upazila: 'Dhaka Sadar',
       area: 'Dhaka City',
       fullAddress: cart.customerLocation || 'Address via Cart Follow-up (Dhaka)',
-      items: cart.items.map((it) => ({
+      items: cartItemsList.map((it) => ({
         productId: it.productId,
         productName: it.name,
         productImage: it.image,
@@ -303,6 +371,10 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
       ],
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
+      orderSource: 'manual',
+      isAiBotOrder: false,
+      source: 'Cart Conversion (Admin)',
+      sourceChannel: 'Cart Conversion (Admin)',
       createdByStaffId: currentStaff?.id,
       createdByStaffName: currentStaff?.name,
       createdByStaffRole: activeRole,
@@ -327,6 +399,14 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
 
   // Active Authenticated Staff
   const [staffList, setStaffList] = useState<StaffUser[]>(() => {
+    if (passedStaffList && passedStaffList.length > 0) return passedStaffList;
+    try {
+      const cached = localStorage.getItem('kenax_staff_cache') || localStorage.getItem('preview_kenax_staff_cache');
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch {}
     return INITIAL_STAFF.map((s) => ({
       id: s.id,
       name: s.name,
@@ -340,6 +420,12 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
       lastLogin: s.lastLogin,
     }));
   });
+
+  useEffect(() => {
+    if (passedStaffList && passedStaffList.length > 0) {
+      setStaffList(passedStaffList);
+    }
+  }, [passedStaffList]);
 
   const [authenticatedStaff, setAuthenticatedStaff] = useState<StaffUser | null>(() => {
     if (externalStaff) return externalStaff;
@@ -415,6 +501,11 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     }
     const updated = { ...currentStaff, password: newStaffPassword };
     setCurrentStaff(updated);
+    try {
+      localStorage.setItem('kenax_authenticated_staff', JSON.stringify(updated));
+      localStorage.setItem('kenax_current_staff', JSON.stringify(updated));
+      localStorage.setItem('kenax_admin_session', JSON.stringify(updated));
+    } catch {}
     handleUpdateStaff(updated);
     setPasswordChangeMsg('Password updated successfully! All account data preserved.');
     setTimeout(() => {
@@ -427,6 +518,13 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
 
   // Effective Role (prioritizes currentStaff role if logged in)
   const activeRole: UserRole = currentStaff?.role || currentRole || 'super_admin';
+
+  // Ensure My Dashboard is strictly accessible by Super Admin only
+  useEffect(() => {
+    if (currentTab === 'my-dashboard' && activeRole !== 'super_admin') {
+      setCurrentTab('overview');
+    }
+  }, [currentTab, activeRole]);
 
   // Sub-entity states
   const [customers, setCustomers] = useState<CustomerRecord[]>(() => {
@@ -516,47 +614,16 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     safeSetLocalStorage('kenax_categories_cache', JSON.stringify(updatedCats));
   };
 
-  const [reviews, setReviews] = useState<Review[]>([
-    {
-      id: 'rev-1',
-      productId: 'prod-smartwatch-1',
-      productName: 'Haylou Solar Pro Smartwatch',
-      customerName: 'Tanvir Hossain',
-      customerEmail: 'tanvir@gmail.com',
-      rating: 5,
-      comment: 'Original product! Packaging was intact and Steadfast delivery took only 24 hours in Dhaka.',
-      photos: ['https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=400'],
-      verifiedPurchase: true,
-      status: 'approved',
-      createdAt: '2025-02-14T10:00:00Z',
-    },
-    {
-      id: 'rev-2',
-      productId: 'prod-earbuds-1',
-      productName: 'Xiaomi Redmi Buds 5',
-      customerName: 'Nusrat Jahan',
-      customerEmail: 'nusrat@gmail.com',
-      rating: 5,
-      comment: 'Sound quality and active noise cancellation is awesome for this price. Highly recommended KenaX BD!',
-      photos: [],
-      verifiedPurchase: true,
-      status: 'approved',
-      createdAt: '2025-02-13T18:30:00Z',
-    },
-    {
-      id: 'rev-3',
-      productId: 'prod-powerbank-1',
-      productName: 'Baseus 20000mAh Power Bank',
-      customerName: 'Kamrul Hasan',
-      customerEmail: 'kamrul@gmail.com',
-      rating: 4,
-      comment: 'Fast charging works perfectly with 22.5W output on my Xiaomi phone.',
-      photos: ['https://images.unsplash.com/photo-1609592424104-16d755227181?w=400'],
-      verifiedPurchase: false,
-      status: 'pending',
-      createdAt: '2025-02-12T14:15:00Z',
-    },
-  ]);
+  const [reviews, setReviews] = useState<Review[]>(() => {
+    try {
+      const cached = localStorage.getItem('kenax_reviews_cache');
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch {}
+    return INITIAL_REVIEWS;
+  });
 
   // Helper to filter out legacy demo/placeholder records
   const isDemoExpense = (e: any) =>
@@ -668,6 +735,12 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
         setSourcingLocations(dbSourcing);
         safeSetLocalStorage('kenax_sourcing_locations_cache', JSON.stringify(dbSourcing));
       }
+
+      const dbReviews = await getReviewsFromDB();
+      if (dbReviews && dbReviews.length > 0) {
+        setReviews(dbReviews);
+        safeSetLocalStorage('kenax_reviews_cache', JSON.stringify(dbReviews));
+      }
     }
     loadAdminData();
 
@@ -713,6 +786,13 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
       }
     });
 
+    const unsubscribeReviews = subscribeToReviews((freshReviews) => {
+      if (freshReviews && freshReviews.length > 0) {
+        setReviews(freshReviews);
+        safeSetLocalStorage('kenax_reviews_cache', JSON.stringify(freshReviews));
+      }
+    });
+
     return () => {
       unsubscribeLogs();
       unsubscribeCustomers();
@@ -720,6 +800,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
       unsubscribeOtherProfits();
       unsubscribeSuppliers();
       unsubscribeSourcing();
+      unsubscribeReviews();
     };
   }, []);
 
@@ -844,28 +925,39 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     orderId: string,
     newStatus: OrderStatus,
     courierName?: string,
-    trackingNumber?: string
+    trackingNumber?: string,
+    staff?: { id?: string; name?: string; role?: string }
   ) => {
-    onUpdateOrderStatus(orderId, newStatus, courierName, trackingNumber);
+    const activeStaff = staff || (currentStaff ? {
+      id: currentStaff.id,
+      name: currentStaff.name,
+      role: currentStaff.role,
+    } : undefined);
+
+    onUpdateOrderStatus(orderId, newStatus, courierName, trackingNumber, activeStaff);
 
     recordAuditLog(
       `Order Status updated to ${newStatus}`,
       'orders',
       orderId,
-      `Order #${orderId} marked as ${newStatus}. Courier: ${courierName || 'Standard'}. Tracking: ${trackingNumber || 'N/A'}`
+      `Order #${orderId} marked as ${newStatus} by ${activeStaff?.name || 'Staff'} (${activeStaff?.role || 'Admin'}). Courier: ${courierName || 'Standard'}. Tracking: ${trackingNumber || 'N/A'}`
     );
 
     // Automated Email Notification & Staff Audit Workflow
     const targetOrder = orders.find((o) => o.id === orderId);
     if (targetOrder) {
+      const isCompletingOrder = newStatus === 'Completed';
       const updatedOrderSnapshot: Order = {
         ...targetOrder,
         orderStatus: newStatus,
+        paymentStatus: isCompletingOrder ? 'Paid' : targetOrder.paymentStatus,
+        paidAmount: isCompletingOrder ? targetOrder.totalAmount : targetOrder.paidAmount,
+        dueAmount: isCompletingOrder ? 0 : targetOrder.dueAmount,
         courierName: courierName || targetOrder.courierName,
         trackingNumber: trackingNumber || targetOrder.trackingNumber,
       };
 
-      // 1. Send Customer Email update for Confirmed, Processing, Picked, etc.
+      // 1. Send Customer Email update for Confirmed, Processing, Picked, Completed, etc.
       triggerOrderStatusChangeWorkflow(
         updatedOrderSnapshot,
         newStatus,
@@ -895,6 +987,23 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
         courierName,
         trackingNumber,
       }).catch((tgErr) => console.error('[Telegram Order Status Alert Error]:', tgErr));
+
+      // 4. WhatsApp Automation Workflow:
+      //    - Notifies Customer of order status update (if configured)
+      //    - Notifies Pinned Admin (01887713212) with Staff Activity details & transition (e.g. Confirmed ➡️ Processing)
+      triggerWhatsAppEvent({
+        event: 'order_status_changed',
+        order: updatedOrderSnapshot,
+        staff: currentStaff
+          ? { name: currentStaff.name, role: currentStaff.role, id: currentStaff.id }
+          : activeStaff
+          ? { name: activeStaff.name, role: activeStaff.role, id: activeStaff.id }
+          : { name: 'Admin Staff', role: activeRole },
+        statusChange: {
+          oldStatus: targetOrder.orderStatus,
+          newStatus: newStatus,
+        },
+      }).catch((waErr) => console.error('[WhatsApp Order Status Alert Error]:', waErr));
     }
   };
 
@@ -903,13 +1012,21 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     const targetOrder = orders.find((o) => o.id === orderId);
     if (!targetOrder) return;
 
-    const isDeliveryOnly = targetOrder.paymentOptionType === 'delivery_only';
+    const isDeliveryOnly = targetOrder.paymentOptionType === 'delivery_only' || targetOrder.paymentMethod === 'Delivery Charge Only';
+    const isCOD = targetOrder.paymentOptionType === 'cod' || targetOrder.paymentMethod === 'Cash on Delivery';
+
     const verifiedAdvanceAmount = isDeliveryOnly
       ? (targetOrder.paidAmount !== undefined && targetOrder.paidAmount > 0 ? targetOrder.paidAmount : targetOrder.deliveryCharge)
       : targetOrder.totalAmount;
     const remainingDue = isDeliveryOnly
       ? (targetOrder.dueAmount !== undefined ? targetOrder.dueAmount : Math.max(0, targetOrder.totalAmount - verifiedAdvanceAmount))
       : 0;
+
+    const activeStaff = currentStaff || {
+      name: 'Admin Staff',
+      role: activeRole,
+      id: 'staff-admin',
+    };
 
     const updatedOrder: Order = {
       ...targetOrder,
@@ -918,17 +1035,19 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
       dueAmount: remainingDue,
       paymentVerifiedAt: new Date().toISOString(),
       orderStatus: targetOrder.orderStatus === 'Payment Verification' ? 'Confirmed' : targetOrder.orderStatus,
-      handledByStaffId: currentStaff?.id,
-      handledByStaffName: currentStaff?.name,
-      handledByStaffRole: activeRole,
+      handledByStaffId: activeStaff.id,
+      handledByStaffName: activeStaff.name,
+      handledByStaffRole: activeStaff.role,
       timeline: [
         ...targetOrder.timeline,
         {
           status: 'Payment Verification',
           timestamp: new Date().toISOString(),
           note: isDeliveryOnly
-            ? `Delivery advance of ৳${verifiedAdvanceAmount.toLocaleString()} verified by ${currentStaff?.name || 'Admin'}. Remaining due on delivery: ৳${remainingDue.toLocaleString()}`
-            : `Payment of ৳${targetOrder.totalAmount.toLocaleString()} verified by ${currentStaff?.name || 'Admin'}`,
+            ? `Delivery advance of ৳${verifiedAdvanceAmount.toLocaleString()} verified by ${activeStaff.name} (${activeStaff.role}). Remaining due on delivery: ৳${remainingDue.toLocaleString()}`
+            : isCOD
+            ? `Cash on Delivery bill of ৳${targetOrder.totalAmount.toLocaleString()} verified as Collected & Paid by ${activeStaff.name} (${activeStaff.role}). Due: ৳0`
+            : `Full payment of ৳${targetOrder.totalAmount.toLocaleString()} verified by ${activeStaff.name} (${activeStaff.role}). Due: ৳0`,
         },
       ],
     };
@@ -936,12 +1055,40 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     updateOrderInDB(updatedOrder.id, updatedOrder);
     onUpdateOrderStatus(orderId, updatedOrder.orderStatus);
 
+    // 1. Audit Log in admin activity logs
     recordAuditLog(
       'Payment Verified',
       'payments',
       orderId,
-      `Approved ${isDeliveryOnly ? 'delivery advance' : 'payment'} of ৳${verifiedAdvanceAmount.toLocaleString()} for Order #${orderId} via ${targetOrder.paymentMethod}`
+      `স্টাফ ${activeStaff.name} (${activeStaff.role}) কাস্টমার ${targetOrder.customerName}-এর অর্ডার #${orderId} এর ${isDeliveryOnly ? 'ডেলিভারি অগ্রিম' : 'ফুল পেমেন্ট'} ৳${verifiedAdvanceAmount.toLocaleString()} (${targetOrder.paymentMethod}, TrxID: ${targetOrder.transactionId || 'N/A'}) সফলভাবে ভেরিফাই ও অনুমোদন করেছেন।`
     );
+
+    // 2. Alert to Admin / Super Admin (Email alert with staff details):
+    // "স্টাফ এই উনার প্রোডাক্টটা অ্যাডভান্স করছে এবং অ্যাডভান্সটা ভেরিফাইড করছে।"
+    const paymentLabel = isDeliveryOnly ? 'ডেলিভারি চার্জ অগ্রিম (Delivery Advance)' : isCOD ? 'ক্যাশ অন ডেলিভারি (COD)' : 'সম্পূর্ণ অগ্রিম (Full Payment)';
+    triggerSuperAdminAuditAlert(
+      currentStaff,
+      `Payment Verified by Staff: ${activeStaff.name}`,
+      'Payment',
+      `স্টাফ ${activeStaff.name} (${activeStaff.role}) কাস্টমার ${targetOrder.customerName} (${targetOrder.customerMobile || targetOrder.deliveryMobile})-এর অর্ডার #${orderId} এর ${paymentLabel} ৳${verifiedAdvanceAmount.toLocaleString()} (${targetOrder.paymentMethod}, TrxID: ${targetOrder.transactionId || 'N/A'}) সফলভাবে ভেরিফাই ও অনুমোদন করেছেন। অবশিষ্ট ডিউ: ৳${remainingDue.toLocaleString()}`
+    ).catch((err) => console.error('[Payment Super Admin Audit Alert Error]:', err));
+
+    // 3. Notification to Customer & Pinned Admin via WhatsApp Event:
+    // "আর কাস্টমারের কাছে যাবে যে তার পেমেন্টটা ভেরিফাই করা হয়েছে।"
+    triggerWhatsAppEvent({
+      event: 'payment_received' as any,
+      order: updatedOrder,
+      staff: activeStaff,
+      customerPhone: targetOrder.customerMobile || targetOrder.deliveryMobile,
+      customVariables: {
+        '{{staffName}}': activeStaff.name,
+        '{{staffRole}}': activeStaff.role,
+        '{{paymentMethod}}': targetOrder.paymentMethod || 'bKash / Nagad',
+        '{{trxId}}': targetOrder.transactionId || 'N/A',
+        '{{paidAmount}}': String(verifiedAdvanceAmount),
+        '{{dueAmount}}': String(remainingDue),
+      },
+    }).catch((waErr) => console.error('[WhatsApp Payment Verified Alert Error]:', waErr));
   };
 
   // Stock Adjustment Handler
@@ -1096,7 +1243,11 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
 
   // Staff Management
   const handleAddStaff = (newStaff: StaffUser) => {
-    setStaffList((prev) => [newStaff, ...prev]);
+    setStaffList((prev) => {
+      const next = [newStaff, ...prev];
+      if (onUpdateStaffList) onUpdateStaffList(next);
+      return next;
+    });
     saveStaffToDB(newStaff);
     recordAuditLog(
       'New Staff Account Created',
@@ -1107,13 +1258,45 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   };
 
   const handleUpdateStaff = (updatedStaff: StaffUser) => {
-    setStaffList((prev) => prev.map((s) => (s.id === updatedStaff.id ? updatedStaff : s)));
+    setStaffList((prev) => {
+      const next = prev.map((s) => (s.id === updatedStaff.id ? updatedStaff : s));
+      safeSetLocalStorage('kenax_staff_cache', JSON.stringify(next));
+      safeSetLocalStorage('preview_kenax_staff_cache', JSON.stringify(next));
+      if (onUpdateStaffList) onUpdateStaffList(next);
+      return next;
+    });
+
+    // If the updated staff is currently active or super admin, sync active session states & local caches
+    const isCurrentActive =
+      currentStaff?.id === updatedStaff.id ||
+      (currentStaff?.email && updatedStaff.email && currentStaff.email.toLowerCase() === updatedStaff.email.toLowerCase()) ||
+      authenticatedStaff?.id === updatedStaff.id ||
+      (authenticatedStaff?.email && updatedStaff.email && authenticatedStaff.email.toLowerCase() === updatedStaff.email.toLowerCase()) ||
+      (updatedStaff.role === 'super_admin' && (currentStaff?.role === 'super_admin' || authenticatedStaff?.role === 'super_admin'));
+
+    if (isCurrentActive) {
+      setCurrentStaff(updatedStaff);
+      setAuthenticatedStaff(updatedStaff);
+      if (onUpdateCurrentStaff) {
+        onUpdateCurrentStaff(updatedStaff);
+      }
+      try {
+        const serialized = JSON.stringify(updatedStaff);
+        safeSetLocalStorage('kenax_current_staff', serialized);
+        safeSetLocalStorage('kenax_authenticated_staff', serialized);
+        safeSetLocalStorage('preview_kenax_current_staff', serialized);
+        safeSetLocalStorage('preview_kenax_authenticated_staff', serialized);
+        safeSetLocalStorage('kenax_admin_session', serialized);
+        safeSetLocalStorage('preview_kenax_admin_session', serialized);
+      } catch {}
+    }
+
     saveStaffToDB(updatedStaff);
     recordAuditLog(
       'Staff Account Updated',
       'staff',
       updatedStaff.email,
-      `Updated profile/permissions for ${updatedStaff.name}`
+      `Updated profile/phone/permissions for ${updatedStaff.name}`
     );
   };
 
@@ -1125,6 +1308,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     setStaffList((prev) => {
       const next = prev.filter((s) => s.id !== staffId);
       safeSetLocalStorage('kenax_staff_cache', JSON.stringify(next));
+      if (onUpdateStaffList) onUpdateStaffList(next);
       return next;
     });
 
@@ -1317,16 +1501,26 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
 
     const tabPermissionMap: Record<string, string> = {
       overview: 'reports.view',
-      performance: 'reports.view',
+      performance: 'performance.view',
+      'my-dashboard': 'my_dashboard.view',
       orders: 'orders.view',
-      'cart-activities': 'orders.view',
-      'wishlist-activities': 'orders.view',
+      'cart-activities': 'orders.cart_activities',
+      'wishlist-activities': 'orders.wishlist_activities',
       payments: 'payments.view',
-      'payment-gateways': 'settings.view',
+      'payment-gateways': 'payments.gateways',
+      'delivery-advance': 'payments.verify',
+      costs: 'costs.view',
       reports: 'reports.view',
       products: 'products.view',
-      dropshipping: 'products.view',
-      categories: 'products.view',
+      partners: 'products.view',
+      'admin-sellers': 'products.view',
+      'admin-resellers': 'products.view',
+      'admin-seller-plans': 'products.view',
+      'admin-reseller-plans': 'products.view',
+      'admin-partner-payouts': 'payments.view',
+      advertiser: 'marketing.view',
+      dropshipping: 'suppliers.view',
+      categories: 'categories.manage',
       inventory: 'inventory.view',
       coupons: 'coupons.view',
       customers: 'customers.view',
@@ -1334,6 +1528,12 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
       delivery: 'delivery.view',
       staff: 'staff.view',
       roles: 'roles.view',
+      'chat-bot': 'chatbot.ai',
+      'telegram-bot': 'chatbot.telegram',
+      'whatsapp-automation': 'chatbot.whatsapp',
+      'sms-gateway': 'chatbot.sms',
+      'gmail-alerts': 'chatbot.email',
+      'seo-settings': 'seo.manage',
       logs: 'logs.view',
       settings: 'settings.view',
     };
@@ -1345,9 +1545,39 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   }, [activeRole, currentTab]);
 
   // Computed counts for badges
-  const pendingOrdersCount = orders.filter(
-    (o) => o.orderStatus === 'Pending' || o.orderStatus === 'Payment Verification'
-  ).length;
+  const isResellerOrderCheck = (o: Order) =>
+    Boolean(
+      (o as any).resellerId ||
+      (o as any).resellerStoreName ||
+      (o as any).isResellerOrder ||
+      (o.notes && o.notes.includes('[Dropship:'))
+    );
+
+  const pendingOrdersCount = orders.filter((o) => {
+    if (isResellerOrderCheck(o)) return false;
+    const s = (o.orderStatus || (o as any).status || 'Pending').toString().trim().toLowerCase();
+    return s === 'pending' || s === 'payment verification' || s === 'unconfirmed';
+  }).length;
+
+  const pendingResellerOrdersCount = orders.filter((o) => {
+    if (!isResellerOrderCheck(o)) return false;
+    const s = (o.orderStatus || (o as any).status || 'Pending').toString().trim().toLowerCase();
+    return s === 'pending' || s === 'payment verification' || s === 'unconfirmed';
+  }).length;
+
+  const confirmedOrdersCount = orders.filter((o) => {
+    const s = (o.orderStatus || (o as any).status || '').toString().trim().toLowerCase();
+    return (
+      s === 'confirmed' ||
+      s === 'processing' ||
+      s === 'packed' ||
+      s === 'picked' ||
+      s === 'shipped' ||
+      s === 'out for delivery' ||
+      s === 'out_for_delivery' ||
+      s === 'delivered'
+    );
+  }).length;
 
   const lowStockCount = products.filter((p) => p.stock <= 10).length;
 
@@ -1367,8 +1597,53 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     }
   };
 
+  const isResellerTab =
+    currentTab === 'admin-resellers' ||
+    currentTab === 'admin-reseller-orders' ||
+    currentTab === 'admin-reseller-approvals' ||
+    currentTab === 'admin-reseller-subscriptions' ||
+    currentTab === 'admin-reseller-renewals' ||
+    currentTab === 'admin-reseller-plans' ||
+    currentTab === 'admin-reseller-payouts';
+
+  if (isResellerTab) {
+    return (
+      <div className="admin-portal-root min-h-screen bg-slate-100 dark:bg-slate-950 text-slate-900 dark:text-slate-100 p-3 sm:p-5 lg:p-6 font-sans">
+        <AdminResellerManagement
+          initialTab={
+            currentTab === 'admin-reseller-orders'
+              ? 'orders'
+              : currentTab === 'admin-reseller-approvals'
+              ? 'pending'
+              : currentTab === 'admin-reseller-subscriptions'
+              ? 'subscriptions'
+              : currentTab === 'admin-reseller-renewals'
+              ? 'renewals'
+              : currentTab === 'admin-reseller-plans'
+              ? 'plans'
+              : currentTab === 'admin-reseller-payouts'
+              ? 'payouts'
+              : 'overview'
+          }
+          onBackToAdmin={() => setCurrentTab('overview')}
+          onLoginAsPartner={onNavigateToPartnerPortal}
+          onNavigateToPermissionMatrix={() => setCurrentTab('permission-matrix')}
+          orders={orders}
+          products={products}
+          onUpdateOrderStatus={handleUpdateOrderStatus}
+          onVerifyPayment={handleVerifyPayment}
+          onOpenInvoice={(ord) => setSelectedInvoiceOrder(ord)}
+          currentRole={activeRole}
+          currentStaff={currentStaff}
+          settings={settings}
+          onRecordAudit={recordAuditLog}
+        />
+      </div>
+    );
+  }
+
   return (
-    <div className="min-h-screen bg-slate-100 flex flex-col font-sans">
+    <div className="admin-portal-root min-h-screen bg-slate-100 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex flex-col font-sans">
       {/* Fixed Desktop / Drawer Mobile Sidebar */}
       <AdminSidebar
         currentTab={currentTab}
@@ -1380,6 +1655,8 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
           if (onNavigateToStore) onNavigateToStore();
         }}
         pendingOrdersCount={pendingOrdersCount}
+        confirmedOrdersCount={confirmedOrdersCount}
+        pendingResellerOrdersCount={pendingResellerOrdersCount}
         lowStockCount={lowStockCount}
         liveCartsCount={liveCartsCount}
         liveWishlistsCount={customers.filter((c) => c.wishlist && c.wishlist.length > 0).length}
@@ -1387,15 +1664,23 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
         onCloseMobile={() => setIsMobileMenuOpen(false)}
         onRoleChange={handleRoleChange}
         isSuperAdminAccount={isSuperAdminAccount}
+        isCollapsed={isSidebarCollapsed}
+        onToggleCollapse={handleToggleSidebarCollapse}
       />
 
-      {/* Main Content Area (Offset by 64px for sidebar on lg screens) */}
-      <div className="lg:pl-64 flex-1 flex flex-col min-w-0">
+      {/* Main Content Area (Offset by 20/64 for sidebar on lg screens with smooth transition) */}
+      <div
+        className={`${
+          isSidebarCollapsed ? 'lg:pl-20' : 'lg:pl-64'
+        } flex-1 flex flex-col min-w-0 transition-all duration-300 ease-in-out`}
+      >
         {/* Top Header */}
         <AdminHeader
           currentTab={currentTab}
           onSelectTab={setCurrentTab}
           onOpenMobileMenu={() => setIsMobileMenuOpen(true)}
+          isSidebarCollapsed={isSidebarCollapsed}
+          onToggleSidebarCollapse={handleToggleSidebarCollapse}
           notifications={notifications}
           onMarkNotificationRead={handleMarkNotificationRead}
           currentStaff={currentStaff}
@@ -1411,7 +1696,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
         />
 
         {/* Tab Body */}
-        <main className="flex-1 p-4 sm:p-6 lg:p-8 max-w-7xl w-full mx-auto">
+        <main className="flex-1 p-2 sm:p-4 lg:p-5 w-full max-w-[99%] 2xl:max-w-[1720px] mx-auto">
           {currentTab === 'overview' && (
             <AdminOverview
               orders={orders}
@@ -1442,6 +1727,19 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
             />
           )}
 
+          {currentTab === 'my-dashboard' && activeRole === 'super_admin' && (
+            <AdminMyDashboard
+              orders={orders}
+              staffList={staffList}
+              currentStaff={currentStaff}
+              currentRole={activeRole}
+              activityLogs={activityLogs}
+              onUpdateOrderStatus={handleUpdateOrderStatus}
+              onPrintInvoice={(order) => setSelectedInvoiceOrder(order)}
+              onSelectTab={setCurrentTab}
+            />
+          )}
+
           {currentTab === 'costs' && (
             <AdminCosts
               expenses={expenses}
@@ -1459,12 +1757,14 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
             />
           )}
 
-          {currentTab === 'orders' && (
+          {(currentTab === 'orders' || currentTab === 'confirmed-orders') && (
             <AdminOrders
+              key={currentTab}
               orders={orders}
               products={products}
-              onUpdateOrderStatus={(orderId, status, courier, tracking) => {
-                handleUpdateOrderStatus(orderId, status, courier, tracking);
+              initialScope={currentTab === 'confirmed-orders' ? 'confirmed' : 'pending'}
+              onUpdateOrderStatus={(orderId, status, courier, tracking, staff) => {
+                handleUpdateOrderStatus(orderId, status, courier, tracking, staff);
               }}
               onVerifyPayment={handleVerifyPayment}
               onPrintInvoice={(order) => setSelectedInvoiceOrder(order)}
@@ -1474,6 +1774,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
               }}
               currentRole={activeRole}
               currentStaff={currentStaff}
+              settings={settings}
             />
           )}
 
@@ -1551,6 +1852,53 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
             />
           )}
 
+          {(currentTab === 'admin-sellers' ||
+            currentTab === 'admin-seller-approvals' ||
+            currentTab === 'admin-seller-renewals' ||
+            currentTab === 'admin-seller-plans' ||
+            currentTab === 'admin-partner-payouts') && (
+            <AdminSellerManagement
+              initialTab={
+                currentTab === 'admin-seller-approvals'
+                  ? 'pending'
+                  : currentTab === 'admin-seller-renewals'
+                  ? 'renewals'
+                  : currentTab === 'admin-seller-plans'
+                  ? 'plans'
+                  : currentTab === 'admin-partner-payouts'
+                  ? 'payouts'
+                  : 'all'
+              }
+              onLoginAsPartner={onNavigateToPartnerPortal}
+              onNavigateToPermissionMatrix={() => setCurrentTab('permission-matrix')}
+            />
+          )}
+
+          {currentTab === 'partners' && (
+            <AdminPartners
+              initialTab="all"
+              onLoginAsPartner={onNavigateToPartnerPortal}
+            />
+          )}
+
+          {currentTab === 'landing-pages' && (
+            <AdminLandingPages
+              products={products}
+              categories={categories}
+              onUpdateProduct={(prod) => {
+                onUpdateProduct(prod);
+                recordAuditLog(
+                  prod.landingPage?.enabled ? 'Landing Page Enabled' : 'Landing Page Updated',
+                  'products',
+                  prod.sku || prod.name,
+                  `Updated landing page config for product: ${prod.name}`
+                );
+              }}
+              currentRole={activeRole}
+              currentStaff={currentStaff}
+            />
+          )}
+
           {currentTab === 'dropshipping' && (
             <AdminDropshipping
               products={products}
@@ -1606,6 +1954,17 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
             />
           )}
 
+          {currentTab === 'advertiser' && (
+            <AdminAdvertiser
+              siteSettings={settings}
+              onUpdateSettings={onUpdateSettings}
+              products={products}
+              orders={orders}
+              currentRole={activeRole}
+              onRecordAudit={recordAuditLog}
+            />
+          )}
+
           {currentTab === 'inventory' && (
             <AdminInventory
               products={products}
@@ -1639,6 +1998,16 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
               }}
               currentRole={activeRole}
               currentStaff={currentStaff}
+              settings={settings}
+              onUpdateSettings={onUpdateSettings}
+            />
+          )}
+
+          {currentTab === 'courier-fraud' && (
+            <AdminCourierFraudChecker
+              siteSettings={settings}
+              onUpdateSettings={onUpdateSettings}
+              canManageSettings={activeRole === 'super_admin' || activeRole === 'manager'}
             />
           )}
 
@@ -1646,8 +2015,10 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
             <AdminPayments
               orders={orders}
               onVerifyPayment={handleVerifyPayment}
+              onUpdateOrderStatus={handleUpdateOrderStatus}
               currentRole={activeRole}
               currentStaff={currentStaff}
+              settings={settings}
             />
           )}
 
@@ -1763,6 +2134,10 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
             />
           )}
 
+          {currentTab === 'permission-matrix' && (
+            <PermissionMatrix />
+          )}
+
           {currentTab === 'reports' && (
             <AdminReports
               orders={orders}
@@ -1777,6 +2152,29 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
               logs={activityLogs}
               currentRole={activeRole}
               currentStaff={currentStaff}
+            />
+          )}
+
+          {currentTab === 'chat-bot' && (
+            <AdminChatBot
+              currentRole={activeRole}
+              currentStaff={currentStaff}
+              siteSettings={settings}
+              onUpdateSettings={async (newSet) => {
+                await onUpdateSettings(newSet);
+                recordAuditLog(
+                  'Chat Bot Settings Updated',
+                  'settings',
+                  'site-settings-chatbot',
+                  'Updated KenaX AI Bot configuration and official contact channels'
+                );
+              }}
+              orders={orders}
+              products={products}
+              onUpdateOrderStatus={onUpdateOrderStatus}
+              onPrintInvoice={(order) => setSelectedInvoiceOrder(order)}
+              onNavigateToConfirmedOrders={() => setCurrentTab('confirmed-orders')}
+              onNavigateToOrders={() => setCurrentTab('orders')}
             />
           )}
 
@@ -1833,6 +2231,21 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
             />
           )}
 
+          {currentTab === 'policies' && (
+            <AdminPoliciesSettings
+              settings={settings}
+              onUpdateSettings={onUpdateSettings}
+              onRecordAudit={recordAuditLog}
+            />
+          )}
+
+          {currentTab === 'google-sheets' && (
+            <AdminGoogleSheets
+              settings={settings}
+              onUpdateSettings={onUpdateSettings}
+            />
+          )}
+
           {currentTab === 'settings' && (
             <AdminSettings
               settings={settings}
@@ -1883,12 +2296,12 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
 
       {/* Change Password Modal */}
       {isChangePasswordOpen && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl overflow-hidden border border-slate-200">
-            <div className="bg-slate-900 text-white px-6 py-4 flex items-center justify-between">
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl max-w-md w-full shadow-2xl overflow-hidden border border-slate-200 dark:border-slate-800">
+            <div className="bg-slate-900 dark:bg-slate-950 text-white px-6 py-4 flex items-center justify-between border-b border-slate-800">
               <div className="flex items-center gap-2">
                 <span className="w-8 h-8 rounded-xl bg-sky-500/20 text-sky-400 flex items-center justify-center font-bold">🔑</span>
-                <h3 className="font-bold text-base">Change Staff Password</h3>
+                <h3 className="font-bold text-base text-white">Change Staff Password</h3>
               </div>
               <button
                 onClick={() => setIsChangePasswordOpen(false)}
@@ -1900,51 +2313,51 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
 
             <form onSubmit={handleChangePasswordSubmit} className="p-6 space-y-4">
               {passwordChangeMsg && (
-                <div className={`p-3 rounded-xl text-xs font-semibold ${passwordChangeMsg.includes('success') ? 'bg-emerald-50 text-emerald-800 border border-emerald-200' : 'bg-red-50 text-red-700 border border-red-200'}`}>
+                <div className={`p-3 rounded-xl text-xs font-semibold ${passwordChangeMsg.includes('success') ? 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800' : 'bg-red-50 dark:bg-red-950/60 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800'}`}>
                   {passwordChangeMsg}
                 </div>
               )}
 
-              <div className="p-3 bg-slate-50 rounded-xl text-xs text-slate-600 mb-2">
-                Changing password for: <b className="text-slate-900">{currentStaff?.name}</b> ({currentStaff?.email})
-                <span className="block text-[10px] text-slate-400 mt-0.5">Your dashboard, role, permissions, and all data remain fully intact and secure.</span>
+              <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl text-xs text-slate-600 dark:text-slate-300 border border-slate-100 dark:border-slate-700 mb-2">
+                Changing password for: <b className="text-slate-900 dark:text-white">{currentStaff?.name}</b> ({currentStaff?.email})
+                <span className="block text-[10px] text-slate-400 dark:text-slate-400 mt-0.5">Your dashboard, role, permissions, and all data remain fully intact and secure.</span>
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">New Password *</label>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">New Password *</label>
                 <input
                   type="password"
                   required
                   value={newStaffPassword}
                   onChange={(e) => setNewStaffPassword(e.target.value)}
                   placeholder="Enter new password (min 4 chars)"
-                  className="w-full px-3 py-2.5 rounded-xl border border-slate-300 text-xs text-slate-900 font-mono"
+                  className="w-full px-3 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs text-slate-900 dark:text-slate-100 font-mono focus:outline-hidden focus:ring-2 focus:ring-sky-500"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Confirm New Password *</label>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Confirm New Password *</label>
                 <input
                   type="password"
                   required
                   value={confirmStaffPassword}
                   onChange={(e) => setConfirmStaffPassword(e.target.value)}
                   placeholder="Re-enter new password"
-                  className="w-full px-3 py-2.5 rounded-xl border border-slate-300 text-xs text-slate-900 font-mono"
+                  className="w-full px-3 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs text-slate-900 dark:text-slate-100 font-mono focus:outline-hidden focus:ring-2 focus:ring-sky-500"
                 />
               </div>
 
-              <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
+              <div className="flex justify-end gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
                 <button
                   type="button"
                   onClick={() => setIsChangePasswordOpen(false)}
-                  className="px-4 py-2 rounded-xl border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+                  className="px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold shadow-xs"
+                  className="px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold shadow-xs cursor-pointer"
                 >
                   Update Password
                 </button>
@@ -1956,3 +2369,5 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     </div>
   );
 };
+
+export default AdminPortal;

@@ -32,7 +32,7 @@ import {
   Sliders,
 } from 'lucide-react';
 import { extractYouTubeId } from '../HeroBanner';
-import { getOptimizedImageUrl, handleImageError } from '../../utils/imageOptimizer';
+import { getOptimizedImageUrl, handleImageError, formatGoogleDriveImageUrl } from '../../utils/imageOptimizer';
 
 interface AdminHeroSlidesManagerProps {
   heroBanners: HeroBannerSlide[];
@@ -137,27 +137,27 @@ export const AdminHeroSlidesManager: React.FC<AdminHeroSlidesManagerProps> = ({
   const allExpanded = heroBanners.length > 0 && heroBanners.every((s, i) => Boolean(expandedSlideIds[s.id || `slide-${i}`]));
 
   return (
-    <div id="admin-hero-slides-manager" className="p-3 sm:p-6 rounded-2xl bg-white border border-slate-200 shadow-2xs space-y-3.5 sm:space-y-4">
+    <div id="admin-hero-slides-manager" className="p-3 sm:p-6 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xs space-y-3.5 sm:space-y-4">
       {/* Top Header & Cloud Sync Bar */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 sm:gap-3 pb-3 border-b border-slate-100">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 sm:gap-3 pb-3 border-b border-slate-100 dark:border-slate-800">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
-            <div className="p-1.5 sm:p-2 rounded-xl bg-sky-50 text-sky-600 border border-sky-200 shrink-0">
+            <div className="p-1.5 sm:p-2 rounded-xl bg-sky-50 dark:bg-sky-950/80 text-sky-600 dark:text-sky-400 border border-sky-200 dark:border-sky-800 shrink-0">
               <ImageIcon className="w-4 h-4 sm:w-5 sm:h-5" />
             </div>
-            <h3 className="font-black text-xs sm:text-base text-slate-900">
+            <h3 className="font-black text-xs sm:text-base text-slate-900 dark:text-white">
               Top Hero Banner Carousel Slides
             </h3>
-            <span className="hidden sm:inline-block text-[10px] font-black px-2 py-0.5 rounded-full bg-sky-100 text-sky-800 border border-sky-200">
+            <span className="hidden sm:inline-block text-[10px] font-black px-2 py-0.5 rounded-full bg-sky-100 dark:bg-sky-950/80 text-sky-800 dark:text-sky-300 border border-sky-200 dark:border-sky-800">
               {heroBanners.length} Active Slides
             </span>
-            <span className="hidden sm:inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+            <span className="hidden sm:inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
               <span>Synced</span>
             </span>
           </div>
           {/* Subtext hidden on mobile as requested */}
-          <p className="text-xs text-slate-500 mt-1 hidden sm:block">
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 hidden sm:block">
             Manage top storefront slides, desktop &amp; mobile optimized artwork, floating badges, and call-to-action buttons.
           </p>
         </div>
@@ -167,7 +167,7 @@ export const AdminHeroSlidesManager: React.FC<AdminHeroSlidesManagerProps> = ({
             type="button"
             id="btn-toggle-expand-slides"
             onClick={() => setAllSlidesExpanded(!allExpanded)}
-            className="px-2.5 py-1.5 rounded-xl border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 text-[11px] sm:text-xs font-bold transition-colors cursor-pointer"
+            className="px-2.5 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-[11px] sm:text-xs font-bold transition-colors cursor-pointer"
           >
             {allExpanded ? 'Collapse All' : 'Expand All'}
           </button>
@@ -203,7 +203,7 @@ export const AdminHeroSlidesManager: React.FC<AdminHeroSlidesManagerProps> = ({
               }
             }}
             title="Reset to default slides"
-            className="text-xs font-bold text-slate-500 hover:text-slate-800 bg-slate-100 hover:bg-slate-200 p-1.5 rounded-xl transition-colors cursor-pointer"
+            className="text-xs font-bold text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 p-1.5 rounded-xl transition-colors cursor-pointer"
           >
             <RotateCcw className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
           </button>
@@ -212,16 +212,16 @@ export const AdminHeroSlidesManager: React.FC<AdminHeroSlidesManagerProps> = ({
 
       {/* Direct Save Toast Notification */}
       {directSaveToast && (
-        <div className="p-3 rounded-xl bg-emerald-50 text-emerald-800 border border-emerald-300 text-xs font-bold flex items-center justify-between gap-2 animate-in fade-in shadow-xs">
+        <div className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800 text-xs font-bold flex items-center justify-between gap-2 animate-in fade-in shadow-xs">
           <div className="flex items-center gap-2">
-            <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" />
+            <CheckCircle className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
             <span>{directSaveToast}</span>
           </div>
           {onDismissToast && (
             <button
               type="button"
               onClick={onDismissToast}
-              className="text-emerald-700 hover:text-emerald-900 cursor-pointer"
+              className="text-emerald-700 dark:text-emerald-300 hover:text-emerald-900 cursor-pointer"
             >
               <X className="w-4 h-4" />
             </button>
@@ -245,8 +245,8 @@ export const AdminHeroSlidesManager: React.FC<AdminHeroSlidesManagerProps> = ({
               id={`slide-card-${idx}`}
               className={`rounded-2xl border transition-all duration-200 overflow-hidden ${
                 isExpanded
-                  ? 'bg-white border-sky-300 shadow-md ring-1 ring-sky-200'
-                  : 'bg-slate-50/90 hover:bg-slate-100/90 border-slate-200 shadow-2xs'
+                  ? 'bg-white dark:bg-slate-900 border-sky-300 dark:border-sky-800 shadow-md ring-1 ring-sky-200 dark:ring-sky-900'
+                  : 'bg-slate-50/90 dark:bg-slate-800/60 hover:bg-slate-100/90 dark:hover:bg-slate-800 border-slate-200 dark:border-slate-800 shadow-2xs'
               }`}
             >
               {/* Compact Slide Header Bar (Click to toggle) */}
@@ -282,11 +282,11 @@ export const AdminHeroSlidesManager: React.FC<AdminHeroSlidesManagerProps> = ({
                   {/* Slide Titles & Summary */}
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-1.5 min-w-0">
-                      <span className="text-xs sm:text-sm font-bold text-slate-900 truncate">
+                      <span className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white truncate">
                         {slide.title || `Slide #${idx + 1}`}
                       </span>
                       {slide.subtitle && (
-                        <span className="hidden sm:inline text-xs font-semibold text-slate-500 truncate">
+                        <span className="hidden sm:inline text-xs font-semibold text-slate-500 dark:text-slate-400 truncate">
                           — {slide.subtitle}
                         </span>
                       )}
@@ -294,12 +294,12 @@ export const AdminHeroSlidesManager: React.FC<AdminHeroSlidesManagerProps> = ({
 
                     <div className="flex items-center gap-1 sm:gap-1.5 mt-0.5 overflow-hidden flex-nowrap">
                       {/* Media Type Chip */}
-                      <span className="text-[9px] sm:text-[10px] font-bold px-1.5 py-0.2 rounded-md bg-slate-200/80 text-slate-700 shrink-0">
+                      <span className="text-[9px] sm:text-[10px] font-bold px-1.5 py-0.2 rounded-md bg-slate-200/80 dark:bg-slate-700 text-slate-700 dark:text-slate-200 shrink-0">
                         {mediaType === 'youtube' ? '📺 YT' : mediaType === 'video' ? '🎬 Video' : '🖼️ Image'}
                       </span>
 
                       {/* Badges count chip */}
-                      <span className="text-[9px] sm:text-[10px] font-bold px-1.5 py-0.2 rounded-md bg-sky-50 text-sky-700 border border-sky-200 shrink-0">
+                      <span className="text-[9px] sm:text-[10px] font-bold px-1.5 py-0.2 rounded-md bg-sky-50 dark:bg-sky-950/80 text-sky-700 dark:text-sky-300 border border-sky-200 dark:border-sky-800 shrink-0">
                         🏷️ {badgesCount} {badgesCount === 1 ? 'Badge' : 'Badges'}
                       </span>
 
@@ -425,6 +425,34 @@ export const AdminHeroSlidesManager: React.FC<AdminHeroSlidesManagerProps> = ({
                   {/* ---------------------------------------------------- */}
                   {activeSubtab === 'content' && (
                     <div className="space-y-3 animate-in fade-in duration-150">
+                      {/* One-click Clean Image Banner helper */}
+                      <div className="p-2.5 rounded-xl bg-sky-50/80 border border-sky-200 flex flex-wrap items-center justify-between gap-2">
+                        <div className="text-[11px] text-sky-900">
+                          <span className="font-bold">💡 শুধু ইমেজ ব্যানার দেখাতে চান?</span>{' '}
+                          <span className="text-slate-600">কোনো লেখা ও বাটন ছাড়া ক্লিয়ার ইমেজ দেখাতে চাইলে নিচের বাটনে ক্লিক করুন।</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const updated = [...heroBanners];
+                            updated[idx].title = '';
+                            updated[idx].subtitle = '';
+                            updated[idx].description = '';
+                            updated[idx].bengali = '';
+                            updated[idx].badge = '';
+                            updated[idx].badges = [];
+                            updated[idx].buttonText = '';
+                            updated[idx].buttons = [];
+                            updated[idx].overlayOpacity = 0;
+                            setHeroBanners(updated);
+                          }}
+                          className="px-2.5 py-1 rounded-lg bg-sky-600 hover:bg-sky-500 text-white text-[11px] font-bold flex items-center gap-1 shadow-2xs transition-colors cursor-pointer"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                          <span>সব টেক্সট ও বাটন ক্লিয়ার করুন (Image-Only)</span>
+                        </button>
+                      </div>
+
                       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                         <div>
                           <div className="flex items-center justify-between mb-1">
@@ -1166,17 +1194,36 @@ export const AdminHeroSlidesManager: React.FC<AdminHeroSlidesManagerProps> = ({
                                 />
                               </label>
 
-                              <input
-                                type="url"
-                                placeholder="Paste Google Drive, Facebook, or Direct Image URL..."
-                                value={slide.image || ''}
-                                onChange={(e) => {
-                                  const updated = [...heroBanners];
-                                  updated[idx].image = e.target.value;
-                                  setHeroBanners(updated);
-                                }}
-                                className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 text-xs font-mono text-slate-900 bg-white"
-                              />
+                              <div className="flex-1 flex items-center gap-1.5 w-full">
+                                <input
+                                  type="url"
+                                  placeholder="Paste Google Drive, Facebook, or Direct Image URL..."
+                                  value={slide.image || ''}
+                                  onChange={(e) => {
+                                    const rawVal = e.target.value.trim();
+                                    const formatted = formatGoogleDriveImageUrl(rawVal);
+                                    const updated = [...heroBanners];
+                                    updated[idx].image = formatted;
+                                    setHeroBanners(updated);
+                                  }}
+                                  className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 text-xs font-mono text-slate-900 bg-white"
+                                />
+                                {slide.image && slide.image.trim() !== '' && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const updated = [...heroBanners];
+                                      updated[idx].image = '';
+                                      setHeroBanners(updated);
+                                    }}
+                                    className="px-2 py-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 text-xs font-bold flex items-center gap-1 cursor-pointer shrink-0 transition-colors"
+                                    title="Clear desktop image"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                    <span>Clear</span>
+                                  </button>
+                                )}
+                              </div>
                             </div>
                             <p className="text-[10px] text-slate-500 italic">
                               💡 Supports: Local Device file upload, Google Drive sharing links, Facebook photo links, & Direct web URLs.
@@ -1220,17 +1267,36 @@ export const AdminHeroSlidesManager: React.FC<AdminHeroSlidesManagerProps> = ({
                                 />
                               </label>
 
-                              <input
-                                type="url"
-                                placeholder="Paste Google Drive, Facebook, or Direct Image URL..."
-                                value={slide.mobileImage || ''}
-                                onChange={(e) => {
-                                  const updated = [...heroBanners];
-                                  updated[idx].mobileImage = e.target.value;
-                                  setHeroBanners(updated);
-                                }}
-                                className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 text-xs font-mono text-slate-900 bg-white"
-                              />
+                              <div className="flex-1 flex items-center gap-1.5 w-full">
+                                <input
+                                  type="url"
+                                  placeholder="Paste Google Drive, Facebook, or Direct Image URL..."
+                                  value={slide.mobileImage || ''}
+                                  onChange={(e) => {
+                                    const rawVal = e.target.value.trim();
+                                    const formatted = formatGoogleDriveImageUrl(rawVal);
+                                    const updated = [...heroBanners];
+                                    updated[idx].mobileImage = formatted;
+                                    setHeroBanners(updated);
+                                  }}
+                                  className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 text-xs font-mono text-slate-900 bg-white"
+                                />
+                                {slide.mobileImage && slide.mobileImage.trim() !== '' && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const updated = [...heroBanners];
+                                      updated[idx].mobileImage = '';
+                                      setHeroBanners(updated);
+                                    }}
+                                    className="px-2 py-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 text-xs font-bold flex items-center gap-1 cursor-pointer shrink-0 transition-colors"
+                                    title="Clear mobile image"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                    <span>Clear</span>
+                                  </button>
+                                )}
+                              </div>
                             </div>
                             <p className="text-[10px] text-slate-500 italic">
                               💡 Supports: Local Device file upload, Google Drive sharing links, Facebook photo links, & Direct web URLs.

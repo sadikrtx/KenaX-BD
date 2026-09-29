@@ -3,6 +3,23 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" content="#0b0f19" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
+    <script>
+      (function() {
+        try {
+          var saved = localStorage.getItem('kenax_theme');
+          var isDark = saved === 'dark' || (!saved && window.matchMedia('(prefers-color-scheme: dark)').matches);
+          if (isDark) {
+            document.documentElement.classList.add('dark');
+            document.documentElement.setAttribute('data-theme', 'dark');
+            document.documentElement.style.backgroundColor = '#0b0f19';
+            document.documentElement.style.colorScheme = 'dark';
+          }
+        } catch (e) {}
+      })();
+    </script>
     <script>
       (function() {
         function isBenignFirestoreMsg(args) {
@@ -57,6 +74,9 @@
         });
       })();
     </script>
+    <!-- Telegram WebApp JS SDK -->
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+
     <!-- Google Tag Manager -->
     <script>(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':
     new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],
@@ -89,6 +109,11 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 
+    <!-- Google Fonts: Hind Siliguri (Crisp, High-Legibility Bengali) & Plus Jakarta Sans -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+
     <!-- Favicon & Touch Icons for Googlebot and all browsers -->
     <link rel="icon" href="/favicon.ico" sizes="any" />
     <link rel="icon" type="image/svg+xml" href="/logo.svg" />
@@ -99,6 +124,16 @@
     <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png" />
     <link rel="icon" type="image/png" sizes="512x512" href="/favicon-512.png" />
     <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/manifest.json" />
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/sw.js')
+            .then((reg) => console.log('Service Worker registered', reg))
+            .catch((err) => console.log('Service Worker registration failed', err));
+        });
+      }
+    </script>
 
     <!-- Open Graph (Facebook, Google Discover, LinkedIn, WhatsApp) -->
     <meta property="og:title" content="KenaX BD" />
@@ -170,6 +205,7 @@
 
     <div id="root"></div>
 
+    <script async defer src="https://apis.google.com/js/api.js"></script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

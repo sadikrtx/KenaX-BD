@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { Product, OrderItem } from '../types';
 import { resolveOriginalImageMedia, getSynchronouslyResolvedMedia } from '../lib/firebase';
-import { getOptimizedImageUrl, NEUTRAL_PRODUCT_PLACEHOLDER, markImageLoaded } from '../utils/imageOptimizer';
+import { getOptimizedImageUrl, NEUTRAL_PRODUCT_PLACEHOLDER, markImageLoaded, handleImageError } from '../utils/imageOptimizer';
 
 interface CartItemImageProps {
-  item: OrderItem;
+  item?: OrderItem | any;
   product?: Product;
   className?: string;
   sizeClassName?: string;
@@ -22,13 +22,13 @@ export const CartItemImage: React.FC<CartItemImageProps> = ({
 }) => {
   // Determine raw starting image candidates
   const getCandidateImage = (): string => {
-    // 1. Explicit color image
-    if (item.selectedColorImage && item.selectedColorImage.trim() !== '') {
+    // 1. Explicit color image on item
+    if (item?.selectedColorImage && typeof item.selectedColorImage === 'string' && item.selectedColorImage.trim() !== '') {
       return item.selectedColorImage;
     }
 
     // 2. Lookup by selected color or variant string in product if available
-    if (product) {
+    if (product && item) {
       const colorCandidate = item.selectedColor || (item.variant ? item.variant.split('/')[0].trim() : '');
       if (colorCandidate && product.colors && product.colors.length > 0) {
         const matchedColor = product.colors.find(
@@ -40,13 +40,25 @@ export const CartItemImage: React.FC<CartItemImageProps> = ({
       }
     }
 
-    // 3. Explicit item product image
-    if (item.productImage && item.productImage.trim() !== '') {
+    // 3. Explicit item product image / image / imageUrl / thumbnail
+    if (item?.productImage && typeof item.productImage === 'string' && item.productImage.trim() !== '') {
       return item.productImage;
     }
+    if (item?.image && typeof item.image === 'string' && item.image.trim() !== '') {
+      return item.image;
+    }
+    if (item?.imageUrl && typeof item.imageUrl === 'string' && item.imageUrl.trim() !== '') {
+      return item.imageUrl;
+    }
+    if (item?.thumbnail && typeof item.thumbnail === 'string' && item.thumbnail.trim() !== '') {
+      return item.thumbnail;
+    }
 
-    // 4. Default product image
+    // 4. Product images
     if (product) {
+      if (product.featuredImage && typeof product.featuredImage === 'string' && product.featuredImage.trim() !== '') {
+        return product.featuredImage;
+      }
       if (product.images && product.images.length > 0) {
         const valid = product.images.find((img) => typeof img === 'string' && img.trim() !== '');
         if (valid) return valid;
@@ -69,7 +81,7 @@ export const CartItemImage: React.FC<CartItemImageProps> = ({
     }
     return initialCandidate.startsWith('data:') || initialCandidate.startsWith('blob:')
       ? initialCandidate
-      : getOptimizedImageUrl(initialCandidate, 200);
+      : getOptimizedImageUrl(initialCandidate, 800);
   });
 
   const [hasError, setHasError] = useState(false);
@@ -90,7 +102,7 @@ export const CartItemImage: React.FC<CartItemImageProps> = ({
       if (syncVal) {
         setImgSrc(syncVal);
         setIsLoading(false);
-        markImageLoaded(syncVal, 200);
+        markImageLoaded(syncVal, 800);
         return;
       }
 
@@ -98,11 +110,11 @@ export const CartItemImage: React.FC<CartItemImageProps> = ({
         if (isMounted) {
           if (resolved && resolved.trim() !== '' && !resolved.startsWith('media://')) {
             setImgSrc(resolved);
-            markImageLoaded(resolved, 200);
+            markImageLoaded(resolved, 800);
           } else {
             // Try product fallback
-            const fb = product?.images?.[0] || DEFAULT_FALLBACK_IMAGE;
-            setImgSrc(fb.startsWith('media://') ? DEFAULT_FALLBACK_IMAGE : getOptimizedImageUrl(fb, 200));
+            const fb = product?.featuredImage || product?.images?.[0] || DEFAULT_FALLBACK_IMAGE;
+            setImgSrc(fb.startsWith('media://') ? DEFAULT_FALLBACK_IMAGE : getOptimizedImageUrl(fb, 800));
           }
           setIsLoading(false);
         }
@@ -110,7 +122,7 @@ export const CartItemImage: React.FC<CartItemImageProps> = ({
     } else {
       const optimized = candidate.startsWith('data:') || candidate.startsWith('blob:')
         ? candidate
-        : getOptimizedImageUrl(candidate, 200);
+        : getOptimizedImageUrl(candidate, 800);
       setImgSrc(optimized);
       setIsLoading(false);
     }
@@ -118,19 +130,28 @@ export const CartItemImage: React.FC<CartItemImageProps> = ({
     return () => {
       isMounted = false;
     };
-  }, [item.productImage, item.selectedColorImage, item.selectedColor, product]);
+  }, [
+    item?.productImage,
+    item?.image,
+    item?.imageUrl,
+    item?.selectedColorImage,
+    item?.selectedColor,
+    product?.id,
+    product?.featuredImage,
+    product?.images?.[0],
+  ]);
 
-  const handleError = () => {
+  const onError = (e: React.SyntheticEvent<HTMLImageElement, Event>) => {
     if (!hasError) {
       setHasError(true);
       if (product?.images && product.images.length > 0) {
         const fb = product.images.find((img) => img && img !== imgSrc && !img.startsWith('media://'));
         if (fb) {
-          setImgSrc(getOptimizedImageUrl(fb, 200));
+          setImgSrc(getOptimizedImageUrl(fb, 800));
           return;
         }
       }
-      setImgSrc(DEFAULT_FALLBACK_IMAGE);
+      handleImageError(e, initialCandidate);
     }
   };
 
@@ -140,17 +161,16 @@ export const CartItemImage: React.FC<CartItemImageProps> = ({
     >
       <img
         src={imgSrc}
-        alt={alt || item.productName || 'Product Image'}
-        crossOrigin="anonymous"
+        alt={alt || item?.productName || item?.name || product?.name || 'Product Image'}
         referrerPolicy="no-referrer"
-        onError={handleError}
+        onError={onError}
         onLoad={() => {
           setIsLoading(false);
-          markImageLoaded(imgSrc, 200);
+          markImageLoaded(imgSrc, 800);
         }}
         loading="lazy"
         decoding="async"
-        className="w-full h-full object-contain p-1"
+        className="w-full h-full object-cover"
       />
       {isLoading && (
         <div className="absolute inset-0 bg-slate-100/60 animate-pulse flex items-center justify-center">

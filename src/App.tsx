@@ -6,31 +6,48 @@ import { HeroBanner } from './components/HeroBanner';
 import { CategoryNav } from './components/CategoryNav';
 import { PromoGrid } from './components/PromoGrid';
 import { ProductCard } from './components/ProductCard';
-import { ProductDetailModal } from './components/ProductDetailModal';
-import { ProductPageView } from './components/ProductPageView';
 import { CartDrawer } from './components/CartDrawer';
-import { CheckoutModal } from './components/CheckoutModal';
-import { TrackOrderView } from './components/TrackOrderView';
-import { AboutView } from './components/AboutView';
-import { CustomerDashboard } from './components/CustomerDashboard';
-import { AdminPortal } from './components/AdminPortal';
-import { ContactView } from './components/ContactView';
-import { AIAssistantModal } from './components/AIAssistantModal';
 import { Footer } from './components/Footer';
 import { FlashSaleBanner } from './components/FlashSaleBanner';
 import { MobileBottomNav } from './components/MobileBottomNav';
-import { PolicyModal, PolicyTab } from './components/PolicyModal';
+import { OrderProcessingAnimation } from './components/OrderProcessingAnimation';
+import { MaintenanceModal } from './components/MaintenanceModal';
+import type { PolicyTab } from './components/PolicyModal';
+
+import { ProductPageView } from './components/ProductPageView';
+import { AuthPageView } from './components/AuthPageView';
+
+// Portals & Core Views: Direct imports ensure rock-solid React hook dispatcher stability across all routes
+import AdminPortal from './components/AdminPortal';
+import { SellerPortal } from './components/seller/SellerPortal';
+import { ResellerPortal } from './components/reseller/ResellerPortal';
+import { PartnerLoginPage } from './components/partner/PartnerLoginPage';
+
+// High-Performance Core Views & Modals: Direct imports ensure rock-solid React hook dispatcher stability
+import { CustomerFloatingChat } from './components/CustomerFloatingChat';
+import { CheckoutModal } from './components/CheckoutModal';
+import { CheckoutPageView } from './components/CheckoutPageView';
+import { OrderSuccessModal } from './components/OrderSuccessModal';
+import { ErrorBoundary } from './components/ErrorBoundary';
+import { CustomerDashboard } from './components/CustomerDashboard';
+import { TrackOrderView } from './components/TrackOrderView';
+import { AboutView } from './components/AboutView';
+import { ContactView } from './components/ContactView';
 import { PolicyView } from './components/PolicyView';
+import { PolicyModal } from './components/PolicyModal';
+import { ProductLandingPageView } from './components/ProductLandingPageView';
+import { TagProductsView } from './components/TagProductsView';
+import { AIAssistantModal } from './components/AIAssistantModal';
 import { CustomerAuthModal } from './components/CustomerAuthModal';
 import { AdminLoginModal } from './components/admin/AdminLoginModal';
-import { OrderProcessingAnimation } from './components/OrderProcessingAnimation';
-import { OrderSuccessModal } from './components/OrderSuccessModal';
-import { MaintenanceModal } from './components/MaintenanceModal';
-import { TagProductsView } from './components/TagProductsView';
 import { safeSetLocalStorage } from './lib/storage';
+import { getEnvStorageKey } from './utils/envHelper';
+import { sanitizeCart } from './utils/cartUtils';
 import { applySEOMetaTags } from './utils/seo';
 import { sortProductsByPagePriority } from './utils/productPriorityUtils';
+import { recordProductAction } from './utils/productPopularity';
 import { getCleanPromoGridSettings } from './data/defaultPromoBanners';
+import { sanitizeSiteSettings } from './utils/sanitizeSiteSettings';
 import {
   DEFAULT_FLASH_SALE_BANNER,
   DEFAULT_PRIVACY_POLICY,
@@ -41,6 +58,7 @@ import {
 
 import {
   Product,
+  ProductHistoryEntry,
   Order,
   OrderItem,
   Category,
@@ -53,8 +71,10 @@ import {
   CartActivity,
   CartActivityItem,
   DEFAULT_HERO_SIDE_BANNER,
+  PartnerUser,
 } from './types';
-import { INITIAL_PRODUCTS, DEMO_PRODUCT_IDS } from './data/initialProducts';
+import { INITIAL_PRODUCTS, PRODUCTION_PRODUCTS } from './data/initialProducts';
+import { isPreviewEnvironment } from './utils/envHelper';
 import {
   INITIAL_CATEGORIES,
   INITIAL_WEBSITE_SETTINGS,
@@ -79,6 +99,9 @@ import {
   fetchCustomerOrdersFromDB,
   fetchCustomerRecordFromDB,
   saveCustomerToDB,
+  getStaffFromDB,
+  saveStaffToDB,
+  subscribeToStaff,
   getSettingsFromDB,
   saveSettingsToDB,
   subscribeToSettings,
@@ -104,14 +127,154 @@ import {
   triggerOrderStatusSMS,
   triggerOrderEmailNotification,
 } from './lib/smsService';
-import { triggerTelegramNewOrder } from './lib/telegramBotService';
+import { triggerTelegramNewOrder, triggerTelegramOrderStatusChange } from './lib/telegramBotService';
+import { triggerWhatsAppEvent } from './lib/whatsappService';
+import { dispatchFakeOrderAlerts } from './lib/fakeOrderAlertService';
+import {
+  initTrackingPixels,
+  trackPixelPageView,
+  trackPixelViewContent,
+  trackPixelAddToCart,
+  trackPixelInitiateCheckout,
+  trackPixelPurchase,
+  trackPixelSearch,
+  trackPixelContact,
+} from './utils/pixelTracker';
 
 export default function App() {
-  // Navigation View State
-  const [currentView, setCurrentView] = useState<string>('home');
+  // Navigation View State with Full Refresh & Direct Route Persistence
+  const [currentView, setCurrentView] = useState<string>(() => {
+    try {
+      const pathname = (window.location.pathname || '').toLowerCase().replace(/\/$/, '');
+      const hash = (window.location.hash || '').toLowerCase();
+      const params = new URLSearchParams(window.location.search);
+      const urlView = params.get('view');
+      const portalParam = params.get('portal');
+
+      // 1. Direct Multi-Page URL Pathname Routes
+      if (pathname === '/seller' || pathname === '/seller-portal' || pathname === '/seller/dashboard') {
+        return 'seller-portal';
+      }
+      if (pathname === '/reseller' || pathname === '/reseller-portal' || pathname === '/reseller/dashboard') {
+        return 'reseller-portal';
+      }
+      if (pathname === '/admin' || pathname === '/admin-dashboard' || pathname === '/admin-portal' || pathname === '/admin/dashboard') {
+        return 'admin-dashboard';
+      }
+      if (pathname === '/partner-login' || pathname === '/partner' || pathname === '/seller-login' || pathname === '/reseller-login') {
+        return 'partner-login';
+      }
+      if (pathname === '/checkout') return 'checkout';
+      if (pathname === '/track' || pathname === '/track-order') return 'track-order';
+      if (pathname === '/about') return 'about';
+      if (pathname === '/contact') return 'contact';
+
+      // 2. Admin dashboard route (hash or view param)
+      if (
+        hash === '#admin' ||
+        hash === '#admin-dashboard' ||
+        hash === '#admin-portal' ||
+        urlView === 'admin' ||
+        urlView === 'admin-dashboard'
+      ) {
+        return 'admin-dashboard';
+      }
+
+      // 3. Direct Landing Page route (?lp=slug or ?landing=slug or ?offer=slug)
+      if (params.has('lp') || params.has('landing') || params.has('offer')) {
+        return 'landing-page';
+      }
+
+      // 4. Direct Product route (?product=id or ?p=id or ?id=id)
+      if (params.has('product') || params.has('p') || params.has('id')) {
+        return 'product';
+      }
+
+      // 5. Tag view route (?tag=...)
+      if (params.has('tag')) {
+        return `tag:${params.get('tag')}`;
+      }
+
+      // 6. Dedicated Partner Portals (?portal=seller, ?portal=reseller, ?portal=partner-login)
+      if (portalParam === 'seller') return 'seller-portal';
+      if (portalParam === 'reseller') return 'reseller-portal';
+      if (portalParam === 'partner-login' || portalParam === 'partner') return 'partner-login';
+
+      // 7. Explicit view route (?view=...)
+      if (urlView) {
+        if (urlView === 'home') return 'home';
+        if (urlView === 'checkout') return 'checkout';
+        if (urlView === 'login' || urlView === 'register' || urlView === 'auth') {
+          return 'auth';
+        }
+        if (urlView === 'seller-portal' || urlView === 'seller') return 'seller-portal';
+        if (urlView === 'reseller-portal' || urlView === 'reseller') return 'reseller-portal';
+        if (urlView === 'partner-login') return 'partner-login';
+        return urlView;
+      }
+
+      // 8. Direct persistent saved view
+      const savedView = localStorage.getItem('kenax_current_view');
+      if (savedView) {
+        if (savedView === 'admin-dashboard' || savedView === 'admin') {
+          const hasStaff =
+            localStorage.getItem('kenax_current_staff') ||
+            localStorage.getItem('kenax_authenticated_staff') ||
+            localStorage.getItem('preview_kenax_current_staff');
+          if (hasStaff) return 'admin-dashboard';
+          return 'home';
+        }
+        if (savedView === 'seller-portal' || savedView === 'reseller-portal') {
+          const hasPartner = localStorage.getItem('kenax_current_partner');
+          if (hasPartner) return savedView;
+          return 'partner-login';
+        }
+        if (savedView === 'product' || savedView === 'landing-page') {
+          return 'home';
+        }
+        return savedView;
+      }
+    } catch {}
+    return 'home';
+  });
   const [selectedTrackOrder, setSelectedTrackOrder] = useState<Order | null>(null);
-  const [currentRole, setCurrentRole] = useState<UserRole>('customer');
-  const [adminInitialTab, setAdminInitialTab] = useState<any>('overview');
+
+  // Partner (Seller & Reseller) State
+  const [currentPartner, setCurrentPartner] = useState<PartnerUser | null>(() => {
+    try {
+      const saved = localStorage.getItem('kenax_current_partner');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed && parsed.id) return parsed;
+      }
+    } catch {}
+    return null;
+  });
+  const [currentRole, setCurrentRole] = useState<UserRole>(() => {
+    try {
+      const savedStaff =
+        localStorage.getItem('kenax_current_staff') ||
+        localStorage.getItem('kenax_authenticated_staff') ||
+        localStorage.getItem('preview_kenax_current_staff');
+      if (savedStaff) {
+        const parsed = JSON.parse(savedStaff);
+        if (parsed && parsed.role) return parsed.role;
+      }
+      const savedRole = localStorage.getItem('kenax_authenticated_role');
+      if (savedRole) return savedRole as UserRole;
+    } catch {}
+    return 'customer';
+  });
+  const [adminInitialTab, setAdminInitialTab] = useState<any>(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const urlTab = params.get('tab');
+      if (urlTab) return urlTab;
+      const savedTab = localStorage.getItem('kenax_admin_active_tab');
+      if (savedTab) return savedTab;
+    } catch {}
+    return 'overview';
+  });
   const [adminInitialSettingsSubTab, setAdminInitialSettingsSubTab] = useState<any>('hero');
 
   // Customer Authentication state
@@ -127,17 +290,159 @@ export default function App() {
     }
     return null;
   });
+  const [authPageTab, setAuthPageTab] = useState<'login' | 'register'>(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const urlView = (params.get('view') || '').toLowerCase();
+      const tabParam = (params.get('tab') || '').toLowerCase();
+      if (urlView === 'register' || tabParam === 'register') return 'register';
+      return 'login';
+    } catch {
+      return 'login';
+    }
+  });
+  const [returnViewAfterAuth, setReturnViewAfterAuth] = useState<string>('home');
   const [isCustomerAuthOpen, setIsCustomerAuthOpen] = useState(false);
   const [customerAuthInitialTab, setCustomerAuthInitialTab] = useState<'login' | 'register'>('login');
 
-  const handleOpenCustomerAuth = (tab: 'login' | 'register' = 'register') => {
+  const handleOpenCustomerAuth = (tab: 'login' | 'register' = 'login') => {
+    setAuthPageTab(tab);
     setCustomerAuthInitialTab(tab);
-    setIsCustomerAuthOpen(true);
+    if (currentView !== 'auth' && currentView !== 'login' && currentView !== 'register') {
+      setReturnViewAfterAuth(currentView);
+    }
+    // Directly navigate to the dedicated separate Auth Page
+    setCurrentView('auth');
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.set('view', tab);
+      window.history.pushState(null, '', url.pathname + '?' + url.searchParams.toString());
+    } catch {}
+    window.scrollTo({ top: 0, behavior: 'instant' });
   };
 
-  // Staff Authentication state
+  const handleBackFromAuth = () => {
+    if (
+      returnViewAfterAuth &&
+      returnViewAfterAuth !== 'auth' &&
+      returnViewAfterAuth !== 'login' &&
+      returnViewAfterAuth !== 'register'
+    ) {
+      handleNavigate(returnViewAfterAuth);
+    } else {
+      handleNavigate('home');
+    }
+  };
+
+  // Staff Authentication state (Permanent Multi-Device & Cross-Environment Persistence)
+  const [staffList, setStaffList] = useState<StaffUser[]>(() => {
+    const staffById = new Map<string, StaffUser>();
+    const staffByEmail = new Map<string, StaffUser>();
+
+    const mergeEntry = (s: StaffUser) => {
+      if (!s || (!s.id && !s.email)) return;
+      const lowerEmail = s.email ? s.email.trim().toLowerCase() : '';
+      const idKey = s.id ? s.id.trim() : '';
+
+      const existing = (idKey ? staffById.get(idKey) : null) || (lowerEmail ? staffByEmail.get(lowerEmail) : null);
+      const resolvedPhone = (s.phone && s.phone.trim() !== '') ? s.phone.trim() : (existing?.phone || s.phone);
+      const resolvedName = (s.name && s.name.trim() !== '') ? s.name.trim() : (existing?.name || s.name);
+      const merged: StaffUser = existing
+        ? {
+            ...existing,
+            ...s,
+            phone: resolvedPhone,
+            name: resolvedName,
+          }
+        : { ...s };
+
+      if (idKey) staffById.set(idKey, merged);
+      if (lowerEmail) staffByEmail.set(lowerEmail, merged);
+    };
+
+    // 1. INITIAL_STAFF baseline
+    for (const s of INITIAL_STAFF as StaffUser[]) {
+      mergeEntry(s);
+    }
+
+    const readLocal = (key: string) => {
+      try {
+        const cached = localStorage.getItem(key);
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          if (Array.isArray(parsed)) {
+            parsed.forEach((s) => mergeEntry(s));
+          } else if (parsed && typeof parsed === 'object' && (parsed.id || parsed.email)) {
+            mergeEntry(parsed);
+          }
+        }
+      } catch {}
+    };
+    readLocal('kenax_staff_cache');
+    readLocal('preview_kenax_staff_cache');
+    readLocal('kenax_current_staff');
+    readLocal('kenax_authenticated_staff');
+
+    const seen = new Set<string>();
+    const res: StaffUser[] = [];
+    for (const s of staffById.values()) {
+      const key = s.id || (s.email ? s.email.toLowerCase() : '');
+      if (key && !seen.has(key)) {
+        seen.add(key);
+        res.push(s);
+      }
+    }
+    return res;
+  });
+
+  useEffect(() => {
+    // Initial fetch from DB / Server store / Firestore
+    getStaffFromDB().then((dbStaff) => {
+      if (dbStaff && dbStaff.length > 0) {
+        setStaffList(dbStaff);
+        setCurrentStaff((prev) => {
+          if (!prev) return prev;
+          const matched = dbStaff.find(
+            (s) => s.id === prev.id || (s.email && prev.email && s.email.toLowerCase() === prev.email.toLowerCase())
+          );
+          if (matched) {
+            const ser = JSON.stringify(matched);
+            localStorage.setItem('kenax_current_staff', ser);
+            localStorage.setItem('kenax_authenticated_staff', ser);
+            return matched;
+          }
+          return prev;
+        });
+      }
+    });
+
+    // Real-time synchronization subscription
+    const unsubscribe = subscribeToStaff((latestStaff) => {
+      if (latestStaff && latestStaff.length > 0) {
+        setStaffList(latestStaff);
+        setCurrentStaff((prev) => {
+          if (!prev) return prev;
+          const matched = latestStaff.find(
+            (s) => s.id === prev.id || (s.email && prev.email && s.email.toLowerCase() === prev.email.toLowerCase())
+          );
+          if (matched) {
+            const ser = JSON.stringify(matched);
+            localStorage.setItem('kenax_current_staff', ser);
+            localStorage.setItem('kenax_authenticated_staff', ser);
+            return matched;
+          }
+          return prev;
+        });
+      }
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, []);
+
   const [currentStaff, setCurrentStaff] = useState<StaffUser | null>(() => {
-    const saved = localStorage.getItem('kenax_current_staff') || localStorage.getItem('kenax_authenticated_staff');
+    const saved = localStorage.getItem('kenax_current_staff') || localStorage.getItem('kenax_authenticated_staff') || localStorage.getItem('preview_kenax_current_staff');
     if (saved) {
       try {
         const parsed: StaffUser = JSON.parse(saved);
@@ -148,6 +453,24 @@ export default function App() {
     }
     return null;
   });
+
+  // Reconcile active session staff into staffList so it's always listed in Staff Members & RBAC
+  useEffect(() => {
+    if (currentStaff && (currentStaff.id || currentStaff.email)) {
+      setStaffList((prev) => {
+        const exists = prev.some(
+          (s) => s.id === currentStaff.id || (s.email && currentStaff.email && s.email.toLowerCase() === currentStaff.email.toLowerCase())
+        );
+        if (!exists) {
+          const updated = [currentStaff, ...prev];
+          saveStaffToDB(currentStaff);
+          return updated;
+        }
+        return prev;
+      });
+    }
+  }, [currentStaff]);
+
   const [isAdminLoginOpen, setIsAdminLoginOpen] = useState(false);
 
   // Cart Activities for Admin / Manager / Moderator Tracking
@@ -181,15 +504,16 @@ export default function App() {
   // Database Data States
   const [products, setProducts] = useState<Product[]>(() => {
     try {
-      const rawDeleted = localStorage.getItem('kenax_deleted_product_ids');
+      const rawDeleted = localStorage.getItem(getEnvStorageKey('kenax_deleted_product_ids'));
       const deletedSet = new Set<string>(rawDeleted ? JSON.parse(rawDeleted) : []);
-      const cached = localStorage.getItem('kenax_products_cache');
+      const cached = localStorage.getItem(getEnvStorageKey('kenax_products_cache'));
       let cachedList: Product[] = [];
       if (cached) {
         const parsed = JSON.parse(cached);
         if (Array.isArray(parsed)) cachedList = parsed;
       }
-      const merged = mergeProductsLists(INITIAL_PRODUCTS, cachedList, deletedSet);
+      const baseline = INITIAL_PRODUCTS;
+      const merged = mergeProductsLists(baseline, cachedList, deletedSet);
       return merged.filter((p: Product) => p && p.id && !deletedSet.has(p.id));
     } catch {
       return INITIAL_PRODUCTS;
@@ -197,7 +521,7 @@ export default function App() {
   });
   const [orders, setOrders] = useState<Order[]>(() => {
     try {
-      const cached = localStorage.getItem('kenax_orders_cache');
+      const cached = localStorage.getItem(getEnvStorageKey('kenax_orders_cache'));
       if (cached) {
         const parsed = JSON.parse(cached);
         if (Array.isArray(parsed) && parsed.length > 0) return mergeOrdersLists([], parsed);
@@ -218,9 +542,6 @@ export default function App() {
     return INITIAL_CATEGORIES;
   });
   const [siteSettings, setSiteSettings] = useState<SiteSettings>(() => {
-    try {
-      localStorage.removeItem('kenax_custom_logo'); // Brand logo is protected & permanent
-    } catch {}
     const saved = (() => {
       try {
         return localStorage.getItem('kenax_site_settings') || localStorage.getItem('kenax_settings_cache');
@@ -228,43 +549,39 @@ export default function App() {
         return null;
       }
     })();
+    const storedLogo = (() => {
+      try {
+        return localStorage.getItem('kenax_custom_logo') || undefined;
+      } catch {
+        return undefined;
+      }
+    })();
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        return {
-          ...INITIAL_WEBSITE_SETTINGS,
-          ...parsed,
-          customLogo: undefined,
-          heroBanners: (parsed.heroBanners && Array.isArray(parsed.heroBanners) && parsed.heroBanners.length > 0)
-            ? parsed.heroBanners
-            : INITIAL_WEBSITE_SETTINGS.heroBanners,
-          heroSideBanner: parsed.heroSideBanner || DEFAULT_HERO_SIDE_BANNER,
-          flashSaleBanner: parsed.flashSaleBanner || DEFAULT_FLASH_SALE_BANNER,
-          privacyPolicy: (parsed.privacyPolicy && parsed.privacyPolicy.trim()) ? parsed.privacyPolicy : DEFAULT_PRIVACY_POLICY,
-          termsOfService: (parsed.termsOfService && parsed.termsOfService.trim()) ? parsed.termsOfService : DEFAULT_TERMS_OF_SERVICE,
-          refundPolicy: (parsed.refundPolicy && parsed.refundPolicy.trim()) ? parsed.refundPolicy : DEFAULT_REFUND_POLICY,
-          faqs: (parsed.faqs && Array.isArray(parsed.faqs) && parsed.faqs.length > 0) ? parsed.faqs : DEFAULT_FAQS,
-          promoGrid: getCleanPromoGridSettings(parsed.promoGrid || parsed.promoBanners),
-        };
+        return sanitizeSiteSettings(parsed, storedLogo);
       } catch (e) {
         console.error('Failed to parse saved siteSettings', e);
       }
     }
-    return INITIAL_WEBSITE_SETTINGS;
+    return sanitizeSiteSettings(INITIAL_WEBSITE_SETTINGS, storedLogo);
   });
 
-  // Dynamically sync SEO Meta Tags to DOM head
+  // Dynamically sync SEO Meta Tags and Advertising Pixels (Meta Pixel, CAPI, TikTok, GA4) to DOM
   useEffect(() => {
     if (siteSettings?.seoSettings) {
       applySEOMetaTags(siteSettings.seoSettings);
     }
-  }, [siteSettings?.seoSettings]);
+    if (siteSettings?.advertiserSettings) {
+      initTrackingPixels(siteSettings);
+    }
+  }, [siteSettings?.seoSettings, siteSettings?.advertiserSettings]);
 
   // Policy & Help Center Page State
   const [isPolicyModalOpen, setIsPolicyModalOpen] = useState<boolean>(false);
-  const [policyPageTab, setPolicyPageTab] = useState<PolicyTab>('privacy');
+  const [policyPageTab, setPolicyPageTab] = useState<string>('return');
 
-  const handleOpenPolicy = (tab: PolicyTab) => {
+  const handleOpenPolicy = (tab: string) => {
     setPolicyPageTab(tab);
     if (currentView === 'policy') {
       window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -275,14 +592,15 @@ export default function App() {
   };
 
   const handleUpdateSettings = async (newSettings: SiteSettings) => {
-    const sanitized = { ...newSettings, customLogo: undefined };
-    let fullMerged: SiteSettings = { ...siteSettings, ...sanitized };
+    let fullMerged: SiteSettings = sanitizeSiteSettings(newSettings, siteSettings.customLogo);
     setSiteSettings((prev) => {
-      fullMerged = { ...prev, ...sanitized };
+      fullMerged = sanitizeSiteSettings({ ...prev, ...newSettings });
       try {
         safeSetLocalStorage('kenax_site_settings', JSON.stringify(fullMerged));
         safeSetLocalStorage('kenax_settings_cache', JSON.stringify(fullMerged));
-        localStorage.removeItem('kenax_custom_logo');
+        if (fullMerged.customLogo) {
+          safeSetLocalStorage('kenax_custom_logo', fullMerged.customLogo);
+        }
       } catch (e) {
         console.error('Failed to persist siteSettings', e);
       }
@@ -293,20 +611,65 @@ export default function App() {
 
   // Filters & Search
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedCategory, setSelectedCategory] = useState('All');
-  const [selectedSubcategory, setSelectedSubcategory] = useState<string>('All');
+  const [selectedCategory, setSelectedCategory] = useState<string>(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const cat = params.get('cat') || params.get('category');
+      if (cat) return cat;
+      const saved = localStorage.getItem('kenax_selected_category');
+      if (saved) return saved;
+    } catch {}
+    return 'All';
+  });
+  const [selectedSubcategory, setSelectedSubcategory] = useState<string>(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const sub = params.get('sub') || params.get('subcategory');
+      if (sub) return sub;
+    } catch {}
+    return 'All';
+  });
   const [selectedSubSubcategory, setSelectedSubSubcategory] = useState<string>('All');
-  const [selectedTag, setSelectedTag] = useState<string>('Flash Sale');
+  const [selectedTag, setSelectedTag] = useState<string>(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const tag = params.get('tag');
+      if (tag) return tag;
+      const saved = localStorage.getItem('kenax_selected_tag');
+      if (saved) return saved;
+    } catch {}
+    return 'Flash Sale';
+  });
   const [selectedHomeTab, setSelectedHomeTab] = useState<'all' | 'trending' | 'electronics' | 'fashion' | 'home' | 'bestsellers'>('all');
   const [sortBy, setSortBy] = useState<'featured' | 'price-low' | 'price-high' | 'rating'>('featured');
+
+  useEffect(() => {
+    if (siteSettings.homeTabs?.hiddenTabs?.includes(selectedHomeTab)) {
+      setSelectedHomeTab('all');
+    }
+  }, [siteSettings.homeTabs?.hiddenTabs, selectedHomeTab]);
+
+  useEffect(() => {
+    if (selectedCategory) {
+      safeSetLocalStorage('kenax_selected_category', selectedCategory);
+    }
+  }, [selectedCategory]);
+
+  useEffect(() => {
+    if (selectedTag) {
+      safeSetLocalStorage('kenax_selected_tag', selectedTag);
+    }
+  }, [selectedTag]);
 
   const handleSelectCategory = (catName: string, subcategory = 'All', subSubcategory = 'All') => {
     setSelectedCategory(catName);
     setSelectedSubcategory(subcategory);
     setSelectedSubSubcategory(subSubcategory);
     setSearchQuery(''); // Clear search query on category selection so category products display properly
-    setCurrentView('shop');
-    window.scrollTo({ top: 0, behavior: 'instant' });
+    if (currentView !== 'shop') {
+      setCurrentView('shop');
+      window.scrollTo({ top: 0, behavior: 'instant' });
+    }
   };
 
   const handleSelectSubcategory = (subName: string) => {
@@ -323,7 +686,8 @@ export default function App() {
     const saved = localStorage.getItem('kenax_cart');
     if (saved) {
       try {
-        return JSON.parse(saved);
+        const parsed = JSON.parse(saved);
+        return sanitizeCart(parsed);
       } catch (e) {
         console.error('Failed to parse cart', e);
       }
@@ -331,6 +695,10 @@ export default function App() {
     return [];
   });
   const [checkoutItems, setCheckoutItems] = useState<OrderItem[]>([]);
+  const checkoutItemsRef = useRef<OrderItem[]>([]);
+  useEffect(() => {
+    checkoutItemsRef.current = checkoutItems;
+  }, [checkoutItems]);
   const [wishlist, setWishlist] = useState<Product[]>(() => {
     const saved = localStorage.getItem('kenax_wishlist');
     if (saved) {
@@ -408,8 +776,46 @@ export default function App() {
   // Modals
   const [isCartOpen, setIsCartOpen] = useState(false);
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
+  const [checkoutOrderSource, setCheckoutOrderSource] = useState<'manual' | 'chatbot' | string>('manual');
+  const [returnViewAfterCheckout, setReturnViewAfterCheckout] = useState<string>('home');
   const [isAIAssistantOpen, setIsAIAssistantOpen] = useState(false);
-  const [selectedProductForDetail, setSelectedProductForDetail] = useState<Product | null>(null);
+  const [selectedProductForDetail, setSelectedProductForDetail] = useState<Product | null>(() => {
+    try {
+      const savedProductJson = localStorage.getItem('kenax_selected_product_for_detail');
+      if (savedProductJson) {
+        const parsed = JSON.parse(savedProductJson);
+        if (parsed && parsed.id) return parsed;
+      }
+    } catch {}
+    return null;
+  });
+
+  useEffect(() => {
+    if (selectedProductForDetail) {
+      try {
+        localStorage.setItem('kenax_selected_product_for_detail', JSON.stringify(selectedProductForDetail));
+      } catch {}
+    }
+  }, [selectedProductForDetail]);
+
+  // Product Navigation History Stack (supports multi-level product chains e.g. Home -> Product A -> Product B -> Back to A -> Back to Home)
+  const [productNavHistory, setProductNavHistory] = useState<ProductHistoryEntry[]>(() => {
+    try {
+      const saved = sessionStorage.getItem('kenax_product_nav_history');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch {}
+    return [];
+  });
+
+  const saveProductNavHistory = (newStack: ProductHistoryEntry[]) => {
+    setProductNavHistory(newStack);
+    try {
+      sessionStorage.setItem('kenax_product_nav_history', JSON.stringify(newStack));
+    } catch {}
+  };
 
   // Customer Saved Addresses (Empty by default, permanently saved in localStorage)
   const [savedAddresses, setSavedAddresses] = useState<DeliveryAddress[]>(() => {
@@ -474,8 +880,31 @@ export default function App() {
       targetView = 'customer-dashboard';
     } else if (cleanView === 'checkout' || cleanView === 'view:checkout') {
       setCheckoutItems(cart.length > 0 ? cart : []);
+      if (currentView !== 'checkout') {
+        setReturnViewAfterCheckout(currentView);
+      }
+      setIsCartOpen(false);
       setIsCheckoutOpen(true);
+      setCurrentView('checkout');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
       return;
+    } else if (cleanView === 'login' || cleanView === 'auth:login' || cleanView === 'signin') {
+      setAuthPageTab('login');
+      if (currentView !== 'auth' && currentView !== 'login' && currentView !== 'register') {
+        setReturnViewAfterAuth(currentView);
+      }
+      targetView = 'auth';
+    } else if (cleanView === 'register' || cleanView === 'auth:register' || cleanView === 'signup') {
+      setAuthPageTab('register');
+      if (currentView !== 'auth' && currentView !== 'login' && currentView !== 'register') {
+        setReturnViewAfterAuth(currentView);
+      }
+      targetView = 'auth';
+    } else if (cleanView === 'auth') {
+      if (currentView !== 'auth' && currentView !== 'login' && currentView !== 'register') {
+        setReturnViewAfterAuth(currentView);
+      }
+      targetView = 'auth';
     }
 
     if (cleanView.startsWith('tag:') || cleanView.startsWith('tag-')) {
@@ -642,47 +1071,200 @@ export default function App() {
       setCurrentView(targetView);
     }
 
-    // Clean up product query param when navigating to other main views
-    if (targetView !== 'product') {
+    // Clean up product query params when navigating to other main views
+    if (targetView !== 'product' && targetView !== 'landing-page') {
+      saveProductNavHistory([]);
       try {
         const url = new URL(window.location.href);
-        if (url.searchParams.has('product') || url.searchParams.has('p') || url.searchParams.has('id')) {
-          url.searchParams.delete('product');
-          url.searchParams.delete('p');
-          url.searchParams.delete('id');
-          window.history.pushState({}, '', url.pathname + url.search);
+        url.searchParams.delete('product');
+        url.searchParams.delete('p');
+        url.searchParams.delete('id');
+        url.searchParams.delete('lp');
+        url.searchParams.delete('landing');
+        url.searchParams.delete('offer');
+
+        if (targetView === 'home') {
+          url.searchParams.delete('view');
+          url.searchParams.delete('tag');
+          url.searchParams.delete('tab');
+          url.searchParams.delete('orderId');
+          const cleanSearch = url.searchParams.toString() ? '?' + url.searchParams.toString() : '';
+          window.history.pushState({}, '', url.pathname + cleanSearch);
+        } else if (targetView.startsWith('tag:')) {
+          url.searchParams.delete('view');
+          url.searchParams.set('tag', targetView.replace(/^tag:/i, '').trim());
+          window.history.pushState({}, '', url.pathname + '?' + url.searchParams.toString());
+        } else if (targetView === 'shop') {
+          url.searchParams.delete('tag');
+          url.searchParams.set('view', 'shop');
+          window.history.pushState({}, '', url.pathname + '?' + url.searchParams.toString());
+        } else {
+          url.searchParams.delete('tag');
+          url.searchParams.set('view', targetView);
+          window.history.pushState({}, '', url.pathname + '?' + url.searchParams.toString());
         }
       } catch (e) {}
     }
   };
 
-  const handleOpenProductDetail = (product: Product) => {
+  const handleOpenProductDetail = (product: Product, forceStandardView = false) => {
+    const currentScrollY = window.scrollY;
+
+    // Track navigation history: if currently viewing a product and clicking another product (e.g. related/similar products),
+    // push current product to history stack. If viewing a page, push current page view to history.
+    if ((currentView === 'product' || currentView === 'landing-page') && selectedProductForDetail) {
+      if (selectedProductForDetail.id !== product.id) {
+        const productEntry: ProductHistoryEntry = {
+          type: 'product',
+          view: currentView,
+          productId: selectedProductForDetail.id,
+          productName: selectedProductForDetail.name,
+          scrollY: currentScrollY,
+        };
+        saveProductNavHistory([...productNavHistory, productEntry]);
+      }
+    } else {
+      const pageEntry: ProductHistoryEntry = {
+        type: 'view',
+        view: currentView,
+        category: selectedCategory,
+        subcategory: selectedSubcategory,
+        subSubcategory: selectedSubSubcategory,
+        tag: selectedTag,
+        searchQuery: searchQuery,
+        scrollY: currentScrollY,
+      };
+      saveProductNavHistory([...productNavHistory, pageEntry]);
+    }
+
     setSelectedProductForDetail(product);
     try {
       const url = new URL(window.location.href);
-      url.searchParams.set('product', product.id);
+      if (!forceStandardView && product.landingPage?.enabled) {
+        url.searchParams.set('lp', product.landingPage.slug || product.id);
+        url.searchParams.delete('product');
+      } else {
+        url.searchParams.set('product', product.id);
+        url.searchParams.delete('lp');
+      }
       window.history.pushState({ productId: product.id }, '', url.pathname + '?' + url.searchParams.toString());
     } catch (e) {}
 
     window.scrollTo({ top: 0, behavior: 'instant' });
-    if (currentView !== 'product') {
+    if (!forceStandardView && product.landingPage?.enabled) {
+      setCurrentView('landing-page');
+    } else {
       setCurrentView('product');
     }
+
+    // Dispatch Multi-Channel ViewContent (Meta Pixel, CAPI, TikTok, GA4)
+    trackPixelViewContent(product, siteSettings);
   };
 
-  // Sync URL query params with product details (e.g. ?product=prod_1 for Ad campaigns / Landing pages)
+  const handleBackFromProduct = () => {
+    if (productNavHistory.length > 0) {
+      const nextStack = [...productNavHistory];
+      const previous = nextStack.pop()!;
+      saveProductNavHistory(nextStack);
+
+      if (previous.type === 'product' && previous.productId) {
+        const prevProduct = products.find((p) => p.id === previous.productId);
+        if (prevProduct) {
+          setSelectedProductForDetail(prevProduct);
+          setCurrentView(previous.view === 'landing-page' && prevProduct.landingPage?.enabled ? 'landing-page' : 'product');
+          try {
+            const url = new URL(window.location.href);
+            if (previous.view === 'landing-page' && prevProduct.landingPage?.enabled) {
+              url.searchParams.set('lp', prevProduct.landingPage.slug || prevProduct.id);
+              url.searchParams.delete('product');
+            } else {
+              url.searchParams.set('product', prevProduct.id);
+              url.searchParams.delete('lp');
+            }
+            window.history.pushState({ productId: prevProduct.id }, '', url.pathname + '?' + url.searchParams.toString());
+          } catch (e) {}
+
+          if (previous.scrollY !== undefined && previous.scrollY > 0) {
+            window.scrollTo({ top: previous.scrollY, behavior: 'instant' });
+          } else {
+            window.scrollTo({ top: 0, behavior: 'instant' });
+          }
+          return;
+        }
+      }
+
+      // Previous was a page view (Home, Shop, Tag, Customer Dashboard, etc.)
+      const targetView = previous.view && previous.view !== 'product' && previous.view !== 'landing-page' ? previous.view : 'shop';
+      if (previous.category) setSelectedCategory(previous.category);
+      if (previous.subcategory) setSelectedSubcategory(previous.subcategory);
+      if (previous.subSubcategory) setSelectedSubSubcategory(previous.subSubcategory);
+      if (previous.tag) setSelectedTag(previous.tag);
+      if (previous.searchQuery !== undefined) setSearchQuery(previous.searchQuery);
+
+      setCurrentView(targetView);
+      try {
+        const url = new URL(window.location.href);
+        url.searchParams.delete('product');
+        url.searchParams.delete('p');
+        url.searchParams.delete('id');
+        url.searchParams.delete('lp');
+        window.history.pushState({}, '', url.pathname + (url.search ? url.search : ''));
+      } catch (e) {}
+
+      if (previous.scrollY !== undefined && previous.scrollY > 0) {
+        window.scrollTo({ top: previous.scrollY, behavior: 'instant' });
+      } else {
+        window.scrollTo({ top: 0, behavior: 'instant' });
+      }
+      return;
+    }
+
+    // Default fallback if no history stack exists
+    setCurrentView('shop');
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.delete('product');
+      url.searchParams.delete('p');
+      url.searchParams.delete('id');
+      url.searchParams.delete('lp');
+      window.history.pushState({}, '', url.pathname + (url.search ? url.search : ''));
+    } catch (e) {}
+    window.scrollTo({ top: 0, behavior: 'instant' });
+  };
+
+  // Sync URL query params with product details (e.g. ?product=prod_1 or ?lp=offer-slug for FB Ad campaigns / Landing pages)
   useEffect(() => {
     const handleUrlProductCheck = () => {
       try {
         const urlParams = new URLSearchParams(window.location.search);
+        const lpSlug = urlParams.get('lp') || urlParams.get('landing') || urlParams.get('offer');
         const prodId = urlParams.get('product') || urlParams.get('p') || urlParams.get('id');
+
+        if (lpSlug && products.length > 0) {
+          const matchedByLp = products.find(
+            (p) =>
+              (p.landingPage?.slug && p.landingPage.slug.toLowerCase() === lpSlug.toLowerCase()) ||
+              p.id.toLowerCase() === lpSlug.toLowerCase() ||
+              (p.sku && p.sku.toLowerCase() === lpSlug.toLowerCase())
+          );
+          if (matchedByLp) {
+            setSelectedProductForDetail(matchedByLp);
+            setCurrentView('landing-page');
+            return;
+          }
+        }
+
         if (prodId && products.length > 0) {
           const matchedProduct = products.find(
             (p) => p.id === prodId || p.id.toLowerCase() === prodId.toLowerCase() || (p.sku && p.sku.toLowerCase() === prodId.toLowerCase())
           );
           if (matchedProduct) {
             setSelectedProductForDetail(matchedProduct);
-            setCurrentView('product');
+            if (matchedProduct.landingPage?.enabled && urlParams.get('mode') !== 'standard') {
+              setCurrentView('landing-page');
+            } else {
+              setCurrentView('product');
+            }
           }
         }
       } catch (e) {}
@@ -694,11 +1276,80 @@ export default function App() {
       if (freshCurrentProduct) {
         setSelectedProductForDetail(freshCurrentProduct);
       }
-    } else {
-      handleUrlProductCheck();
     }
+    // Check URL parameters on mount or when products are loaded to display direct product / landing links
+    handleUrlProductCheck();
 
     const onPopState = () => {
+      try {
+        const pathname = (window.location.pathname || '').toLowerCase().replace(/\/$/, '');
+        const hash = (window.location.hash || '').toLowerCase();
+        const urlParams = new URLSearchParams(window.location.search);
+        const prodId = urlParams.get('product') || urlParams.get('p') || urlParams.get('id');
+        const lpSlug = urlParams.get('lp') || urlParams.get('landing') || urlParams.get('offer');
+        const urlTag = urlParams.get('tag');
+        const urlView = urlParams.get('view');
+        const portalParam = urlParams.get('portal');
+
+        if (pathname === '/seller' || pathname === '/seller-portal' || portalParam === 'seller') {
+          setCurrentView('seller-portal');
+          return;
+        }
+        if (pathname === '/reseller' || pathname === '/reseller-portal' || portalParam === 'reseller') {
+          setCurrentView('reseller-portal');
+          return;
+        }
+        if (pathname === '/partner-login' || portalParam === 'partner-login' || portalParam === 'partner') {
+          setCurrentView('partner-login');
+          return;
+        }
+        if (pathname === '/admin' || pathname === '/admin-dashboard' || hash === '#admin' || urlView === 'admin') {
+          setCurrentView('admin-dashboard');
+          return;
+        }
+
+        if (!prodId && !lpSlug) {
+          if (urlTag) {
+            setSelectedTag(urlTag);
+            setCurrentView(`tag:${urlTag}`);
+            return;
+          }
+          if (urlView) {
+            setCurrentView(urlView);
+            return;
+          }
+          if (!urlParams.toString()) {
+            setCurrentView('home');
+            return;
+          }
+          if (productNavHistory.length > 0) {
+            const nextStack = [...productNavHistory];
+            const previous = nextStack.pop()!;
+            saveProductNavHistory(nextStack);
+            const targetView = previous.view && previous.view !== 'product' && previous.view !== 'landing-page' ? previous.view : 'shop';
+            if (previous.category) setSelectedCategory(previous.category);
+            if (previous.subcategory) setSelectedSubcategory(previous.subcategory);
+            if (previous.subSubcategory) setSelectedSubSubcategory(previous.subSubcategory);
+            if (previous.tag) setSelectedTag(previous.tag);
+            if (previous.searchQuery !== undefined) setSearchQuery(previous.searchQuery);
+            setCurrentView(targetView);
+            if (previous.scrollY) {
+              window.scrollTo({ top: previous.scrollY, behavior: 'instant' });
+            }
+            return;
+          } else if (currentView === 'product' || currentView === 'landing-page') {
+            setCurrentView('home');
+            return;
+          }
+        } else if (prodId && productNavHistory.length > 0) {
+          const top = productNavHistory[productNavHistory.length - 1];
+          if (top.type === 'product' && top.productId === prodId) {
+            const nextStack = [...productNavHistory];
+            nextStack.pop();
+            saveProductNavHistory(nextStack);
+          }
+        }
+      } catch (e) {}
       handleUrlProductCheck();
     };
 
@@ -706,10 +1357,145 @@ export default function App() {
     return () => window.removeEventListener('popstate', onPopState);
   }, [products]);
 
-  // Ensure any view change instantly resets the scroll position to top for clean entrance animation
+  const lastScrolledViewRef = useRef<string>(currentView);
+
+  // Ensure view changes update localStorage and URL search params for 100% accurate refresh persistence
   useEffect(() => {
-    window.scrollTo({ top: 0, behavior: 'instant' });
-  }, [currentView]);
+    if (lastScrolledViewRef.current !== currentView) {
+      window.scrollTo({ top: 0, behavior: 'instant' });
+      lastScrolledViewRef.current = currentView;
+    }
+    try {
+      localStorage.setItem('kenax_current_view', currentView);
+      const url = new URL(window.location.href);
+
+      if (currentView === 'home') {
+        // Clean all route/product params on home view so refresh strictly stays on Home
+        url.searchParams.delete('view');
+        url.searchParams.delete('product');
+        url.searchParams.delete('p');
+        url.searchParams.delete('id');
+        url.searchParams.delete('lp');
+        url.searchParams.delete('landing');
+        url.searchParams.delete('offer');
+        url.searchParams.delete('tag');
+        url.searchParams.delete('tab');
+        url.searchParams.delete('orderId');
+        localStorage.removeItem('kenax_landing_page_active');
+        const cleanSearch = url.searchParams.toString() ? '?' + url.searchParams.toString() : '';
+        window.history.replaceState(null, '', url.pathname + cleanSearch);
+      } else if (currentView === 'seller-portal' || currentView === 'seller') {
+        url.searchParams.delete('product');
+        url.searchParams.delete('lp');
+        url.searchParams.delete('landing');
+        url.searchParams.delete('offer');
+        url.searchParams.delete('tag');
+        url.searchParams.delete('view');
+        url.searchParams.set('portal', 'seller');
+        document.title = siteSettings.storeName ? `Seller Dashboard - ${siteSettings.storeName}` : 'Seller Dashboard - KenaX BD';
+        window.history.replaceState(null, '', url.pathname + '?' + url.searchParams.toString());
+      } else if (currentView === 'reseller-portal' || currentView === 'reseller') {
+        url.searchParams.delete('product');
+        url.searchParams.delete('lp');
+        url.searchParams.delete('landing');
+        url.searchParams.delete('offer');
+        url.searchParams.delete('tag');
+        url.searchParams.delete('view');
+        url.searchParams.set('portal', 'reseller');
+        document.title = siteSettings.storeName ? `Reseller Dashboard - ${siteSettings.storeName}` : 'Reseller Dashboard - KenaX BD';
+        window.history.replaceState(null, '', url.pathname + '?' + url.searchParams.toString());
+      } else if (currentView === 'partner-login') {
+        url.searchParams.delete('product');
+        url.searchParams.delete('lp');
+        url.searchParams.delete('landing');
+        url.searchParams.delete('offer');
+        url.searchParams.delete('tag');
+        url.searchParams.delete('view');
+        url.searchParams.set('portal', 'partner-login');
+        document.title = 'Partner Login - KenaX BD Marketplace';
+        window.history.replaceState(null, '', url.pathname + '?' + url.searchParams.toString());
+      } else if (currentView === 'admin-dashboard' || currentView === 'admin' || currentView === 'moderator-dashboard') {
+        url.searchParams.delete('product');
+        url.searchParams.delete('lp');
+        url.searchParams.delete('landing');
+        url.searchParams.delete('offer');
+        url.searchParams.set('view', 'admin');
+        document.title = 'Admin Portal - KenaX BD Management';
+        window.history.replaceState(null, '', url.pathname + '?' + url.searchParams.toString() + '#admin');
+      } else if (currentView === 'product') {
+        url.searchParams.delete('view');
+        url.searchParams.delete('lp');
+        url.searchParams.delete('landing');
+        url.searchParams.delete('offer');
+        url.searchParams.delete('tag');
+        if (selectedProductForDetail?.id) {
+          url.searchParams.set('product', selectedProductForDetail.id);
+        }
+        window.history.replaceState(null, '', url.pathname + '?' + url.searchParams.toString());
+      } else if (currentView === 'landing-page') {
+        url.searchParams.delete('view');
+        url.searchParams.delete('product');
+        url.searchParams.delete('p');
+        url.searchParams.delete('id');
+        url.searchParams.delete('tag');
+        if (selectedProductForDetail) {
+          url.searchParams.set('lp', selectedProductForDetail.landingPage?.slug || selectedProductForDetail.id);
+        }
+        window.history.replaceState(null, '', url.pathname + '?' + url.searchParams.toString());
+      } else if (currentView.startsWith('tag:')) {
+        url.searchParams.delete('product');
+        url.searchParams.delete('lp');
+        url.searchParams.delete('landing');
+        url.searchParams.delete('offer');
+        url.searchParams.delete('view');
+        const tagName = currentView.replace(/^tag:/i, '').trim();
+        url.searchParams.set('tag', tagName);
+        window.history.replaceState(null, '', url.pathname + '?' + url.searchParams.toString());
+      } else if (currentView === 'shop') {
+        url.searchParams.delete('product');
+        url.searchParams.delete('lp');
+        url.searchParams.delete('landing');
+        url.searchParams.delete('offer');
+        url.searchParams.delete('tag');
+        url.searchParams.set('view', 'shop');
+        if (selectedCategory && selectedCategory !== 'All') {
+          url.searchParams.set('cat', selectedCategory);
+        } else {
+          url.searchParams.delete('cat');
+          url.searchParams.delete('category');
+        }
+        window.history.replaceState(null, '', url.pathname + '?' + url.searchParams.toString());
+      } else if (currentView === 'auth' || currentView === 'login' || currentView === 'register') {
+        url.searchParams.delete('product');
+        url.searchParams.delete('lp');
+        url.searchParams.delete('landing');
+        url.searchParams.delete('offer');
+        url.searchParams.delete('tag');
+        url.searchParams.set('view', authPageTab === 'register' ? 'register' : 'login');
+        window.history.replaceState(null, '', url.pathname + '?' + url.searchParams.toString());
+      } else if (currentView === 'checkout') {
+        url.searchParams.delete('product');
+        url.searchParams.delete('p');
+        url.searchParams.delete('id');
+        url.searchParams.delete('lp');
+        url.searchParams.delete('landing');
+        url.searchParams.delete('offer');
+        url.searchParams.delete('tag');
+        url.searchParams.set('view', 'checkout');
+        window.history.replaceState(null, '', url.pathname + '?' + url.searchParams.toString());
+      } else {
+        url.searchParams.delete('product');
+        url.searchParams.delete('lp');
+        url.searchParams.delete('landing');
+        url.searchParams.delete('offer');
+        url.searchParams.set('view', currentView);
+        window.history.replaceState(null, '', url.pathname + '?' + url.searchParams.toString());
+      }
+
+      // Track Multi-Channel PageView (Meta Pixel, TikTok, GA4)
+      trackPixelPageView(document.title, siteSettings);
+    } catch {}
+  }, [currentView, selectedProductForDetail?.id, selectedTag, selectedCategory, authPageTab, siteSettings]);
 
   // Horizontal scroll ref for shop category filter chips
   const categoryChipsRef = useRef<HTMLDivElement>(null);
@@ -763,13 +1549,7 @@ export default function App() {
       const dbSettings = await getSettingsFromDB();
       if (dbSettings) {
         setSiteSettings((prev) => {
-          const merged = {
-            ...prev,
-            ...dbSettings,
-            heroBanners: (dbSettings.heroBanners && Array.isArray(dbSettings.heroBanners) && dbSettings.heroBanners.length > 0)
-              ? dbSettings.heroBanners
-              : (prev.heroBanners && prev.heroBanners.length > 0 ? prev.heroBanners : INITIAL_WEBSITE_SETTINGS.heroBanners),
-          };
+          const merged = sanitizeSiteSettings({ ...prev, ...dbSettings });
           safeSetLocalStorage('kenax_site_settings', JSON.stringify(merged));
           safeSetLocalStorage('kenax_settings_cache', JSON.stringify(merged));
           return merged;
@@ -782,15 +1562,6 @@ export default function App() {
         setCategories(dbCategories);
       }
 
-      // Fetch initial orders
-      const dbOrders = await getOrdersFromDB();
-      setOrders(dbOrders || []);
-
-      // Subscribe to real-time updates from Cloud Firestore
-      unsubscribeOrders = subscribeToOrders((liveOrders) => {
-        setOrders(liveOrders || []);
-      });
-
       unsubscribeProducts = subscribeToProducts((liveProducts) => {
         if (liveProducts && liveProducts.length > 0) {
           setProducts(liveProducts);
@@ -800,13 +1571,7 @@ export default function App() {
       unsubscribeSettings = subscribeToSettings((liveSettings) => {
         if (liveSettings) {
           setSiteSettings((prev) => {
-            const merged = {
-              ...prev,
-              ...liveSettings,
-              heroBanners: (liveSettings.heroBanners && Array.isArray(liveSettings.heroBanners) && liveSettings.heroBanners.length > 0)
-                ? liveSettings.heroBanners
-                : (prev.heroBanners && prev.heroBanners.length > 0 ? prev.heroBanners : INITIAL_WEBSITE_SETTINGS.heroBanners),
-            };
+            const merged = sanitizeSiteSettings({ ...prev, ...liveSettings });
             safeSetLocalStorage('kenax_site_settings', JSON.stringify(merged));
             safeSetLocalStorage('kenax_settings_cache', JSON.stringify(merged));
             return merged;
@@ -819,15 +1584,6 @@ export default function App() {
           setCategories(liveCategories);
         }
       });
-
-      const dbCartActivities = await getCartActivitiesFromDB();
-      setCartActivities(dbCartActivities || []);
-
-      unsubscribeCartActivities = subscribeToCartActivities((liveCartActivities) => {
-        if (liveCartActivities) {
-          setCartActivities(liveCartActivities);
-        }
-      });
     }
 
     initDB();
@@ -838,9 +1594,14 @@ export default function App() {
         if (freshProducts && freshProducts.length > 0) {
           setProducts(freshProducts);
         }
-        const freshOrders = await getOrdersFromDB();
-        if (freshOrders && freshOrders.length > 0) {
-          setOrders(freshOrders);
+        const freshSettings = await getSettingsFromDB();
+        if (freshSettings) {
+          setSiteSettings((prev) => {
+            const merged = sanitizeSiteSettings({ ...prev, ...freshSettings });
+            safeSetLocalStorage('kenax_site_settings', JSON.stringify(merged));
+            safeSetLocalStorage('kenax_settings_cache', JSON.stringify(merged));
+            return merged;
+          });
         }
       } catch (e) {}
     };
@@ -852,13 +1613,27 @@ export default function App() {
       }
     };
 
+    const handleSettingsUpdatedEvent = (e: any) => {
+      const updated = e.detail;
+      if (updated) {
+        setSiteSettings((prev) => {
+          const merged = sanitizeSiteSettings({ ...prev, ...updated });
+          safeSetLocalStorage('kenax_site_settings', JSON.stringify(merged));
+          safeSetLocalStorage('kenax_settings_cache', JSON.stringify(merged));
+          return merged;
+        });
+      }
+    };
+
     window.addEventListener('online', handleSyncOnNetworkOrPoll);
     window.addEventListener('kenax_product_deleted', handleProductDeletedEvent);
+    window.addEventListener('kenax_settings_updated', handleSettingsUpdatedEvent);
     const syncInterval = setInterval(handleSyncOnNetworkOrPoll, 10000);
 
     return () => {
       window.removeEventListener('online', handleSyncOnNetworkOrPoll);
       window.removeEventListener('kenax_product_deleted', handleProductDeletedEvent);
+      window.removeEventListener('kenax_settings_updated', handleSettingsUpdatedEvent);
       clearInterval(syncInterval);
       if (unsubscribeOrders) unsubscribeOrders();
       if (unsubscribeProducts) unsubscribeProducts();
@@ -912,12 +1687,57 @@ export default function App() {
             setWishlist((prevWish) => (prevWish.length === 0 ? freshCust.wishlist! : prevWish));
           }
           if (freshCust.cart && freshCust.cart.length > 0) {
-            setCart((prevCart) => (prevCart.length === 0 ? freshCust.cart! : prevCart));
+            setCart((prevCart) => (prevCart.length === 0 ? sanitizeCart(freshCust.cart!) : prevCart));
           }
         }
       }).catch((e) => console.warn('Sync customer profile error:', e));
     }
   }, [currentCustomer?.id]);
+
+  // Real-time synchronization for Authorized Staff Only (Completely isolated from regular public store customers)
+  useEffect(() => {
+    const isStaffLoggedIn = Boolean(
+      currentStaff && ['super_admin', 'admin', 'manager', 'moderator'].includes(currentStaff.role)
+    );
+    if (!isStaffLoggedIn) {
+      return;
+    }
+
+    let isMounted = true;
+    let unsubOrders: (() => void) | null = null;
+    let unsubCartActivities: (() => void) | null = null;
+
+    // Fetch store orders and cart activities for authenticated staff
+    getOrdersFromDB().then((dbOrders) => {
+      if (isMounted && dbOrders) {
+        setOrders(dbOrders);
+      }
+    });
+
+    unsubOrders = subscribeToOrders((liveOrders) => {
+      if (isMounted && liveOrders) {
+        setOrders(liveOrders);
+      }
+    });
+
+    getCartActivitiesFromDB().then((dbCartActivities) => {
+      if (isMounted && dbCartActivities) {
+        setCartActivities(dbCartActivities);
+      }
+    });
+
+    unsubCartActivities = subscribeToCartActivities((liveCartActivities) => {
+      if (isMounted && liveCartActivities) {
+        setCartActivities(liveCartActivities);
+      }
+    });
+
+    return () => {
+      isMounted = false;
+      if (unsubOrders) unsubOrders();
+      if (unsubCartActivities) unsubCartActivities();
+    };
+  }, [currentStaff?.id, currentStaff?.role]);
 
   // Real-time cart tracking synchronization for Staff (Admin, Manager, Moderator)
   const syncCartActivity = async (updatedItems: OrderItem[], actionProduct?: Product) => {
@@ -1049,46 +1869,32 @@ export default function App() {
 
     let nextCart: OrderItem[] = [];
     setCart((prev) => {
-      const existing = prev.find((item) => item.productId === product.id && item.variant === variant);
-      if (existing) {
-        nextCart = prev.map((item) =>
-          item.productId === product.id && item.variant === variant
-            ? {
-                ...item,
-                quantity: item.quantity + quantity,
-                total: (item.quantity + quantity) * item.price,
-                selectedColor: detectedColor || item.selectedColor,
-                selectedColorImage: detectedColorImage || (customImage && customImage.trim() !== '' ? customImage : item.selectedColorImage),
-                productImage: customImage || detectedColorImage || (item.productImage && item.productImage.trim() !== '' && !item.productImage.startsWith('media://')
-                  ? item.productImage
-                  : exactImage),
-              }
-            : item
-        );
-      } else {
-        nextCart = [
-          ...prev,
-          {
-            productId: product.id,
-            productName: product.name,
-            productImage: customImage || detectedColorImage || exactImage,
-            selectedColor: detectedColor,
-            selectedColorImage: detectedColorImage || (customImage && customImage.trim() !== '' ? customImage : undefined),
-            quantity,
-            price: product.price,
-            total: product.price * quantity,
-            variant,
-          },
-        ];
-      }
+      const newItem: OrderItem = {
+        productId: product.id,
+        productName: product.name,
+        productImage: customImage || detectedColorImage || exactImage,
+        selectedColor: detectedColor,
+        selectedColorImage: detectedColorImage || (customImage && customImage.trim() !== '' ? customImage : undefined),
+        quantity,
+        price: product.price,
+        total: product.price * quantity,
+        variant,
+      };
+      nextCart = sanitizeCart([...prev, newItem]);
       return nextCart;
     });
 
     setIsCartOpen(true);
     syncCartActivity(nextCart, product);
+    recordProductAction(product.id, 'add_to_cart', quantity);
+
+    // Multi-Channel AddToCart tracking (Meta Pixel, CAPI, TikTok, GA4)
+    trackPixelAddToCart(product, quantity, variant, siteSettings);
   };
 
-  const handleBuyNow = (product: Product, quantity = 1, variant?: string, customImage?: string) => {
+  const handleBuyNow = (product: Product, quantity = 1, variant?: string, customImage?: string, orderSource = 'manual') => {
+    setCheckoutOrderSource(orderSource);
+    recordProductAction(product.id, 'buy_now', quantity);
     let exactImage =
       (customImage && customImage.trim() !== '')
         ? customImage
@@ -1119,13 +1925,6 @@ export default function App() {
     if (exactImage && exactImage.startsWith('media://productImageMedia/')) {
       resolveOriginalImageMedia(exactImage).then((resolved) => {
         if (resolved && !resolved.startsWith('media://')) {
-          setCart((prev) =>
-            prev.map((item) =>
-              item.productId === product.id && item.variant === variant
-                ? { ...item, productImage: resolved, selectedColorImage: detectedColorImage || resolved }
-                : item
-            )
-          );
           setCheckoutItems((prev) =>
             prev.map((item) =>
               item.productId === product.id && item.variant === variant
@@ -1149,35 +1948,17 @@ export default function App() {
       variant: variant || undefined,
     };
 
-    // Automatically add/merge item into cart so if user leaves checkout without placing order, item is preserved in cart
-    let nextCart: OrderItem[] = [];
-    setCart((prev) => {
-      const existing = prev.find((item) => item.productId === product.id && item.variant === variant);
-      if (existing) {
-        nextCart = prev.map((item) =>
-          item.productId === product.id && item.variant === variant
-            ? {
-                ...item,
-                quantity: item.quantity + quantity,
-                total: (item.quantity + quantity) * item.price,
-                selectedColor: detectedColor || item.selectedColor,
-                selectedColorImage: detectedColorImage || (customImage && customImage.trim() !== '' ? customImage : item.selectedColorImage),
-                productImage: customImage || detectedColorImage || (item.productImage && item.productImage.trim() !== '' && !item.productImage.startsWith('media://')
-                  ? item.productImage
-                  : exactImage),
-              }
-            : item
-        );
-      } else {
-        nextCart = [...prev, singleItem];
-      }
-      return nextCart;
-    });
-    syncCartActivity(nextCart, product);
-
+    checkoutItemsRef.current = [singleItem];
     setCheckoutItems([singleItem]);
+    if (currentView !== 'checkout') {
+      setReturnViewAfterCheckout(currentView);
+    }
     setIsCartOpen(false);
+    setIsAIAssistantOpen(false);
+    setSelectedProductForDetail(null);
+    setCurrentView('checkout');
     setIsCheckoutOpen(true);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const handleUpdateCartQuantity = (productId: string, quantity: number) => {
@@ -1229,8 +2010,10 @@ export default function App() {
     setWishlist((prev) => {
       const exists = prev.some((p) => p.id === product.id);
       if (exists) {
+        recordProductAction(product.id, 'unfavorite');
         return prev.filter((p) => p.id !== product.id);
       } else {
+        recordProductAction(product.id, 'favorite');
         return [...prev, product];
       }
     });
@@ -1269,9 +2052,34 @@ export default function App() {
     setDiscountAmount(0);
   };
 
+  const handleCloseCheckout = () => {
+    setIsCheckoutOpen(false);
+    setCheckoutOrderSource('manual');
+    const itemsToSave = checkoutItemsRef.current;
+    if (itemsToSave && itemsToSave.length > 0 && currentView !== 'checkout') {
+      setCart((prev) => {
+        const next = sanitizeCart([...prev, ...itemsToSave]);
+        syncCartActivity(next);
+        return next;
+      });
+    }
+    checkoutItemsRef.current = [];
+    setCheckoutItems([]);
+    if (currentView === 'checkout') {
+      setCurrentView(returnViewAfterCheckout || 'home');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  };
+
   // Order Placement Handler
   const handleOrderPlaced = async (newOrder: Order) => {
+    // Reset checkout items ref immediately to prevent restoring ordered items to cart
+    checkoutItemsRef.current = [];
+    setCheckoutItems([]);
     setIsCheckoutOpen(false);
+    if (currentView === 'checkout') {
+      setCurrentView('home');
+    }
 
     // Immediately launch the delivery van animation for instant visual feedback on both Desktop/PC and Mobile
     processingOrderRef.current = newOrder;
@@ -1281,15 +2089,30 @@ export default function App() {
     setOrders((prev) => [newOrder, ...prev]);
 
     // Clean up ordered items from cart (whether direct Buy Now or combined with cart items)
-    const orderedProductIds = (newOrder.items || []).map((i) => i.productId);
+    const orderedKeys = new Set(
+      (newOrder.items || []).map((i) => `${i.productId}_${i.variant || ''}`)
+    );
+    const orderedProductIds = new Set((newOrder.items || []).map((i) => i.productId));
+
     setCart((prev) => {
-      const remaining = prev.filter((i) => !orderedProductIds.includes(i.productId));
+      const remaining = prev.filter(
+        (i) => !orderedKeys.has(`${i.productId}_${i.variant || ''}`) && !orderedProductIds.has(i.productId)
+      );
+      safeSetLocalStorage('kenax_cart', JSON.stringify(remaining));
+      safeSetLocalStorage(getEnvStorageKey('kenax_cart'), JSON.stringify(remaining));
       syncCartActivity(remaining);
       return remaining;
     });
-    setCheckoutItems([]);
     setAppliedCoupon(null);
     setDiscountAmount(0);
+
+    // Track product order popularity
+    (newOrder.items || []).forEach((it) => {
+      const pId = it.productId || (it as any).id;
+      if (pId) {
+        recordProductAction(pId, 'buy_now', it.quantity || 1);
+      }
+    });
 
     // Auto-save order delivery location to customer's saved addresses (preventing duplicates)
     if (newOrder.fullAddress && newOrder.fullAddress.trim().length > 3) {
@@ -1319,17 +2142,38 @@ export default function App() {
       if (currentCustomer) {
         const currentAddrs = currentCustomer.addresses || currentCustomer.savedAddresses || [];
         const { addresses: updatedAddrs } = addAddressWithoutDuplicates(currentAddrs, orderDeliveryAddr);
+        const currentOrderIds = currentCustomer.orderIds || [];
+        const updatedOrderIds = currentOrderIds.includes(newOrder.id) ? currentOrderIds : [newOrder.id, ...currentOrderIds];
         const updatedCust: CustomerRecord = {
           ...currentCustomer,
           addresses: updatedAddrs,
           savedAddresses: updatedAddrs,
+          orderIds: updatedOrderIds,
           totalOrders: (currentCustomer.totalOrders || 0) + 1,
+          ordersCount: ((currentCustomer.ordersCount || currentCustomer.totalOrders) || 0) + 1,
           totalSpent: (currentCustomer.totalSpent || 0) + newOrder.totalAmount,
           lastOrderDate: newOrder.createdAt,
         };
         setCurrentCustomer(updatedCust);
+        safeSetLocalStorage('kenax_current_customer', JSON.stringify(updatedCust));
+        safeSetLocalStorage(getEnvStorageKey('kenax_current_customer'), JSON.stringify(updatedCust));
         saveCustomerToDB(updatedCust).catch((err) => console.warn('Sync customer order address:', err));
       }
+    } else if (currentCustomer) {
+      const currentOrderIds = currentCustomer.orderIds || [];
+      const updatedOrderIds = currentOrderIds.includes(newOrder.id) ? currentOrderIds : [newOrder.id, ...currentOrderIds];
+      const updatedCust: CustomerRecord = {
+        ...currentCustomer,
+        orderIds: updatedOrderIds,
+        totalOrders: (currentCustomer.totalOrders || 0) + 1,
+        ordersCount: ((currentCustomer.ordersCount || currentCustomer.totalOrders) || 0) + 1,
+        totalSpent: (currentCustomer.totalSpent || 0) + newOrder.totalAmount,
+        lastOrderDate: newOrder.createdAt,
+      };
+      setCurrentCustomer(updatedCust);
+      safeSetLocalStorage('kenax_current_customer', JSON.stringify(updatedCust));
+      safeSetLocalStorage(getEnvStorageKey('kenax_current_customer'), JSON.stringify(updatedCust));
+      saveCustomerToDB(updatedCust).catch((err) => console.warn('Sync customer order record:', err));
     }
 
     // Persist to Cloud Firestore and local storage in background (non-blocking)
@@ -1350,6 +2194,9 @@ export default function App() {
       triggerTelegramNewOrder(newOrder).catch((tgErr) => {
         console.warn('[Telegram New Order Alert Warning]:', tgErr);
       });
+
+      // Dispatch Multi-Channel Purchase Event (Meta Pixel + Server-Side CAPI, TikTok, Google Ads)
+      trackPixelPurchase(newOrder, siteSettings);
     } catch (err) {
       console.warn('[KenaX BD] Error persisting order to Firestore:', err);
     }
@@ -1399,6 +2246,15 @@ export default function App() {
     localStorage.removeItem('kenax_current_staff');
     localStorage.removeItem('kenax_authenticated_staff');
     localStorage.removeItem('kenax_authenticated_role');
+    localStorage.removeItem('kenax_current_view');
+    localStorage.removeItem('kenax_admin_active_tab');
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.delete('view');
+      url.searchParams.delete('tab');
+      const cleanSearch = url.searchParams.toString() ? '?' + url.searchParams.toString() : '';
+      window.history.replaceState(null, '', url.pathname + cleanSearch);
+    } catch {}
     setCurrentView('home');
   };
 
@@ -1416,8 +2272,12 @@ export default function App() {
 
   // Product update by admin
   const handleUpdateProduct = async (updatedProduct: Product) => {
-    setProducts((prev) => prev.map((p) => (p.id === updatedProduct.id ? updatedProduct : p)));
-    await saveProductToDB(updatedProduct);
+    const freshProduct: Product = {
+      ...updatedProduct,
+      updatedAt: new Date().toISOString(),
+    };
+    setProducts((prev) => prev.map((p) => (p.id === freshProduct.id ? freshProduct : p)));
+    await saveProductToDB(freshProduct);
   };
 
   // Product deletion
@@ -1498,57 +2358,204 @@ export default function App() {
     status: OrderStatus,
     courier?: string,
     tracking?: string,
-    handledByStaff?: { id?: string; name?: string; role?: string }
+    handledByStaff?: { id?: string; name?: string; role?: string },
+    adminNotes?: string
   ) => {
     const existing = orders.find((o) => o.id === orderId);
     const nowISO = new Date().toISOString();
     const currentTimeline = existing?.timeline || [];
     const updatedTimeline = [...currentTimeline];
 
+    const activeStaffName = handledByStaff?.name || currentStaff?.name || 'Staff Admin';
+    const activeStaffRole = handledByStaff?.role || currentStaff?.role || 'Super Admin';
+    const activeStaffId = handledByStaff?.id || currentStaff?.id || '';
+
     updatedTimeline.push({
       status,
       timestamp: nowISO,
-      note: `Status updated to ${status}${courier ? ` via ${courier}` : ''}${tracking ? ` (Tracking: ${tracking})` : ''}`,
-      updatedBy: handledByStaff?.name || currentStaff?.name || 'Staff Admin',
+      note: `Status updated to ${status}${courier ? ` via ${courier}` : ''}${tracking ? ` (Tracking: ${tracking})` : ''}${adminNotes ? ` | Note: ${adminNotes}` : ''}`,
+      updatedBy: activeStaffName,
     });
+
+    const isConfirming =
+      status === 'Confirmed' ||
+      (status !== 'Pending' &&
+        status !== 'Payment Verification' &&
+        status !== 'Cancelled' &&
+        status !== 'Rejected' &&
+        status !== 'Fake Order' &&
+        !existing?.confirmedByStaffName);
+
+    const confirmedByStaffName = isConfirming
+      ? existing?.confirmedByStaffName || activeStaffName
+      : existing?.confirmedByStaffName;
+    const confirmedByStaffId = isConfirming
+      ? existing?.confirmedByStaffId || activeStaffId
+      : existing?.confirmedByStaffId;
+    const confirmedByStaffRole = isConfirming
+      ? existing?.confirmedByStaffRole || activeStaffRole
+      : existing?.confirmedByStaffRole;
+    const confirmedAt = isConfirming
+      ? existing?.confirmedAt || nowISO
+      : existing?.confirmedAt;
+
+    const isDeliveredOrCompleted = status === 'Delivered' || status === 'Completed';
+    const isReturnedStatus = status === 'Returned';
+
+    // If order is Delivered or Completed (COD or any pending bill), mark the bill as fully Paid and dueAmount as 0
+    // If order is Returned, mark as Unpaid
+    let paymentUpdates: Partial<Order> = {};
+    if (isDeliveredOrCompleted) {
+      paymentUpdates = {
+        paymentStatus: 'Paid',
+        paidAmount: existing?.totalAmount || 0,
+        dueAmount: 0,
+        paymentVerifiedAt: existing?.paymentVerifiedAt || nowISO,
+      };
+    } else if (isReturnedStatus) {
+      paymentUpdates = {
+        paymentStatus: 'Unpaid',
+        paidAmount: 0,
+        dueAmount: existing?.totalAmount || 0,
+      };
+    }
 
     const updates: Partial<Order> = {
       orderStatus: status,
+      status: status as any,
+      isFakeOrder: status === 'Fake Order' ? true : false,
+      isV2Order: true,
       courierName: courier || existing?.courierName,
       trackingNumber: tracking || existing?.trackingNumber,
+      adminNotes: adminNotes !== undefined ? adminNotes : existing?.adminNotes,
       timeline: updatedTimeline,
       updatedAt: nowISO,
+      handledByStaffId: activeStaffId,
+      handledByStaffName: activeStaffName,
+      handledByStaffRole: activeStaffRole,
+      confirmedByStaffId,
+      confirmedByStaffName,
+      confirmedByStaffRole,
+      confirmedAt,
+      ...paymentUpdates,
     };
-
-    if (handledByStaff?.id || currentStaff?.id) {
-      updates.handledByStaffId = handledByStaff?.id || currentStaff?.id;
-      updates.handledByStaffName = handledByStaff?.name || currentStaff?.name;
-      updates.handledByStaffRole = handledByStaff?.role || currentStaff?.role;
-    }
 
     setOrders((prev) =>
       prev.map((o) => (o.id === orderId ? { ...o, ...updates } : o))
     );
     await updateOrderInDB(orderId, updates);
 
-    // Trigger Automated SMS notification to Customer for status change (Shipped/Delivered/Confirmed)
+    // Trigger Automated SMS & WhatsApp notification to Customer & Pinned Admin for status change
     if (existing) {
       const updatedOrder: Order = {
         ...existing,
         ...updates,
       };
+
+      // If marked as Fake Order: Dispatch high-priority alert across WhatsApp, Telegram, and Email
+      if (status === 'Fake Order') {
+        dispatchFakeOrderAlerts({
+          order: updatedOrder,
+          staff: {
+            name: activeStaffName,
+            role: activeStaffRole,
+            id: activeStaffId,
+          },
+          note: adminNotes || 'Marked as Fake Order by Staff',
+        }).catch((err) => {
+          console.warn('[Dispatch Fake Order Alerts Error]:', err);
+        });
+      }
+
       triggerOrderStatusSMS(updatedOrder, status).catch((err) => {
         console.warn('[Order Status SMS Warning]:', err);
+      });
+      triggerTelegramOrderStatusChange({
+        order: updatedOrder,
+        prevStatus: existing.orderStatus || 'Pending',
+        newStatus: status,
+        staffUser: activeStaffName ? {
+          id: activeStaffId,
+          name: activeStaffName,
+          role: activeStaffRole as any,
+          email: '',
+        } : null,
+        courierName: courier,
+        trackingNumber: tracking,
+      }).catch((tgErr) => {
+        console.warn('[Telegram Status Change Warning]:', tgErr);
+      });
+      triggerWhatsAppEvent({
+        event: status === 'Fake Order' ? ('admin_pinned_fake_order_alert' as any) : 'order_status_changed',
+        order: updatedOrder,
+        customerPhone: updatedOrder.customerMobile || updatedOrder.deliveryMobile,
+        user: {
+          name: updatedOrder.customerName || updatedOrder.deliveryName,
+          email: updatedOrder.customerEmail || '',
+          phone: updatedOrder.customerMobile || updatedOrder.deliveryMobile,
+          id: updatedOrder.customerId,
+        },
+        statusChange: {
+          oldStatus: existing.orderStatus,
+          newStatus: status,
+        },
+        staff: {
+          name: activeStaffName,
+          role: activeStaffRole,
+          id: activeStaffId,
+        },
+      }).catch((waErr) => {
+        console.warn('[WhatsApp Order Status Event Error]:', waErr);
       });
     }
   };
 
-  // Manual order creation by Staff (Admin, Moderator, Manager)
+  // Manual order creation by Staff (Admin, Moderator, Manager) or Customer Bot
   const handleAddOrder = async (newOrder: Order) => {
-    setOrders((prev) => [newOrder, ...prev]);
-    await saveOrderToDB(newOrder);
+    const rawStatus = (newOrder.orderStatus || (newOrder as any).status || 'Pending').toString().trim();
+    const lower = rawStatus.toLowerCase();
+    const normalizedStatus: OrderStatus =
+      lower === 'pending'
+        ? 'Pending'
+        : lower === 'confirmed'
+        ? 'Confirmed'
+        : lower === 'cancelled'
+        ? 'Cancelled'
+        : lower === 'delivered'
+        ? 'Delivered'
+        : ((rawStatus.charAt(0).toUpperCase() + rawStatus.slice(1)) as OrderStatus);
+
+    const isBot = newOrder.orderSource === 'chatbot' || newOrder.orderSource === 'ai_bot';
+    const sanitizedOrder: Order = {
+      ...newOrder,
+      orderStatus: normalizedStatus,
+      status: normalizedStatus as any,
+      isV2Order: true,
+      orderSource: isBot ? 'chatbot' : (newOrder.orderSource || 'manual'),
+      isAiBotOrder: isBot,
+      createdByStaffName: isBot
+        ? 'Ordered by KenaX Bot'
+        : newOrder.createdByStaffName === 'Ordered by KenaX Bot'
+        ? undefined
+        : newOrder.createdByStaffName,
+    };
+    setOrders((prev) => [sanitizedOrder, ...prev.filter((o) => o.id !== sanitizedOrder.id)]);
+    await saveOrderToDB(sanitizedOrder);
     triggerTelegramNewOrder(newOrder).catch((tgErr) => {
       console.warn('[Telegram Manual Order Alert Warning]:', tgErr);
+    });
+    triggerWhatsAppEvent({
+      event: 'order_placed',
+      order: newOrder,
+      customerPhone: newOrder.customerMobile || newOrder.deliveryMobile,
+      user: {
+        name: newOrder.customerName || newOrder.deliveryName,
+        email: newOrder.customerEmail || '',
+        phone: newOrder.customerMobile || newOrder.deliveryMobile,
+        id: newOrder.customerId,
+      },
+    }).catch((waErr) => {
+      console.warn('[WhatsApp Manual Order Alert Error]:', waErr);
     });
   };
 
@@ -1704,6 +2711,14 @@ export default function App() {
       setCurrentCustomer(adminCustomerProfile);
       localStorage.setItem('kenax_current_customer', JSON.stringify(adminCustomerProfile));
     }
+    localStorage.setItem('kenax_current_view', 'home');
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.delete('view');
+      url.searchParams.delete('tab');
+      const cleanSearch = url.searchParams.toString() ? '?' + url.searchParams.toString() : '';
+      window.history.replaceState(null, '', url.pathname + cleanSearch);
+    } catch {}
     setCurrentView('home');
   };
 
@@ -1756,66 +2771,249 @@ export default function App() {
               setIsAdminLoginOpen(false);
               setCurrentView('admin-dashboard');
             }}
-            staffList={INITIAL_STAFF.map((s) => ({
-              id: s.id,
-              name: s.name,
-              email: s.email,
-              phone: s.phone,
-              role: s.role as UserRole,
-              permissions: s.permissions,
-              isActive: s.status === 'active',
-              createdAt: s.createdAt,
-              lastLogin: s.lastLogin,
-            }))}
+            staffList={staffList}
           />
         </div>
       );
     }
 
     return (
-      <AdminPortal
-        products={products}
-        orders={orders}
-        settings={siteSettings}
-        categories={categories}
-        onAddCategory={handleAddCategory}
-        onUpdateCategory={handleUpdateCategory}
-        onDeleteCategory={handleDeleteCategory}
-        onReorderCategories={handleReorderCategories}
-        cartActivities={cartActivities}
-        onUpdateCartActivityStatus={async (cartId, status) => {
-          await updateCartActivityStatusInDB(cartId, status);
-          setCartActivities((prev) =>
-            prev.map((c) => (c.id === cartId ? { ...c, status, updatedAt: new Date().toISOString() } : c))
-          );
-        }}
-        onRefreshCartActivities={async () => {
-          const fresh = await getCartActivitiesFromDB();
-          if (fresh) setCartActivities(fresh);
-        }}
-        onUpdateProduct={handleUpdateProduct}
-        onAddProduct={handleAddProduct}
-        onDeleteProduct={handleDeleteProduct}
-        onUpdateOrderStatus={handleUpdateOrderStatus}
-        onAddOrder={handleAddOrder}
-        onUpdateSettings={handleUpdateSettings}
-        currentRole={currentStaff?.role || currentRole}
-        currentStaff={currentStaff}
-        onNavigateToStore={handleNavigateToStoreFromAdmin}
-        onLogout={handleStaffLogout}
-        initialTab={adminInitialTab}
-        initialSettingsSubTab={adminInitialSettingsSubTab}
-        onRoleChange={(role) => {
-          setCurrentRole(role);
-          if (currentStaff) {
-            const updated = { ...currentStaff, role };
+      <React.Suspense
+        fallback={
+          <div className="min-h-screen bg-slate-900 text-slate-100 flex flex-col items-center justify-center p-4">
+            <div className="flex flex-col items-center gap-4 text-center max-w-sm">
+              <div className="w-16 h-16 rounded-2xl bg-sky-500/10 border border-sky-500/30 flex items-center justify-center text-sky-400 shadow-xl shadow-sky-500/5">
+                <ShieldCheck className="w-8 h-8 animate-pulse" />
+              </div>
+              <div className="space-y-1.5">
+                <h3 className="text-base font-bold text-white">Loading Admin Portal...</h3>
+                <p className="text-xs text-slate-400 leading-relaxed">
+                  Verifying staff credentials and loading management console
+                </p>
+              </div>
+              <div className="w-48 h-1.5 bg-slate-800 rounded-full overflow-hidden mt-1">
+                <div className="h-full bg-sky-500 rounded-full animate-pulse w-3/4" />
+              </div>
+            </div>
+          </div>
+        }
+      >
+        <AdminPortal
+          products={products}
+          orders={orders}
+          settings={siteSettings}
+          categories={categories}
+          onAddCategory={handleAddCategory}
+          onUpdateCategory={handleUpdateCategory}
+          onDeleteCategory={handleDeleteCategory}
+          onReorderCategories={handleReorderCategories}
+          cartActivities={cartActivities}
+          onUpdateCartActivityStatus={async (cartId, status) => {
+            await updateCartActivityStatusInDB(cartId, status);
+            setCartActivities((prev) =>
+              prev.map((c) => (c.id === cartId ? { ...c, status, updatedAt: new Date().toISOString() } : c))
+            );
+          }}
+          onRefreshCartActivities={async () => {
+            const fresh = await getCartActivitiesFromDB();
+            if (fresh) setCartActivities(fresh);
+          }}
+          onUpdateProduct={handleUpdateProduct}
+          onAddProduct={handleAddProduct}
+          onDeleteProduct={handleDeleteProduct}
+          onUpdateOrderStatus={handleUpdateOrderStatus}
+          onAddOrder={handleAddOrder}
+          onUpdateSettings={handleUpdateSettings}
+          currentRole={currentStaff?.role || currentRole}
+          currentStaff={currentStaff}
+          onNavigateToStore={handleNavigateToStoreFromAdmin}
+          onLogout={handleStaffLogout}
+          initialTab={adminInitialTab}
+          initialSettingsSubTab={adminInitialSettingsSubTab}
+          staffList={staffList}
+          onUpdateStaffList={(newList) => {
+            setStaffList(newList);
+            if (currentStaff) {
+              const matched = newList.find(
+                (s) => s.id === currentStaff.id || (s.email && currentStaff.email && s.email.toLowerCase() === currentStaff.email.toLowerCase())
+              );
+              if (matched) {
+                setCurrentStaff(matched);
+                const ser = JSON.stringify(matched);
+                localStorage.setItem('kenax_current_staff', ser);
+                localStorage.setItem('kenax_authenticated_staff', ser);
+                localStorage.setItem('preview_kenax_current_staff', ser);
+              }
+            }
+          }}
+          onUpdateCurrentStaff={(updated) => {
             setCurrentStaff(updated);
-            localStorage.setItem('kenax_current_staff', JSON.stringify(updated));
-            localStorage.setItem('kenax_authenticated_staff', JSON.stringify(updated));
-            localStorage.setItem('kenax_authenticated_role', role);
-          }
-        }}
-      />
+            const ser = JSON.stringify(updated);
+            localStorage.setItem('kenax_current_staff', ser);
+            localStorage.setItem('kenax_authenticated_staff', ser);
+            localStorage.setItem('preview_kenax_current_staff', ser);
+          }}
+          onRoleChange={(role) => {
+            setCurrentRole(role);
+            if (currentStaff) {
+              const updated = { ...currentStaff, role };
+              setCurrentStaff(updated);
+              localStorage.setItem('kenax_current_staff', JSON.stringify(updated));
+              localStorage.setItem('kenax_authenticated_staff', JSON.stringify(updated));
+              localStorage.setItem('kenax_authenticated_role', role);
+            }
+          }}
+          onNavigateToPartnerPortal={(partner) => {
+            setCurrentPartner(partner);
+            safeSetLocalStorage('kenax_current_partner', JSON.stringify(partner));
+            if (partner.type === 'seller') {
+              setCurrentView('seller-portal');
+            } else {
+              setCurrentView('reseller-portal');
+            }
+          }}
+        />
+      </React.Suspense>
+    );
+  }
+
+  // ================= DEDICATED SELLER HUB (VENDOR PORTAL) =================
+  if (currentView === 'seller-portal') {
+    if (!currentPartner || currentPartner.type !== 'seller') {
+      return (
+        <React.Suspense fallback={<div className="min-h-screen bg-slate-900" />}>
+          <PartnerLoginPage
+            initialRole="seller"
+            onLoginSuccess={(p) => {
+              setCurrentPartner(p);
+              safeSetLocalStorage('kenax_current_partner', JSON.stringify(p));
+              setCurrentView('seller-portal');
+            }}
+            onBackToStore={() => {
+              setCurrentView('home');
+              try {
+                const url = new URL(window.location.href);
+                url.searchParams.delete('portal');
+                window.history.pushState(null, '', url.pathname);
+              } catch {}
+            }}
+          />
+        </React.Suspense>
+      );
+    }
+
+    return (
+      <React.Suspense fallback={<div className="min-h-screen bg-slate-950 flex items-center justify-center text-white text-xs">Loading Seller Portal...</div>}>
+        <SellerPortal
+          currentPartner={currentPartner}
+          products={products}
+          orders={orders}
+          onAddProduct={handleAddProduct}
+          onUpdateProduct={handleUpdateProduct}
+          onDeleteProduct={handleDeleteProduct}
+          onLogout={() => {
+            setCurrentPartner(null);
+            localStorage.removeItem('kenax_current_partner');
+            setCurrentView('home');
+            try {
+              const url = new URL(window.location.href);
+              url.searchParams.delete('portal');
+              window.history.pushState(null, '', url.pathname);
+            } catch {}
+          }}
+          onNavigateToStore={() => {
+            setCurrentView('home');
+            try {
+              const url = new URL(window.location.href);
+              url.searchParams.delete('portal');
+              window.history.pushState(null, '', url.pathname);
+            } catch {}
+          }}
+        />
+      </React.Suspense>
+    );
+  }
+
+  // ================= DEDICATED RESELLER & DROPSHIP HUB =================
+  if (currentView === 'reseller-portal') {
+    if (!currentPartner || currentPartner.type !== 'reseller') {
+      return (
+        <React.Suspense fallback={<div className="min-h-screen bg-slate-900" />}>
+          <PartnerLoginPage
+            initialRole="reseller"
+            onLoginSuccess={(p) => {
+              setCurrentPartner(p);
+              safeSetLocalStorage('kenax_current_partner', JSON.stringify(p));
+              setCurrentView('reseller-portal');
+            }}
+            onBackToStore={() => {
+              setCurrentView('home');
+              try {
+                const url = new URL(window.location.href);
+                url.searchParams.delete('portal');
+                window.history.pushState(null, '', url.pathname);
+              } catch {}
+            }}
+          />
+        </React.Suspense>
+      );
+    }
+
+    return (
+      <React.Suspense fallback={<div className="min-h-screen bg-slate-950 flex items-center justify-center text-white text-xs">Loading Reseller Portal...</div>}>
+        <ResellerPortal
+          currentPartner={currentPartner}
+          products={products}
+          orders={orders}
+          onPlaceOrder={handleAddOrder}
+          onLogout={() => {
+            setCurrentPartner(null);
+            localStorage.removeItem('kenax_current_partner');
+            setCurrentView('home');
+            try {
+              const url = new URL(window.location.href);
+              url.searchParams.delete('portal');
+              window.history.pushState(null, '', url.pathname);
+            } catch {}
+          }}
+          onNavigateToStore={() => {
+            setCurrentView('home');
+            try {
+              const url = new URL(window.location.href);
+              url.searchParams.delete('portal');
+              window.history.pushState(null, '', url.pathname);
+            } catch {}
+          }}
+        />
+      </React.Suspense>
+    );
+  }
+
+  // ================= DEDICATED PARTNER LOGIN VIEW =================
+  if (currentView === 'partner-login') {
+    return (
+      <React.Suspense fallback={<div className="min-h-screen bg-slate-900" />}>
+        <PartnerLoginPage
+          initialRole="seller"
+          onLoginSuccess={(p) => {
+            setCurrentPartner(p);
+            safeSetLocalStorage('kenax_current_partner', JSON.stringify(p));
+            if (p.type === 'seller') {
+              setCurrentView('seller-portal');
+            } else {
+              setCurrentView('reseller-portal');
+            }
+          }}
+          onBackToStore={() => {
+            setCurrentView('home');
+            try {
+              const url = new URL(window.location.href);
+              url.searchParams.delete('portal');
+              window.history.pushState(null, '', url.pathname);
+            } catch {}
+          }}
+        />
+      </React.Suspense>
     );
   }
 
@@ -1826,7 +3024,7 @@ export default function App() {
   );
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col font-sans selection:bg-sky-500 selection:text-white">
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex flex-col font-sans selection:bg-sky-500 selection:text-white transition-colors duration-200">
       {/* Active Maintenance Mode Banner for Logged-in Staff */}
       {isMaintenanceActive && isStaffUser && (
         <div className="bg-gradient-to-r from-amber-500 via-amber-400 to-amber-500 text-slate-950 px-3 py-2 text-[11px] sm:text-xs font-black flex flex-col sm:flex-row items-center justify-between gap-1.5 shadow-sm relative z-50 border-b border-amber-600/30">
@@ -1940,32 +3138,34 @@ export default function App() {
                 <div>
                   <div className="flex items-center gap-2">
                     <span className="w-2 h-2 rounded-full bg-sky-600"></span>
-                    <h2 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">
-                      Popular Products & Deals
+                    <h2 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white tracking-tight">
+                      {siteSettings.homeTabs?.sectionTitle || 'Popular Products & Deals'}
                     </h2>
                   </div>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    Authentic items with manufacturer warranty and fast delivery
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                    {siteSettings.homeTabs?.sectionSubtitle || 'Authentic items with manufacturer warranty and fast delivery'}
                   </p>
                 </div>
 
                 {/* Filter Tabs */}
                 <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs">
                   {[
-                    { id: 'all', label: 'All Products' },
-                    { id: 'trending', label: '🔥 Trending' },
-                    { id: 'electronics', label: 'Electronics' },
-                    { id: 'fashion', label: 'Fashion' },
-                    { id: 'home', label: 'Home & Living' },
-                    { id: 'bestsellers', label: 'Best Sellers' },
-                  ].map((tab) => (
+                    { id: 'all', label: siteSettings.homeTabs?.all || 'All Products' },
+                    { id: 'trending', label: siteSettings.homeTabs?.trending || '🔥 Trending' },
+                    { id: 'electronics', label: siteSettings.homeTabs?.electronics || 'Electronics' },
+                    { id: 'fashion', label: siteSettings.homeTabs?.fashion || 'Fashion' },
+                    { id: 'home', label: siteSettings.homeTabs?.home || 'Home & Living' },
+                    { id: 'bestsellers', label: siteSettings.homeTabs?.bestsellers || 'Best Sellers' },
+                  ]
+                    .filter((tab) => !siteSettings.homeTabs?.hiddenTabs?.includes(tab.id))
+                    .map((tab) => (
                     <button
                       key={tab.id}
                       onClick={() => setSelectedHomeTab(tab.id as any)}
                       className={`px-3.5 py-1.5 rounded-xl font-bold transition-all cursor-pointer whitespace-nowrap ${
                         selectedHomeTab === tab.id
                           ? 'bg-sky-600 text-white shadow-xs'
-                          : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
+                          : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800'
                       }`}
                     >
                       {tab.label}
@@ -1987,7 +3187,7 @@ export default function App() {
                     isWishlisted={wishlist.some((w) => w.id === product.id)}
                     currentRole={currentRole}
                     isLoggedIn={Boolean(currentCustomer)}
-                    onOpenCustomerAuth={() => setIsCustomerAuthOpen(true)}
+                    onOpenCustomerAuth={() => handleOpenCustomerAuth('login')}
                   />
                 ))}
               </div>
@@ -1995,7 +3195,7 @@ export default function App() {
               <div className="mt-8 text-center">
                 <button
                   onClick={() => handleNavigate('shop')}
-                  className="inline-flex items-center gap-2 px-8 py-3 rounded-2xl bg-white border border-slate-300 text-slate-900 hover:bg-sky-50 hover:text-sky-700 hover:border-sky-300 text-xs font-bold transition-all shadow-xs cursor-pointer"
+                  className="inline-flex items-center gap-2 px-8 py-3 rounded-2xl bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white hover:bg-sky-50 dark:hover:bg-slate-800 hover:text-sky-700 dark:hover:text-sky-400 hover:border-sky-300 dark:hover:border-sky-600 text-xs font-bold transition-all shadow-xs cursor-pointer"
                 >
                   <span>Explore All Products ({products.length})</span>
                   <ArrowRight className="w-4 h-4" />
@@ -2014,41 +3214,41 @@ export default function App() {
 
             {/* Why Choose KenaX BD Section */}
             <section className="max-w-[1536px] mx-auto px-3 sm:px-6 lg:px-8 py-10">
-              <div className="bg-white rounded-3xl border border-slate-200 p-8 shadow-xs">
+              <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-8 shadow-xs">
                 <div className="text-center max-w-2xl mx-auto mb-8">
-                  <h3 className="text-2xl font-black text-slate-900">Why Shop at KenaX BD?</h3>
-                  <p className="text-xs text-slate-500 mt-1">
+                  <h3 className="text-2xl font-black text-slate-900 dark:text-white">Why Shop at KenaX BD?</h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
                     Delivering trust and quality across 64 districts in Bangladesh
                   </p>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                  <div className="p-5 rounded-2xl bg-slate-50 border border-slate-100 text-center">
-                    <div className="w-12 h-12 rounded-2xl bg-sky-100 text-sky-600 flex items-center justify-center mx-auto mb-3">
+                  <div className="p-5 rounded-2xl bg-slate-50 dark:bg-slate-800/80 border border-slate-100 dark:border-slate-700/80 text-center">
+                    <div className="w-12 h-12 rounded-2xl bg-sky-100 dark:bg-sky-950/80 text-sky-600 dark:text-sky-400 flex items-center justify-center mx-auto mb-3">
                       <ShieldCheck className="w-6 h-6" />
                     </div>
-                    <h4 className="text-sm font-bold text-slate-900">100% Genuine Guaranteed</h4>
-                    <p className="text-xs text-slate-500 mt-1">
+                    <h4 className="text-sm font-bold text-slate-900 dark:text-white">100% Genuine Guaranteed</h4>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
                       Every product is inspected and sourced directly from authentic manufacturers with warranty.
                     </p>
                   </div>
 
-                  <div className="p-5 rounded-2xl bg-slate-50 border border-slate-100 text-center">
-                    <div className="w-12 h-12 rounded-2xl bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto mb-3">
+                  <div className="p-5 rounded-2xl bg-slate-50 dark:bg-slate-800/80 border border-slate-100 dark:border-slate-700/80 text-center">
+                    <div className="w-12 h-12 rounded-2xl bg-emerald-100 dark:bg-emerald-950/80 text-emerald-600 dark:text-emerald-400 flex items-center justify-center mx-auto mb-3">
                       <CheckCircle className="w-6 h-6" />
                     </div>
-                    <h4 className="text-sm font-bold text-slate-900">Cash on Delivery</h4>
-                    <p className="text-xs text-slate-500 mt-1">
+                    <h4 className="text-sm font-bold text-slate-900 dark:text-white">Cash on Delivery</h4>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
                       Zero payment risk. Inspect your parcel when the courier arrives at your doorstep before paying.
                     </p>
                   </div>
 
-                  <div className="p-5 rounded-2xl bg-slate-50 border border-slate-100 text-center">
-                    <div className="w-12 h-12 rounded-2xl bg-purple-100 text-purple-600 flex items-center justify-center mx-auto mb-3">
+                  <div className="p-5 rounded-2xl bg-slate-50 dark:bg-slate-800/80 border border-slate-100 dark:border-slate-700/80 text-center">
+                    <div className="w-12 h-12 rounded-2xl bg-purple-100 dark:bg-purple-950/80 text-purple-600 dark:text-purple-400 flex items-center justify-center mx-auto mb-3">
                       <Sparkles className="w-6 h-6" />
                     </div>
-                    <h4 className="text-sm font-bold text-slate-900">Smart AI Assistant</h4>
-                    <p className="text-xs text-slate-500 mt-1">
+                    <h4 className="text-sm font-bold text-slate-900 dark:text-white">Smart AI Assistant</h4>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
                       Powered by Gemini 2.5 with deep thinking mode to help you choose the ideal products for your budget.
                     </p>
                   </div>
@@ -2062,32 +3262,32 @@ export default function App() {
         {currentView === 'shop' && (
           <div className="max-w-[1536px] mx-auto px-3 sm:px-6 lg:px-8 py-6 sm:py-8">
             {/* Breadcrumb Navigation */}
-            <nav className="flex items-center flex-wrap gap-1.5 text-xs text-slate-500 mb-4 bg-slate-50/80 px-3.5 py-2 rounded-xl border border-slate-100">
+            <nav className="flex items-center flex-wrap gap-1.5 text-xs text-slate-500 dark:text-slate-400 mb-4 bg-slate-50/80 dark:bg-slate-900 px-3.5 py-2 rounded-xl border border-slate-100 dark:border-slate-800">
               <button
                 type="button"
                 onClick={() => handleNavigate('home')}
-                className="hover:text-sky-600 font-semibold cursor-pointer"
+                className="hover:text-sky-600 dark:hover:text-sky-400 font-semibold cursor-pointer"
               >
                 Home
               </button>
-              <span className="text-slate-300">/</span>
+              <span className="text-slate-300 dark:text-slate-600">/</span>
               <button
                 type="button"
                 onClick={() => handleSelectCategory('All', 'All', 'All')}
                 className={`font-semibold cursor-pointer ${
-                  selectedCategory === 'All' ? 'text-sky-600 font-bold' : 'hover:text-sky-600'
+                  selectedCategory === 'All' ? 'text-sky-600 dark:text-sky-400 font-bold' : 'hover:text-sky-600 dark:hover:text-sky-400'
                 }`}
               >
                 ALL Product
               </button>
               {selectedCategory !== 'All' && (
                 <>
-                  <span className="text-slate-300">/</span>
+                  <span className="text-slate-300 dark:text-slate-600">/</span>
                   <button
                     type="button"
                     onClick={() => handleSelectCategory(selectedCategory, 'All', 'All')}
                     className={`font-semibold cursor-pointer ${
-                      selectedSubcategory === 'All' ? 'text-sky-600 font-bold' : 'hover:text-sky-600'
+                      selectedSubcategory === 'All' ? 'text-sky-600 dark:text-sky-400 font-bold' : 'hover:text-sky-600 dark:hover:text-sky-400'
                     }`}
                   >
                     {selectedCategory}
@@ -2096,12 +3296,12 @@ export default function App() {
               )}
               {selectedSubcategory !== 'All' && (
                 <>
-                  <span className="text-slate-300">/</span>
+                  <span className="text-slate-300 dark:text-slate-600">/</span>
                   <button
                     type="button"
                     onClick={() => handleSelectCategory(selectedCategory, selectedSubcategory, 'All')}
                     className={`font-semibold cursor-pointer ${
-                      selectedSubSubcategory === 'All' ? 'text-sky-600 font-bold' : 'hover:text-sky-600'
+                      selectedSubSubcategory === 'All' ? 'text-sky-600 dark:text-sky-400 font-bold' : 'hover:text-sky-600 dark:hover:text-sky-400'
                     }`}
                   >
                     {selectedSubcategory}
@@ -2110,8 +3310,8 @@ export default function App() {
               )}
               {selectedSubSubcategory !== 'All' && (
                 <>
-                  <span className="text-slate-300">/</span>
-                  <span className="text-sky-600 font-bold bg-sky-100/70 px-2 py-0.5 rounded-md">
+                  <span className="text-slate-300 dark:text-slate-600">/</span>
+                  <span className="text-sky-600 dark:text-sky-400 font-bold bg-sky-100/70 dark:bg-sky-950/60 px-2 py-0.5 rounded-md">
                     {selectedSubSubcategory}
                   </span>
                 </>
@@ -2120,7 +3320,7 @@ export default function App() {
 
             <div className="flex flex-row items-center justify-between gap-3 mb-5">
               <div>
-                <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">
+                <h1 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white tracking-tight">
                   {selectedSubSubcategory !== 'All'
                     ? selectedSubSubcategory
                     : selectedSubcategory !== 'All'
@@ -2129,13 +3329,13 @@ export default function App() {
                     ? 'All Products'
                     : selectedCategory}
                 </h1>
-                <p className="text-xs text-slate-500 mt-0.5 flex items-center gap-2">
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 flex items-center gap-2">
                   <span>Showing {shopFilteredProducts.length} items</span>
                   {(selectedCategory !== 'All' || selectedSubcategory !== 'All' || selectedSubSubcategory !== 'All') && (
                     <button
                       type="button"
                       onClick={() => handleSelectCategory('All', 'All', 'All')}
-                      className="text-sky-600 hover:text-sky-800 font-bold text-[11px] underline cursor-pointer"
+                      className="text-sky-600 dark:text-sky-400 hover:text-sky-800 dark:hover:text-sky-300 font-bold text-[11px] underline cursor-pointer"
                     >
                       Clear All Filters
                     </button>
@@ -2145,11 +3345,11 @@ export default function App() {
 
               {/* Sorting Controls */}
               <div className="flex items-center gap-2 shrink-0">
-                <span className="hidden sm:inline text-xs font-bold text-slate-600">Sort By:</span>
+                <span className="hidden sm:inline text-xs font-bold text-slate-600 dark:text-slate-400">Sort By:</span>
                 <select
                   value={sortBy}
                   onChange={(e) => setSortBy(e.target.value as any)}
-                  className="px-2.5 sm:px-3 py-1.5 bg-white border border-slate-300 rounded-xl text-xs font-semibold text-slate-700 focus:outline-hidden focus:border-sky-500 shadow-2xs cursor-pointer"
+                  className="px-2.5 sm:px-3 py-1.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-700 dark:text-slate-200 focus:outline-hidden focus:border-sky-500 shadow-2xs cursor-pointer"
                 >
                   <option value="featured">Featured Deals</option>
                   <option value="price-low">Price: Low to High</option>
@@ -2202,7 +3402,7 @@ export default function App() {
                       <button
                         type="button"
                         onClick={() => scrollCategoryChips('left')}
-                        className="hidden md:flex absolute -left-3 top-1/2 -translate-y-1/2 z-10 w-8 h-8 rounded-full bg-white border border-slate-300 shadow-md items-center justify-center text-slate-700 hover:text-sky-600 hover:bg-sky-50 hover:border-sky-300 transition-all cursor-pointer"
+                        className="hidden md:flex absolute -left-3 top-1/2 -translate-y-1/2 z-10 w-8 h-8 rounded-full bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 shadow-md items-center justify-center text-slate-700 dark:text-slate-200 hover:text-sky-600 dark:hover:text-sky-400 hover:bg-sky-50 dark:hover:bg-slate-700 hover:border-sky-300 transition-all cursor-pointer"
                         aria-label="Scroll left"
                       >
                         <ChevronLeft className="w-4 h-4" />
@@ -2210,14 +3410,14 @@ export default function App() {
 
                       <div
                         ref={categoryChipsRef}
-                        className="flex items-center gap-1.5 overflow-x-auto pb-1 scroll-smooth scrollbar-thin scrollbar-thumb-slate-200 hover:scrollbar-thumb-slate-300"
+                        className="flex items-center gap-1.5 overflow-x-auto pb-1 scroll-smooth scrollbar-thin scrollbar-thumb-slate-200 dark:scrollbar-thumb-slate-700 hover:scrollbar-thumb-slate-300"
                       >
                         <button
                           onClick={() => handleSelectCategory('All', 'All', 'All')}
                           className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap shrink-0 ${
                             selectedCategory === 'All'
-                              ? 'bg-sky-600 text-white shadow-xs'
-                              : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
+                              ? 'bg-sky-600 text-white shadow-xs ring-2 ring-sky-300 dark:ring-sky-500/50'
+                              : 'bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-100 hover:bg-slate-50 dark:hover:bg-slate-750 hover:border-sky-300 dark:hover:border-sky-500 hover:text-sky-600 dark:hover:text-sky-300'
                           }`}
                         >
                           All Categories
@@ -2230,8 +3430,8 @@ export default function App() {
                               onClick={() => handleSelectCategory(cat.name, 'All', 'All')}
                               className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap shrink-0 flex items-center gap-1.5 ${
                                 isCatSelected
-                                  ? 'bg-sky-600 text-white shadow-xs ring-2 ring-sky-300'
-                                  : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 hover:border-slate-300'
+                                  ? 'bg-sky-600 text-white shadow-xs ring-2 ring-sky-300 dark:ring-sky-500/50'
+                                  : 'bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-100 hover:bg-slate-50 dark:hover:bg-slate-750 hover:border-sky-300 dark:hover:border-sky-500 hover:text-sky-600 dark:hover:text-sky-300'
                               }`}
                             >
                               <span>{cat.name}</span>
@@ -2244,7 +3444,7 @@ export default function App() {
                       <button
                         type="button"
                         onClick={() => scrollCategoryChips('right')}
-                        className="hidden md:flex absolute -right-3 top-1/2 -translate-y-1/2 z-10 w-8 h-8 rounded-full bg-white border border-slate-300 shadow-md items-center justify-center text-slate-700 hover:text-sky-600 hover:bg-sky-50 hover:border-sky-300 transition-all cursor-pointer"
+                        className="hidden md:flex absolute -right-3 top-1/2 -translate-y-1/2 z-10 w-8 h-8 rounded-full bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 shadow-md items-center justify-center text-slate-700 dark:text-slate-200 hover:text-sky-600 dark:hover:text-sky-400 hover:bg-sky-50 dark:hover:bg-slate-700 hover:border-sky-300 transition-all cursor-pointer"
                         aria-label="Scroll right"
                       >
                         <ChevronRight className="w-4 h-4" />
@@ -2254,12 +3454,12 @@ export default function App() {
 
                   {/* Level 2: Sub-categories Bar (Shown ONLY when Category is selected & Level 3 is not active) */}
                   {isLevel2Active && (
-                    <div className="relative p-1.5 rounded-2xl bg-slate-100/80 border border-slate-200/80 group/subbar animate-in fade-in duration-200">
+                    <div className="relative p-1.5 rounded-2xl bg-slate-100/80 dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 group/subbar animate-in fade-in duration-200">
                       {/* Left Scroll Arrow (Desktop) */}
                       <button
                         type="button"
                         onClick={() => scrollSubcategoryChips('left')}
-                        className="hidden md:flex absolute -left-2.5 top-1/2 -translate-y-1/2 z-10 w-7 h-7 rounded-full bg-white border border-slate-300 shadow-sm items-center justify-center text-slate-700 hover:text-sky-600 hover:bg-sky-50 hover:border-sky-300 transition-all cursor-pointer"
+                        className="hidden md:flex absolute -left-2.5 top-1/2 -translate-y-1/2 z-10 w-7 h-7 rounded-full bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 shadow-sm items-center justify-center text-slate-700 dark:text-slate-200 hover:text-sky-600 dark:hover:text-sky-400 hover:bg-sky-50 dark:hover:bg-slate-700 hover:border-sky-300 transition-all cursor-pointer"
                         aria-label="Scroll left"
                       >
                         <ChevronLeft className="w-3.5 h-3.5" />
@@ -2272,7 +3472,7 @@ export default function App() {
                         {/* Quick return to All Categories */}
                         <button
                           onClick={() => handleSelectCategory('All', 'All', 'All')}
-                          className="px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap shrink-0 flex items-center gap-1 bg-white border border-slate-200 text-slate-600 hover:bg-slate-200 hover:text-slate-900 shadow-2xs"
+                          className="px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap shrink-0 flex items-center gap-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 hover:text-slate-900 dark:hover:text-white shadow-2xs"
                           title="Back to All Categories"
                         >
                           <ChevronLeft className="w-3.5 h-3.5" />
@@ -2284,8 +3484,8 @@ export default function App() {
                           onClick={() => handleSelectSubcategory('All')}
                           className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap shrink-0 flex items-center gap-1.5 shadow-2xs ${
                             selectedSubcategory === 'All'
-                              ? 'bg-sky-600 text-white shadow-xs ring-2 ring-sky-300'
-                              : 'bg-white border border-slate-200 text-slate-700 hover:bg-sky-50 hover:text-sky-700 hover:border-sky-300'
+                              ? 'bg-sky-600 text-white shadow-xs ring-2 ring-sky-300 dark:ring-sky-500/50'
+                              : 'bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-100 hover:bg-sky-50 dark:hover:bg-slate-750 hover:text-sky-700 dark:hover:text-sky-300 hover:border-sky-300'
                           }`}
                         >
                           <span>All {selectedCategory}</span>
@@ -2293,7 +3493,7 @@ export default function App() {
                             className={`text-[10px] px-1.5 py-0.2 rounded-full font-black ${
                               selectedSubcategory === 'All'
                                 ? 'bg-sky-700 text-white'
-                                : 'bg-slate-100 text-slate-600'
+                                : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-200'
                             }`}
                           >
                             {totalCategoryProducts}
@@ -2315,8 +3515,8 @@ export default function App() {
                               onClick={() => handleSelectSubcategory(subName)}
                               className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap shrink-0 flex items-center gap-1.5 shadow-2xs ${
                                 isSelected
-                                  ? 'bg-sky-600 text-white shadow-xs ring-2 ring-sky-300'
-                                  : 'bg-white border border-slate-200 text-slate-700 hover:bg-sky-50 hover:text-sky-700 hover:border-sky-300'
+                                  ? 'bg-sky-600 text-white shadow-xs ring-2 ring-sky-300 dark:ring-sky-500/50'
+                                  : 'bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-100 hover:bg-sky-50 dark:hover:bg-slate-750 hover:text-sky-700 dark:hover:text-sky-300 hover:border-sky-300'
                               }`}
                             >
                               <span>{subName}</span>
@@ -2324,7 +3524,7 @@ export default function App() {
                                 className={`text-[10px] px-1.5 py-0.2 rounded-full font-black ${
                                   isSelected
                                     ? 'bg-sky-700 text-white'
-                                    : 'bg-slate-100 text-slate-600'
+                                    : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-200'
                                 }`}
                               >
                                 {count}
@@ -2338,7 +3538,7 @@ export default function App() {
                       <button
                         type="button"
                         onClick={() => scrollSubcategoryChips('right')}
-                        className="hidden md:flex absolute -right-2.5 top-1/2 -translate-y-1/2 z-10 w-7 h-7 rounded-full bg-white border border-slate-300 shadow-sm items-center justify-center text-slate-700 hover:text-sky-600 hover:bg-sky-50 hover:border-sky-300 transition-all cursor-pointer"
+                        className="hidden md:flex absolute -right-2.5 top-1/2 -translate-y-1/2 z-10 w-7 h-7 rounded-full bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 shadow-sm items-center justify-center text-slate-700 dark:text-slate-200 hover:text-sky-600 dark:hover:text-sky-400 hover:bg-sky-50 dark:hover:bg-slate-700 hover:border-sky-300 transition-all cursor-pointer"
                         aria-label="Scroll right"
                       >
                         <ChevronRight className="w-3.5 h-3.5" />
@@ -2348,12 +3548,12 @@ export default function App() {
 
                   {/* Level 3: 3rd-Tier Sub-subcategories Interactive Navigation Bar (Shown ONLY when Subcategory selected with children) */}
                   {isLevel3Active && (
-                    <div className="relative p-1.5 rounded-2xl bg-sky-50/70 border border-sky-200/70 group/subsubbar animate-in fade-in duration-200">
+                    <div className="relative p-1.5 rounded-2xl bg-sky-50/70 dark:bg-sky-950/40 border border-sky-200/70 dark:border-sky-800/60 group/subsubbar animate-in fade-in duration-200">
                       {/* Left Scroll Arrow (Desktop) */}
                       <button
                         type="button"
                         onClick={() => scrollSubSubcategoryChips('left')}
-                        className="hidden md:flex absolute -left-2.5 top-1/2 -translate-y-1/2 z-10 w-7 h-7 rounded-full bg-white border border-sky-300 shadow-sm items-center justify-center text-sky-700 hover:text-white hover:bg-sky-600 hover:border-sky-600 transition-all cursor-pointer"
+                        className="hidden md:flex absolute -left-2.5 top-1/2 -translate-y-1/2 z-10 w-7 h-7 rounded-full bg-white dark:bg-slate-800 border border-sky-300 dark:border-sky-700 shadow-sm items-center justify-center text-sky-700 dark:text-sky-300 hover:text-white hover:bg-sky-600 hover:border-sky-600 transition-all cursor-pointer"
                         aria-label="Scroll left"
                       >
                         <ChevronLeft className="w-3.5 h-3.5" />
@@ -2366,7 +3566,7 @@ export default function App() {
                         {/* Quick return to parent Category Subcategories */}
                         <button
                           onClick={() => handleSelectCategory(selectedCategory, 'All', 'All')}
-                          className="px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap shrink-0 flex items-center gap-1 bg-white border border-sky-200 text-sky-800 hover:bg-sky-100 shadow-2xs"
+                          className="px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap shrink-0 flex items-center gap-1 bg-white dark:bg-slate-800 border border-sky-200 dark:border-sky-800 text-sky-800 dark:text-sky-300 hover:bg-sky-100 dark:hover:bg-sky-900/40 shadow-2xs"
                           title={`Back to all ${selectedCategory}`}
                         >
                           <ChevronLeft className="w-3.5 h-3.5" />
@@ -2378,16 +3578,16 @@ export default function App() {
                           onClick={() => handleSelectSubSubcategory('All')}
                           className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap shrink-0 flex items-center gap-1.5 shadow-2xs ${
                             selectedSubSubcategory === 'All'
-                              ? 'bg-slate-900 text-white shadow-xs ring-2 ring-slate-400'
-                              : 'bg-white border border-sky-200 text-slate-700 hover:bg-sky-600 hover:text-white hover:border-sky-600'
+                              ? 'bg-sky-600 text-white shadow-xs ring-2 ring-sky-300 dark:ring-sky-500/50'
+                              : 'bg-white dark:bg-slate-800 border border-sky-200 dark:border-slate-700 text-slate-800 dark:text-slate-100 hover:bg-sky-600 hover:text-white hover:border-sky-600'
                           }`}
                         >
                           <span>All {selectedSubcategory}</span>
                           <span
                             className={`text-[10px] px-1.5 py-0.2 rounded-full font-black ${
                               selectedSubSubcategory === 'All'
-                                ? 'bg-slate-800 text-white'
-                                : 'bg-slate-100 text-slate-600'
+                                ? 'bg-sky-700 text-white'
+                                : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-200'
                             }`}
                           >
                             {totalSubProducts}
@@ -2413,8 +3613,8 @@ export default function App() {
                               onClick={() => handleSelectSubSubcategory(ssName)}
                               className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap shrink-0 flex items-center gap-1.5 shadow-2xs ${
                                 isSelected
-                                  ? 'bg-sky-600 text-white shadow-xs ring-2 ring-sky-300'
-                                  : 'bg-white border border-sky-200 text-slate-800 hover:bg-sky-600 hover:text-white hover:border-sky-600'
+                                  ? 'bg-sky-600 text-white shadow-xs ring-2 ring-sky-300 dark:ring-sky-500/50'
+                                  : 'bg-white dark:bg-slate-800 border border-sky-200 dark:border-slate-700 text-slate-800 dark:text-slate-100 hover:bg-sky-600 hover:text-white hover:border-sky-600'
                               }`}
                             >
                               <span>{ssName}</span>
@@ -2422,7 +3622,7 @@ export default function App() {
                                 className={`text-[10px] px-1.5 py-0.2 rounded-full font-black ${
                                   isSelected
                                     ? 'bg-sky-700 text-white'
-                                    : 'bg-sky-50 text-sky-700'
+                                    : 'bg-sky-50 dark:bg-slate-700 text-sky-700 dark:text-sky-300'
                                 }`}
                               >
                                 {count}
@@ -2436,7 +3636,7 @@ export default function App() {
                       <button
                         type="button"
                         onClick={() => scrollSubSubcategoryChips('right')}
-                        className="hidden md:flex absolute -right-2.5 top-1/2 -translate-y-1/2 z-10 w-7 h-7 rounded-full bg-white border border-sky-300 shadow-sm items-center justify-center text-sky-700 hover:text-white hover:bg-sky-600 hover:border-sky-600 transition-all cursor-pointer"
+                        className="hidden md:flex absolute -right-2.5 top-1/2 -translate-y-1/2 z-10 w-7 h-7 rounded-full bg-white dark:bg-slate-800 border border-sky-300 dark:border-sky-700 shadow-sm items-center justify-center text-sky-700 dark:text-sky-300 hover:text-white hover:bg-sky-600 hover:border-sky-600 transition-all cursor-pointer"
                         aria-label="Scroll right"
                       >
                         <ChevronRight className="w-3.5 h-3.5" />
@@ -2449,9 +3649,9 @@ export default function App() {
 
             {/* Products Grid */}
             {shopFilteredProducts.length === 0 ? (
-              <div className="bg-white rounded-3xl border border-slate-200 p-12 text-center max-w-md mx-auto">
-                <p className="text-sm font-bold text-slate-800">No Products Found</p>
-                <p className="text-xs text-slate-500 mt-1">
+              <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-12 text-center max-w-md mx-auto">
+                <p className="text-sm font-bold text-slate-800 dark:text-slate-100">No Products Found</p>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
                   No products match your current filters or category selection.
                 </p>
                 <div className="flex items-center justify-center flex-wrap gap-2 mt-4">
@@ -2466,14 +3666,14 @@ export default function App() {
                   {selectedSubcategory !== 'All' && (
                     <button
                       onClick={() => handleSelectSubcategory('All')}
-                      className="px-3.5 py-1.5 bg-slate-100 text-slate-700 rounded-xl text-xs font-bold hover:bg-slate-200 cursor-pointer"
+                      className="px-3.5 py-1.5 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-bold hover:bg-slate-200 dark:hover:bg-slate-700 cursor-pointer"
                     >
                       View All {selectedCategory}
                     </button>
                   )}
                   <button
                     onClick={() => handleSelectCategory('All', 'All', 'All')}
-                    className="px-3.5 py-1.5 bg-slate-900 text-white rounded-xl text-xs font-bold hover:bg-slate-800 cursor-pointer"
+                    className="px-3.5 py-1.5 bg-slate-900 dark:bg-sky-600 text-white rounded-xl text-xs font-bold hover:bg-slate-800 dark:hover:bg-sky-700 cursor-pointer"
                   >
                     View All Products
                   </button>
@@ -2492,7 +3692,7 @@ export default function App() {
                     isWishlisted={wishlist.some((w) => w.id === product.id)}
                     currentRole={currentRole}
                     isLoggedIn={Boolean(currentCustomer)}
-                    onOpenCustomerAuth={() => setIsCustomerAuthOpen(true)}
+                    onOpenCustomerAuth={() => handleOpenCustomerAuth('login')}
                   />
                 ))}
               </div>
@@ -2512,41 +3712,69 @@ export default function App() {
             wishlist={wishlist}
             currentRole={currentRole}
             isLoggedIn={Boolean(currentCustomer)}
-            onOpenCustomerAuth={() => setIsCustomerAuthOpen(true)}
+            onOpenCustomerAuth={() => handleOpenCustomerAuth('login')}
             onNavigate={handleNavigate}
             siteSettings={siteSettings}
             onUpdateSettings={handleUpdateSettings}
           />
         )}
 
-        {/* VIEW: Dedicated Product Page */}
-        {currentView === 'product' && (
-          <ProductPageView
-            product={selectedProductForDetail || products[0]}
+        {/* VIEW: Dedicated Landing Page for Facebook Ads / Direct Campaigns */}
+        {(currentView === 'landing-page' || currentView === 'lp') && (
+          <ProductLandingPageView
+            product={
+              selectedProductForDetail ||
+              (localStorage.getItem('kenax_active_landing_product_id')
+                ? products.find((p) => p.id === localStorage.getItem('kenax_active_landing_product_id'))
+                : null) ||
+              products.find((p) => p.landingPage?.enabled) ||
+              products[0]
+            }
             allProducts={products}
             onSelectProduct={(p) => handleOpenProductDetail(p)}
             onAddToCart={(p, qty, variant, customImg) => handleAddToCart(p, qty, variant, customImg)}
             onBuyNow={(p, qty, variant, customImg) => handleBuyNow(p, qty, variant, customImg)}
-            onToggleWishlist={handleToggleWishlist}
-            isWishlisted={Boolean(
-              (selectedProductForDetail || products[0]) &&
-                wishlist.some((w) => w.id === (selectedProductForDetail || products[0]).id)
-            )}
-            wishlist={wishlist}
-            currentRole={currentRole}
-            isLoggedIn={Boolean(currentCustomer)}
-            onOpenCustomerAuth={() => setIsCustomerAuthOpen(true)}
-            onNavigate={handleNavigate}
-            onSelectCategory={(cat) => {
-              setSelectedCategory(cat);
-              setSelectedSubcategory('All');
-              handleNavigate('shop');
-            }}
-            insideDhakaFee={siteSettings.insideDhakaDeliveryFee}
-            outsideDhakaFee={siteSettings.outsideDhakaDeliveryFee}
-            orders={orders}
-            currentCustomer={currentCustomer}
+            onOrderPlaced={handleOrderPlaced}
+            siteSettings={siteSettings}
           />
+        )}
+
+        {/* VIEW: Dedicated Product Page */}
+        {currentView === 'product' && (
+          (selectedProductForDetail || products.length > 0) ? (
+            <ProductPageView
+              product={selectedProductForDetail || products[0]}
+              allProducts={products}
+              onSelectProduct={(p) => handleOpenProductDetail(p)}
+              onAddToCart={(p, qty, variant, customImg) => handleAddToCart(p, qty, variant, customImg)}
+              onBuyNow={(p, qty, variant, customImg) => handleBuyNow(p, qty, variant, customImg)}
+              onToggleWishlist={handleToggleWishlist}
+              isWishlisted={Boolean(
+                (selectedProductForDetail || products[0]) &&
+                  wishlist.some((w) => w.id === (selectedProductForDetail || products[0]).id)
+              )}
+              wishlist={wishlist}
+              currentRole={currentRole}
+              isLoggedIn={Boolean(currentCustomer)}
+              onOpenCustomerAuth={() => handleOpenCustomerAuth('login')}
+              onNavigate={handleNavigate}
+              onSelectCategory={(cat) => {
+                setSelectedCategory(cat);
+                setSelectedSubcategory('All');
+                handleNavigate('shop');
+              }}
+              insideDhakaFee={siteSettings.insideDhakaDeliveryFee}
+              outsideDhakaFee={siteSettings.outsideDhakaDeliveryFee}
+              orders={orders}
+              currentCustomer={currentCustomer}
+              onBack={handleBackFromProduct}
+              previousItem={productNavHistory.length > 0 ? productNavHistory[productNavHistory.length - 1] : null}
+            />
+          ) : (
+            <div className="min-h-[50vh] flex items-center justify-center py-12">
+              <div className="w-8 h-8 border-4 border-sky-600 border-t-transparent rounded-full animate-spin" />
+            </div>
+          )
         )}
 
         {/* VIEW: Track Order */}
@@ -2601,7 +3829,7 @@ export default function App() {
             onToggleWishlist={handleToggleWishlist}
             products={products}
             currentCustomer={currentCustomer}
-            onOpenCustomerAuth={() => setIsCustomerAuthOpen(true)}
+            onOpenCustomerAuth={() => handleOpenCustomerAuth('login')}
           />
         )}
 
@@ -2626,10 +3854,16 @@ export default function App() {
           currentView === 'help' ||
           currentView === 'terms' ||
           currentView === 'privacy' ||
-          currentView === 'refund') && (
+          currentView === 'refund' ||
+          currentView === 'return' ||
+          currentView === 'exchange') && (
           <PolicyView
             initialTab={
-              currentView === 'terms'
+              currentView === 'return'
+                ? 'return'
+                : currentView === 'exchange'
+                ? 'exchange'
+                : currentView === 'terms'
                 ? 'terms'
                 : currentView === 'refund'
                 ? 'refund'
@@ -2639,9 +3873,13 @@ export default function App() {
                 ? 'privacy'
                 : policyPageTab
             }
+            siteSettings={siteSettings}
             privacyPolicyText={siteSettings.privacyPolicy}
             termsOfServiceText={siteSettings.termsOfService}
             refundPolicyText={siteSettings.refundPolicy}
+            returnPolicyText={siteSettings.returnPolicy}
+            exchangePolicyText={siteSettings.exchangePolicy}
+            storePolicies={siteSettings.storePolicies}
             faqs={siteSettings.faqs}
             onNavigate={(view) => {
               setCurrentView(view);
@@ -2652,6 +3890,100 @@ export default function App() {
               setCurrentView('shop');
               window.scrollTo({ top: 0, behavior: 'smooth' });
             }}
+          />
+        )}
+
+        {/* VIEW: Dedicated Customer & Staff Auth Page (Login / Register) */}
+        {(currentView === 'auth' || currentView === 'login' || currentView === 'register') && (
+          <AuthPageView
+            initialTab={authPageTab}
+            onCustomerLogin={(customer) => {
+              setCurrentCustomer(customer);
+              localStorage.setItem('kenax_current_customer', JSON.stringify(customer));
+              if (customer.cart && Array.isArray(customer.cart)) {
+                const cleanCart = sanitizeCart(customer.cart);
+                setCart(cleanCart);
+                localStorage.setItem('kenax_cart', JSON.stringify(cleanCart));
+              }
+              if (customer.wishlist && Array.isArray(customer.wishlist)) {
+                setWishlist(customer.wishlist);
+                localStorage.setItem('kenax_wishlist', JSON.stringify(customer.wishlist));
+              }
+              const addrs = customer.addresses || customer.savedAddresses;
+              if (addrs && Array.isArray(addrs) && addrs.length > 0) {
+                setSavedAddresses(addrs);
+                localStorage.setItem('kenax_saved_addresses', JSON.stringify(addrs));
+              }
+              if (returnViewAfterAuth === 'checkout') {
+                setIsCheckoutOpen(true);
+                setCurrentView('home');
+              } else if (
+                returnViewAfterAuth &&
+                returnViewAfterAuth !== 'auth' &&
+                returnViewAfterAuth !== 'login' &&
+                returnViewAfterAuth !== 'register'
+              ) {
+                setCurrentView(returnViewAfterAuth);
+              } else {
+                setCurrentView('customer-dashboard');
+              }
+            }}
+            onStaffLogin={(staff) => {
+              setCurrentStaff(staff);
+              setCurrentRole(staff.role);
+              localStorage.setItem('kenax_current_staff', JSON.stringify(staff));
+              localStorage.setItem('kenax_authenticated_staff', JSON.stringify(staff));
+              localStorage.setItem('kenax_authenticated_role', staff.role);
+
+              const adminCustomerProfile: CustomerRecord = {
+                id: `staff-cust-${staff.id}`,
+                name: staff.name,
+                email: staff.email,
+                mobile: staff.phone || '01700000000',
+                totalOrders: 0,
+                totalSpent: 0,
+                isBlocked: false,
+                status: 'active',
+                registeredAt: staff.createdAt || new Date().toISOString(),
+                createdAt: staff.createdAt || new Date().toISOString(),
+              };
+              setCurrentCustomer(adminCustomerProfile);
+              localStorage.setItem('kenax_current_customer', JSON.stringify(adminCustomerProfile));
+
+              setCurrentView('admin-dashboard');
+            }}
+            staffList={staffList}
+            onBack={handleBackFromAuth}
+            onNavigate={handleNavigate}
+            customLogoUrl={siteSettings.customLogoUrl}
+          />
+        )}
+
+        {/* VIEW: Dedicated Full Checkout Page (Opens on Buy Now or Direct Cart Checkout) */}
+        {currentView === 'checkout' && (
+          <CheckoutPageView
+            cartItems={checkoutItems.length > 0 ? checkoutItems : cart}
+            fullCart={cart}
+            discountAmount={discountAmount}
+            couponCode={appliedCoupon || undefined}
+            orderSource={checkoutOrderSource}
+            onOrderPlaced={handleOrderPlaced}
+            onClose={handleCloseCheckout}
+            savedAddresses={savedAddresses}
+            defaultInsideCityFee={siteSettings.insideDhakaDeliveryFee}
+            defaultOutsideCityFee={siteSettings.outsideDhakaDeliveryFee}
+            currentCustomer={currentCustomer}
+            onCustomerCreated={(newCust) => {
+              setCurrentCustomer(newCust);
+              try {
+                localStorage.setItem('kenax_current_customer', JSON.stringify(newCust));
+              } catch {}
+            }}
+            onRemoveItem={handleRemoveCartItem}
+            onUpdateCartItem={handleUpdateCartItem}
+            products={products}
+            siteSettings={siteSettings}
+            onNavigate={handleNavigate}
           />
         )}
           </motion.div>
@@ -2668,9 +4000,15 @@ export default function App() {
         onUpdateQuantity={handleUpdateCartQuantity}
         onRemoveItem={handleRemoveCartItem}
         onCheckout={() => {
+          checkoutItemsRef.current = cart;
           setCheckoutItems(cart);
+          if (currentView !== 'checkout') {
+            setReturnViewAfterCheckout(currentView);
+          }
           setIsCartOpen(false);
           setIsCheckoutOpen(true);
+          setCurrentView('checkout');
+          window.scrollTo({ top: 0, behavior: 'smooth' });
         }}
         appliedCoupon={appliedCoupon}
         discountAmount={discountAmount}
@@ -2681,33 +4019,33 @@ export default function App() {
         onSelectProduct={handleOpenProductDetail}
       />
 
-      {/* Checkout Modal (Bangladesh Dependent Location System + Immutable Snapshot + Supported Payments) */}
-      <CheckoutModal
-        isOpen={isCheckoutOpen}
-        onClose={() => {
-          setIsCheckoutOpen(false);
-          setCheckoutItems([]);
-        }}
-        cartItems={checkoutItems.length > 0 ? checkoutItems : cart}
-        fullCart={cart}
-        discountAmount={discountAmount}
-        couponCode={appliedCoupon || undefined}
-        onOrderPlaced={handleOrderPlaced}
-        savedAddresses={savedAddresses}
-        defaultInsideCityFee={siteSettings.insideDhakaDeliveryFee}
-        defaultOutsideCityFee={siteSettings.outsideDhakaDeliveryFee}
-        currentCustomer={currentCustomer}
-        onCustomerCreated={(newCust) => {
-          setCurrentCustomer(newCust);
-          try {
-            localStorage.setItem('kenax_current_customer', JSON.stringify(newCust));
-          } catch {}
-        }}
-        onRemoveItem={handleRemoveCartItem}
-        onUpdateCartItem={handleUpdateCartItem}
-        products={products}
-        siteSettings={siteSettings}
-      />
+      {/* Checkout Modal (Used if opened outside dedicated checkout page) */}
+      {isCheckoutOpen && currentView !== 'checkout' && (
+        <CheckoutModal
+          isOpen={isCheckoutOpen}
+          onClose={handleCloseCheckout}
+          cartItems={checkoutItems.length > 0 ? checkoutItems : cart}
+          fullCart={cart}
+          discountAmount={discountAmount}
+          couponCode={appliedCoupon || undefined}
+          orderSource={checkoutOrderSource}
+          onOrderPlaced={handleOrderPlaced}
+          savedAddresses={savedAddresses}
+          defaultInsideCityFee={siteSettings.insideDhakaDeliveryFee}
+          defaultOutsideCityFee={siteSettings.outsideDhakaDeliveryFee}
+          currentCustomer={currentCustomer}
+          onCustomerCreated={(newCust) => {
+            setCurrentCustomer(newCust);
+            try {
+              localStorage.setItem('kenax_current_customer', JSON.stringify(newCust));
+            } catch {}
+          }}
+          onRemoveItem={handleRemoveCartItem}
+          onUpdateCartItem={handleUpdateCartItem}
+          products={products}
+          siteSettings={siteSettings}
+        />
+      )}
 
       {/* Order Dispatch Animation (Moving KenaX BD Express Delivery Van with Real-time Status Steps) */}
       <OrderProcessingAnimation
@@ -2717,121 +4055,152 @@ export default function App() {
       />
 
       {/* Order Received Success Popup Modal (Contact Notice, Receipt Download/Print, Track Order Button) */}
-      <OrderSuccessModal
-        isOpen={isSuccessModalOpen}
-        onClose={() => setIsSuccessModalOpen(false)}
-        order={successOrder}
-        onTrackOrder={(order) => {
-          setSelectedTrackOrder(order);
-          setCurrentView('track');
-          window.scrollTo({ top: 0, behavior: 'smooth' });
-        }}
-        onContinueShopping={() => {
-          setCurrentView('shop');
-          window.scrollTo({ top: 0, behavior: 'smooth' });
-        }}
-      />
+      {isSuccessModalOpen && (
+        <ErrorBoundary
+          fallback={
+            <div className="fixed inset-0 z-[9999] bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+              <div className="bg-white rounded-2xl max-w-md w-full p-6 text-center shadow-2xl border border-slate-200 space-y-4">
+                <div className="w-12 h-12 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto">
+                  <CheckCircle className="w-6 h-6" />
+                </div>
+                <h3 className="text-lg font-bold text-slate-900">
+                  অর্ডারটি সফলভাবে সম্পন্ন হয়েছে!
+                </h3>
+                <p className="text-xs text-slate-600">
+                  {successOrder?.id ? `অর্ডার আইডি: #${successOrder.id}` : 'আপনার অর্ডারটি গ্রহণ করা হয়েছে।'}
+                </p>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsSuccessModalOpen(false);
+                      setCurrentView('shop');
+                    }}
+                    className="flex-1 py-2 px-3 bg-sky-600 hover:bg-sky-700 text-white rounded-xl font-bold text-xs"
+                  >
+                    শপিং চালিয়ে যান
+                  </button>
+                  {successOrder && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsSuccessModalOpen(false);
+                        setSelectedTrackOrder(successOrder);
+                        setCurrentView('track');
+                      }}
+                      className="flex-1 py-2 px-3 bg-slate-800 hover:bg-slate-900 text-white rounded-xl font-bold text-xs"
+                    >
+                      ট্র্যাক অর্ডার
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          }
+        >
+          <OrderSuccessModal
+            isOpen={isSuccessModalOpen}
+            onClose={() => setIsSuccessModalOpen(false)}
+            order={successOrder}
+            onTrackOrder={(order) => {
+              setSelectedTrackOrder(order);
+              setCurrentView('track');
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+            onContinueShopping={() => {
+              setCurrentView('shop');
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+          />
+        </ErrorBoundary>
+      )}
 
       {/* AI Assistant Modal (Gemini 2.5 with Fast & Deep Thinking Modes) */}
-      <AIAssistantModal
-        isOpen={isAIAssistantOpen}
-        onClose={() => setIsAIAssistantOpen(false)}
-        products={products}
-        onSelectProduct={(p) => {
-          handleOpenProductDetail(p);
-          setIsAIAssistantOpen(false);
-        }}
-        onAddToCart={(p) => handleAddToCart(p, 1)}
-      />
+      {isAIAssistantOpen && (
+        <AIAssistantModal
+          isOpen={isAIAssistantOpen}
+          onClose={() => setIsAIAssistantOpen(false)}
+          products={products}
+          onSelectProduct={(p) => {
+            handleOpenProductDetail(p);
+            setIsAIAssistantOpen(false);
+          }}
+          onAddToCart={(p) => handleAddToCart(p, 1)}
+          onBuyNow={(p, qty) => handleBuyNow(p, qty || 1, undefined, undefined, 'chatbot')}
+        />
+      )}
 
       {/* Customer & Staff Authentication Modal (Unified Login / Register) */}
-      <CustomerAuthModal
-        isOpen={isCustomerAuthOpen}
-        onClose={() => setIsCustomerAuthOpen(false)}
-        initialTab={customerAuthInitialTab}
-        onCustomerLogin={(customer) => {
-          setCurrentCustomer(customer);
-          localStorage.setItem('kenax_current_customer', JSON.stringify(customer));
-          if (customer.cart && Array.isArray(customer.cart)) {
-            setCart(customer.cart);
-            localStorage.setItem('kenax_cart', JSON.stringify(customer.cart));
-          }
-          if (customer.wishlist && Array.isArray(customer.wishlist)) {
-            setWishlist(customer.wishlist);
-            localStorage.setItem('kenax_wishlist', JSON.stringify(customer.wishlist));
-          }
-          const addrs = customer.addresses || customer.savedAddresses;
-          if (addrs && Array.isArray(addrs) && addrs.length > 0) {
-            setSavedAddresses(addrs);
-            localStorage.setItem('kenax_saved_addresses', JSON.stringify(addrs));
-          }
-          setIsCustomerAuthOpen(false);
-        }}
-        onStaffLogin={(staff) => {
-          setCurrentStaff(staff);
-          setCurrentRole(staff.role);
-          localStorage.setItem('kenax_current_staff', JSON.stringify(staff));
-          localStorage.setItem('kenax_authenticated_staff', JSON.stringify(staff));
-          localStorage.setItem('kenax_authenticated_role', staff.role);
+      {isCustomerAuthOpen && (
+        <CustomerAuthModal
+          isOpen={isCustomerAuthOpen}
+          onClose={() => setIsCustomerAuthOpen(false)}
+          initialTab={customerAuthInitialTab}
+          onCustomerLogin={(customer) => {
+            setCurrentCustomer(customer);
+            localStorage.setItem('kenax_current_customer', JSON.stringify(customer));
+            if (customer.cart && Array.isArray(customer.cart)) {
+              const cleanCart = sanitizeCart(customer.cart);
+              setCart(cleanCart);
+              localStorage.setItem('kenax_cart', JSON.stringify(cleanCart));
+            }
+            if (customer.wishlist && Array.isArray(customer.wishlist)) {
+              setWishlist(customer.wishlist);
+              localStorage.setItem('kenax_wishlist', JSON.stringify(customer.wishlist));
+            }
+            const addrs = customer.addresses || customer.savedAddresses;
+            if (addrs && Array.isArray(addrs) && addrs.length > 0) {
+              setSavedAddresses(addrs);
+              localStorage.setItem('kenax_saved_addresses', JSON.stringify(addrs));
+            }
+            setIsCustomerAuthOpen(false);
+          }}
+          onStaffLogin={(staff) => {
+            setCurrentStaff(staff);
+            setCurrentRole(staff.role);
+            localStorage.setItem('kenax_current_staff', JSON.stringify(staff));
+            localStorage.setItem('kenax_authenticated_staff', JSON.stringify(staff));
+            localStorage.setItem('kenax_authenticated_role', staff.role);
 
-          const adminCustomerProfile: CustomerRecord = {
-            id: `staff-cust-${staff.id}`,
-            name: staff.name,
-            email: staff.email,
-            mobile: staff.phone || '01700000000',
-            totalOrders: 0,
-            totalSpent: 0,
-            isBlocked: false,
-            status: 'active',
-            registeredAt: staff.createdAt || new Date().toISOString(),
-            createdAt: staff.createdAt || new Date().toISOString(),
-          };
-          setCurrentCustomer(adminCustomerProfile);
-          localStorage.setItem('kenax_current_customer', JSON.stringify(adminCustomerProfile));
+            const adminCustomerProfile: CustomerRecord = {
+              id: `staff-cust-${staff.id}`,
+              name: staff.name,
+              email: staff.email,
+              mobile: staff.phone || '01700000000',
+              totalOrders: 0,
+              totalSpent: 0,
+              isBlocked: false,
+              status: 'active',
+              registeredAt: staff.createdAt || new Date().toISOString(),
+              createdAt: staff.createdAt || new Date().toISOString(),
+            };
+            setCurrentCustomer(adminCustomerProfile);
+            localStorage.setItem('kenax_current_customer', JSON.stringify(adminCustomerProfile));
 
-          setIsCustomerAuthOpen(false);
-          setCurrentView('admin-dashboard');
-        }}
-        staffList={INITIAL_STAFF.map((s) => ({
-          id: s.id,
-          name: s.name,
-          email: s.email,
-          phone: s.phone,
-          password: (s as any).password,
-          role: s.role as UserRole,
-          permissions: s.permissions,
-          isActive: s.status === 'active',
-          createdAt: s.createdAt,
-          lastLogin: s.lastLogin,
-        }))}
-      />
+            setIsCustomerAuthOpen(false);
+            setCurrentView('admin-dashboard');
+          }}
+          staffList={staffList}
+        />
+      )}
 
       {/* Staff Authentication Modal (Admin / Manager / Moderator / Super Admin) */}
-      <AdminLoginModal
-        isOpen={isAdminLoginOpen}
-        onClose={() => setIsAdminLoginOpen(false)}
-        onLoginSuccess={(staff) => {
-          setCurrentStaff(staff);
-          setCurrentRole(staff.role);
-          localStorage.setItem('kenax_current_staff', JSON.stringify(staff));
-          localStorage.setItem('kenax_authenticated_staff', JSON.stringify(staff));
-          localStorage.setItem('kenax_authenticated_role', staff.role);
-          setIsAdminLoginOpen(false);
-          setCurrentView('admin-dashboard');
-        }}
-        staffList={INITIAL_STAFF.map((s) => ({
-          id: s.id,
-          name: s.name,
-          email: s.email,
-          phone: s.phone,
-          password: (s as any).password,
-          role: s.role as UserRole,
-          permissions: s.permissions,
-          isActive: s.status === 'active',
-          createdAt: s.createdAt,
-          lastLogin: s.lastLogin,
-        }))}
-      />
+      {isAdminLoginOpen && (
+        <AdminLoginModal
+          isOpen={isAdminLoginOpen}
+          onClose={() => setIsAdminLoginOpen(false)}
+          onLoginSuccess={(staff) => {
+            setCurrentStaff(staff);
+            setCurrentRole(staff.role);
+            localStorage.setItem('kenax_current_staff', JSON.stringify(staff));
+            localStorage.setItem('kenax_authenticated_staff', JSON.stringify(staff));
+            localStorage.setItem('kenax_authenticated_role', staff.role);
+            setIsAdminLoginOpen(false);
+            setCurrentView('admin-dashboard');
+          }}
+          staffList={staffList}
+        />
+      )}
 
       {/* 4. Footer with Policy Triggers (English Only, Trade License Removed) */}
       <Footer
@@ -2847,15 +4216,17 @@ export default function App() {
       />
 
       {/* 5. Customer Policy & FAQ Help Center Modal (Optional Fallback) */}
-      <PolicyModal
-        isOpen={isPolicyModalOpen}
-        onClose={() => setIsPolicyModalOpen(false)}
-        initialTab={policyPageTab}
-        privacyPolicyText={siteSettings.privacyPolicy}
-        termsOfServiceText={siteSettings.termsOfService}
-        refundPolicyText={siteSettings.refundPolicy}
-        faqs={siteSettings.faqs}
-      />
+      {isPolicyModalOpen && (
+        <PolicyModal
+          isOpen={isPolicyModalOpen}
+          onClose={() => setIsPolicyModalOpen(false)}
+          initialTab={policyPageTab}
+          privacyPolicyText={siteSettings.privacyPolicy}
+          termsOfServiceText={siteSettings.termsOfService}
+          refundPolicyText={siteSettings.refundPolicy}
+          faqs={siteSettings.faqs}
+        />
+      )}
 
       {/* 6. Global Maintenance Mode Modal Popup for Public Visitors */}
       {isMaintenanceActive && !isStaffUser && currentView !== 'admin-dashboard' && (
@@ -2875,7 +4246,7 @@ export default function App() {
           isCartOpen={isCartOpen}
           onNavigate={handleNavigate}
           onOpenCart={() => setIsCartOpen(true)}
-          onOpenCustomerAuth={() => setIsCustomerAuthOpen(true)}
+          onOpenCustomerAuth={() => handleOpenCustomerAuth('login')}
           searchQuery={searchQuery}
           setSearchQuery={setSearchQuery}
           onSelectCategory={(cat, sub, subSub) => {
@@ -2885,6 +4256,20 @@ export default function App() {
           products={products}
           onOpenProductDetail={handleOpenProductDetail}
           onAddToCart={handleAddToCart}
+        />
+      )}
+
+      {/* Customer Floating Support Chat (KenaX AI Bot, WhatsApp, Telegram, Messenger) */}
+      {currentView !== 'admin-dashboard' && (
+        <CustomerFloatingChat
+          currentCustomer={currentCustomer}
+          siteSettings={siteSettings}
+          onAddOrder={handleAddOrder}
+          products={products}
+          onOpenProductDetail={handleOpenProductDetail}
+          orders={orders}
+          wishlist={wishlist}
+          cart={cart}
         />
       )}
     </div>

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   X,
   Save,
@@ -30,10 +30,13 @@ import {
   ArrowLeft,
   ArrowRight,
   Maximize2,
+  Globe,
+  CheckCircle2,
 } from 'lucide-react';
 import { TagCollectionSlide, TagCollectionButton, WebsiteSettings } from '../../types';
 import { getDefaultTagSlides, getTagSlides } from '../../utils/tagBannerDefaults';
 import { saveOriginalImageMedia, resolveOriginalImageMedia, compressImage, getSynchronouslyResolvedMedia } from '../../lib/firebase';
+import { getOptimizedImageUrl, extractGoogleDriveFileId, handleImageError } from '../../utils/imageOptimizer';
 
 interface TagBannerEditorModalProps {
   isOpen: boolean;
@@ -73,6 +76,15 @@ export const TagBannerEditorModal: React.FC<TagBannerEditorModalProps> = ({
   const [previewDevice, setPreviewDevice] = useState<'desktop' | 'mobile'>('desktop');
   const [resolvedDesktopImg, setResolvedDesktopImg] = useState<string | undefined>();
   const [resolvedMobileImg, setResolvedMobileImg] = useState<string | undefined>();
+  const [isUploadingDesktop, setIsUploadingDesktop] = useState(false);
+  const [isUploadingMobile, setIsUploadingMobile] = useState(false);
+
+  // Dedicated URL inputs for easy editing, replacing and Google Drive pasting
+  const [desktopUrlInput, setDesktopUrlInput] = useState('');
+  const [mobileUrlInput, setMobileUrlInput] = useState('');
+
+  const lastLoadedTagRef = useRef<string | null>(null);
+  const wasOpenRef = useRef<boolean>(false);
 
   useEffect(() => {
     if (initialTag) {
@@ -80,17 +92,41 @@ export const TagBannerEditorModal: React.FC<TagBannerEditorModalProps> = ({
     }
   }, [initialTag]);
 
-  // Load slides whenever selectedTag changes
+  // Load slides cleanly when modal opens or when selectedTag changes, WITHOUT resetting on parent re-renders
   useEffect(() => {
-    if (selectedTag) {
-      const existing = getTagSlides(selectedTag, tagCollectionBanners, itemCount);
-      setSlides(JSON.parse(JSON.stringify(existing)));
-      setActiveSlideIndex(0);
+    if (isOpen) {
+      if (!wasOpenRef.current || lastLoadedTagRef.current !== selectedTag) {
+        const existing = getTagSlides(selectedTag, tagCollectionBanners, itemCount);
+        setSlides(JSON.parse(JSON.stringify(existing)));
+        setActiveSlideIndex(0);
+        lastLoadedTagRef.current = selectedTag;
+        wasOpenRef.current = true;
+      }
+    } else {
+      wasOpenRef.current = false;
+      lastLoadedTagRef.current = null;
     }
-  }, [selectedTag, tagCollectionBanners, itemCount]);
+  }, [isOpen, selectedTag, tagCollectionBanners, itemCount]);
 
   // Resolve background images asynchronously for live preview rendering
   const currentSlide = slides[activeSlideIndex] || slides[0];
+
+  // Synchronize text URL inputs when active slide changes
+  useEffect(() => {
+    if (currentSlide) {
+      if (currentSlide.backgroundImage && !currentSlide.backgroundImage.startsWith('media://')) {
+        setDesktopUrlInput(currentSlide.backgroundImage);
+      } else {
+        setDesktopUrlInput('');
+      }
+
+      if (currentSlide.mobileBackgroundImage && !currentSlide.mobileBackgroundImage.startsWith('media://')) {
+        setMobileUrlInput(currentSlide.mobileBackgroundImage);
+      } else {
+        setMobileUrlInput('');
+      }
+    }
+  }, [activeSlideIndex, slides.length]);
 
   useEffect(() => {
     let isMounted = true;
@@ -100,7 +136,7 @@ export const TagBannerEditorModal: React.FC<TagBannerEditorModalProps> = ({
           if (isMounted) setResolvedDesktopImg(url && url.trim() !== '' ? url : undefined);
         });
       } else {
-        setResolvedDesktopImg(currentSlide.backgroundImage);
+        setResolvedDesktopImg(getOptimizedImageUrl(currentSlide.backgroundImage, 1600));
       }
     } else {
       setResolvedDesktopImg(undefined);
@@ -112,7 +148,7 @@ export const TagBannerEditorModal: React.FC<TagBannerEditorModalProps> = ({
           if (isMounted) setResolvedMobileImg(url && url.trim() !== '' ? url : undefined);
         });
       } else {
-        setResolvedMobileImg(currentSlide.mobileBackgroundImage);
+        setResolvedMobileImg(getOptimizedImageUrl(currentSlide.mobileBackgroundImage, 1280));
       }
     } else {
       setResolvedMobileImg(undefined);
@@ -186,22 +222,33 @@ export const TagBannerEditorModal: React.FC<TagBannerEditorModalProps> = ({
     const file = e.target.files?.[0];
     if (!file) return;
 
+    if (isMobile) setIsUploadingMobile(true);
+    else setIsUploadingDesktop(true);
+
     try {
-      // High-efficiency web compression (1920x1080 for desktop, 1080x1080 for mobile)
-      const compressedBase64 = await compressImage(file, isMobile ? 1080 : 1920, isMobile ? 1080 : 1080, 0.85);
+      // High-efficiency web compression (2048x1200 for desktop, 1280x720 for mobile 16:9 HD)
+      const compressedBase64 = await compressImage(
+        file,
+        isMobile ? 1280 : 2048,
+        isMobile ? 720 : 1200,
+        0.92
+      );
       if (compressedBase64) {
         const mediaId = `tag_bg_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
         const mediaRef = await saveOriginalImageMedia(mediaId, compressedBase64);
         
         if (isMobile) {
           setResolvedMobileImg(compressedBase64);
+          setMobileUrlInput('');
           updateCurrentSlide({
             mobileBackgroundImage: mediaRef,
+            mobileHeight: currentSlide?.mobileHeight === 'custom' ? currentSlide.mobileHeight : 'hd_16_9',
             gradientTheme: 'none',
             backgroundMode: 'image',
           });
         } else {
           setResolvedDesktopImg(compressedBase64);
+          setDesktopUrlInput('');
           updateCurrentSlide({
             backgroundImage: mediaRef,
             gradientTheme: 'none',
@@ -211,14 +258,118 @@ export const TagBannerEditorModal: React.FC<TagBannerEditorModalProps> = ({
       }
     } catch (err) {
       console.error('Error handling banner image upload:', err);
+    } finally {
+      if (isMobile) setIsUploadingMobile(false);
+      else setIsUploadingDesktop(false);
+      // Reset input value so re-selecting same file works
+      e.target.value = '';
+    }
+  };
+
+  const handleApplyImageUrl = (inputUrl: string, isMobile: boolean = false) => {
+    const trimmed = inputUrl.trim();
+    if (isMobile) setMobileUrlInput(trimmed);
+    else setDesktopUrlInput(trimmed);
+
+    if (!trimmed) {
+      if (isMobile) {
+        setResolvedMobileImg(undefined);
+        updateCurrentSlide({ mobileBackgroundImage: undefined });
+      } else {
+        setResolvedDesktopImg(undefined);
+        updateCurrentSlide({ backgroundImage: undefined });
+      }
+      return;
+    }
+
+    // Convert Google Drive sharing link if provided to ultra-fast CDN streaming endpoint
+    let finalUrl = trimmed;
+    const driveId = extractGoogleDriveFileId(trimmed);
+    if (driveId) {
+      finalUrl = isMobile
+        ? `https://drive.google.com/thumbnail?id=${driveId}&sz=w1280`
+        : `https://drive.google.com/thumbnail?id=${driveId}&sz=w1600`;
+    }
+
+    if (isMobile) {
+      setResolvedMobileImg(finalUrl);
+      updateCurrentSlide({
+        mobileBackgroundImage: finalUrl,
+        mobileHeight: currentSlide?.mobileHeight === 'custom' ? currentSlide.mobileHeight : 'hd_16_9',
+        gradientTheme: 'none',
+        backgroundMode: 'image',
+      });
+    } else {
+      setResolvedDesktopImg(finalUrl);
+      updateCurrentSlide({
+        backgroundImage: finalUrl,
+        gradientTheme: 'none',
+        backgroundMode: 'image',
+      });
+    }
+  };
+
+  const handleRemoveImage = (isMobile: boolean = false) => {
+    if (isMobile) {
+      setResolvedMobileImg(undefined);
+      setMobileUrlInput('');
+      updateCurrentSlide({ mobileBackgroundImage: undefined });
+    } else {
+      setResolvedDesktopImg(undefined);
+      setDesktopUrlInput('');
+      updateCurrentSlide({ backgroundImage: undefined });
     }
   };
 
   const handleSave = async () => {
     setIsSaving(true);
     try {
+      // Auto-commit any pending URL changes before saving to prevent lost changes
+      const currentSlidesCopy = [...slides];
+      const idx = activeSlideIndex < currentSlidesCopy.length ? activeSlideIndex : 0;
+      if (currentSlidesCopy[idx]) {
+        let slideUpdated = false;
+        const currentSlideObj = { ...currentSlidesCopy[idx] };
+
+        if (desktopUrlInput && desktopUrlInput.trim() !== '') {
+          const trimmedDesk = desktopUrlInput.trim();
+          let finalDeskUrl = trimmedDesk;
+          const driveId = extractGoogleDriveFileId(trimmedDesk);
+          if (driveId) {
+            finalDeskUrl = `https://drive.google.com/thumbnail?id=${driveId}&sz=w1600`;
+          }
+          if (currentSlideObj.backgroundImage !== finalDeskUrl) {
+            currentSlideObj.backgroundImage = finalDeskUrl;
+            currentSlideObj.gradientTheme = 'none';
+            currentSlideObj.backgroundMode = 'image';
+            slideUpdated = true;
+          }
+        }
+
+        if (mobileUrlInput && mobileUrlInput.trim() !== '') {
+          const trimmedMob = mobileUrlInput.trim();
+          let finalMobUrl = trimmedMob;
+          const driveId = extractGoogleDriveFileId(trimmedMob);
+          if (driveId) {
+            finalMobUrl = `https://drive.google.com/thumbnail?id=${driveId}&sz=w1280`;
+          }
+          if (currentSlideObj.mobileBackgroundImage !== finalMobUrl) {
+            currentSlideObj.mobileBackgroundImage = finalMobUrl;
+            currentSlideObj.mobileHeight = currentSlideObj.mobileHeight === 'custom' ? currentSlideObj.mobileHeight : 'hd_16_9';
+            currentSlideObj.gradientTheme = 'none';
+            currentSlideObj.backgroundMode = 'image';
+            slideUpdated = true;
+          }
+        }
+
+        if (slideUpdated) {
+          currentSlidesCopy[idx] = currentSlideObj;
+          setSlides(currentSlidesCopy);
+        }
+      }
+
       const tagKey = selectedTag.trim().toLowerCase();
-      await onSaveBanner(tagKey, slides);
+      await onSaveBanner(tagKey, currentSlidesCopy);
       setToastMessage('Banner configuration saved permanently!');
       setTimeout(() => {
         setToastMessage(null);
@@ -458,6 +609,8 @@ export const TagBannerEditorModal: React.FC<TagBannerEditorModalProps> = ({
                         alt="Slide Background"
                         className="absolute inset-0 w-full h-full object-cover pointer-events-none"
                         style={{ zIndex: 0 }}
+                        referrerPolicy="no-referrer"
+                        onError={(e) => handleImageError(e, currentSlide.backgroundImage || resolvedDesktopImg)}
                       />
                     )}
 
@@ -560,25 +713,38 @@ export const TagBannerEditorModal: React.FC<TagBannerEditorModalProps> = ({
                     </div>
                   </div>
                 ) : (
-                  <div className="p-3 bg-slate-900 rounded-3xl border-4 border-slate-700 max-w-[340px] mx-auto shadow-2xl">
+                  <div className="p-3 bg-slate-900 rounded-3xl border-4 border-slate-700 max-w-[360px] mx-auto shadow-2xl">
+                    <div className="flex items-center justify-between px-1 pb-2 text-[11px] font-bold text-slate-300">
+                      <span className="flex items-center gap-1.5">
+                        <Smartphone className="w-3.5 h-3.5 text-sky-400" />
+                        Mobile Phone Screen
+                      </span>
+                      <span className="bg-sky-500/20 text-sky-300 px-2 py-0.5 rounded-full border border-sky-400/30 font-mono text-[10px]">
+                        1280 × 720 (16:9 HD)
+                      </span>
+                    </div>
                     <div
-                      className={`relative rounded-2xl overflow-hidden text-white transition-all border border-slate-700 flex flex-col ${
+                      className={`relative rounded-2xl overflow-hidden text-white transition-all border border-slate-700 flex flex-col w-full ${
                         (resolvedMobileImg || resolvedDesktopImg || currentSlide.mobileBackgroundImage || currentSlide.backgroundImage)
                           ? 'bg-slate-950'
                           : currentSlide.gradientTheme === 'none'
                           ? 'bg-slate-900'
                           : `bg-gradient-to-r ${currentSlide.gradientTheme || 'from-rose-600 via-red-600 to-amber-600'}`
+                      } ${
+                        currentSlide.mobileHeight === 'compact'
+                          ? 'min-h-[130px]'
+                          : currentSlide.mobileHeight === 'tall'
+                          ? 'min-h-[280px]'
+                          : currentSlide.mobileHeight === 'extra_tall'
+                          ? 'min-h-[360px]'
+                          : currentSlide.mobileHeight === 'custom' && currentSlide.mobileCustomHeight
+                          ? ''
+                          : 'aspect-[16/9]'
                       }`}
                       style={{
-                        minHeight: currentSlide.mobileHeight === 'custom' && currentSlide.mobileCustomHeight
-                          ? `${currentSlide.mobileCustomHeight}px`
-                          : currentSlide.mobileHeight === 'compact'
-                          ? '130px'
-                          : currentSlide.mobileHeight === 'tall'
-                          ? '280px'
-                          : currentSlide.mobileHeight === 'extra_tall'
-                          ? '360px'
-                          : '200px'
+                        ...(currentSlide.mobileHeight === 'custom' && currentSlide.mobileCustomHeight
+                          ? { minHeight: `${currentSlide.mobileCustomHeight}px` }
+                          : {})
                       }}
                     >
                       {/* Mobile Background Image or Fallback */}
@@ -588,6 +754,8 @@ export const TagBannerEditorModal: React.FC<TagBannerEditorModalProps> = ({
                           alt="Mobile Slide Background"
                           className="absolute inset-0 w-full h-full object-cover pointer-events-none"
                           style={{ zIndex: 0 }}
+                          referrerPolicy="no-referrer"
+                          onError={(e) => handleImageError(e, currentSlide.mobileBackgroundImage || resolvedMobileImg)}
                         />
                       )}
 
@@ -933,7 +1101,7 @@ export const TagBannerEditorModal: React.FC<TagBannerEditorModalProps> = ({
                 </div>
               </div>
 
-              {/* Dual Image Uploads (Desktop & Mobile) */}
+              {/* Dual Image Uploads (Desktop & Mobile) - Supports Device Upload, Google Drive, & Direct URLs */}
               <div className="space-y-3 bg-white p-3.5 rounded-2xl border border-slate-200">
                 <div className="flex items-center justify-between">
                   <label className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
@@ -950,86 +1118,332 @@ export const TagBannerEditorModal: React.FC<TagBannerEditorModalProps> = ({
                           backgroundMode: 'gradient',
                           gradientTheme: 'from-rose-600 via-red-600 to-amber-600',
                         });
+                        setResolvedDesktopImg(undefined);
+                        setResolvedMobileImg(undefined);
                       }}
-                      className="text-[10px] text-rose-600 font-bold hover:underline cursor-pointer"
+                      className="text-[10px] text-rose-600 font-bold hover:underline cursor-pointer flex items-center gap-1"
                     >
-                      Clear All Images
+                      <Trash2 className="w-3 h-3" />
+                      <span>Clear All Images</span>
                     </button>
                   )}
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {/* Desktop Image */}
-                  <div className="p-2.5 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-3.5">
+                  {/* Desktop Image Box */}
+                  <div className="p-3 bg-slate-50/90 rounded-xl border border-slate-200 space-y-2.5">
                     <div className="flex items-center justify-between">
-                      <span className="text-[11px] font-bold text-slate-800 flex items-center gap-1">
+                      <span className="text-[11px] font-bold text-slate-800 flex items-center gap-1.5">
                         <Monitor className="w-3.5 h-3.5 text-slate-700" />
-                        Desktop Image
+                        <span>Desktop Hero Image</span>
                       </span>
                       {currentSlide.backgroundImage && (
                         <button
                           type="button"
-                          onClick={() => updateCurrentSlide({ backgroundImage: undefined })}
-                          className="text-[10px] text-rose-600 font-bold hover:underline cursor-pointer"
+                          onClick={() => handleRemoveImage(false)}
+                          className="text-[10px] text-rose-600 font-bold hover:underline cursor-pointer flex items-center gap-1"
                         >
-                          Remove
+                          <Trash2 className="w-3 h-3" />
+                          <span>Remove</span>
                         </button>
                       )}
                     </div>
-                    <label className="w-full py-1.5 px-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer transition-colors shadow-xs">
-                      <Upload className="w-3.5 h-3.5" />
-                      <span>{currentSlide.backgroundImage ? 'Change Image' : 'Upload Desktop Image'}</span>
-                      <input
-                        type="file"
-                        accept="image/*"
-                        onChange={(e) => handleImageUpload(e, false)}
-                        className="hidden"
-                      />
-                    </label>
+
+                    {/* Device Upload Button */}
+                    <div>
+                      <label
+                        className={`w-full py-2 px-3 rounded-lg text-white font-semibold text-xs flex items-center justify-center gap-2 cursor-pointer transition-all shadow-2xs ${
+                          isUploadingDesktop
+                            ? 'bg-slate-700 opacity-80 cursor-wait'
+                            : 'bg-slate-900 hover:bg-slate-800 active:scale-[0.99]'
+                        }`}
+                      >
+                        <Upload className="w-3.5 h-3.5 shrink-0" />
+                        <span>
+                          {isUploadingDesktop
+                            ? 'Uploading & Processing HD...'
+                            : currentSlide.backgroundImage
+                            ? 'Change Device Photo'
+                            : 'Upload from Device (PC/Phone)'}
+                        </span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          disabled={isUploadingDesktop}
+                          onChange={(e) => handleImageUpload(e, false)}
+                          className="hidden"
+                        />
+                      </label>
+                    </div>
+
+                    {/* Divider with 'OR' */}
+                    <div className="relative flex items-center justify-center my-0.5">
+                      <div className="border-t border-slate-200 w-full" />
+                      <span className="bg-slate-50/90 px-2 text-[9px] font-bold text-slate-400 uppercase tracking-wider absolute">
+                        or Google Drive / Direct URL
+                      </span>
+                    </div>
+
+                    {/* Google Drive or Direct URL Input */}
+                    <div className="space-y-1.5">
+                      <div className="flex items-center gap-1.5">
+                        <div className="relative flex-1 flex items-center">
+                          <LinkIcon className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 pointer-events-none shrink-0" />
+                          <input
+                            type="url"
+                            placeholder="Paste Google Drive or image URL..."
+                            value={desktopUrlInput}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setDesktopUrlInput(val);
+                              if (val.includes('drive.google.com') || val.startsWith('http://') || val.startsWith('https://')) {
+                                handleApplyImageUrl(val, false);
+                              }
+                            }}
+                            onBlur={() => handleApplyImageUrl(desktopUrlInput, false)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault();
+                                handleApplyImageUrl(desktopUrlInput, false);
+                              }
+                            }}
+                            className="w-full pl-8 pr-2 py-1.5 rounded-lg border border-slate-300 text-xs font-mono text-slate-900 bg-white focus:outline-none focus:ring-1.5 focus:ring-sky-500 focus:border-sky-500 shadow-2xs placeholder:text-slate-400"
+                          />
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleApplyImageUrl(desktopUrlInput, false)}
+                          className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-900 text-white rounded-lg text-xs font-bold shrink-0 transition-colors shadow-2xs cursor-pointer"
+                        >
+                          Set Image
+                        </button>
+                      </div>
+
+                      {/* Source Type & Drive Badge */}
+                      {extractGoogleDriveFileId(desktopUrlInput) ? (
+                        <div className="flex items-center gap-1.5 pt-0.5">
+                          <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-md">
+                            <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                            Google Drive (ID: {extractGoogleDriveFileId(desktopUrlInput)?.slice(0, 10)}...) - HD Ready
+                          </span>
+                        </div>
+                      ) : currentSlide.backgroundImage ? (
+                        <div className="flex items-center gap-1.5 pt-0.5">
+                          {currentSlide.backgroundImage.startsWith('media://') ? (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-purple-700 bg-purple-50 border border-purple-200 px-2 py-0.5 rounded-md">
+                              <CheckCircle2 className="w-3 h-3 text-purple-600" />
+                              Device Uploaded (Stored in DB)
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-sky-800 bg-sky-50 border border-sky-200 px-2 py-0.5 rounded-md">
+                              <CheckCircle2 className="w-3 h-3 text-sky-600" />
+                              Web Photo URL
+                            </span>
+                          )}
+                        </div>
+                      ) : null}
+                    </div>
+
+                    {/* Image Preview Box */}
                     {resolvedDesktopImg ? (
-                      <div className="relative h-14 rounded-lg overflow-hidden border border-slate-200">
-                        <img src={resolvedDesktopImg} alt="Desktop preview" className="w-full h-full object-cover" />
+                      <div className="relative h-20 w-full rounded-lg overflow-hidden border border-slate-300 bg-slate-900 group">
+                        <img
+                          src={resolvedDesktopImg}
+                          alt="Desktop preview"
+                          className="w-full h-full object-cover"
+                          referrerPolicy="no-referrer"
+                          onError={(e) => handleImageError(e, currentSlide.backgroundImage || resolvedDesktopImg)}
+                        />
+                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+                          <span className="text-[10px] text-white font-medium bg-black/70 px-2 py-0.5 rounded">
+                            Desktop HD Preview
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveImage(false)}
+                            className="text-[10px] text-rose-200 hover:text-white font-bold bg-rose-600/80 px-2 py-0.5 rounded cursor-pointer"
+                          >
+                            Remove
+                          </button>
+                        </div>
+                        <span className="absolute bottom-1 right-1 px-1.5 py-0.5 rounded bg-black/80 text-white text-[9px] font-bold backdrop-blur-xs">
+                          Desktop View
+                        </span>
                       </div>
                     ) : (
-                      <p className="text-[10px] text-slate-400 italic">No desktop image uploaded.</p>
+                      <p className="text-[10px] text-slate-400 italic">No desktop image uploaded or linked.</p>
                     )}
+
+                    <p className="text-[10px] text-slate-500">
+                      📐 Recommended: 1920x600 px or 16:9 widescreen HD.
+                    </p>
                   </div>
 
-                  {/* Mobile Image */}
-                  <div className="p-2.5 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
+                  {/* Mobile Image Box */}
+                  <div className="p-3 bg-slate-50/90 rounded-xl border border-slate-200 space-y-2.5">
                     <div className="flex items-center justify-between">
-                      <span className="text-[11px] font-bold text-slate-800 flex items-center gap-1">
+                      <span className="text-[11px] font-bold text-slate-800 flex items-center gap-1.5">
                         <Smartphone className="w-3.5 h-3.5 text-sky-600" />
-                        Mobile Image
+                        <span>Mobile Hero Image</span>
                       </span>
                       {currentSlide.mobileBackgroundImage && (
                         <button
                           type="button"
-                          onClick={() => updateCurrentSlide({ mobileBackgroundImage: undefined })}
-                          className="text-[10px] text-rose-600 font-bold hover:underline cursor-pointer"
+                          onClick={() => handleRemoveImage(true)}
+                          className="text-[10px] text-rose-600 font-bold hover:underline cursor-pointer flex items-center gap-1"
                         >
-                          Remove
+                          <Trash2 className="w-3 h-3" />
+                          <span>Remove</span>
                         </button>
                       )}
                     </div>
-                    <label className="w-full py-1.5 px-3 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer transition-colors shadow-xs">
-                      <Upload className="w-3.5 h-3.5" />
-                      <span>{currentSlide.mobileBackgroundImage ? 'Change Image' : 'Upload Mobile Image'}</span>
-                      <input
-                        type="file"
-                        accept="image/*"
-                        onChange={(e) => handleImageUpload(e, true)}
-                        className="hidden"
-                      />
-                    </label>
+
+                    {/* Device Upload Button */}
+                    <div>
+                      <label
+                        className={`w-full py-2 px-3 rounded-lg text-white font-semibold text-xs flex items-center justify-center gap-2 cursor-pointer transition-all shadow-2xs ${
+                          isUploadingMobile
+                            ? 'bg-sky-700 opacity-80 cursor-wait'
+                            : 'bg-sky-600 hover:bg-sky-700 active:scale-[0.99]'
+                        }`}
+                      >
+                        <Upload className="w-3.5 h-3.5 shrink-0" />
+                        <span>
+                          {isUploadingMobile
+                            ? 'Processing 1280x720 HD...'
+                            : currentSlide.mobileBackgroundImage
+                            ? 'Change Mobile Photo (1280x720)'
+                            : 'Upload Mobile Photo (1280x720)'}
+                        </span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          disabled={isUploadingMobile}
+                          onChange={(e) => handleImageUpload(e, true)}
+                          className="hidden"
+                        />
+                      </label>
+                    </div>
+
+                    {/* Divider with 'OR' */}
+                    <div className="relative flex items-center justify-center my-0.5">
+                      <div className="border-t border-slate-200 w-full" />
+                      <span className="bg-slate-50/90 px-2 text-[9px] font-bold text-slate-400 uppercase tracking-wider absolute">
+                        or Google Drive / Direct URL
+                      </span>
+                    </div>
+
+                    {/* Google Drive or Direct URL Input */}
+                    <div className="space-y-1.5">
+                      <div className="flex items-center gap-1.5">
+                        <div className="relative flex-1 flex items-center">
+                          <LinkIcon className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 pointer-events-none shrink-0" />
+                          <input
+                            type="url"
+                            placeholder="Paste Google Drive or image URL (1280x720)..."
+                            value={mobileUrlInput}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setMobileUrlInput(val);
+                              if (val.includes('drive.google.com') || val.startsWith('http://') || val.startsWith('https://')) {
+                                handleApplyImageUrl(val, true);
+                              }
+                            }}
+                            onBlur={() => handleApplyImageUrl(mobileUrlInput, true)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault();
+                                handleApplyImageUrl(mobileUrlInput, true);
+                              }
+                            }}
+                            className="w-full pl-8 pr-2 py-1.5 rounded-lg border border-slate-300 text-xs font-mono text-slate-900 bg-white focus:outline-none focus:ring-1.5 focus:ring-sky-500 focus:border-sky-500 shadow-2xs placeholder:text-slate-400"
+                          />
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleApplyImageUrl(mobileUrlInput, true)}
+                          className="px-2.5 py-1.5 bg-sky-600 hover:bg-sky-700 text-white rounded-lg text-xs font-bold shrink-0 transition-colors shadow-2xs cursor-pointer"
+                        >
+                          Set Image
+                        </button>
+                      </div>
+
+                      {/* Source Type & Drive Badge */}
+                      {extractGoogleDriveFileId(mobileUrlInput) ? (
+                        <div className="flex items-center gap-1.5 pt-0.5">
+                          <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-md">
+                            <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                            Google Drive (ID: {extractGoogleDriveFileId(mobileUrlInput)?.slice(0, 10)}...) - 1280x720 Ready
+                          </span>
+                        </div>
+                      ) : currentSlide.mobileBackgroundImage ? (
+                        <div className="flex items-center gap-1.5 pt-0.5">
+                          {currentSlide.mobileBackgroundImage.startsWith('media://') ? (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-purple-700 bg-purple-50 border border-purple-200 px-2 py-0.5 rounded-md">
+                              <CheckCircle2 className="w-3 h-3 text-purple-600" />
+                              Device Uploaded (1280x720 HD Stored)
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-sky-800 bg-sky-50 border border-sky-200 px-2 py-0.5 rounded-md">
+                              <CheckCircle2 className="w-3 h-3 text-sky-600" />
+                              Web Photo URL
+                            </span>
+                          )}
+                        </div>
+                      ) : null}
+                    </div>
+
+                    {/* Image Preview Box */}
                     {resolvedMobileImg ? (
-                      <div className="relative h-14 rounded-lg overflow-hidden border border-slate-200">
-                        <img src={resolvedMobileImg} alt="Mobile preview" className="w-full h-full object-cover" />
+                      <div className="relative h-20 w-full rounded-lg overflow-hidden border border-slate-300 bg-slate-900 group">
+                        <img
+                          src={resolvedMobileImg}
+                          alt="Mobile preview"
+                          className="w-full h-full object-cover"
+                          referrerPolicy="no-referrer"
+                          onError={(e) => handleImageError(e, currentSlide.mobileBackgroundImage || resolvedMobileImg)}
+                        />
+                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+                          <span className="text-[10px] text-white font-medium bg-black/70 px-2 py-0.5 rounded">
+                            1280×720 Mobile Preview
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveImage(true)}
+                            className="text-[10px] text-rose-200 hover:text-white font-bold bg-rose-600/80 px-2 py-0.5 rounded cursor-pointer"
+                          >
+                            Remove
+                          </button>
+                        </div>
+                        <span className="absolute bottom-1 right-1 px-1.5 py-0.5 rounded bg-sky-700/90 text-white text-[9px] font-bold backdrop-blur-xs font-mono">
+                          1280 × 720 (16:9)
+                        </span>
                       </div>
                     ) : (
                       <p className="text-[10px] text-slate-400 italic">Falls back to desktop image if empty.</p>
                     )}
+
+                    <p className="text-[10px] text-sky-700 font-medium">
+                      📱 <strong>Recommended Mobile Size: 1280 × 720 px</strong> (16:9 Widescreen HD).
+                    </p>
                   </div>
+                </div>
+
+                {/* Helpful guidance banner */}
+                <div className="p-2.5 rounded-xl bg-sky-50/80 border border-sky-100 text-[11px] text-sky-950 space-y-1">
+                  <div className="font-bold flex items-center gap-1.5 text-sky-900">
+                    <Sparkles className="w-3.5 h-3.5 text-sky-600 shrink-0" />
+                    <span>Photo Source Options & Quality Assurance</span>
+                  </div>
+                  <p className="text-slate-600 leading-relaxed text-[10.5px]">
+                    • <strong>Google Drive Links</strong>: গুগল ড্রাইভ থেকে ফটোর লিঙ্ক দিয়ে ব্যবহার করতে ড্রাইভের শেয়ার অপশন &apos;Anyone with the link can view&apos; করুন। লিঙ্ক পেস্ট করলেই তা স্বয়ংক্রিয়ভাবে আল্ট্রা-ফাস্ট গুগল CDN স্ট্রিমে কনভার্ট হবে।
+                  </p>
+                  <p className="text-slate-600 leading-relaxed text-[10.5px]">
+                    • <strong>Device File Upload</strong>: ডিভাইস থেকে আপলোডকৃত ছবি ফুল এইচডি কোয়ালিটিতে ক্লাউড ডাটাবেজে স্থায়ীভাবে সেভ থাকে, যা রিলোড বা যেকোনো ডিভাইসে হারিয়ে যাবে না।
+                  </p>
+                  <p className="text-slate-600 leading-relaxed text-[10.5px]">
+                    • <strong>Direct Image URL</strong>: যেকোনো পাবলিক ডিরেক্ট ওয়েব ইমেজ লিঙ্ক (Imgur, Unsplash, Cloudinary ইত্যাদি) এখানে সরাসরি ব্যবহার করতে পারবেন।
+                  </p>
                 </div>
               </div>
 
@@ -1183,10 +1597,11 @@ export const TagBannerEditorModal: React.FC<TagBannerEditorModalProps> = ({
                         : (currentSlide.mobileHeight || 'standard').toUpperCase()}
                     </span>
                   </div>
-                  <div className="grid grid-cols-5 gap-1">
+                  <div className="grid grid-cols-3 sm:grid-cols-6 gap-1">
                     {[
-                      { id: 'compact', label: 'Compact' },
+                      { id: 'hd_16_9', label: '1280×720 (16:9)' },
                       { id: 'standard', label: 'Standard' },
+                      { id: 'compact', label: 'Compact' },
                       { id: 'tall', label: 'Tall' },
                       { id: 'extra_tall', label: 'Extra Tall' },
                       { id: 'custom', label: 'Custom' },
@@ -1195,9 +1610,9 @@ export const TagBannerEditorModal: React.FC<TagBannerEditorModalProps> = ({
                         key={opt.id}
                         type="button"
                         onClick={() => updateCurrentSlide({ mobileHeight: opt.id as any })}
-                        className={`py-1 rounded-lg text-[10px] font-bold transition-all cursor-pointer text-center ${
-                          (currentSlide.mobileHeight || 'standard') === opt.id
-                            ? 'bg-sky-600 text-white shadow-xs'
+                        className={`py-1.5 px-1 rounded-lg text-[10px] font-bold transition-all cursor-pointer text-center ${
+                          (currentSlide.mobileHeight || 'hd_16_9') === opt.id
+                            ? 'bg-sky-600 text-white shadow-xs ring-1 ring-sky-500'
                             : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
                         }`}
                       >

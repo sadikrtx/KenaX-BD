@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Flame, ArrowRight, ShieldCheck, Truck, Sparkles } from 'lucide-react';
 import { FlashSaleBannerSettings } from '../types';
 import { resolveOriginalImageMedia } from '../lib/firebase';
+import { useLanguage } from '../context/LanguageContext';
 
 interface FlashSaleBannerProps {
   settings?: FlashSaleBannerSettings;
@@ -12,17 +13,19 @@ export const FlashSaleBanner: React.FC<FlashSaleBannerProps> = ({
   settings,
   onNavigateToShop,
 }) => {
+  const { t } = useLanguage();
+
   if (settings && settings.enabled === false) {
     return null;
   }
 
-  const badge = settings?.badge || 'MEGA GADGET FEST';
-  const discount = settings?.discount || 'UP TO 40% OFF';
+  const badge = settings?.badge || t('মেগা গ্যাজেট ফেস্ট', 'MEGA GADGET FEST');
+  const discount = settings?.discount || t('সর্বোচ্চ ৪০% পর্যন্ত ছাড়', 'UP TO 40% OFF');
   const title =
-    settings?.title || 'Mega Gadget Fest: Up to 40% Off on Premium Gadgets!';
+    settings?.title || t('মেগা গ্যাজেট ফেস্ট: সেরা গ্যাজেটে পাচ্ছেন সর্বোচ্চ ৪০% ছাড়!', 'Mega Gadget Fest: Up to 40% Off on Premium Gadgets!');
   const subtitle =
     settings?.subtitle ||
-    'Grab authentic smartwatches, wireless earbuds, smart accessories, and lifestyle essentials with verified Cash on Delivery nationwide.';
+    t('স্মার্টওয়াচ, ওয়্যারলেস ইয়ারবাডস এবং আকর্ষণীয় এক্সেসরিজে উপভোগ করুন দেশব্যাপী ক্যাশ অন ডেলিভারি।', 'Grab authentic smartwatches, wireless earbuds, smart accessories, and lifestyle essentials with verified Cash on Delivery nationwide.');
   const buttonText = settings?.buttonText || 'Shop Flash Sale Deals';
   const rawBannerImage =
     settings?.image && settings.image.trim() !== ''
@@ -56,6 +59,8 @@ export const FlashSaleBanner: React.FC<FlashSaleBannerProps> = ({
             <img
               src={resolvedImage}
               alt={title}
+              loading="lazy"
+              decoding="async"
               className="w-full h-full object-cover object-center opacity-40 scale-105 transition-transform duration-700 hover:scale-100"
               referrerPolicy="no-referrer"
             />
@@ -97,12 +102,12 @@ export const FlashSaleBanner: React.FC<FlashSaleBannerProps> = ({
             <div className="flex flex-wrap items-center gap-4 pt-2 text-xs text-slate-300">
               <div className="flex items-center gap-1.5 bg-slate-900/80 backdrop-blur-xs px-3 py-1.5 rounded-xl border border-slate-700/60">
                 <Truck className="w-3.5 h-3.5 text-sky-400" />
-                <span className="font-semibold">Nationwide Cash on Delivery</span>
+                <span className="font-semibold">{t('সারাদেশে ক্যাশ অন ডেলিভারি', 'Nationwide Cash on Delivery')}</span>
               </div>
 
               <div className="flex items-center gap-1.5 bg-slate-900/80 backdrop-blur-xs px-3 py-1.5 rounded-xl border border-slate-700/60">
                 <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-                <span className="font-semibold">100% Genuine with Warranty</span>
+                <span className="font-semibold">{t('১০০% আসল প্রোডাক্ট ও ওয়ারেন্টি', '100% Genuine with Warranty')}</span>
               </div>
             </div>
 

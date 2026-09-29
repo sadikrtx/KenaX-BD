@@ -33,10 +33,17 @@ import {
   ArrowRight,
   Tag,
   Zap,
+  LogIn,
+  UserPlus,
+  Sun,
+  Moon,
 } from 'lucide-react';
 import { KenaXLogo } from './KenaXLogo';
+import { ThemeToggle } from './ThemeToggle';
 import { UserRole, CustomerRecord, StaffUser, Category, SubCategoryItem, Product, WebsiteSettings } from '../types';
 import { getEffectiveNavItems } from '../data/defaultNavItems';
+import { useLanguage } from '../context/LanguageContext';
+import { useTheme } from '../context/ThemeContext';
 
 interface HeaderProps {
   cartCount: number;
@@ -91,6 +98,44 @@ export const Header: React.FC<HeaderProps> = ({
   siteName,
   siteSettings,
 }) => {
+  const { language, setLanguage, toggleLanguage, t } = useLanguage();
+  const { theme, toggleTheme, isDark } = useTheme();
+
+  const getLocalizedNavLabel = (label: string) => {
+    const trimmed = label.trim();
+    const l = trimmed.toLowerCase();
+
+    // These tags and promotional categories must ALWAYS remain in English:
+    // ALL Products, Flash Sale, HOT, Trending/TRENDING, New Arrivals/Collection, Hot Deals/Deals, Best Sell/Best Sellers
+    if (trimmed === 'ফ্ল্যাশ সেল' || l === 'flash sale') return 'Flash Sale';
+    if (trimmed === 'হট ডিল' || l === 'hot deals' || l === 'deals' || l === 'hot deal' || l === 'hot') return 'Hot Deals';
+    if (trimmed === 'নতুন কালেকশন' || l === 'new arrivals' || l === 'new arrival' || l === 'new collection') return 'New Arrivals';
+    if (l === 'trending') return 'Trending';
+    if (trimmed === 'সেরা বিক্রি' || trimmed === 'বেস্ট সেলার' || l === 'best sell' || l === 'best sellers' || l === 'best seller') return 'Best Sellers';
+    if (trimmed === 'সব পণ্য' || trimmed === 'সকল পণ্য' || l === 'all products') return 'All Products';
+
+    if (
+      l === 'all products' ||
+      l === 'flash sale' ||
+      l === 'hot' ||
+      l === 'hot deals' ||
+      l === 'deals' ||
+      l === 'trending' ||
+      l === 'new arrivals' ||
+      l === 'best sell' ||
+      l === 'best sellers'
+    ) {
+      return label;
+    }
+
+    if (language !== 'bn') return label;
+    if (l === 'home') return 'হোম';
+    if (l === 'shop') return 'শপ';
+    if (l === 'track order' || l === 'track') return 'অর্ডার ট্র্যাক';
+    if (l === 'contact' || l === 'contact us') return 'যোগাযোগ';
+    return label;
+  };
+
   const [isCategoryMenuOpen, setIsCategoryMenuOpen] = useState(false);
   const [isAccountDropdownOpen, setIsAccountDropdownOpen] = useState(false);
   const [isMobileAccountOpen, setIsMobileAccountOpen] = useState(false);
@@ -376,7 +421,7 @@ export const Header: React.FC<HeaderProps> = ({
   return (
     <>
       <header
-        className={`sticky top-0 z-40 bg-white border-b border-slate-200 shadow-xs transition-transform duration-300 ease-in-out ${
+        className={`sticky top-0 z-40 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 shadow-xs transition-transform duration-300 ease-in-out ${
           isHeaderVisible ? 'translate-y-0' : '-translate-y-full md:translate-y-0'
         }`}
       >
@@ -390,7 +435,13 @@ export const Header: React.FC<HeaderProps> = ({
           }}
           className="cursor-pointer transition-transform active:scale-95 shrink-0 py-0.5 sm:py-1"
         >
-          <KenaXLogo size="md" customLogoUrl={customLogoUrl} siteName={siteName} />
+          <KenaXLogo
+            size="md"
+            theme={isDark ? 'dark' : 'light'}
+            customLogoUrl={customLogoUrl}
+            customDarkLogoUrl={siteSettings?.customLogoDark}
+            siteName={siteName}
+          />
         </div>
 
         {/* Desktop Search Bar with Search Button */}
@@ -403,15 +454,15 @@ export const Header: React.FC<HeaderProps> = ({
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search for products, brands and more..."
-              className="w-full pl-4 pr-12 py-2.5 rounded-l-xl border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-sky-500 focus:border-sky-500 text-sm text-slate-800 placeholder-slate-400 shadow-xs"
+              placeholder={t('পণ্য, ব্র্যান্ড বা মডেল খুঁজুন...', 'Search for products, brands and more...')}
+              className="w-full pl-4 pr-12 py-2.5 rounded-l-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800/90 focus:outline-hidden focus:ring-2 focus:ring-sky-500 focus:border-sky-500 text-sm text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 shadow-xs"
             />
             <button
               type="submit"
               className="bg-sky-600 hover:bg-sky-700 active:bg-sky-800 text-white px-6 py-2.5 rounded-r-xl font-medium text-sm transition-colors flex items-center justify-center shrink-0 cursor-pointer shadow-xs"
             >
               <Search className="w-4 h-4 mr-1.5" />
-              <span>Search</span>
+              <span>{t('সার্চ', 'Search')}</span>
             </button>
           </div>
         </form>
@@ -428,17 +479,17 @@ export const Header: React.FC<HeaderProps> = ({
             >
               <button
                 onClick={() => setIsAccountDropdownOpen((prev) => !prev)}
-                className="flex items-center gap-2 p-1.5 sm:px-3 sm:py-2 rounded-xl hover:bg-slate-100 transition-colors text-slate-700 text-xs font-medium cursor-pointer"
+                className="flex items-center gap-2 p-1.5 sm:px-3 sm:py-2 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors text-slate-700 dark:text-slate-200 text-xs font-medium cursor-pointer"
                 aria-expanded={isAccountDropdownOpen}
               >
                 <div className="w-8 h-8 rounded-full bg-sky-600 text-white flex items-center justify-center font-bold text-xs shadow-2xs">
                   {currentCustomer.name.charAt(0).toUpperCase()}
                 </div>
                 <div className="hidden sm:flex flex-col text-left leading-tight">
-                  <span className="text-[10px] text-slate-500">
+                  <span className="text-[10px] text-slate-500 dark:text-slate-400">
                     {currentStaff ? 'Staff Account' : 'Customer Account'}
                   </span>
-                  <span className="text-xs font-semibold text-slate-800 flex items-center">
+                  <span className="text-xs font-semibold text-slate-800 dark:text-slate-100 flex items-center">
                     {currentCustomer.name.split(' ')[0]}
                     <ChevronDown className={`w-3 h-3 ml-0.5 text-slate-400 transition-transform duration-200 ${isAccountDropdownOpen ? 'rotate-180' : ''}`} />
                   </span>
@@ -448,14 +499,14 @@ export const Header: React.FC<HeaderProps> = ({
               {/* Dropdown Menu */}
               {isAccountDropdownOpen && (
                 <div
-                  className="absolute right-0 mt-2 w-60 bg-white rounded-2xl shadow-xl border border-slate-200 py-2 z-50 text-slate-800 animate-in fade-in zoom-in-95 duration-100"
+                  className="absolute right-0 mt-2 w-60 bg-white dark:bg-slate-900 rounded-2xl shadow-xl border border-slate-200 dark:border-slate-800 py-2 z-50 text-slate-800 dark:text-slate-100 animate-in fade-in zoom-in-95 duration-100"
                   onMouseEnter={handleAccountMouseEnter}
                   onMouseLeave={handleAccountMouseLeave}
                 >
-                  <div className="px-4 py-2 border-b border-slate-100">
-                    <p className="text-xs text-slate-500">Signed in as</p>
-                    <p className="text-sm font-bold text-slate-900 truncate">{currentCustomer.name}</p>
-                    <p className="text-[11px] text-sky-600 font-mono truncate">{currentCustomer.email}</p>
+                  <div className="px-4 py-2 border-b border-slate-100 dark:border-slate-800">
+                    <p className="text-xs text-slate-500 dark:text-slate-400">Signed in as</p>
+                    <p className="text-sm font-bold text-slate-900 dark:text-slate-100 truncate">{currentCustomer.name}</p>
+                    <p className="text-[11px] text-sky-600 dark:text-sky-400 font-mono truncate">{currentCustomer.email}</p>
                   </div>
 
                   <div className="py-1">
@@ -465,10 +516,10 @@ export const Header: React.FC<HeaderProps> = ({
                           onNavigate('admin-dashboard');
                           setIsAccountDropdownOpen(false);
                         }}
-                        className="w-full text-left px-4 py-2.5 text-xs font-bold text-sky-700 bg-sky-50 hover:bg-sky-100 flex items-center gap-2 cursor-pointer border-b border-sky-100 mb-1"
+                        className="w-full text-left px-4 py-2.5 text-xs font-bold text-sky-700 dark:text-sky-400 bg-sky-50 dark:bg-sky-950/50 hover:bg-sky-100 dark:hover:bg-sky-900/50 flex items-center gap-2 cursor-pointer border-b border-sky-100 dark:border-sky-900/40 mb-1"
                       >
                         <ShieldCheck className="w-4 h-4 text-sky-600" />
-                        <span>Admin Dashboard</span>
+                        <span>{t('অ্যাডমিন ড্যাশবোর্ড', 'Admin Dashboard')}</span>
                       </button>
                     )}
                     <button
@@ -476,59 +527,59 @@ export const Header: React.FC<HeaderProps> = ({
                         onNavigate('customer-dashboard');
                         setIsAccountDropdownOpen(false);
                       }}
-                      className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-sky-50 hover:text-sky-700 flex items-center gap-2 cursor-pointer font-medium"
+                      className="w-full text-left px-4 py-2 text-sm text-slate-700 dark:text-slate-200 hover:bg-sky-50 dark:hover:bg-slate-800 hover:text-sky-700 dark:hover:text-sky-400 flex items-center gap-2 cursor-pointer font-medium"
                     >
-                      <User className="w-4 h-4 text-sky-600" /> My Account & Orders
+                      <User className="w-4 h-4 text-sky-600" /> {t('আমার অ্যাকাউন্ট ও অর্ডার', 'My Account & Orders')}
                     </button>
                     <button
                       onClick={() => {
                         onNavigate('cart-items');
                         setIsAccountDropdownOpen(false);
                       }}
-                      className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-sky-50 hover:text-sky-700 flex items-center gap-2 cursor-pointer font-medium"
+                      className="w-full text-left px-4 py-2 text-sm text-slate-700 dark:text-slate-200 hover:bg-sky-50 dark:hover:bg-slate-800 hover:text-sky-700 dark:hover:text-sky-400 flex items-center gap-2 cursor-pointer font-medium"
                     >
-                      <ShoppingCart className="w-4 h-4 text-sky-600" /> My Cart Items
+                      <ShoppingCart className="w-4 h-4 text-sky-600" /> {t('আমার কার্ট পণ্য', 'My Cart Items')}
                     </button>
                     <button
                       onClick={() => {
                         onNavigate('saved-addresses');
                         setIsAccountDropdownOpen(false);
                       }}
-                      className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-sky-50 hover:text-sky-700 flex items-center gap-2 cursor-pointer font-medium"
+                      className="w-full text-left px-4 py-2 text-sm text-slate-700 dark:text-slate-200 hover:bg-sky-50 dark:hover:bg-slate-800 hover:text-sky-700 dark:hover:text-sky-400 flex items-center gap-2 cursor-pointer font-medium"
                     >
-                      <MapPin className="w-4 h-4 text-sky-600" /> Saved Addresses
+                      <MapPin className="w-4 h-4 text-sky-600" /> {t('সংরক্ষিত ঠিকানা', 'Saved Addresses')}
                     </button>
                     <button
                       onClick={() => {
                         onOpenWishlist();
                         setIsAccountDropdownOpen(false);
                       }}
-                      className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-sky-50 hover:text-sky-700 flex items-center gap-2 cursor-pointer font-medium"
+                      className="w-full text-left px-4 py-2 text-sm text-slate-700 dark:text-slate-200 hover:bg-sky-50 dark:hover:bg-slate-800 hover:text-sky-700 dark:hover:text-sky-400 flex items-center gap-2 cursor-pointer font-medium"
                     >
-                      <Heart className="w-4 h-4 text-rose-500" /> My Wishlist
+                      <Heart className="w-4 h-4 text-rose-500" /> {t('পছন্দের তালিকা', 'My Wishlist')}
                     </button>
                     <button
                       onClick={() => {
                         onNavigate('track');
                         setIsAccountDropdownOpen(false);
                       }}
-                      className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-sky-50 hover:text-sky-700 flex items-center gap-2 cursor-pointer font-medium"
+                      className="w-full text-left px-4 py-2 text-sm text-slate-700 dark:text-slate-200 hover:bg-sky-50 dark:hover:bg-slate-800 hover:text-sky-700 dark:hover:text-sky-400 flex items-center gap-2 cursor-pointer font-medium"
                     >
-                      <Truck className="w-4 h-4 text-emerald-600" /> Track Live Order
+                      <Truck className="w-4 h-4 text-emerald-600" /> {t('অর্ডার ট্র্যাক করুন', 'Track Live Order')}
                     </button>
                   </div>
 
                   {onCustomerLogout && (
-                    <div className="pt-1 border-t border-slate-100">
+                    <div className="pt-1 border-t border-slate-100 dark:border-slate-800">
                       <button
                         onClick={() => {
                           onCustomerLogout();
                           if (onStaffLogout) onStaffLogout();
                           setIsAccountDropdownOpen(false);
                         }}
-                        className="w-full text-left px-4 py-2 text-xs font-bold text-rose-600 hover:bg-rose-50 flex items-center gap-2 cursor-pointer"
+                        className="w-full text-left px-4 py-2 text-xs font-bold text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/30 flex items-center gap-2 cursor-pointer"
                       >
-                        <LogOut className="w-3.5 h-3.5" /> Sign Out
+                        <LogOut className="w-3.5 h-3.5" /> {t('সাইন আউট', 'Sign Out')}
                       </button>
                     </div>
                   )}
@@ -536,21 +587,33 @@ export const Header: React.FC<HeaderProps> = ({
               )}
             </div>
           ) : (
-            /* Visitor Login / Register Button (Right Beside Cart) */
-            <button
-              onClick={() => onOpenCustomerAuth?.('register')}
-              className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-sky-50 hover:bg-sky-100 text-sky-700 font-bold text-xs border border-sky-200 transition-colors cursor-pointer shadow-2xs"
-              title="Sign In or Register New Customer Account"
-            >
-              <User className="w-4 h-4 text-sky-600 shrink-0" />
-              <span>Login / Register</span>
-            </button>
+            /* Visitor Login / Register Buttons (Right Beside Cart) */
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => onOpenCustomerAuth?.('login')}
+                className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-bold text-xs border border-slate-200 dark:border-slate-700 transition-colors cursor-pointer shadow-2xs active:scale-95"
+                title={t('লগইন করুন', 'Sign In')}
+              >
+                <LogIn className="w-3.5 h-3.5 text-slate-600 dark:text-slate-300 shrink-0" />
+                <span>{t('লগইন', 'Login')}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => onOpenCustomerAuth?.('register')}
+                className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs transition-colors cursor-pointer shadow-2xs active:scale-95"
+                title={t('নতুন অ্যাকাউন্ট তৈরি করুন', 'Register New Account')}
+              >
+                <UserPlus className="w-3.5 h-3.5 text-sky-100 shrink-0" />
+                <span>{t('রেজিস্টার', 'Register')}</span>
+              </button>
+            </div>
           )}
 
           {/* Desktop Wishlist Button */}
           <button
             onClick={onOpenWishlist}
-            className="relative p-2 rounded-xl text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
+            className="relative p-2 rounded-xl text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
             aria-label="Wishlist"
           >
             <Heart className="w-5 h-5" />
@@ -564,7 +627,7 @@ export const Header: React.FC<HeaderProps> = ({
           {/* Desktop Cart Button */}
           <button
             onClick={onOpenCart}
-            className="flex items-center gap-2 px-3 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-medium text-xs transition-colors cursor-pointer shadow-xs"
+            className="flex items-center gap-2 px-3 py-2 rounded-xl bg-slate-900 dark:bg-slate-800 hover:bg-slate-800 dark:hover:bg-slate-700 text-white font-medium text-xs transition-colors cursor-pointer shadow-xs border border-transparent dark:border-slate-700"
           >
             <div className="relative">
               <ShoppingCart className="w-4 h-4" />
@@ -574,12 +637,50 @@ export const Header: React.FC<HeaderProps> = ({
                 </span>
               )}
             </div>
-            <span className="hidden sm:inline font-semibold">Cart</span>
+            <span className="hidden sm:inline font-semibold">{t('কার্ট', 'Cart')}</span>
           </button>
+
+          {/* Desktop Dark Mode Theme Toggle */}
+          <ThemeToggle variant="compact" />
+
+          {/* Language Switcher (বাংলা / EN) */}
+          <div className="flex items-center p-0.5 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-bold shrink-0 ml-0.5">
+            <button
+              type="button"
+              onClick={() => setLanguage('bn')}
+              className={`px-2 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                language === 'bn' ? 'bg-sky-600 text-white shadow-2xs' : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              বাংলা
+            </button>
+            <button
+              type="button"
+              onClick={() => setLanguage('en')}
+              className={`px-2 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                language === 'en' ? 'bg-sky-600 text-white shadow-2xs' : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              EN
+            </button>
+          </div>
         </div>
 
-        {/* Mobile View: Right Actions (Track Order, Wishlist, Account Icon Only) */}
+        {/* Mobile View: Right Actions (Dark Toggle, Language Switcher, Track Order, Wishlist, Account Icon Only) */}
         <div className="md:hidden flex items-center gap-1">
+          {/* Mobile Dark Mode Toggle */}
+          <ThemeToggle variant="mobile" />
+
+          {/* Mobile Language Switcher */}
+          <button
+            type="button"
+            onClick={toggleLanguage}
+            className="px-2 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 active:bg-slate-300 dark:active:bg-slate-600 text-slate-800 dark:text-slate-200 text-[11px] font-bold border border-slate-200 dark:border-slate-700 cursor-pointer transition-colors shrink-0"
+            title="Switch Language"
+          >
+            {language === 'bn' ? 'বাংলা' : 'EN'}
+          </button>
+
           {/* 1. Track Order Button (Beside Wishlist) */}
           <button
             type="button"
@@ -587,18 +688,18 @@ export const Header: React.FC<HeaderProps> = ({
               onNavigate('track');
               window.scrollTo({ top: 0, behavior: 'instant' });
             }}
-            className="p-1.5 sm:p-2 rounded-xl text-slate-900 hover:bg-slate-100 active:scale-90 transition-all cursor-pointer flex items-center justify-center relative"
+            className="p-1.5 sm:p-2 rounded-xl text-slate-900 dark:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800 active:scale-90 transition-all cursor-pointer flex items-center justify-center relative"
             aria-label="Track Your Order"
             title="Track Your Order"
           >
-            <Truck className="w-6 h-6 text-slate-900 stroke-[2.5]" />
+            <Truck className="w-6 h-6 text-slate-900 dark:text-slate-100 stroke-[2.5]" />
           </button>
 
           {/* 2. Wishlist Button */}
           <button
             type="button"
             onClick={onOpenWishlist}
-            className="relative p-2 rounded-xl text-slate-700 hover:bg-slate-100 active:scale-90 transition-all cursor-pointer flex items-center justify-center"
+            className="relative p-2 rounded-xl text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 active:scale-90 transition-all cursor-pointer flex items-center justify-center"
             aria-label="Wishlist"
             title="Wishlist"
           >
@@ -610,37 +711,47 @@ export const Header: React.FC<HeaderProps> = ({
             )}
           </button>
 
-          {/* 3. When Logged Out: Show 'Register' button. When Logged In: Customer Avatar & Menu */}
+          {/* 3. When Logged Out: Show 'Login' & 'Register' buttons. When Logged In: Customer Avatar & Menu */}
           {!currentCustomer ? (
-            <button
-              type="button"
-              onClick={() => onOpenCustomerAuth?.('register')}
-              className="px-3 py-1.5 rounded-xl bg-sky-600 hover:bg-sky-700 active:bg-sky-800 text-white font-bold text-xs tracking-tight shadow-xs active:scale-95 transition-all cursor-pointer flex items-center justify-center shrink-0"
-              title="Register"
-            >
-              <span>Register</span>
-            </button>
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => onOpenCustomerAuth?.('login')}
+                className="px-2 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold text-[11px] tracking-tight border border-slate-200 dark:border-slate-700 transition-all cursor-pointer flex items-center justify-center shrink-0 active:scale-95"
+                title="Login"
+              >
+                <span>{t('লগইন', 'Login')}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => onOpenCustomerAuth?.('register')}
+                className="px-2.5 py-1 rounded-lg bg-sky-600 hover:bg-sky-700 text-white font-bold text-[11px] tracking-tight shadow-xs transition-all cursor-pointer flex items-center justify-center shrink-0 active:scale-95"
+                title="Register"
+              >
+                <span>{t('রেজিস্টার', 'Register')}</span>
+              </button>
+            </div>
           ) : (
             <div ref={mobileAccountRef} className="relative">
               <button
                 type="button"
                 onClick={() => setIsMobileAccountOpen((prev) => !prev)}
-                className="p-1.5 rounded-xl hover:bg-slate-100 active:scale-90 transition-all cursor-pointer flex items-center justify-center"
+                className="p-1.5 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 active:scale-90 transition-all cursor-pointer flex items-center justify-center"
                 aria-label="Account Menu"
                 title="Account"
               >
-                <div className="w-7 h-7 rounded-full bg-slate-900 text-white flex items-center justify-center font-bold text-xs shadow-2xs">
+                <div className="w-7 h-7 rounded-full bg-slate-900 dark:bg-sky-600 text-white flex items-center justify-center font-bold text-xs shadow-2xs">
                   {currentCustomer.name.charAt(0).toUpperCase()}
                 </div>
               </button>
 
               {/* Mobile Account Dropdown Menu */}
               {isMobileAccountOpen && (
-                <div className="absolute right-0 mt-2 w-56 bg-white rounded-2xl shadow-2xl border border-slate-200 py-2 z-50 text-slate-800 animate-in fade-in zoom-in-95 duration-150">
-                  <div className="px-3.5 py-2 border-b border-slate-100 bg-slate-50/70 rounded-t-2xl">
-                    <p className="text-[10px] text-slate-500">Signed in as</p>
-                    <p className="text-xs font-bold text-slate-900 truncate">{currentCustomer.name}</p>
-                    <p className="text-[10px] text-sky-600 font-mono truncate">{currentCustomer.email}</p>
+                <div className="absolute right-0 mt-2 w-56 bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 py-2 z-50 text-slate-800 dark:text-slate-100 animate-in fade-in zoom-in-95 duration-150">
+                  <div className="px-3.5 py-2 border-b border-slate-100 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-850 rounded-t-2xl">
+                    <p className="text-[10px] text-slate-500 dark:text-slate-400">Signed in as</p>
+                    <p className="text-xs font-bold text-slate-900 dark:text-slate-100 truncate">{currentCustomer.name}</p>
+                    <p className="text-[10px] text-sky-600 dark:text-sky-400 font-mono truncate">{currentCustomer.email}</p>
                   </div>
 
                   <div className="py-1">
@@ -651,7 +762,7 @@ export const Header: React.FC<HeaderProps> = ({
                           onNavigate('admin-dashboard');
                           setIsMobileAccountOpen(false);
                         }}
-                        className="w-full text-left px-3.5 py-2 text-xs font-bold text-sky-700 bg-sky-50 hover:bg-sky-100 flex items-center gap-2 cursor-pointer border-b border-sky-100"
+                        className="w-full text-left px-3.5 py-2 text-xs font-bold text-sky-700 dark:text-sky-400 bg-sky-50 dark:bg-sky-950/40 hover:bg-sky-100 dark:hover:bg-sky-900/40 flex items-center gap-2 cursor-pointer border-b border-sky-100 dark:border-sky-900/40"
                       >
                         <ShieldCheck className="w-4 h-4 text-sky-600 shrink-0" />
                         <span>Admin Dashboard</span>
@@ -664,7 +775,7 @@ export const Header: React.FC<HeaderProps> = ({
                         onNavigate('customer-dashboard');
                         setIsMobileAccountOpen(false);
                       }}
-                      className="w-full text-left px-3.5 py-2 text-xs text-slate-700 hover:bg-sky-50 hover:text-sky-700 flex items-center gap-2.5 cursor-pointer font-semibold"
+                      className="w-full text-left px-3.5 py-2 text-xs text-slate-700 dark:text-slate-200 hover:bg-sky-50 dark:hover:bg-slate-800 hover:text-sky-700 dark:hover:text-sky-400 flex items-center gap-2.5 cursor-pointer font-semibold"
                     >
                       <User className="w-4 h-4 text-sky-600 shrink-0" />
                       <span>Your Account</span>
@@ -676,7 +787,7 @@ export const Header: React.FC<HeaderProps> = ({
                         onNavigate('customer-dashboard');
                         setIsMobileAccountOpen(false);
                       }}
-                      className="w-full text-left px-3.5 py-2 text-xs text-slate-700 hover:bg-sky-50 hover:text-sky-700 flex items-center gap-2.5 cursor-pointer font-semibold"
+                      className="w-full text-left px-3.5 py-2 text-xs text-slate-700 dark:text-slate-200 hover:bg-sky-50 dark:hover:bg-slate-800 hover:text-sky-700 dark:hover:text-sky-400 flex items-center gap-2.5 cursor-pointer font-semibold"
                     >
                       <Truck className="w-4 h-4 text-emerald-600 shrink-0" />
                       <span>Your Orders</span>
@@ -688,7 +799,7 @@ export const Header: React.FC<HeaderProps> = ({
                         onOpenWishlist();
                         setIsMobileAccountOpen(false);
                       }}
-                      className="w-full text-left px-3.5 py-2 text-xs text-slate-700 hover:bg-sky-50 hover:text-sky-700 flex items-center gap-2.5 cursor-pointer font-semibold"
+                      className="w-full text-left px-3.5 py-2 text-xs text-slate-700 dark:text-slate-200 hover:bg-sky-50 dark:hover:bg-slate-800 hover:text-sky-700 dark:hover:text-sky-400 flex items-center gap-2.5 cursor-pointer font-semibold"
                     >
                       <Heart className="w-4 h-4 text-rose-500 shrink-0" />
                       <span>Your Wishlist</span>
@@ -700,7 +811,7 @@ export const Header: React.FC<HeaderProps> = ({
                         onOpenCart();
                         setIsMobileAccountOpen(false);
                       }}
-                      className="w-full text-left px-3.5 py-2 text-xs text-slate-700 hover:bg-sky-50 hover:text-sky-700 flex items-center gap-2.5 cursor-pointer font-semibold"
+                      className="w-full text-left px-3.5 py-2 text-xs text-slate-700 dark:text-slate-200 hover:bg-sky-50 dark:hover:bg-slate-800 hover:text-sky-700 dark:hover:text-sky-400 flex items-center gap-2.5 cursor-pointer font-semibold"
                     >
                       <ShoppingCart className="w-4 h-4 text-sky-600 shrink-0" />
                       <span>Your Cart</span>
@@ -708,14 +819,14 @@ export const Header: React.FC<HeaderProps> = ({
                   </div>
 
                   {/* 5. Sign Out */}
-                  <div className="pt-1 border-t border-slate-100">
+                  <div className="pt-1 border-t border-slate-100 dark:border-slate-800">
                     <button
                       onClick={() => {
                         if (onCustomerLogout) onCustomerLogout();
                         if (onStaffLogout) onStaffLogout();
                         setIsMobileAccountOpen(false);
                       }}
-                      className="w-full text-left px-3.5 py-2 text-xs font-bold text-rose-600 hover:bg-rose-50 flex items-center gap-2 cursor-pointer"
+                      className="w-full text-left px-3.5 py-2 text-xs font-bold text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/30 flex items-center gap-2 cursor-pointer"
                     >
                       <LogOut className="w-3.5 h-3.5" />
                       <span>Sign Out</span>
@@ -730,7 +841,7 @@ export const Header: React.FC<HeaderProps> = ({
     </header>
 
       {/* Mobile Sub-Navigation Bar: Directly connected to Admin Store Settings -> Header Navigation & Priority */}
-      <div className="md:hidden bg-slate-50 border-t border-slate-200/80 px-3 py-2 overflow-x-auto no-scrollbar scroll-smooth">
+      <div className="md:hidden bg-slate-50 dark:bg-slate-950 border-t border-slate-200/80 dark:border-slate-800/80 px-3 py-2 overflow-x-auto no-scrollbar scroll-smooth">
         <div className="flex items-center gap-2 w-max pr-2">
           {navItems.map((item) => {
             const isTag = item.targetView.startsWith('tag:');
@@ -829,12 +940,12 @@ export const Header: React.FC<HeaderProps> = ({
                 onClick={handleClick}
                 className={`px-3 py-1.5 rounded-full text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 shrink-0 border select-none active:scale-95 ${
                   isActive
-                    ? 'bg-sky-600 text-white border-sky-700 shadow-xs'
-                    : 'bg-white text-slate-700 border-slate-200 hover:border-sky-300 hover:text-sky-600'
+                    ? 'bg-sky-600 text-white border-sky-500 shadow-md ring-1 ring-sky-400/50'
+                    : 'bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 border-slate-200 dark:border-slate-750 hover:border-sky-300 dark:hover:border-sky-500 hover:text-sky-600 dark:hover:text-sky-300'
                 }`}
               >
                 {renderIcon()}
-                <span>{item.label}</span>
+                <span>{getLocalizedNavLabel(item.label)}</span>
                 {item.isHot && (
                   <span
                     className={`${
@@ -851,7 +962,7 @@ export const Header: React.FC<HeaderProps> = ({
       </div>
 
       {/* 3. Desktop Sub-Navigation Bar */}
-      <div className="bg-white border-t border-slate-100 hidden md:block">
+      <div className="bg-white dark:bg-slate-900 border-t border-slate-100 dark:border-slate-800 hidden md:block">
         <div className="max-w-[1536px] mx-auto px-3 sm:px-6 lg:px-8 flex items-center justify-between">
           <div className="flex items-center gap-1">
             {/* All Categories Trigger Button */}
@@ -868,7 +979,7 @@ export const Header: React.FC<HeaderProps> = ({
                 aria-expanded={isCategoryMenuOpen}
               >
                 <Menu className="w-4 h-4" />
-                <span>All Categories</span>
+                <span>{t('সব ক্যাটাগরি', 'All Categories')}</span>
                 <ChevronDown
                   className={`w-3.5 h-3.5 transition-transform duration-200 ${
                     isCategoryMenuOpen ? 'rotate-180' : ''
@@ -879,15 +990,15 @@ export const Header: React.FC<HeaderProps> = ({
               {/* Categories Mega Dropdown */}
               {isCategoryMenuOpen && (
                 <div
-                  className="absolute left-0 top-full bg-white border border-slate-200 rounded-b-2xl shadow-2xl z-50 animate-in fade-in slide-in-from-top-1 duration-150 flex max-h-[80vh] overflow-hidden"
+                  className="absolute left-0 top-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-b-2xl shadow-2xl z-50 animate-in fade-in slide-in-from-top-1 duration-150 flex max-h-[80vh] overflow-hidden"
                   style={{ width: '780px' }}
                   onMouseEnter={handleCategoryMouseEnter}
                   onMouseLeave={handleCategoryMouseLeave}
                 >
                   {/* Left Column: Category List */}
-                  <div className="w-64 border-r border-slate-100 py-2 bg-slate-50/50 overflow-y-auto scrollbar-thin max-h-[78vh]">
+                  <div className="w-64 border-r border-slate-100 dark:border-slate-800 py-2 bg-slate-50/50 dark:bg-slate-850 overflow-y-auto scrollbar-thin max-h-[78vh]">
                     <div className="px-3 py-1.5 text-[10px] font-black text-slate-400 uppercase tracking-wider">
-                      Categories
+                      {t('ক্যাটাগরি', 'Categories')}
                     </div>
                     {displayedCategories.map((cat) => {
                       const isHovered = (hoveredCatId || displayedCategories[0]?.id) === cat.id;
@@ -901,10 +1012,10 @@ export const Header: React.FC<HeaderProps> = ({
                             onNavigate('shop');
                             setIsCategoryMenuOpen(false);
                           }}
-                          className={`w-full text-left px-3.5 py-2.5 text-xs font-semibold flex items-center justify-between transition-colors cursor-pointer ${
+                          className={`w-full text-left px-3.5 py-2.5 text-xs font-bold flex items-center justify-between transition-colors cursor-pointer ${
                             isHovered
                               ? 'bg-sky-600 text-white shadow-xs'
-                              : 'text-slate-700 hover:bg-slate-100 hover:text-sky-700'
+                              : 'text-slate-800 dark:text-white hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-sky-700 dark:hover:text-sky-400'
                           }`}
                         >
                           <div className="flex items-center gap-2.5 truncate">
@@ -914,7 +1025,7 @@ export const Header: React.FC<HeaderProps> = ({
                             <span className="truncate">{cat.name}</span>
                           </div>
                           {subs.length > 0 && (
-                            <ChevronRight className={`w-3.5 h-3.5 shrink-0 ${isHovered ? 'text-white' : 'text-slate-400'}`} />
+                            <ChevronRight className={`w-3.5 h-3.5 shrink-0 ${isHovered ? 'text-white' : 'text-slate-400 dark:text-slate-500'}`} />
                           )}
                         </div>
                       );
@@ -922,18 +1033,18 @@ export const Header: React.FC<HeaderProps> = ({
                   </div>
 
                   {/* Right Section: Subcategories & 3rd-Tier Child Subcategories */}
-                  <div className="flex-1 p-5 overflow-y-auto max-h-[78vh] bg-white scrollbar-thin">
+                  <div className="flex-1 p-5 overflow-y-auto max-h-[78vh] bg-white dark:bg-slate-900 scrollbar-thin">
                     {activeHoveredCat ? (
                       <div>
                         {/* Active Category Header */}
-                        <div className="flex items-center justify-between border-b border-slate-100 pb-3 mb-4">
+                        <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3 mb-4">
                           <div className="flex items-center gap-2">
-                            <div className="p-2 rounded-xl bg-sky-50 text-sky-600">
+                            <div className="p-2 rounded-xl bg-sky-50 dark:bg-sky-950/60 text-sky-600 dark:text-sky-400">
                               {getCategoryIcon(activeHoveredCat.slug, activeHoveredCat.name)}
                             </div>
                             <div>
-                              <h3 className="text-sm font-black text-slate-900">{activeHoveredCat.name}</h3>
-                              <p className="text-[11px] text-slate-500">
+                              <h3 className="text-sm font-black text-slate-900 dark:text-white">{activeHoveredCat.name}</h3>
+                              <p className="text-[11px] text-slate-500 dark:text-slate-400 font-medium">
                                 {normalizeSubs(activeHoveredCat.subcategories).length} subcategories available
                               </p>
                             </div>
@@ -945,7 +1056,7 @@ export const Header: React.FC<HeaderProps> = ({
                               onNavigate('shop');
                               setIsCategoryMenuOpen(false);
                             }}
-                            className="text-xs font-bold text-sky-600 hover:text-sky-700 hover:underline flex items-center gap-1 cursor-pointer"
+                            className="text-xs font-bold text-sky-600 dark:text-sky-400 hover:text-sky-700 dark:hover:text-sky-300 hover:underline flex items-center gap-1 cursor-pointer"
                           >
                             <span>View All Products</span>
                             <ArrowRight className="w-3.5 h-3.5" />
@@ -958,7 +1069,7 @@ export const Header: React.FC<HeaderProps> = ({
                             {normalizeSubs(activeHoveredCat.subcategories).map((sub) => (
                               <div
                                 key={sub.id}
-                                className="bg-slate-50/70 hover:bg-sky-50/40 p-3 rounded-xl border border-slate-100 transition-all hover:border-sky-200"
+                                className="bg-slate-50/70 dark:bg-slate-800/60 hover:bg-sky-50/40 dark:hover:bg-slate-800 p-3 rounded-xl border border-slate-100 dark:border-slate-700/70 transition-all hover:border-sky-200 dark:hover:border-sky-500/50"
                               >
                                 {/* Subcategory Title */}
                                 <button
@@ -968,17 +1079,17 @@ export const Header: React.FC<HeaderProps> = ({
                                     onNavigate('shop');
                                     setIsCategoryMenuOpen(false);
                                   }}
-                                  className="w-full text-left font-bold text-xs text-slate-900 hover:text-sky-600 flex items-center justify-between group cursor-pointer mb-2"
+                                  className="w-full text-left font-bold text-xs text-slate-900 dark:text-white hover:text-sky-600 dark:hover:text-sky-400 flex items-center justify-between group cursor-pointer mb-2"
                                 >
                                   <span className="group-hover:translate-x-0.5 transition-transform">
                                     {sub.name}
                                   </span>
-                                  <ChevronRight className="w-3.5 h-3.5 text-slate-400 group-hover:text-sky-600" />
+                                  <ChevronRight className="w-3.5 h-3.5 text-slate-400 group-hover:text-sky-600 dark:group-hover:text-sky-400" />
                                 </button>
 
                                 {/* 3rd-Tier Child Subcategories (Sub-subcategories) */}
                                 {sub.subSubcategories && sub.subSubcategories.length > 0 ? (
-                                  <div className="flex flex-wrap gap-1.5 mt-1.5 pt-1.5 border-t border-slate-200/60">
+                                  <div className="flex flex-wrap gap-1.5 mt-1.5 pt-1.5 border-t border-slate-200/60 dark:border-slate-700/60">
                                     {sub.subSubcategories.map((ssName, ssIdx) => (
                                       <button
                                         key={ssIdx}
@@ -988,7 +1099,7 @@ export const Header: React.FC<HeaderProps> = ({
                                           onNavigate('shop');
                                           setIsCategoryMenuOpen(false);
                                         }}
-                                        className="text-[11px] px-2 py-0.5 rounded-lg bg-white border border-slate-200 text-slate-600 hover:bg-sky-600 hover:text-white hover:border-sky-600 transition-colors cursor-pointer"
+                                        className="text-[11px] px-2 py-0.5 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-sky-600 hover:text-white hover:border-sky-600 transition-colors cursor-pointer"
                                       >
                                         {ssName}
                                       </button>
@@ -1017,7 +1128,7 @@ export const Header: React.FC<HeaderProps> = ({
             </div>
 
             {/* Navigation Links (Priority Configurable by Admin) */}
-            <nav className="flex items-center space-x-1 pl-4 text-xs font-semibold text-slate-700 overflow-x-auto no-scrollbar">
+            <nav className="flex items-center space-x-1 pl-4 text-xs font-semibold text-slate-700 dark:text-slate-300 overflow-x-auto no-scrollbar">
               {navItems.map((item) => {
                 const isTag = item.targetView.startsWith('tag:');
                 const tagVal = isTag ? item.targetView.replace(/^tag:/, '') : '';
@@ -1031,11 +1142,11 @@ export const Header: React.FC<HeaderProps> = ({
                     onClick={() => onNavigate(item.targetView)}
                     className={`px-3 py-2 rounded-lg transition-colors cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
                       isActive
-                        ? 'text-sky-600 font-bold bg-sky-50/90'
-                        : 'hover:text-sky-600 text-slate-700'
+                        ? 'text-sky-600 dark:text-sky-400 font-bold bg-sky-50/90 dark:bg-sky-950/60'
+                        : 'hover:text-sky-600 dark:hover:text-sky-400 text-slate-700 dark:text-slate-300'
                     }`}
                   >
-                    <span>{item.label}</span>
+                    <span>{getLocalizedNavLabel(item.label)}</span>
                     {item.isHot && (
                       <span
                         className={`${
@@ -1065,10 +1176,10 @@ export const Header: React.FC<HeaderProps> = ({
           {/* Drawer Sidebar */}
           <div
             ref={mobileMenuRef}
-            className="relative w-[85%] max-w-sm bg-white h-full shadow-2xl flex flex-col z-10 animate-in slide-in-from-left duration-250 ease-out"
+            className="relative w-[85%] max-w-sm bg-white dark:bg-slate-900 h-full shadow-2xl flex flex-col z-10 animate-in slide-in-from-left duration-250 ease-out"
           >
             {/* Drawer Top Header */}
-            <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-gradient-to-r from-sky-600 to-blue-700 text-white">
+            <div className="p-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-gradient-to-r from-sky-600 to-blue-700 text-white">
               <div className="flex items-center gap-2">
                 <div className="w-8 h-8 rounded-xl bg-white/15 flex items-center justify-center text-white">
                   <Layers className="w-5 h-5" />
@@ -1088,13 +1199,13 @@ export const Header: React.FC<HeaderProps> = ({
             </div>
 
             {/* Tab Selector: Categories vs Quick Menu */}
-            <div className="flex border-b border-slate-200 bg-slate-50 p-1.5 gap-1.5 text-xs font-bold">
+            <div className="flex border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 p-1.5 gap-1.5 text-xs font-bold">
               <button
                 onClick={() => setMobileActiveTab('categories')}
                 className={`flex-1 py-2 rounded-lg flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
                   mobileActiveTab === 'categories'
-                    ? 'bg-white text-sky-700 shadow-xs border border-slate-200/80 font-black'
-                    : 'text-slate-600 hover:text-slate-900'
+                    ? 'bg-white dark:bg-slate-900 text-sky-700 dark:text-sky-400 shadow-xs border border-slate-200/80 dark:border-slate-700 font-black'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
                 }`}
               >
                 <Grid className="w-3.5 h-3.5" />
@@ -1104,8 +1215,8 @@ export const Header: React.FC<HeaderProps> = ({
                 onClick={() => setMobileActiveTab('menu')}
                 className={`flex-1 py-2 rounded-lg flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
                   mobileActiveTab === 'menu'
-                    ? 'bg-white text-sky-700 shadow-xs border border-slate-200/80 font-black'
-                    : 'text-slate-600 hover:text-slate-900'
+                    ? 'bg-white dark:bg-slate-900 text-sky-700 dark:text-sky-400 shadow-xs border border-slate-200/80 dark:border-slate-700 font-black'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
                 }`}
               >
                 <Menu className="w-3.5 h-3.5" />
@@ -1127,16 +1238,16 @@ export const Header: React.FC<HeaderProps> = ({
                     }}
                     className={`w-full p-2.5 rounded-xl border text-left flex items-center justify-between transition-all cursor-pointer ${
                       selectedCategory === 'All'
-                        ? 'bg-sky-50/80 border-sky-500 text-sky-900 font-bold shadow-2xs'
-                        : 'bg-white border-slate-200 text-slate-800 hover:bg-slate-50'
+                        ? 'bg-sky-50/80 dark:bg-sky-950/60 border-sky-500 dark:border-sky-500 text-sky-900 dark:text-sky-300 font-bold shadow-2xs'
+                        : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-100 hover:bg-slate-50 dark:hover:bg-slate-800'
                     }`}
                   >
                     <div className="flex items-center gap-2.5">
-                      <div className="w-8 h-8 rounded-lg bg-sky-100 flex items-center justify-center shrink-0">
-                        <Grid className="w-4 h-4 text-sky-600" />
+                      <div className="w-8 h-8 rounded-lg bg-sky-100 dark:bg-sky-950/80 flex items-center justify-center shrink-0">
+                        <Grid className="w-4 h-4 text-sky-600 dark:text-sky-400" />
                       </div>
                       <div>
-                        <span className="text-xs font-black block">All Products</span>
+                        <span className="text-xs font-black block text-slate-900 dark:text-white">All Products</span>
                         <span className="text-[10px] text-slate-400">View entire catalog</span>
                       </div>
                     </div>
@@ -1154,8 +1265,8 @@ export const Header: React.FC<HeaderProps> = ({
                         key={cat.id}
                         className={`rounded-2xl border transition-all overflow-hidden ${
                           isSelected
-                            ? 'bg-sky-50/50 border-sky-400'
-                            : 'bg-white border-slate-200'
+                            ? 'bg-sky-50/50 dark:bg-sky-950/40 border-sky-400 dark:border-sky-500/70'
+                            : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800'
                         }`}
                       >
                         <div className="flex items-center justify-between p-2.5">
@@ -1168,11 +1279,11 @@ export const Header: React.FC<HeaderProps> = ({
                             }}
                             className="flex items-center gap-2.5 min-w-0 flex-1 text-left cursor-pointer"
                           >
-                            <div className="w-8 h-8 rounded-lg bg-slate-100 flex items-center justify-center shrink-0">
+                            <div className="w-8 h-8 rounded-lg bg-slate-100 dark:bg-slate-800 flex items-center justify-center shrink-0">
                               {getCategoryIcon(cat.slug, cat.name)}
                             </div>
                             <div className="min-w-0">
-                              <span className="text-xs font-bold text-slate-800 block truncate">
+                              <span className="text-xs font-black text-slate-900 dark:text-white block truncate">
                                 {cat.name}
                               </span>
                               {cat.itemCount !== undefined && (
@@ -1193,12 +1304,12 @@ export const Header: React.FC<HeaderProps> = ({
                                   [cat.id]: !prev[cat.id],
                                 }));
                               }}
-                              className="p-1.5 rounded-lg text-slate-400 hover:text-sky-600 hover:bg-sky-50 transition-colors ml-1 cursor-pointer"
+                              className="p-1.5 rounded-lg text-slate-400 hover:text-sky-600 dark:hover:text-sky-400 hover:bg-sky-50 dark:hover:bg-slate-800 transition-colors ml-1 cursor-pointer"
                               aria-label="Toggle subcategories"
                             >
                               <ChevronDown
                                 className={`w-4 h-4 transition-transform duration-200 ${
-                                  isExpanded ? 'rotate-180 text-sky-600' : ''
+                                  isExpanded ? 'rotate-180 text-sky-600 dark:text-sky-400' : ''
                                 }`}
                               />
                             </button>
@@ -1207,7 +1318,7 @@ export const Header: React.FC<HeaderProps> = ({
 
                         {/* Nested Subcategories (Tier 2 & 3) */}
                         {isExpanded && subs.length > 0 && (
-                          <div className="bg-slate-50/90 border-t border-slate-100 p-2.5 space-y-2">
+                          <div className="bg-slate-50/90 dark:bg-slate-950 border-t border-slate-100 dark:border-slate-800 p-2.5 space-y-2">
                             {subs.map((sub) => {
                               const subKey = `${cat.id}_${sub.id}`;
                               const isSubExpanded = !!mobileExpandedSubKeys[subKey];
@@ -1216,7 +1327,7 @@ export const Header: React.FC<HeaderProps> = ({
                               return (
                                 <div
                                   key={sub.id}
-                                  className="bg-white rounded-xl border border-slate-200/80 p-2 shadow-2xs"
+                                  className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200/80 dark:border-slate-800 p-2 shadow-2xs"
                                 >
                                   <div className="flex items-center justify-between">
                                     <button
@@ -1226,7 +1337,7 @@ export const Header: React.FC<HeaderProps> = ({
                                         onNavigate('shop');
                                         setIsMobileMenuOpen(false);
                                       }}
-                                      className="text-xs font-bold text-slate-800 hover:text-sky-600 text-left flex-1 py-1 cursor-pointer"
+                                      className="text-xs font-black text-slate-900 dark:text-white hover:text-sky-600 dark:hover:text-sky-400 text-left flex-1 py-1 cursor-pointer"
                                     >
                                       {sub.name}
                                     </button>
@@ -1240,7 +1351,7 @@ export const Header: React.FC<HeaderProps> = ({
                                             [subKey]: !prev[subKey],
                                           }));
                                         }}
-                                        className="text-[10px] text-sky-600 font-bold px-2 py-0.5 rounded-md bg-sky-50 hover:bg-sky-100 cursor-pointer"
+                                        className="text-[10px] text-sky-600 dark:text-sky-400 font-bold px-2 py-0.5 rounded-md bg-sky-50 dark:bg-sky-950/60 hover:bg-sky-100 dark:hover:bg-sky-900/60 cursor-pointer"
                                       >
                                         {childSubs.length} sub-items {isSubExpanded ? '▲' : '▼'}
                                       </button>
@@ -1249,7 +1360,7 @@ export const Header: React.FC<HeaderProps> = ({
 
                                   {/* 3rd-Tier Child Subcategories (Tier 3) */}
                                   {(isSubExpanded || childSubs.length <= 3) && childSubs.length > 0 && (
-                                    <div className="flex flex-wrap gap-1.5 mt-2 pt-2 border-t border-slate-100">
+                                    <div className="flex flex-wrap gap-1.5 mt-2 pt-2 border-t border-slate-100 dark:border-slate-800">
                                       {childSubs.map((ssName, ssIdx) => (
                                         <button
                                           key={ssIdx}
@@ -1259,7 +1370,7 @@ export const Header: React.FC<HeaderProps> = ({
                                             onNavigate('shop');
                                             setIsMobileMenuOpen(false);
                                           }}
-                                          className="text-[10px] px-2 py-1 rounded-md bg-slate-100 text-slate-700 hover:bg-sky-600 hover:text-white font-medium transition-colors cursor-pointer"
+                                          className="text-[10px] px-2 py-1 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-sky-600 hover:text-white hover:border-sky-600 transition-colors cursor-pointer"
                                         >
                                           {ssName}
                                         </button>
@@ -1294,12 +1405,12 @@ export const Header: React.FC<HeaderProps> = ({
                         }}
                         className={`w-full px-3.5 py-2.5 rounded-xl flex items-center justify-between text-xs font-bold text-left transition-colors cursor-pointer ${
                           isActive
-                            ? 'bg-sky-50 text-sky-700 font-bold border border-sky-100'
-                            : 'text-slate-700 hover:bg-slate-100'
+                            ? 'bg-sky-50 dark:bg-sky-950/60 text-sky-700 dark:text-sky-300 font-bold border border-sky-100 dark:border-sky-800'
+                            : 'text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800'
                         }`}
                       >
                         <div className="flex items-center gap-2.5">
-                          <Tag className="w-3.5 h-3.5 text-sky-600 shrink-0" />
+                          <Tag className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400 shrink-0" />
                           <span>{item.label}</span>
                         </div>
                         {item.isHot && (
@@ -1321,9 +1432,9 @@ export const Header: React.FC<HeaderProps> = ({
                         onNavigate('admin-dashboard');
                         setIsMobileMenuOpen(false);
                       }}
-                      className="w-full px-3 py-2.5 rounded-xl flex items-center gap-3 text-xs font-black text-left bg-sky-50 text-sky-700 border border-sky-200/60"
+                      className="w-full px-3 py-2.5 rounded-xl flex items-center gap-3 text-xs font-black text-left bg-sky-50 dark:bg-sky-950/60 text-sky-700 dark:text-sky-300 border border-sky-200/60 dark:border-sky-800"
                     >
-                      <ShieldCheck className="w-4 h-4 text-sky-600" />
+                      <ShieldCheck className="w-4 h-4 text-sky-600 dark:text-sky-400" />
                       <span>Admin Dashboard</span>
                     </button>
                   )}
@@ -1334,10 +1445,10 @@ export const Header: React.FC<HeaderProps> = ({
                       setIsMobileMenuOpen(false);
                     }}
                     className={`w-full px-3 py-2.5 rounded-xl flex items-center gap-3 text-xs font-bold text-left transition-colors cursor-pointer ${
-                      currentView === 'customer-dashboard' ? 'bg-sky-50 text-sky-700' : 'text-slate-700 hover:bg-slate-100'
+                      currentView === 'customer-dashboard' ? 'bg-sky-50 dark:bg-sky-950/60 text-sky-700 dark:text-sky-300' : 'text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800'
                     }`}
                   >
-                    <User className="w-4 h-4 text-sky-600" />
+                    <User className="w-4 h-4 text-sky-600 dark:text-sky-400" />
                     <span>Customer Account / Dashboard</span>
                   </button>
                 </div>
@@ -1345,7 +1456,7 @@ export const Header: React.FC<HeaderProps> = ({
             </div>
 
             {/* Bottom User Profile or Login CTA */}
-            <div className="p-3 border-t border-slate-200 bg-slate-50">
+            <div className="p-3 border-t border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950">
               {currentCustomer ? (
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2 min-w-0">
@@ -1353,8 +1464,8 @@ export const Header: React.FC<HeaderProps> = ({
                       {currentCustomer.name.charAt(0).toUpperCase()}
                     </div>
                     <div className="min-w-0">
-                      <p className="text-xs font-bold text-slate-900 truncate">{currentCustomer.name}</p>
-                      <p className="text-[10px] text-slate-500 truncate">{currentCustomer.email}</p>
+                      <p className="text-xs font-bold text-slate-900 dark:text-slate-100 truncate">{currentCustomer.name}</p>
+                      <p className="text-[10px] text-slate-500 dark:text-slate-400 truncate">{currentCustomer.email}</p>
                     </div>
                   </div>
                   {onCustomerLogout && (
@@ -1363,7 +1474,7 @@ export const Header: React.FC<HeaderProps> = ({
                         onCustomerLogout();
                         setIsMobileMenuOpen(false);
                       }}
-                      className="p-1.5 text-rose-600 hover:bg-rose-50 rounded-lg text-xs font-bold flex items-center gap-1 cursor-pointer"
+                      className="p-1.5 text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg text-xs font-bold flex items-center gap-1 cursor-pointer"
                       title="Sign Out"
                     >
                       <LogOut className="w-4 h-4" />
@@ -1371,16 +1482,30 @@ export const Header: React.FC<HeaderProps> = ({
                   )}
                 </div>
               ) : (
-                <button
-                  onClick={() => {
-                    setIsMobileMenuOpen(false);
-                    if (onOpenCustomerAuth) onOpenCustomerAuth();
-                  }}
-                  className="w-full py-2.5 px-3 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-xs cursor-pointer transition-colors"
-                >
-                  <User className="w-4 h-4" />
-                  <span>Sign In / Register</span>
-                </button>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsMobileMenuOpen(false);
+                      if (onOpenCustomerAuth) onOpenCustomerAuth('login');
+                    }}
+                    className="flex-1 py-2.5 px-3 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
+                  >
+                    <LogIn className="w-4 h-4 text-slate-600 dark:text-slate-400" />
+                    <span>{t('লগইন করুন', 'Sign In')}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsMobileMenuOpen(false);
+                      if (onOpenCustomerAuth) onOpenCustomerAuth('register');
+                    }}
+                    className="flex-1 py-2.5 px-3 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs cursor-pointer transition-colors"
+                  >
+                    <UserPlus className="w-4 h-4 text-sky-100" />
+                    <span>{t('রেজিস্টার', 'Register')}</span>
+                  </button>
+                </div>
               )}
             </div>
           </div>

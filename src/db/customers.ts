@@ -1,31 +1,36 @@
 import fs from 'fs';
 import path from 'path';
 import { CustomerRecord } from '../types/index.ts';
+import { normalizeBDPhoneNumber } from '../utils/phoneUtils.ts';
 
 const SERVER_STORE_DIR = path.join(process.cwd(), 'data');
-const SERVER_CUSTOMERS_FILE = path.join(SERVER_STORE_DIR, 'server_customers.json');
 
-export function getAllCustomersFromStore(): CustomerRecord[] {
+function getCustomersFilePath(isEnvPreview?: boolean): string {
+  return path.join(SERVER_STORE_DIR, isEnvPreview ? 'preview_server_customers.json' : 'server_customers.json');
+}
+
+export function getAllCustomersFromStore(isEnvPreview?: boolean): CustomerRecord[] {
   try {
     if (!fs.existsSync(SERVER_STORE_DIR)) {
       fs.mkdirSync(SERVER_STORE_DIR, { recursive: true });
     }
-    if (!fs.existsSync(SERVER_CUSTOMERS_FILE)) {
-      fs.writeFileSync(SERVER_CUSTOMERS_FILE, JSON.stringify([], null, 2), 'utf-8');
+    const filePath = getCustomersFilePath(isEnvPreview);
+    if (!fs.existsSync(filePath)) {
+      fs.writeFileSync(filePath, JSON.stringify([], null, 2), 'utf-8');
       return [];
     }
-    const content = fs.readFileSync(SERVER_CUSTOMERS_FILE, 'utf-8');
+    const content = fs.readFileSync(filePath, 'utf-8');
     const parsed = JSON.parse(content);
     if (Array.isArray(parsed)) {
       return parsed.filter((c) => c && c.id && !c.id.startsWith('staff-cust-'));
     }
   } catch (err) {
-    console.warn('[Server Customers] Error reading server_customers.json:', err);
+    console.warn('[Server Customers] Error reading customers file:', err);
   }
   return [];
 }
 
-export function saveCustomerToStore(customer: CustomerRecord): CustomerRecord {
+export function saveCustomerToStore(customer: CustomerRecord, isEnvPreview?: boolean): CustomerRecord {
   if (!customer || !customer.id || customer.id.startsWith('staff-cust-')) {
     // Never persist temporary staff storefront sessions as customers
     return customer;
@@ -34,10 +39,12 @@ export function saveCustomerToStore(customer: CustomerRecord): CustomerRecord {
     if (!fs.existsSync(SERVER_STORE_DIR)) {
       fs.mkdirSync(SERVER_STORE_DIR, { recursive: true });
     }
-    const current = getAllCustomersFromStore();
+    const filePath = getCustomersFilePath(isEnvPreview);
+    const current = getAllCustomersFromStore(isEnvPreview);
     const idx = current.findIndex((c) => c.id === customer.id || (customer.email && c.email?.toLowerCase() === customer.email.toLowerCase()));
     const sanitizedCustomer: CustomerRecord = {
       ...customer,
+      mobile: normalizeBDPhoneNumber(customer.mobile || (customer as any).phone || ''),
       isV2Account: true,
     };
     if (idx >= 0) {
@@ -45,19 +52,20 @@ export function saveCustomerToStore(customer: CustomerRecord): CustomerRecord {
     } else {
       current.unshift(sanitizedCustomer);
     }
-    fs.writeFileSync(SERVER_CUSTOMERS_FILE, JSON.stringify(current, null, 2), 'utf-8');
+    fs.writeFileSync(filePath, JSON.stringify(current, null, 2), 'utf-8');
     return sanitizedCustomer;
   } catch (err) {
-    console.error('[Server Customers] Error writing server_customers.json:', err);
+    console.error('[Server Customers] Error writing customers file:', err);
   }
   return customer;
 }
 
-export function deleteCustomerFromStore(customerId: string): boolean {
+export function deleteCustomerFromStore(customerId: string, isEnvPreview?: boolean): boolean {
   try {
-    const current = getAllCustomersFromStore();
+    const filePath = getCustomersFilePath(isEnvPreview);
+    const current = getAllCustomersFromStore(isEnvPreview);
     const filtered = current.filter((c) => c.id !== customerId);
-    fs.writeFileSync(SERVER_CUSTOMERS_FILE, JSON.stringify(filtered, null, 2), 'utf-8');
+    fs.writeFileSync(filePath, JSON.stringify(filtered, null, 2), 'utf-8');
     return true;
   } catch (err) {
     console.error('[Server Customers] Error deleting customer from store:', err);
@@ -65,11 +73,11 @@ export function deleteCustomerFromStore(customerId: string): boolean {
   }
 }
 
-export function findCustomerInStore(identifier: string): CustomerRecord | null {
+export function findCustomerInStore(identifier: string, isEnvPreview?: boolean): CustomerRecord | null {
   if (!identifier) return null;
   const clean = identifier.trim().toLowerCase();
   const cleanPhone = identifier.replace(/\D/g, '');
-  const all = getAllCustomersFromStore();
+  const all = getAllCustomersFromStore(isEnvPreview);
 
   const found = all.find((c) => {
     if (!c) return false;

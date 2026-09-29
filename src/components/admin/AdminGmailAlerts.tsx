@@ -392,13 +392,13 @@ export const AdminGmailAlerts: React.FC<AdminGmailAlertsProps> = ({
       {activeTab === 'templates' && (
         <div className="space-y-6">
           {/* Mobile Template Selector (Visible on Mobile & Tablet < lg) */}
-          <div className="block lg:hidden bg-white rounded-2xl border border-slate-200 p-4 shadow-sm space-y-3">
+          <div className="block lg:hidden bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-4 shadow-sm space-y-3">
             <div className="flex items-center justify-between">
-              <label className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
+              <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
                 <Mail className="w-4 h-4 text-red-600" />
                 Select Email to Edit
               </label>
-              <span className="text-[11px] font-bold text-slate-500 font-mono">
+              <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 font-mono">
                 {filteredTemplateList.length} templates
               </span>
             </div>
@@ -407,10 +407,10 @@ export const AdminGmailAlerts: React.FC<AdminGmailAlertsProps> = ({
             <select
               value={selectedTemplateId}
               onChange={(e) => setSelectedTemplateId(e.target.value as EmailTemplateType)}
-              className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-sm font-semibold text-slate-900 focus:outline-none focus:ring-2 focus:ring-red-500"
+              className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl px-3.5 py-2.5 text-sm font-semibold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500"
             >
               {filteredTemplateList.map((tpl) => (
-                <option key={tpl.id} value={tpl.id}>
+                <option key={tpl.id} value={tpl.id} className="dark:bg-slate-800 dark:text-white">
                   {tpl.category === 'super_admin' ? '👑 ' : tpl.category === 'staff' ? '👥 ' : '🛍️ '}
                   {tpl.title}
                 </option>
@@ -426,8 +426,8 @@ export const AdminGmailAlerts: React.FC<AdminGmailAlertsProps> = ({
                   onClick={() => setTemplateFilterCategory(cat)}
                   className={`py-1.5 px-2 rounded-lg text-xs font-semibold text-center transition-all ${
                     templateFilterCategory === cat
-                      ? 'bg-slate-900 text-white shadow-sm font-bold'
-                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                      ? 'bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 shadow-sm font-bold'
+                      : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700'
                   }`}
                 >
                   {cat === 'all'
@@ -446,15 +446,15 @@ export const AdminGmailAlerts: React.FC<AdminGmailAlertsProps> = ({
             {/* Left Column: Template Selection List (Hidden on mobile, visible on Desktop >= lg) */}
             <div className="hidden lg:block lg:col-span-4 space-y-4">
               {/* Category Filter */}
-              <div className="bg-white rounded-2xl border border-slate-200 p-3 shadow-sm">
-                <div className="grid grid-cols-4 gap-1 p-1 bg-slate-100 rounded-xl text-xs font-semibold text-slate-600">
+              <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-3 shadow-sm">
+                <div className="grid grid-cols-4 gap-1 p-1 bg-slate-100 dark:bg-slate-800 rounded-xl text-xs font-semibold text-slate-600 dark:text-slate-400">
                   <button
                     type="button"
                     onClick={() => setTemplateFilterCategory('all')}
                     className={`py-1.5 rounded-lg text-center transition-all ${
                       templateFilterCategory === 'all'
-                        ? 'bg-white text-slate-900 shadow-sm font-bold'
-                        : 'hover:text-slate-900'
+                        ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm font-bold'
+                        : 'hover:text-slate-900 dark:hover:text-white'
                     }`}
                   >
                     All
@@ -464,8 +464,8 @@ export const AdminGmailAlerts: React.FC<AdminGmailAlertsProps> = ({
                     onClick={() => setTemplateFilterCategory('user')}
                     className={`py-1.5 rounded-lg text-center transition-all ${
                       templateFilterCategory === 'user'
-                        ? 'bg-white text-slate-900 shadow-sm font-bold'
-                        : 'hover:text-slate-900'
+                        ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm font-bold'
+                        : 'hover:text-slate-900 dark:hover:text-white'
                     }`}
                   >
                     Customers
@@ -475,8 +475,8 @@ export const AdminGmailAlerts: React.FC<AdminGmailAlertsProps> = ({
                     onClick={() => setTemplateFilterCategory('staff')}
                     className={`py-1.5 rounded-lg text-center transition-all ${
                       templateFilterCategory === 'staff'
-                        ? 'bg-white text-slate-900 shadow-sm font-bold'
-                        : 'hover:text-slate-900'
+                        ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm font-bold'
+                        : 'hover:text-slate-900 dark:hover:text-white'
                     }`}
                   >
                     Staff
@@ -486,8 +486,8 @@ export const AdminGmailAlerts: React.FC<AdminGmailAlertsProps> = ({
                     onClick={() => setTemplateFilterCategory('super_admin')}
                     className={`py-1.5 rounded-lg text-center transition-all ${
                       templateFilterCategory === 'super_admin'
-                        ? 'bg-white text-purple-700 shadow-sm font-bold'
-                        : 'hover:text-purple-700'
+                        ? 'bg-white dark:bg-slate-700 text-purple-700 dark:text-purple-300 shadow-sm font-bold'
+                        : 'hover:text-purple-700 dark:hover:text-purple-300'
                     }`}
                   >
                     Super
@@ -496,7 +496,7 @@ export const AdminGmailAlerts: React.FC<AdminGmailAlertsProps> = ({
               </div>
 
               {/* Template Card Items */}
-              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden divide-y divide-slate-100 max-h-[620px] overflow-y-auto">
+              <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden divide-y divide-slate-100 dark:divide-slate-800 max-h-[620px] overflow-y-auto">
                 {filteredTemplateList.map((tpl) => {
                   const isSelected = tpl.id === selectedTemplateId;
                   const isSuperAdmin = tpl.category === 'super_admin';
@@ -509,18 +509,18 @@ export const AdminGmailAlerts: React.FC<AdminGmailAlertsProps> = ({
                       onClick={() => setSelectedTemplateId(tpl.id)}
                       className={`w-full text-left p-3.5 transition-all relative flex flex-col gap-1.5 ${
                         isSelected
-                          ? 'bg-red-50/90 border-l-4 border-red-600'
-                          : 'hover:bg-slate-50'
+                          ? 'bg-red-50/90 dark:bg-red-950/40 border-l-4 border-red-600'
+                          : 'hover:bg-slate-50 dark:hover:bg-slate-800/60'
                       }`}
                     >
                       <div className="flex items-center justify-between">
                         <span
                           className={`text-[10px] font-bold px-2 py-0.5 rounded-md uppercase tracking-wider ${
                             isSuperAdmin
-                              ? 'bg-purple-100 text-purple-700 border border-purple-200'
+                              ? 'bg-purple-100 dark:bg-purple-950/80 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800'
                               : isStaff
-                              ? 'bg-amber-100 text-amber-800 border border-amber-200'
-                              : 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                              ? 'bg-amber-100 dark:bg-amber-950/80 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800'
+                              : 'bg-emerald-100 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800'
                           }`}
                         >
                           {isSuperAdmin
@@ -532,7 +532,7 @@ export const AdminGmailAlerts: React.FC<AdminGmailAlertsProps> = ({
 
                         <span
                           className={`text-[11px] font-semibold flex items-center gap-1 ${
-                            tpl.enabled ? 'text-emerald-600' : 'text-slate-400'
+                            tpl.enabled ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-400 dark:text-slate-500'
                           }`}
                         >
                           {tpl.enabled ? <Check className="w-3 h-3" /> : <X className="w-3 h-3" />}
@@ -540,11 +540,11 @@ export const AdminGmailAlerts: React.FC<AdminGmailAlertsProps> = ({
                         </span>
                       </div>
 
-                      <h4 className="text-sm font-bold text-slate-900 line-clamp-1">
+                      <h4 className="text-sm font-bold text-slate-900 dark:text-white line-clamp-1">
                         {tpl.title}
                       </h4>
 
-                      <p className="text-xs text-slate-500 line-clamp-1 font-mono">
+                      <p className="text-xs text-slate-500 dark:text-slate-400 line-clamp-1 font-mono">
                         {tpl.subject}
                       </p>
                     </button>
@@ -608,25 +608,25 @@ export const AdminGmailAlerts: React.FC<AdminGmailAlertsProps> = ({
             {/* Right Column: Template Editor & Live Preview */}
             <div className="lg:col-span-8 space-y-6">
               {/* Editor Card */}
-              <div className="bg-white rounded-2xl border border-slate-200 p-4 sm:p-6 shadow-sm space-y-5">
+              <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-4 sm:p-6 shadow-sm space-y-5">
                 {/* Template Title & Action Buttons */}
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-100">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-100 dark:border-slate-800">
                   <div>
                     <div className="flex flex-wrap items-center gap-2">
-                      <h2 className="text-base sm:text-lg font-bold text-slate-900">
+                      <h2 className="text-base sm:text-lg font-bold text-slate-900 dark:text-white">
                         {editingTemplate.title}
                       </h2>
-                      <span className="text-[11px] font-mono text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md">
+                      <span className="text-[11px] font-mono text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-md">
                         {editingTemplate.id}
                       </span>
                     </div>
                     {editingTemplate.description ? (
-                      <p className="text-xs text-slate-500 mt-1">{editingTemplate.description}</p>
+                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">{editingTemplate.description}</p>
                     ) : null}
                   </div>
 
                   <div className="flex flex-wrap items-center gap-2">
-                    <label className="flex items-center gap-2 cursor-pointer select-none bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-xl text-xs font-semibold text-slate-700 hover:bg-slate-100 transition-colors">
+                    <label className="flex items-center gap-2 cursor-pointer select-none bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 px-3 py-1.5 rounded-xl text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors">
                       <input
                         type="checkbox"
                         checked={editingTemplate.enabled}
@@ -642,7 +642,7 @@ export const AdminGmailAlerts: React.FC<AdminGmailAlertsProps> = ({
                       type="button"
                       onClick={handleResetTemplate}
                       title="Reset this template to original default"
-                      className="px-3 py-1.5 text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all active:scale-95"
+                      className="px-3 py-1.5 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all active:scale-95"
                     >
                       <RotateCcw className="w-3.5 h-3.5" />
                       Reset
@@ -666,21 +666,21 @@ export const AdminGmailAlerts: React.FC<AdminGmailAlertsProps> = ({
 
                 {/* Save Feedback Banner */}
                 {templateSaveSuccess && (
-                  <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl text-xs flex items-center gap-2 animate-in fade-in">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <div className="p-3 bg-emerald-50 dark:bg-emerald-950/80 border border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300 rounded-xl text-xs flex items-center gap-2 animate-in fade-in">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
                     <span>Email template updated and saved successfully! Changes are live across all notifications.</span>
                   </div>
                 )}
 
                 {/* Dynamic Variables Pill Bar */}
-                <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 space-y-2">
+                <div className="bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl p-3.5 space-y-2">
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                    <span className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
                       <Sparkles className="w-3.5 h-3.5 text-amber-500" />
                       Insert Dynamic Variables (Click to add):
                     </span>
                     {copiedVariable && (
-                      <span className="text-[11px] font-bold text-emerald-600 bg-emerald-100 px-2 py-0.5 rounded animate-pulse">
+                      <span className="text-[11px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-100 dark:bg-emerald-950/80 px-2 py-0.5 rounded animate-pulse">
                         Added {copiedVariable}!
                       </span>
                     )}
@@ -691,13 +691,13 @@ export const AdminGmailAlerts: React.FC<AdminGmailAlertsProps> = ({
                         key={variable}
                         type="button"
                         onClick={() => handleInsertVariable(variable)}
-                        className="text-[11px] font-mono bg-white hover:bg-red-50 hover:text-red-700 hover:border-red-300 border border-slate-200 px-2.5 py-1 rounded-lg text-slate-700 transition-all shadow-2xs active:scale-95"
+                        className="text-[11px] font-mono bg-white dark:bg-slate-900 hover:bg-red-50 dark:hover:bg-red-950/50 hover:text-red-700 dark:hover:text-red-300 hover:border-red-300 dark:hover:border-red-800 border border-slate-200 dark:border-slate-700 px-2.5 py-1 rounded-lg text-slate-700 dark:text-slate-200 transition-all shadow-2xs active:scale-95"
                       >
                         {`{{${variable}}}`}
                       </button>
                     ))}
                   </div>
-                  <p className="text-[10px] text-slate-400">
+                  <p className="text-[10px] text-slate-400 dark:text-slate-500">
                     Clicking a tag inserts it into your currently focused message field.
                   </p>
                 </div>
@@ -706,7 +706,7 @@ export const AdminGmailAlerts: React.FC<AdminGmailAlertsProps> = ({
                 <div className="space-y-4">
                     {/* Subject Line */}
                     <div>
-                      <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5">
+                      <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1.5">
                         Email Subject Line
                       </label>
                       <input
@@ -715,13 +715,13 @@ export const AdminGmailAlerts: React.FC<AdminGmailAlertsProps> = ({
                         onFocus={() => setLastFocusedField('subject')}
                         onChange={(e) => updateVisualField('subject', e.target.value)}
                         placeholder="Enter email subject line..."
-                        className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-sm text-slate-900 focus:bg-white focus:outline-none focus:border-red-500 font-medium transition-colors"
+                        className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl px-3.5 py-2.5 text-sm text-slate-900 dark:text-white focus:bg-white dark:focus:bg-slate-900 focus:outline-none focus:border-red-500 font-medium transition-colors"
                       />
                     </div>
 
                     {/* Headline / Greeting */}
                     <div>
-                      <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5">
+                      <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1.5">
                         Greeting / Main Headline
                       </label>
                       <input
@@ -730,17 +730,17 @@ export const AdminGmailAlerts: React.FC<AdminGmailAlertsProps> = ({
                         onFocus={() => setLastFocusedField('headline')}
                         onChange={(e) => updateVisualField('headline', e.target.value)}
                         placeholder="e.g. Hello, {{customerName}}! 👋"
-                        className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-sm text-slate-900 focus:bg-white focus:outline-none focus:border-red-500 font-medium transition-colors"
+                        className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl px-3.5 py-2.5 text-sm text-slate-900 dark:text-white focus:bg-white dark:focus:bg-slate-900 focus:outline-none focus:border-red-500 font-medium transition-colors"
                       />
                     </div>
 
                     {/* Main Message Body Text */}
                     <div>
                       <div className="flex items-center justify-between mb-1.5">
-                        <label className="block text-xs font-bold uppercase tracking-wider text-slate-700">
+                        <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">
                           Main Message / Body Text
                         </label>
-                        <span className="text-[11px] text-slate-400">
+                        <span className="text-[11px] text-slate-400 dark:text-slate-500">
                           Primary message content sent to recipient
                         </span>
                       </div>
@@ -750,13 +750,13 @@ export const AdminGmailAlerts: React.FC<AdminGmailAlertsProps> = ({
                         onFocus={() => setLastFocusedField('bodyMessage')}
                         onChange={(e) => updateVisualField('bodyMessage', e.target.value)}
                         placeholder="Type the message here that you want the customer or admin to read..."
-                        className="w-full bg-slate-50 border border-slate-300 rounded-xl p-3.5 text-sm text-slate-900 focus:bg-white focus:outline-none focus:border-red-500 leading-relaxed transition-colors"
+                        className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl p-3.5 text-sm text-slate-900 dark:text-white focus:bg-white dark:focus:bg-slate-900 focus:outline-none focus:border-red-500 leading-relaxed transition-colors"
                       />
                     </div>
 
                     {/* Highlight Note Banner */}
                     <div>
-                      <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5">
+                      <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1.5">
                         Highlight / Callout Box Note
                       </label>
                       <input
@@ -765,14 +765,14 @@ export const AdminGmailAlerts: React.FC<AdminGmailAlertsProps> = ({
                         onFocus={() => setLastFocusedField('highlightNote')}
                         onChange={(e) => updateVisualField('highlightNote', e.target.value)}
                         placeholder="e.g. ⚡ Special Privilege: Enjoy express doorstep delivery..."
-                        className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2 text-xs text-slate-900 focus:bg-white focus:outline-none focus:border-red-500 font-medium transition-colors"
+                        className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl px-3.5 py-2 text-xs text-slate-900 dark:text-white focus:bg-white dark:focus:bg-slate-900 focus:outline-none focus:border-red-500 font-medium transition-colors"
                       />
                     </div>
 
                     {/* Action Button Label & Link */}
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div>
-                        <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5">
+                        <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1.5">
                           Action Button Label
                         </label>
                         <input
@@ -781,12 +781,12 @@ export const AdminGmailAlerts: React.FC<AdminGmailAlertsProps> = ({
                           onFocus={() => setLastFocusedField('buttonText')}
                           onChange={(e) => updateVisualField('buttonText', e.target.value)}
                           placeholder="e.g. Start Shopping Now"
-                          className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2 text-xs text-slate-900 focus:bg-white focus:outline-none focus:border-red-500 font-medium transition-colors"
+                          className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl px-3.5 py-2 text-xs text-slate-900 dark:text-white focus:bg-white dark:focus:bg-slate-900 focus:outline-none focus:border-red-500 font-medium transition-colors"
                         />
                       </div>
 
                       <div>
-                        <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5">
+                        <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1.5">
                           Action Button URL / Variable
                         </label>
                         <input
@@ -795,14 +795,14 @@ export const AdminGmailAlerts: React.FC<AdminGmailAlertsProps> = ({
                           onFocus={() => setLastFocusedField('buttonUrl')}
                           onChange={(e) => updateVisualField('buttonUrl', e.target.value)}
                           placeholder="e.g. {{loginUrl}} or {{orderUrl}}"
-                          className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2 text-xs font-mono text-slate-900 focus:bg-white focus:outline-none focus:border-red-500 font-medium transition-colors"
+                          className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl px-3.5 py-2 text-xs font-mono text-slate-900 dark:text-white focus:bg-white dark:focus:bg-slate-900 focus:outline-none focus:border-red-500 font-medium transition-colors"
                         />
                       </div>
                     </div>
 
                     {/* Footer Support Note */}
                     <div>
-                      <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5">
+                      <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1.5">
                         Footer &amp; Support Assistance Note
                       </label>
                       <input
@@ -811,13 +811,13 @@ export const AdminGmailAlerts: React.FC<AdminGmailAlertsProps> = ({
                         onFocus={() => setLastFocusedField('footerNote')}
                         onChange={(e) => updateVisualField('footerNote', e.target.value)}
                         placeholder="e.g. Need assistance? Reach our dedicated support desk at {{supportPhone}}..."
-                        className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2 text-xs text-slate-900 focus:bg-white focus:outline-none focus:border-red-500 font-medium transition-colors"
+                        className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl px-3.5 py-2 text-xs text-slate-900 dark:text-white focus:bg-white dark:focus:bg-slate-900 focus:outline-none focus:border-red-500 font-medium transition-colors"
                       />
                     </div>
                   </div>
 
                 {/* Mobile Test Send Box (Visible on mobile/tablet < lg) */}
-                <div className="block lg:hidden pt-4 border-t border-slate-100">
+                <div className="block lg:hidden pt-4 border-t border-slate-100 dark:border-slate-800">
                   <div className="bg-slate-900 text-white rounded-xl p-4 space-y-2.5">
                     <div className="flex items-center gap-2">
                       <Send className="w-4 h-4 text-red-400" />
@@ -862,23 +862,23 @@ export const AdminGmailAlerts: React.FC<AdminGmailAlertsProps> = ({
               </div>
 
               {/* Live Responsive Preview Pane */}
-              <div className="bg-white rounded-2xl border border-slate-200 p-4 sm:p-6 shadow-sm space-y-4">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
+              <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-4 sm:p-6 shadow-sm space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100 dark:border-slate-800">
                   <div className="flex items-center gap-2">
                     <Eye className="w-4 h-4 text-red-600" />
-                    <h3 className="text-sm sm:text-base font-bold text-slate-900">
+                    <h3 className="text-sm sm:text-base font-bold text-slate-900 dark:text-white">
                       Live Email Preview (Inbox View)
                     </h3>
                   </div>
 
-                  <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl self-start sm:self-auto">
+                  <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl self-start sm:self-auto">
                     <button
                       type="button"
                       onClick={() => setPreviewDevice('desktop')}
                       className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all ${
                         previewDevice === 'desktop'
-                          ? 'bg-white text-slate-900 shadow-sm'
-                          : 'text-slate-600 hover:text-slate-900'
+                          ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm'
+                          : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                       }`}
                     >
                       <Monitor className="w-3.5 h-3.5" />
@@ -889,8 +889,8 @@ export const AdminGmailAlerts: React.FC<AdminGmailAlertsProps> = ({
                       onClick={() => setPreviewDevice('mobile')}
                       className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all ${
                         previewDevice === 'mobile'
-                          ? 'bg-white text-slate-900 shadow-sm'
-                          : 'text-slate-600 hover:text-slate-900'
+                          ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm'
+                          : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                       }`}
                     >
                       <Smartphone className="w-3.5 h-3.5" />
@@ -900,18 +900,18 @@ export const AdminGmailAlerts: React.FC<AdminGmailAlertsProps> = ({
                 </div>
 
                 {/* Subject Preview Bar */}
-                <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 sm:p-4 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div className="bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl p-3 sm:p-4 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                   <div className="flex-1">
-                    <span className="text-slate-400 font-bold uppercase text-[10px] block">
+                    <span className="text-slate-400 dark:text-slate-500 font-bold uppercase text-[10px] block">
                       Inbox Subject Preview
                     </span>
-                    <span className="font-bold text-slate-900 text-sm mt-0.5 block">
+                    <span className="font-bold text-slate-900 dark:text-white text-sm mt-0.5 block">
                       {previewRender.subject}
                     </span>
                   </div>
-                  <div className="text-left sm:text-right border-t sm:border-t-0 pt-2 sm:pt-0 border-slate-200">
-                    <span className="text-slate-400 text-[10px] block font-mono">Sender:</span>
-                    <span className="text-slate-700 font-semibold text-xs">
+                  <div className="text-left sm:text-right border-t sm:border-t-0 pt-2 sm:pt-0 border-slate-200 dark:border-slate-700">
+                    <span className="text-slate-400 dark:text-slate-500 text-[10px] block font-mono">Sender:</span>
+                    <span className="text-slate-700 dark:text-slate-300 font-semibold text-xs">
                       {settings.senderName || 'KenaX BD'} &lt;{settings.senderEmail || 'support@kenaxbd.com'}&gt;
                     </span>
                   </div>

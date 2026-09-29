@@ -7,7 +7,7 @@ import {
   Order,
   Product,
   StaffUser,
-} from '../types';
+} from '../types/index.ts';
 import {
   getEmailTemplatesFromDB,
   saveEmailLogToDB,
@@ -314,6 +314,89 @@ export const DEFAULT_EMAIL_TEMPLATES: Record<EmailTemplateType, EmailTemplate> =
           <tr>
             <td style="background-color: #f1f5f9; padding: 18px 30px; text-align: center; border-top: 1px solid #e2e8f0; font-size: 12px; color: #64748b;">
               KenaX BD • Authentic Electronics &amp; Gadgets
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`,
+  },
+
+  user_order_delivered: {
+    id: 'user_order_delivered',
+    title: 'Customer Order Delivered & Review Request',
+    banglaTitle: 'কাস্টমার অর্ডার ডেলিভারড ও ওয়েবসাইট রিভিউ রিকোয়েস্ট',
+    category: 'user',
+    subject: '🎉 Order Delivered (#{{orderId}}) - Please Leave a Review on KenaX BD',
+    description: 'Sent when the order status is marked as Delivered, thanking the customer and inviting them to review their product on the website.',
+    variables: ['orderId', 'customerName', 'totalAmount', 'reviewUrl', 'supportPhone'],
+    sampleData: {
+      orderId: 'KB-882194',
+      customerName: 'Sadik Rahman',
+      totalAmount: '৳2,350',
+      reviewUrl: 'https://kenaxbd.ai.studio',
+      supportPhone: '+880 1700-123456',
+    },
+    enabled: true,
+    headline: 'Your order #{{orderId}} has been successfully delivered! 🎉',
+    bodyMessage: 'Dear {{customerName}}, your package has been delivered to your destination. Thank you for choosing KenaX BD! We hope you love your new purchase.',
+    highlightNote: '⭐ Please take 30 seconds to leave an authentic product review on our website: https://kenaxbd.ai.studio',
+    buttonText: '⭐ Write a Review on Website',
+    buttonUrl: 'https://kenaxbd.ai.studio',
+    footerNote: 'If you faced any issue with your parcel or need a replacement, reach out to our support team right away.',
+    htmlContent: `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Order Delivered - Review Request</title>
+</head>
+<body style="margin: 0; padding: 0; background-color: #0f172a; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #334155;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #0f172a; padding: 30px 15px;">
+    <tr>
+      <td align="center">
+        <table width="600" cellpadding="0" cellspacing="0" style="max-width: 600px; width: 100%; background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 10px 25px rgba(0,0,0,0.2);">
+          <tr>
+            <td style="background-color: #0b0f19; padding: 25px 30px; text-align: center; border-bottom: 3px solid #10b981;">
+              <h1 style="margin: 0; color: #ffffff; font-size: 24px; letter-spacing: 1px; font-weight: 800;">
+                KENA<span style="color: #10b981;">X</span> BD
+              </h1>
+              <div style="display: inline-block; margin-top: 10px; background-color: rgba(16, 185, 129, 0.2); border: 1px solid #10b981; color: #34d399; font-size: 12px; font-weight: 700; padding: 4px 12px; border-radius: 20px;">
+                🎉 Status: Delivered Successfully
+              </div>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding: 35px 30px;">
+              <h2 style="margin: 0 0 10px 0; color: #0f172a; font-size: 19px; font-weight: 700;">
+                Your order #{{orderId}} has been delivered! 🎉
+              </h2>
+              <p style="margin: 0 0 20px 0; color: #475569; font-size: 14px; line-height: 1.6;">
+                Dear <strong>{{customerName}}</strong>, your parcel has been safely delivered to your address. Thank you for shopping with <strong>KenaX BD</strong>!
+              </p>
+
+              <div style="background-color: #f0fdf4; border: 1px solid #dcfce7; border-radius: 8px; padding: 20px; margin-bottom: 25px; text-align: center;">
+                <p style="margin: 0 0 10px 0; font-size: 15px; font-weight: 700; color: #15803d;">
+                  ⭐ We Value Your Feedback!
+                </p>
+                <p style="margin: 0 0 15px 0; font-size: 13px; color: #166534; line-height: 1.5;">
+                  Please take 30 seconds to share your experience and leave a product review on our official website.
+                </p>
+                <a href="https://kenaxbd.ai.studio" style="display: inline-block; background-color: #10b981; color: #ffffff; text-decoration: none; padding: 12px 26px; font-size: 14px; font-weight: 700; border-radius: 8px;">
+                  ⭐ Leave a Review on Website (kenaxbd.ai.studio)
+                </a>
+              </div>
+
+              <p style="margin: 0; color: #64748b; font-size: 13px; line-height: 1.5; border-top: 1px solid #e2e8f0; padding-top: 16px;">
+                Website: <a href="https://kenaxbd.ai.studio" style="color: #0ea5e9; font-weight: 600;">https://kenaxbd.ai.studio</a> | Support Hotline: {{supportPhone}}
+              </p>
+            </td>
+          </tr>
+          <tr>
+            <td style="background-color: #f1f5f9; padding: 18px 30px; text-align: center; border-top: 1px solid #e2e8f0; font-size: 12px; color: #64748b;">
+              KenaX BD • Smart Shopping • Authentic Electronics &amp; Gadgets
             </td>
           </tr>
         </table>
@@ -1103,7 +1186,7 @@ export function generateEmailHtml(
       </div>`;
   } else if (template.id === 'user_order_placed') {
     detailsCardHtml = `
-      <div style="background-color: #fffbeb; border: 1px solid #fef3c7; border-radius: 8px; padding: 18px; margin-bottom: 25px;">
+      <div style="background-color: #fffbeb; border: 1px solid #fef3c7; border-radius: 8px; padding: 18px; margin-bottom: 20px;">
         <table width="100%" cellpadding="6" cellspacing="0" style="font-size: 14px; color: #1e293b;">
           <tr><td width="40%" style="color: #78350f; font-weight: 600;">Order ID:</td><td style="font-weight: 700; color: #b45309;">#{{orderId}}</td></tr>
           <tr><td style="color: #78350f; font-weight: 600;">Total Payable:</td><td style="font-weight: 700; color: #0f172a; font-size: 16px;">{{totalAmount}}</td></tr>
@@ -1111,35 +1194,67 @@ export function generateEmailHtml(
           <tr><td style="color: #78350f; font-weight: 600;">Delivery Address:</td><td>{{deliveryAddress}}</td></tr>
           <tr><td style="color: #78350f; font-weight: 600;">Items:</td><td>{{itemsSummary}}</td></tr>
         </table>
+      </div>
+
+      <!-- Telegram Bot Subscription Banner -->
+      <div style="background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%); border-radius: 10px; padding: 18px; color: #ffffff; text-align: center; margin-bottom: 25px; box-shadow: 0 4px 12px rgba(2, 132, 199, 0.25);">
+        <h3 style="margin: 0 0 6px 0; font-size: 15px; font-weight: 800; color: #ffffff;">🤖 Subscribe for Live Telegram Push Updates</h3>
+        <p style="margin: 0 0 12px 0; font-size: 13px; color: #e0f2fe; line-height: 1.4;">Get real-time notification alerts on Telegram when your parcel is confirmed, packed, and handed to courier!</p>
+        <a href="https://t.me/KenaX_Official_Bot?start=order_{{orderId}}" target="_blank" style="display: inline-block; background-color: #ffffff; color: #0284c7; font-weight: 800; padding: 9px 20px; border-radius: 8px; text-decoration: none; font-size: 13px;">
+          📲 Connect Telegram Bot Now
+        </a>
       </div>`;
   } else if (template.id === 'user_order_confirmed') {
     detailsCardHtml = `
-      <div style="background-color: #f0fdf4; border: 1px solid #dcfce7; border-radius: 8px; padding: 18px; margin-bottom: 25px;">
+      <div style="background-color: #f0fdf4; border: 1px solid #dcfce7; border-radius: 8px; padding: 18px; margin-bottom: 20px;">
         <table width="100%" cellpadding="6" cellspacing="0" style="font-size: 14px; color: #166534;">
           <tr><td width="40%" style="font-weight: 600;">Order ID:</td><td style="font-weight: 700; color: #0f172a;">#{{orderId}}</td></tr>
           <tr><td style="font-weight: 600;">Payable Amount:</td><td style="font-weight: 700; color: #15803d; font-size: 16px;">{{totalAmount}}</td></tr>
           <tr><td style="font-weight: 600;">Verified By:</td><td>{{confirmedBy}}</td></tr>
           <tr><td style="font-weight: 600;">Estimated Delivery:</td><td>{{estimatedDelivery}}</td></tr>
         </table>
+      </div>
+
+      <!-- Telegram Bot Subscription Banner -->
+      <div style="background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%); border-radius: 10px; padding: 18px; color: #ffffff; text-align: center; margin-bottom: 25px;">
+        <h3 style="margin: 0 0 6px 0; font-size: 15px; font-weight: 800; color: #ffffff;">🤖 Live Tracking on Telegram Bot</h3>
+        <p style="margin: 0 0 12px 0; font-size: 13px; color: #e0f2fe; line-height: 1.4;">Subscribe to receive real-time courier dispatch notifications directly in your Telegram chat.</p>
+        <a href="https://t.me/KenaX_Official_Bot?start=order_{{orderId}}" target="_blank" style="display: inline-block; background-color: #ffffff; color: #0284c7; font-weight: 800; padding: 9px 20px; border-radius: 8px; text-decoration: none; font-size: 13px;">
+          📲 Track Order on Telegram
+        </a>
       </div>`;
   } else if (template.id === 'user_order_processing') {
     detailsCardHtml = `
-      <div style="background-color: #eef2ff; border: 1px solid #e0e7ff; border-radius: 8px; padding: 18px; margin-bottom: 25px;">
+      <div style="background-color: #eef2ff; border: 1px solid #e0e7ff; border-radius: 8px; padding: 18px; margin-bottom: 20px;">
         <table width="100%" cellpadding="6" cellspacing="0" style="font-size: 14px; color: #3730a3;">
           <tr><td width="40%" style="font-weight: 600;">Order ID:</td><td style="font-weight: 700; color: #0f172a;">#{{orderId}}</td></tr>
           <tr><td style="font-weight: 600;">Fulfillment Hub:</td><td>{{warehouseHub}}</td></tr>
           <tr><td style="font-weight: 600;">Current Step:</td><td>Barcode scanning &amp; security sealing</td></tr>
         </table>
+      </div>
+
+      <div style="background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%); border-radius: 10px; padding: 18px; color: #ffffff; text-align: center; margin-bottom: 25px;">
+        <h3 style="margin: 0 0 6px 0; font-size: 15px; font-weight: 800; color: #ffffff;">🤖 Get Courier Handover Alerts on Telegram</h3>
+        <a href="https://t.me/KenaX_Official_Bot?start=order_{{orderId}}" target="_blank" style="display: inline-block; background-color: #ffffff; color: #0284c7; font-weight: 800; padding: 9px 20px; border-radius: 8px; text-decoration: none; font-size: 13px; margin-top: 8px;">
+          📲 Subscribe on Telegram Bot
+        </a>
       </div>`;
   } else if (template.id === 'user_order_picked') {
     detailsCardHtml = `
-      <div style="background-color: #ecfdf5; border: 1px solid #a7f3d0; border-radius: 8px; padding: 18px; margin-bottom: 25px;">
+      <div style="background-color: #ecfdf5; border: 1px solid #a7f3d0; border-radius: 8px; padding: 18px; margin-bottom: 20px;">
         <table width="100%" cellpadding="6" cellspacing="0" style="font-size: 14px; color: #065f46;">
           <tr><td width="40%" style="font-weight: 600;">Order ID:</td><td style="font-weight: 700; color: #0f172a;">#{{orderId}}</td></tr>
           <tr><td style="font-weight: 600;">Courier Partner:</td><td style="font-weight: 700;">{{courierName}}</td></tr>
           <tr><td style="font-weight: 600;">Tracking Number:</td><td style="font-family: monospace; font-weight: 700; color: #0284c7; font-size: 15px;">{{trackingNumber}}</td></tr>
           <tr><td style="font-weight: 600;">Estimated Arrival:</td><td>{{estimatedDelivery}}</td></tr>
         </table>
+      </div>
+
+      <div style="background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%); border-radius: 10px; padding: 18px; color: #ffffff; text-align: center; margin-bottom: 25px;">
+        <h3 style="margin: 0 0 6px 0; font-size: 15px; font-weight: 800; color: #ffffff;">🤖 Live Courier Tracking via Telegram</h3>
+        <a href="https://t.me/KenaX_Official_Bot?start=order_{{orderId}}" target="_blank" style="display: inline-block; background-color: #ffffff; color: #0284c7; font-weight: 800; padding: 9px 20px; border-radius: 8px; text-decoration: none; font-size: 13px; margin-top: 8px;">
+          📲 Open Telegram Live Tracking
+        </a>
       </div>`;
   } else if (template.id === 'staff_new_user_registered') {
     detailsCardHtml = `
@@ -1870,6 +1985,27 @@ export async function triggerOrderStatusChangeWorkflow(
         courierName: courierName || 'Steadfast Courier / RedX',
         trackingNumber: trackingNumber || `TRK-${order.id}`,
         estimatedDelivery: '24 to 48 hours (Rider will contact prior to delivery)',
+        orderTrackingUrl,
+      },
+    });
+  } else if (
+    newStatus === 'Delivered' ||
+    newStatus === 'Delivered Successfully' ||
+    newStatus === 'Completed'
+  ) {
+    await dispatchEmail({
+      type: 'user_order_delivered',
+      to: order.customerEmail,
+      recipientRole: 'Customer',
+      orderId: order.id,
+      actorName: staffUser?.name || 'Staff',
+      actorRole: staffUser?.role || 'Staff',
+      data: {
+        orderId: order.id,
+        customerName: order.customerName,
+        totalAmount: `৳${(order.totalAmount || 0).toLocaleString('en-BD')}`,
+        reviewUrl: 'https://kenaxbd.ai.studio',
+        supportPhone: '+880 1700-123456',
         orderTrackingUrl,
       },
     });

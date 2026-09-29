@@ -1,4 +1,4 @@
-import { TagCollectionSlide, WebsiteSettings } from '../types';
+import { TagCollectionSlide, WebsiteSettings } from '../types/index.ts';
 
 /**
  * Returns default banner slides for a specific tag or collection if custom ones are not yet saved.
@@ -337,10 +337,19 @@ export function getTagSlides(
   itemCount: number = 0
 ): TagCollectionSlide[] {
   const cleanKey = (tag || '').trim().toLowerCase();
-  if (tagCollectionBanners && Object.prototype.hasOwnProperty.call(tagCollectionBanners, cleanKey)) {
-    const custom = tagCollectionBanners[cleanKey];
-    if (Array.isArray(custom)) {
-      return custom;
+  const rawTag = (tag || '').trim();
+  if (tagCollectionBanners) {
+    if (Object.prototype.hasOwnProperty.call(tagCollectionBanners, cleanKey) && Array.isArray(tagCollectionBanners[cleanKey])) {
+      return tagCollectionBanners[cleanKey];
+    }
+    if (Object.prototype.hasOwnProperty.call(tagCollectionBanners, rawTag) && Array.isArray(tagCollectionBanners[rawTag])) {
+      return tagCollectionBanners[rawTag];
+    }
+    const matchKey = Object.keys(tagCollectionBanners).find(
+      (k) => k.trim().toLowerCase() === cleanKey
+    );
+    if (matchKey && Array.isArray(tagCollectionBanners[matchKey])) {
+      return tagCollectionBanners[matchKey];
     }
   }
   return getDefaultTagSlides(tag, itemCount);

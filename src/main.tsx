@@ -1,3 +1,11 @@
+import React, { StrictMode } from 'react';
+import { createRoot } from 'react-dom/client';
+import App from './App.tsx';
+import { ErrorBoundary } from './components/ErrorBoundary';
+import { LanguageProvider } from './context/LanguageContext';
+import { ThemeProvider } from './context/ThemeContext';
+import './index.css';
+
 // Suppress benign internal Firestore idle stream recycling messages in dev console
 if (typeof window !== 'undefined') {
   const isBenignStreamLog = (args: any[]) => {
@@ -45,32 +53,18 @@ if (typeof window !== 'undefined') {
   });
 }
 
-import {StrictMode} from 'react';
-import {createRoot} from 'react-dom/client';
-import App from './App.tsx';
-import {ErrorBoundary} from './components/ErrorBoundary';
-import {SpeedInsights} from '@vercel/speed-insights/react';
-import {Analytics} from '@vercel/analytics/react';
-import './index.css';
+const rootElement = document.getElementById('root');
+if (rootElement) {
+  createRoot(rootElement).render(
+    <StrictMode>
+      <ErrorBoundary>
+        <ThemeProvider>
+          <LanguageProvider>
+            <App />
+          </LanguageProvider>
+        </ThemeProvider>
+      </ErrorBoundary>
+    </StrictMode>
+  );
+}
 
-const SafeAnalytics = () => {
-  try {
-    return (
-      <>
-        <SpeedInsights />
-        <Analytics />
-      </>
-    );
-  } catch {
-    return null;
-  }
-};
-
-createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    <ErrorBoundary>
-      <App />
-      <SafeAnalytics />
-    </ErrorBoundary>
-  </StrictMode>,
-);

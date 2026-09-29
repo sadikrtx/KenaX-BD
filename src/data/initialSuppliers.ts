@@ -1,4 +1,4 @@
-import { Supplier } from '../types';
+import { Supplier } from '../types/index.ts';
 
 export const INITIAL_SUPPLIERS: Supplier[] = [
   {

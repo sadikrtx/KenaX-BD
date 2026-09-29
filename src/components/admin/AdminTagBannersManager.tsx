@@ -346,9 +346,11 @@ export const AdminTagBannersManager: React.FC<AdminTagBannersManagerProps> = ({
 
   const handleSaveBanner = async (tagKey: string, slides: TagCollectionSlide[]) => {
     const cleanKey = tagKey.trim().toLowerCase();
+    const originalKey = (editingTag || tagKey).trim();
     const updatedTagBanners = {
       ...tagBanners,
       [cleanKey]: slides,
+      [originalKey]: slides,
     };
     await onUpdateSettings({
       tagCollectionBanners: updatedTagBanners,

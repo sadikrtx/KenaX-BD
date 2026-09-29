@@ -117,8 +117,8 @@ export const AdminPerformanceOverview: React.FC<AdminPerformanceOverviewProps> =
 
       {/* Role Segregation Notice */}
       {isStrictRoleRestricted && (
-        <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200 text-amber-800 text-xs flex items-center gap-3">
-          <Lock className="w-5 h-5 shrink-0 text-amber-600" />
+        <div className="p-4 rounded-2xl bg-amber-50 dark:bg-amber-950/60 border border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-300 text-xs flex items-center gap-3">
+          <Lock className="w-5 h-5 shrink-0 text-amber-600 dark:text-amber-400" />
           <div>
             <span className="font-bold">Access Isolation Active:</span> As a <b>{currentRole.toUpperCase()}</b>, you can only view your own secure performance dashboard. Other staff dashboards are strictly isolated for privacy and security.
           </div>
@@ -136,27 +136,27 @@ export const AdminPerformanceOverview: React.FC<AdminPerformanceOverviewProps> =
           return (
             <div
               key={staff.id}
-              className="p-6 rounded-3xl bg-white border border-slate-200 shadow-2xs hover:border-slate-300 transition-all flex flex-col justify-between space-y-5"
+              className="p-6 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xs hover:border-slate-300 dark:hover:border-slate-700 transition-all flex flex-col justify-between space-y-5"
             >
               <div>
                 {/* Top card header */}
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex items-center gap-3.5">
-                    <div className="w-12 h-12 rounded-2xl bg-slate-900 text-white font-black flex items-center justify-center text-base shadow-sm shrink-0">
+                    <div className="w-12 h-12 rounded-2xl bg-slate-900 dark:bg-slate-800 text-white font-black flex items-center justify-center text-base shadow-sm shrink-0 border dark:border-slate-700">
                       {staff.name.charAt(0).toUpperCase()}
                     </div>
                     <div>
                       <div className="flex items-center gap-2">
-                        <h3 className="font-black text-slate-900 text-sm sm:text-base">{staff.name}</h3>
+                        <h3 className="font-black text-slate-900 dark:text-white text-sm sm:text-base">{staff.name}</h3>
                         {staff.isRemoved && (
-                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-700 border border-rose-200">
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 dark:bg-rose-950/80 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800">
                             Removed
                           </span>
                         )}
                       </div>
-                      <p className="text-xs text-slate-400">{staff.email}</p>
+                      <p className="text-xs text-slate-400 dark:text-slate-400">{staff.email}</p>
                       {staff.isRemoved && (
-                        <p className="text-[10px] font-bold text-rose-600 mt-0.5 inline-flex items-center gap-1">
+                        <p className="text-[10px] font-bold text-rose-600 dark:text-rose-400 mt-0.5 inline-flex items-center gap-1">
                           <span>this staff removed</span>
                         </p>
                       )}
@@ -166,10 +166,10 @@ export const AdminPerformanceOverview: React.FC<AdminPerformanceOverviewProps> =
                   <span
                     className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider ${
                       isSuper
-                        ? 'bg-purple-100 text-purple-800'
+                        ? 'bg-purple-100 dark:bg-purple-950/80 text-purple-800 dark:text-purple-300 border border-purple-200 dark:border-purple-800'
                         : isManager
-                        ? 'bg-sky-100 text-sky-800'
-                        : 'bg-emerald-100 text-emerald-800'
+                        ? 'bg-sky-100 dark:bg-sky-950/80 text-sky-800 dark:text-sky-300 border border-sky-200 dark:border-sky-800'
+                        : 'bg-emerald-100 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800'
                     }`}
                   >
                     {staff.role.replace('_', ' ')}
@@ -178,21 +178,21 @@ export const AdminPerformanceOverview: React.FC<AdminPerformanceOverviewProps> =
 
                 {/* Metrics Breakdown Grid */}
                 <div className="grid grid-cols-3 gap-3 mt-5">
-                  <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-100 text-center">
-                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Orders Handled</span>
-                    <p className="text-lg font-black text-slate-900 mt-1">{metrics.ordersProcessed}</p>
+                  <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/80 border border-slate-100 dark:border-slate-700/70 text-center">
+                    <span className="text-[10px] font-bold text-slate-400 dark:text-slate-400 uppercase tracking-wider">Orders Handled</span>
+                    <p className="text-lg font-black text-slate-900 dark:text-white mt-1">{metrics.ordersProcessed}</p>
                   </div>
 
-                  <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-100 text-center">
-                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Audit Actions</span>
-                    <p className="text-lg font-black text-sky-700 mt-1">{metrics.totalActions}</p>
+                  <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/80 border border-slate-100 dark:border-slate-700/70 text-center">
+                    <span className="text-[10px] font-bold text-slate-400 dark:text-slate-400 uppercase tracking-wider">Audit Actions</span>
+                    <p className="text-lg font-black text-sky-700 dark:text-sky-400 mt-1">{metrics.totalActions}</p>
                   </div>
 
-                  <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-100 text-center">
-                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                  <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/80 border border-slate-100 dark:border-slate-700/70 text-center">
+                    <span className="text-[10px] font-bold text-slate-400 dark:text-slate-400 uppercase tracking-wider">
                       {isModerator ? 'Reviews Moderated' : 'Revenue Managed'}
                     </span>
-                    <p className="text-sm sm:text-base font-black text-emerald-600 mt-1">
+                    <p className="text-sm sm:text-base font-black text-emerald-600 dark:text-emerald-400 mt-1">
                       {isModerator ? metrics.reviewsModerated : `৳${metrics.revenueHandled.toLocaleString()}`}
                     </p>
                   </div>
@@ -200,8 +200,8 @@ export const AdminPerformanceOverview: React.FC<AdminPerformanceOverviewProps> =
 
                 {/* Recent Activity Log for this staff */}
                 <div className="mt-5 space-y-2.5">
-                  <h4 className="text-[11px] font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
-                    <Activity className="w-3.5 h-3.5 text-sky-600" />
+                  <h4 className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+                    <Activity className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400" />
                     <span>Recent Activity & Workload Trail</span>
                   </h4>
 
@@ -210,20 +210,20 @@ export const AdminPerformanceOverview: React.FC<AdminPerformanceOverviewProps> =
                       metrics.recentLogs.map((log) => (
                         <div
                           key={log.id}
-                          className="p-2.5 rounded-xl bg-slate-50/80 border border-slate-100 flex items-center justify-between text-xs"
+                          className="p-2.5 rounded-xl bg-slate-50/80 dark:bg-slate-800/80 border border-slate-100 dark:border-slate-700/70 flex items-center justify-between text-xs"
                         >
                           <div className="flex items-center gap-2">
                             <span className="w-2 h-2 rounded-full bg-sky-500 shrink-0"></span>
-                            <span className="font-bold text-slate-800">{log.action}</span>
-                            <span className="text-slate-400 truncate max-w-[180px] sm:max-w-xs">({log.details})</span>
+                            <span className="font-bold text-slate-800 dark:text-slate-200">{log.action}</span>
+                            <span className="text-slate-400 dark:text-slate-400 truncate max-w-[180px] sm:max-w-xs">({log.details})</span>
                           </div>
-                          <span className="text-[10px] text-slate-400 whitespace-nowrap">
+                          <span className="text-[10px] text-slate-400 dark:text-slate-400 whitespace-nowrap">
                             {new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                           </span>
                         </div>
                       ))
                     ) : (
-                      <p className="text-xs text-slate-400 italic py-2 text-center bg-slate-50 rounded-xl">
+                      <p className="text-xs text-slate-400 dark:text-slate-500 italic py-2 text-center bg-slate-50 dark:bg-slate-800/60 rounded-xl">
                         No recent activity logs recorded yet for {staff.name}.
                       </p>
                     )}
@@ -232,10 +232,10 @@ export const AdminPerformanceOverview: React.FC<AdminPerformanceOverviewProps> =
               </div>
 
               {/* Footer status */}
-              <div className="pt-4 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
+              <div className="pt-4 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
                 <div className="flex items-center gap-1.5">
                   <span className={`w-2 h-2 rounded-full ${staff.isActive ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'}`}></span>
-                  <span className="font-semibold text-slate-700">{staff.isActive ? 'Active Staff Account' : 'Suspended'}</span>
+                  <span className="font-semibold text-slate-700 dark:text-slate-300">{staff.isActive ? 'Active Staff Account' : 'Suspended'}</span>
                 </div>
                 <span>Last login: {new Date(staff.lastLogin || staff.createdAt).toLocaleDateString('en-GB')}</span>
               </div>
@@ -244,7 +244,7 @@ export const AdminPerformanceOverview: React.FC<AdminPerformanceOverviewProps> =
         })}
 
         {effectiveStaffList.length === 0 && (
-          <div className="col-span-full py-16 text-center text-slate-400 text-xs italic bg-white rounded-3xl border border-slate-200">
+          <div className="col-span-full py-16 text-center text-slate-400 dark:text-slate-500 text-xs italic bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800">
             No staff members found matching your search query.
           </div>
         )}

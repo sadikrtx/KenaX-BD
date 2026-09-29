@@ -99,8 +99,16 @@ export async function syncFirestoreWithServerStore(): Promise<void> {
     // Gather deleted product tombstones
     const deletedProductIds = new Set<string>();
     try {
-      const delProdSnap = await getDocs(collection(db, 'deletedProducts'));
-      delProdSnap.forEach((d) => {
+      const [delProdSnap1, delProdSnap2] = await Promise.all([
+        getDocs(collection(db, 'deletedProducts')).catch(() => ({ forEach: () => {} } as any)),
+        getDocs(collection(db, 'preview_deletedProducts')).catch(() => ({ forEach: () => {} } as any)),
+      ]);
+      delProdSnap1.forEach((d: any) => {
+        deletedProductIds.add(d.id);
+        recordDeletedProductIdInStore(d.id);
+        deleteProductFromSQL(d.id).catch(() => {});
+      });
+      delProdSnap2.forEach((d: any) => {
         deletedProductIds.add(d.id);
         recordDeletedProductIdInStore(d.id);
         deleteProductFromSQL(d.id).catch(() => {});
@@ -126,6 +134,7 @@ export async function syncFirestoreWithServerStore(): Promise<void> {
           if (data && data.id) {
             if (deletedProductIds.has(data.id) || deletedProductIds.has(d.id)) {
               deleteDoc(doc(db, 'products', d.id)).catch(() => {});
+              deleteDoc(doc(db, 'preview_products', d.id)).catch(() => {});
               deleteProductFromSQL(data.id).catch(() => {});
             } else {
               saveProductToSQL({ ...data, id: d.id });
@@ -192,10 +201,10 @@ export async function syncFirestoreWithServerStore(): Promise<void> {
       console.warn('[Firestore Sync] Order sync notice:', err.message);
     }
 
-    // 3. Sync Staff
+    // 3. Sync Staff from both 'staff' and 'preview_staff' collections
     try {
-      const staffSnap = await getDocs(collection(db, 'staff'));
-      staffSnap.forEach((d) => {
+      const staffSnap1 = await getDocs(collection(db, 'staff'));
+      staffSnap1.forEach((d) => {
         const data = d.data();
         if (deletedStaffIds.has(d.id) || (data && data.id && deletedStaffIds.has(data.id))) {
           deleteDoc(doc(db, 'staff', d.id)).catch(() => {});
@@ -204,7 +213,18 @@ export async function syncFirestoreWithServerStore(): Promise<void> {
           saveStaffToStore({ id: d.id, ...data } as any);
         }
       });
-      console.log(`[Firestore Sync] Synced ${staffSnap.size} staff from Firestore.`);
+
+      const staffSnap2 = await getDocs(collection(db, 'preview_staff'));
+      staffSnap2.forEach((d) => {
+        const data = d.data();
+        if (deletedStaffIds.has(d.id) || (data && data.id && deletedStaffIds.has(data.id))) {
+          deleteDoc(doc(db, 'preview_staff', d.id)).catch(() => {});
+          deleteStaffFromStore(d.id);
+        } else if (data) {
+          saveStaffToStore({ id: d.id, ...data } as any);
+        }
+      });
+      console.log(`[Firestore Sync] Synced staff accounts from Firestore.`);
     } catch (err: any) {
       if (isQuotaError(err)) {
         if (!quotaExceededLogged) {
@@ -242,22 +262,25 @@ export async function syncFirestoreWithServerStore(): Promise<void> {
   }
 }
 
-export async function writeCustomerToFirestore(customer: any): Promise<void> {
+export async function writeCustomerToFirestore(customer: any, isEnvPreview?: boolean): Promise<void> {
   const db = getDb();
   if (!db || !customer || !customer.id || customer.id.startsWith('staff-cust-')) return;
+  const colName = isEnvPreview ? 'preview_customers' : 'customers';
   try {
-    await setDoc(doc(db, 'customers', customer.id), { ...customer, isV2Account: true }, { merge: true });
+    await setDoc(doc(db, colName, customer.id), { ...customer, isV2Account: true }, { merge: true });
   } catch (err: any) {
     console.warn('[Firestore Sync] writeCustomerToFirestore error:', err.message);
   }
 }
 
-export async function deleteCustomerFromFirestore(customerId: string): Promise<void> {
+export async function deleteCustomerFromFirestore(customerId: string, isEnvPreview?: boolean): Promise<void> {
   const db = getDb();
   if (!db || !customerId) return;
+  const colName = isEnvPreview ? 'preview_customers' : 'customers';
+  const delColName = isEnvPreview ? 'preview_deletedCustomers' : 'deletedCustomers';
   try {
-    await deleteDoc(doc(db, 'customers', customerId));
-    await setDoc(doc(db, 'deletedCustomers', customerId), {
+    await deleteDoc(doc(db, colName, customerId));
+    await setDoc(doc(db, delColName, customerId), {
       id: customerId,
       deletedAt: new Date().toISOString(),
     });
@@ -266,58 +289,76 @@ export async function deleteCustomerFromFirestore(customerId: string): Promise<v
   }
 }
 
-export async function writeOrderToFirestore(order: any): Promise<void> {
+export async function writeOrderToFirestore(order: any, isEnvPreview?: boolean): Promise<void> {
   const db = getDb();
   if (!db || !order || !order.id) return;
+  const colName = isEnvPreview ? 'preview_orders' : 'orders';
   try {
-    await setDoc(doc(db, 'orders', order.id), order, { merge: true });
+    await setDoc(doc(db, colName, order.id), order, { merge: true });
   } catch (err: any) {
     console.warn('[Firestore Sync] writeOrderToFirestore error:', err.message);
   }
 }
 
-export async function writeStaffToFirestore(staff: any): Promise<void> {
+export async function writeStaffToFirestore(staff: any, _isEnvPreview?: boolean): Promise<void> {
   const db = getDb();
   if (!db || !staff || !staff.id) return;
   try {
-    await setDoc(doc(db, 'staff', staff.id), staff, { merge: true });
+    await Promise.allSettled([
+      setDoc(doc(db, 'staff', staff.id), staff, { merge: true }),
+      setDoc(doc(db, 'preview_staff', staff.id), staff, { merge: true }),
+    ]);
   } catch (err: any) {
     console.warn('[Firestore Sync] writeStaffToFirestore error:', err.message);
   }
 }
 
-export async function deleteStaffFromFirestore(staffId: string): Promise<void> {
+export async function deleteStaffFromFirestore(staffId: string, _isEnvPreview?: boolean): Promise<void> {
   const db = getDb();
   if (!db || !staffId) return;
   try {
-    await deleteDoc(doc(db, 'staff', staffId));
+    await Promise.allSettled([
+      deleteDoc(doc(db, 'staff', staffId)),
+      deleteDoc(doc(db, 'preview_staff', staffId)),
+      setDoc(doc(db, 'deletedStaff', staffId), { id: staffId, deletedAt: new Date().toISOString() }),
+      setDoc(doc(db, 'preview_deletedStaff', staffId), { id: staffId, deletedAt: new Date().toISOString() }),
+    ]);
   } catch (err: any) {
     console.warn('[Firestore Sync] deleteStaffFromFirestore error:', err.message);
   }
 }
 
-export async function writeProductToFirestore(product: any): Promise<void> {
+export async function writeProductToFirestore(product: any, isEnvPreview?: boolean): Promise<void> {
   const db = getDb();
   if (!db || !product || !product.id) return;
+  const colName = isEnvPreview ? 'preview_products' : 'products';
+  const delColName = isEnvPreview ? 'preview_deletedProducts' : 'deletedProducts';
   try {
     const cleanProduct = JSON.parse(JSON.stringify(product));
-    await setDoc(doc(db, 'products', product.id), cleanProduct, { merge: true });
+    await setDoc(doc(db, colName, product.id), cleanProduct);
     // If it was in deletedProducts, remove the tombstone
-    await deleteDoc(doc(db, 'deletedProducts', product.id)).catch(() => {});
+    await deleteDoc(doc(db, delColName, product.id)).catch(() => {});
   } catch (err: any) {
     console.warn('[Firestore Sync] writeProductToFirestore error:', err.message);
   }
 }
 
-export async function deleteProductFromFirestore(productId: string): Promise<void> {
+export async function deleteProductFromFirestore(productId: string, _isEnvPreview?: boolean): Promise<void> {
   const db = getDb();
   if (!db || !productId) return;
   try {
-    await deleteDoc(doc(db, 'products', productId));
-    await setDoc(doc(db, 'deletedProducts', productId), {
-      id: productId,
-      deletedAt: new Date().toISOString(),
-    });
+    await Promise.allSettled([
+      deleteDoc(doc(db, 'products', productId)),
+      deleteDoc(doc(db, 'preview_products', productId)),
+      setDoc(doc(db, 'deletedProducts', productId), {
+        id: productId,
+        deletedAt: new Date().toISOString(),
+      }),
+      setDoc(doc(db, 'preview_deletedProducts', productId), {
+        id: productId,
+        deletedAt: new Date().toISOString(),
+      }),
+    ]);
   } catch (err: any) {
     console.warn('[Firestore Sync] deleteProductFromFirestore error:', err.message);
   }

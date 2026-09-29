@@ -529,7 +529,7 @@ export const AdminCategories: React.FC<AdminCategoriesProps> = ({
       )}
 
       {/* Top Header Card */}
-      <div className="p-5 sm:p-6 rounded-3xl bg-white border border-slate-200 shadow-sm space-y-4">
+      <div className="p-5 sm:p-6 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <div className="flex items-center gap-3.5">
             <div className="w-12 h-12 rounded-2xl bg-sky-600 flex items-center justify-center text-white shadow-md shadow-sky-600/20 shrink-0">
@@ -537,14 +537,14 @@ export const AdminCategories: React.FC<AdminCategoriesProps> = ({
             </div>
             <div>
               <div className="flex items-center gap-2.5">
-                <h2 className="text-lg sm:text-xl font-black text-slate-900">
+                <h2 className="text-lg sm:text-xl font-black text-slate-900 dark:text-white">
                   Category & Subcategory Studio
                 </h2>
-                <span className="px-2.5 py-0.5 rounded-full bg-sky-100 text-sky-800 text-xs font-black border border-sky-200">
+                <span className="px-2.5 py-0.5 rounded-full bg-sky-100 dark:bg-sky-950/80 text-sky-800 dark:text-sky-300 text-xs font-black border border-sky-200 dark:border-sky-800">
                   {categories.length} Categories
                 </span>
               </div>
-              <p className="text-xs sm:text-sm text-slate-500 mt-0.5">
+              <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-0.5">
                 Manage categories, subcategories, and 3rd-tier tags. All edits save instantly and sync to your storefront.
               </p>
             </div>
@@ -552,17 +552,17 @@ export const AdminCategories: React.FC<AdminCategoriesProps> = ({
 
           <div className="flex items-center flex-wrap gap-2.5 self-start lg:self-auto">
             {/* View Mode Switcher */}
-            <div className="flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200 text-xs shrink-0">
+            <div className="flex items-center bg-slate-100 dark:bg-slate-800 p-1 rounded-xl border border-slate-200 dark:border-slate-700 text-xs shrink-0">
               <button
                 type="button"
                 onClick={() => setViewMode('bento-grid')}
                 className={`flex items-center gap-1.5 px-3.5 py-2 rounded-lg font-bold transition-all cursor-pointer ${
                   viewMode === 'bento-grid'
-                    ? 'bg-white text-slate-900 shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900'
+                    ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                 }`}
               >
-                <LayoutGrid className="w-4 h-4 text-sky-600" />
+                <LayoutGrid className="w-4 h-4 text-sky-600 dark:text-sky-400" />
                 <span>Comfortable Cards</span>
               </button>
               <button
@@ -570,11 +570,11 @@ export const AdminCategories: React.FC<AdminCategoriesProps> = ({
                 onClick={() => setViewMode('compact-list')}
                 className={`flex items-center gap-1.5 px-3.5 py-2 rounded-lg font-bold transition-all cursor-pointer ${
                   viewMode === 'compact-list'
-                    ? 'bg-white text-slate-900 shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900'
+                    ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                 }`}
               >
-                <List className="w-4 h-4 text-sky-600" />
+                <List className="w-4 h-4 text-sky-600 dark:text-sky-400" />
                 <span>Table View</span>
               </button>
             </div>
@@ -591,50 +591,50 @@ export const AdminCategories: React.FC<AdminCategoriesProps> = ({
 
         {/* Quick Stats Strip */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2">
-          <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200/80 flex items-center gap-3.5">
-            <div className="w-10 h-10 rounded-xl bg-sky-100 text-sky-700 flex items-center justify-center shrink-0 font-black">
+          <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/80 flex items-center gap-3.5">
+            <div className="w-10 h-10 rounded-xl bg-sky-100 dark:bg-sky-950 text-sky-700 dark:text-sky-300 flex items-center justify-center shrink-0 font-black">
               <FolderTree className="w-5 h-5" />
             </div>
             <div>
-              <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Main Categories</p>
-              <p className="text-base font-black text-slate-900">{categories.length}</p>
+              <p className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Main Categories</p>
+              <p className="text-base font-black text-slate-900 dark:text-white">{categories.length}</p>
             </div>
           </div>
 
-          <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200/80 flex items-center gap-3.5">
-            <div className="w-10 h-10 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0 font-black">
+          <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/80 flex items-center gap-3.5">
+            <div className="w-10 h-10 rounded-xl bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 flex items-center justify-center shrink-0 font-black">
               <Layers className="w-5 h-5" />
             </div>
             <div>
-              <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Subcategories (২য় স্তর)</p>
-              <p className="text-base font-black text-slate-900">{totalSubcategories}</p>
+              <p className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Subcategories (২য় স্তর)</p>
+              <p className="text-base font-black text-slate-900 dark:text-white">{totalSubcategories}</p>
             </div>
           </div>
 
-          <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200/80 flex items-center gap-3.5">
-            <div className="w-10 h-10 rounded-xl bg-amber-100 text-amber-800 flex items-center justify-center shrink-0 font-black">
+          <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/80 flex items-center gap-3.5">
+            <div className="w-10 h-10 rounded-xl bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300 flex items-center justify-center shrink-0 font-black">
               <Tag className="w-5 h-5" />
             </div>
             <div>
-              <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Child Tags (৩য় স্তর)</p>
-              <p className="text-base font-black text-slate-900">{totalSubSubcategories}</p>
+              <p className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Child Tags (৩য় স্তর)</p>
+              <p className="text-base font-black text-slate-900 dark:text-white">{totalSubSubcategories}</p>
             </div>
           </div>
 
-          <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200/80 flex items-center gap-3.5">
-            <div className="w-10 h-10 rounded-xl bg-purple-100 text-purple-700 flex items-center justify-center shrink-0 font-black">
+          <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/80 flex items-center gap-3.5">
+            <div className="w-10 h-10 rounded-xl bg-purple-100 dark:bg-purple-950 text-purple-700 dark:text-purple-300 flex items-center justify-center shrink-0 font-black">
               <Package className="w-5 h-5" />
             </div>
             <div>
-              <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Catalog Products</p>
-              <p className="text-base font-black text-slate-900">{products.length}</p>
+              <p className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Catalog Products</p>
+              <p className="text-base font-black text-slate-900 dark:text-white">{products.length}</p>
             </div>
           </div>
         </div>
       </div>
 
       {/* Filter & Search Bar */}
-      <div className="flex flex-col sm:flex-row items-center justify-between gap-3 bg-white p-3.5 rounded-2xl border border-slate-200 shadow-xs">
+      <div className="flex flex-col sm:flex-row items-center justify-between gap-3 bg-white dark:bg-slate-900 p-3.5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs">
         <div className="relative w-full sm:w-96">
           <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
           <input
@@ -642,18 +642,18 @@ export const AdminCategories: React.FC<AdminCategoriesProps> = ({
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Search category, subcategory, or child tags..."
-            className="w-full pl-10 pr-3.5 py-2 text-xs sm:text-sm rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:outline-hidden focus:border-sky-500 transition-all font-medium"
+            className="w-full pl-10 pr-3.5 py-2 text-xs sm:text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white focus:bg-white dark:focus:bg-slate-900 focus:outline-hidden focus:border-sky-500 transition-all font-medium"
           />
         </div>
 
-        <div className="flex items-center gap-3 w-full sm:w-auto justify-between sm:justify-end text-xs text-slate-500 font-semibold">
+        <div className="flex items-center gap-3 w-full sm:w-auto justify-between sm:justify-end text-xs text-slate-500 dark:text-slate-400 font-semibold">
           <span>
-            Showing <strong className="text-slate-900 font-black">{filteredCategories.length}</strong> of {categories.length} Categories
+            Showing <strong className="text-slate-900 dark:text-white font-black">{filteredCategories.length}</strong> of {categories.length} Categories
           </span>
           {searchQuery && (
             <button
               onClick={() => setSearchQuery('')}
-              className="text-sky-600 hover:text-sky-800 font-bold cursor-pointer"
+              className="text-sky-600 dark:text-sky-400 hover:text-sky-800 dark:hover:text-sky-300 font-bold cursor-pointer"
             >
               Clear
             </button>
@@ -665,8 +665,8 @@ export const AdminCategories: React.FC<AdminCategoriesProps> = ({
       {viewMode === 'bento-grid' && (
         <div className="space-y-4">
           {filteredCategories.length === 0 ? (
-            <div className="p-12 text-center bg-white rounded-3xl border border-slate-200 text-slate-400 space-y-3">
-              <FolderTree className="w-12 h-12 mx-auto text-slate-300" />
+            <div className="p-12 text-center bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 text-slate-400 space-y-3">
+              <FolderTree className="w-12 h-12 mx-auto text-slate-300 dark:text-slate-600" />
               <p className="text-sm font-bold">No categories match your search.</p>
             </div>
           ) : (
@@ -680,27 +680,27 @@ export const AdminCategories: React.FC<AdminCategoriesProps> = ({
               return (
                 <div
                   key={cat.id}
-                  className={`bg-white rounded-3xl border transition-all shadow-xs overflow-hidden ${
+                  className={`bg-white dark:bg-slate-900 rounded-3xl border transition-all shadow-xs overflow-hidden ${
                     isHighlighted
-                      ? 'border-amber-400 ring-2 ring-amber-300/60 bg-amber-50/20'
-                      : 'border-slate-200 hover:border-slate-300'
+                      ? 'border-amber-400 ring-2 ring-amber-300/60 bg-amber-50/20 dark:bg-amber-950/20'
+                      : 'border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700'
                   }`}
                 >
                   {/* Category Header Card */}
-                  <div className="p-4 sm:p-5 flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-slate-100 bg-slate-50/50">
+                  <div className="p-4 sm:p-5 flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/40">
                     <div className="flex items-center gap-4 min-w-0">
                       {/* Priority Rank Selector */}
-                      <div className="flex flex-col items-center justify-center bg-white px-3 py-2 rounded-2xl border border-slate-200 shadow-2xs shrink-0">
-                        <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-tight">Rank</span>
+                      <div className="flex flex-col items-center justify-center bg-white dark:bg-slate-800 px-3 py-2 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-2xs shrink-0">
+                        <span className="text-[10px] font-extrabold text-slate-400 dark:text-slate-500 uppercase tracking-tight">Rank</span>
                         <div className="flex items-center gap-1 mt-0.5">
                           <select
                             value={cIdx}
                             onChange={(e) => handleSetCategoryPosition(cat.id, Number(e.target.value))}
-                            className="text-xs font-black text-sky-800 bg-transparent cursor-pointer focus:outline-hidden"
+                            className="text-xs font-black text-sky-800 dark:text-sky-300 bg-transparent cursor-pointer focus:outline-hidden"
                             title="Change display order position"
                           >
                             {sortedCategories.map((_, idx) => (
-                              <option key={idx} value={idx}>
+                              <option key={idx} value={idx} className="dark:bg-slate-800 dark:text-white">
                                 #{idx + 1}
                               </option>
                             ))}
@@ -711,7 +711,7 @@ export const AdminCategories: React.FC<AdminCategoriesProps> = ({
                             type="button"
                             onClick={() => handleMoveCategory(cIdx, 'up')}
                             disabled={cIdx === 0}
-                            className="p-1 rounded bg-slate-100 hover:bg-sky-50 text-slate-600 hover:text-sky-600 disabled:opacity-20 cursor-pointer transition-colors"
+                            className="p-1 rounded bg-slate-100 dark:bg-slate-700 hover:bg-sky-50 dark:hover:bg-sky-900 text-slate-600 dark:text-slate-300 hover:text-sky-600 dark:hover:text-sky-300 disabled:opacity-20 cursor-pointer transition-colors"
                             title="Move Up"
                           >
                             <ChevronUp className="w-3 h-3" />
@@ -720,7 +720,7 @@ export const AdminCategories: React.FC<AdminCategoriesProps> = ({
                             type="button"
                             onClick={() => handleMoveCategory(cIdx, 'down')}
                             disabled={cIdx === sortedCategories.length - 1}
-                            className="p-1 rounded bg-slate-100 hover:bg-sky-50 text-slate-600 hover:text-sky-600 disabled:opacity-20 cursor-pointer transition-colors"
+                            className="p-1 rounded bg-slate-100 dark:bg-slate-700 hover:bg-sky-50 dark:hover:bg-sky-900 text-slate-600 dark:text-slate-300 hover:text-sky-600 dark:hover:text-sky-300 disabled:opacity-20 cursor-pointer transition-colors"
                             title="Move Down"
                           >
                             <ChevronDown className="w-3 h-3" />
@@ -735,7 +735,7 @@ export const AdminCategories: React.FC<AdminCategoriesProps> = ({
                           alt={cat.name}
                           referrerPolicy="no-referrer"
                           onError={(e) => handleImageError(e, cat.featuredImage)}
-                          className="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl object-cover bg-slate-100 border border-slate-200 shadow-2xs"
+                          className="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl object-cover bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-2xs"
                         />
                       </div>
 
@@ -749,7 +749,7 @@ export const AdminCategories: React.FC<AdminCategoriesProps> = ({
                                 value={editingCatNameVal}
                                 onChange={(e) => setEditingCatNameVal(e.target.value)}
                                 placeholder="English Category Name"
-                                className="px-3 py-1.5 text-sm font-bold text-slate-900 bg-white border-2 border-sky-500 rounded-xl focus:outline-hidden w-full"
+                                className="px-3 py-1.5 text-sm font-bold text-slate-900 dark:text-white bg-white dark:bg-slate-800 border-2 border-sky-500 rounded-xl focus:outline-hidden w-full"
                               />
                             </div>
                             <div className="flex items-center gap-2">
@@ -758,7 +758,7 @@ export const AdminCategories: React.FC<AdminCategoriesProps> = ({
                                 value={editingCatBanglaVal}
                                 onChange={(e) => setEditingCatBanglaVal(e.target.value)}
                                 placeholder="বাংলা ক্যাটাগরি নাম (ঐচ্ছিক)"
-                                className="px-3 py-1.5 text-xs text-slate-700 bg-white border border-slate-300 rounded-xl focus:outline-hidden w-full"
+                                className="px-3 py-1.5 text-xs text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl focus:outline-hidden w-full"
                               />
                               <button
                                 type="button"
@@ -771,7 +771,7 @@ export const AdminCategories: React.FC<AdminCategoriesProps> = ({
                               <button
                                 type="button"
                                 onClick={() => setEditingCatNameId(null)}
-                                className="px-3 py-1.5 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-700 text-xs font-bold cursor-pointer shrink-0"
+                                className="px-3 py-1.5 rounded-xl bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 text-xs font-bold cursor-pointer shrink-0"
                               >
                                 Cancel
                               </button>
@@ -780,11 +780,11 @@ export const AdminCategories: React.FC<AdminCategoriesProps> = ({
                         ) : (
                           <div>
                             <div className="flex items-center gap-2 flex-wrap">
-                              <h3 className="text-base sm:text-lg font-black text-slate-900 tracking-tight">
+                              <h3 className="text-base sm:text-lg font-black text-slate-900 dark:text-white tracking-tight">
                                 {cat.name}
                               </h3>
                               {cIdx === 0 && (
-                                <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-900 text-[10px] font-black uppercase tracking-wider">
+                                <span className="px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950 text-amber-900 dark:text-amber-300 text-[10px] font-black uppercase tracking-wider">
                                   ★ #1 Priority
                                 </span>
                               )}
@@ -795,21 +795,21 @@ export const AdminCategories: React.FC<AdminCategoriesProps> = ({
                                   setEditingCatNameVal(cat.name);
                                   setEditingCatBanglaVal(cat.banglaName || '');
                                 }}
-                                className="text-slate-400 hover:text-sky-600 p-1 rounded-lg hover:bg-sky-50 transition-colors cursor-pointer"
+                                className="text-slate-400 hover:text-sky-600 dark:hover:text-sky-400 p-1 rounded-lg hover:bg-sky-50 dark:hover:bg-slate-800 transition-colors cursor-pointer"
                                 title="Quick Rename Category"
                               >
                                 <Edit2 className="w-3.5 h-3.5" />
                               </button>
                             </div>
-                            <div className="flex items-center gap-2.5 text-xs text-slate-500 mt-1">
+                            <div className="flex items-center gap-2.5 text-xs text-slate-500 dark:text-slate-400 mt-1">
                               {cat.banglaName && (
-                                <span className="font-bold text-slate-700 bg-slate-100 px-2 py-0.5 rounded-md">
+                                <span className="font-bold text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-md">
                                   {cat.banglaName}
                                 </span>
                               )}
-                              <span className="font-mono text-slate-400 text-[11px]">slug: /{cat.slug || cat.id}</span>
-                              <span className="inline-flex items-center gap-1 text-sky-800 bg-sky-50 font-bold px-2 py-0.5 rounded-md border border-sky-200">
-                                <Package className="w-3 h-3 text-sky-600" />
+                              <span className="font-mono text-slate-400 dark:text-slate-500 text-[11px]">slug: /{cat.slug || cat.id}</span>
+                              <span className="inline-flex items-center gap-1 text-sky-800 dark:text-sky-300 bg-sky-50 dark:bg-sky-950/80 font-bold px-2 py-0.5 rounded-md border border-sky-200 dark:border-sky-800">
+                                <Package className="w-3 h-3 text-sky-600 dark:text-sky-400" />
                                 {prodCount} Products
                               </span>
                             </div>
@@ -822,9 +822,9 @@ export const AdminCategories: React.FC<AdminCategoriesProps> = ({
                     <div className="flex items-center gap-2 self-end lg:self-center">
                       <button
                         onClick={() => openEditModal(cat)}
-                        className="px-3.5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs flex items-center gap-1.5 transition-colors cursor-pointer"
+                        className="px-3.5 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-bold text-xs flex items-center gap-1.5 transition-colors cursor-pointer"
                       >
-                        <Edit2 className="w-3.5 h-3.5 text-slate-500" />
+                        <Edit2 className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400" />
                         <span>Edit Details</span>
                       </button>
 
@@ -834,7 +834,7 @@ export const AdminCategories: React.FC<AdminCategoriesProps> = ({
                         className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-2xs ${
                           isExpanded
                             ? 'bg-sky-600 text-white hover:bg-sky-700'
-                            : 'bg-sky-50 text-sky-700 hover:bg-sky-100 border border-sky-200'
+                            : 'bg-sky-50 dark:bg-sky-950/80 text-sky-700 dark:text-sky-300 hover:bg-sky-100 dark:hover:bg-sky-900 border border-sky-200 dark:border-sky-800'
                         }`}
                       >
                         <Layers className="w-3.5 h-3.5" />
@@ -844,7 +844,7 @@ export const AdminCategories: React.FC<AdminCategoriesProps> = ({
 
                       <button
                         onClick={() => handleDelete(cat)}
-                        className="p-2 rounded-xl text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
+                        className="p-2 rounded-xl text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-slate-800 transition-colors cursor-pointer"
                         title="Delete Category"
                       >
                         <Trash2 className="w-4 h-4" />
@@ -854,18 +854,18 @@ export const AdminCategories: React.FC<AdminCategoriesProps> = ({
 
                   {/* SUB-CATEGORIES & CHILD TAGS STUDIO (Spacious & Easy to Edit) */}
                   {isExpanded && (
-                    <div className="p-4 sm:p-6 bg-slate-50/40 space-y-4">
+                    <div className="p-4 sm:p-6 bg-slate-50/40 dark:bg-slate-900/60 space-y-4">
                       {/* Subcategory Add Bar */}
-                      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 p-3.5 rounded-2xl bg-white border border-slate-200 shadow-2xs">
+                      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 p-3.5 rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-2xs">
                         <div className="flex items-center gap-2">
-                          <div className="w-8 h-8 rounded-xl bg-sky-100 text-sky-700 flex items-center justify-center shrink-0">
+                          <div className="w-8 h-8 rounded-xl bg-sky-100 dark:bg-sky-950 text-sky-700 dark:text-sky-300 flex items-center justify-center shrink-0">
                             <Layers className="w-4 h-4" />
                           </div>
                           <div>
-                            <h4 className="text-xs sm:text-sm font-black text-slate-900">
+                            <h4 className="text-xs sm:text-sm font-black text-slate-900 dark:text-white">
                               Subcategories & Child Tags for "{cat.name}"
                             </h4>
-                            <p className="text-[11px] text-slate-500">
+                            <p className="text-[11px] text-slate-500 dark:text-slate-400">
                               Add subcategories (২য় স্তর) and nested child tags (৩য় স্তর) below.
                             </p>
                           </div>
@@ -885,7 +885,7 @@ export const AdminCategories: React.FC<AdminCategoriesProps> = ({
                                 handleQuickAddSubcategory(cat);
                               }
                             }}
-                            className="flex-1 sm:w-80 px-3.5 py-2 rounded-xl border border-slate-300 text-xs sm:text-sm bg-slate-50 focus:bg-white focus:outline-hidden focus:border-sky-500 font-medium"
+                            className="flex-1 sm:w-80 px-3.5 py-2 rounded-xl border border-slate-300 dark:border-slate-700 text-xs sm:text-sm bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-white focus:bg-white dark:focus:bg-slate-900 focus:outline-hidden focus:border-sky-500 font-medium"
                           />
                           <button
                             type="button"
@@ -898,10 +898,10 @@ export const AdminCategories: React.FC<AdminCategoriesProps> = ({
                         </div>
                       </div>
 
-                      {/* Subcategory List (Comfortable Cards with generous padding and readable typography) */}
+                      {/* Subcategory List */}
                       {parsedSubs.length === 0 ? (
-                        <div className="p-8 text-center bg-white rounded-2xl border border-dashed border-slate-300 text-slate-400 space-y-2">
-                          <Layers className="w-8 h-8 mx-auto text-slate-300" />
+                        <div className="p-8 text-center bg-white dark:bg-slate-800 rounded-2xl border border-dashed border-slate-300 dark:border-slate-700 text-slate-400 space-y-2">
+                          <Layers className="w-8 h-8 mx-auto text-slate-300 dark:text-slate-600" />
                           <p className="text-xs sm:text-sm font-semibold">No subcategories yet. Type a name above and click "Add Subcategory".</p>
                         </div>
                       ) : (
@@ -913,12 +913,12 @@ export const AdminCategories: React.FC<AdminCategoriesProps> = ({
                             return (
                               <div
                                 key={sub.id || sIdx}
-                                className="p-4 sm:p-5 rounded-2xl bg-white border border-slate-200 hover:border-sky-300 hover:shadow-md transition-all space-y-3.5 flex flex-col justify-between"
+                                className="p-4 sm:p-5 rounded-2xl bg-white dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700 hover:border-sky-300 dark:hover:border-sky-600 hover:shadow-md transition-all space-y-3.5 flex flex-col justify-between"
                               >
                                 {/* Top Header of Subcategory */}
-                                <div className="flex items-center justify-between gap-2 border-b border-slate-100 pb-3">
+                                <div className="flex items-center justify-between gap-2 border-b border-slate-100 dark:border-slate-700/80 pb-3">
                                   <div className="flex items-center gap-2 min-w-0 flex-1">
-                                    <span className="w-6 h-6 rounded-lg bg-sky-100 text-sky-800 flex items-center justify-center font-black text-xs shrink-0">
+                                    <span className="w-6 h-6 rounded-lg bg-sky-100 dark:bg-sky-950 text-sky-800 dark:text-sky-300 flex items-center justify-center font-black text-xs shrink-0">
                                       #{sIdx + 1}
                                     </span>
 
@@ -937,7 +937,7 @@ export const AdminCategories: React.FC<AdminCategoriesProps> = ({
                                             }
                                           }}
                                           autoFocus
-                                          className="w-full px-2.5 py-1 text-sm font-bold text-slate-900 bg-white border-2 border-sky-500 rounded-lg focus:outline-hidden"
+                                          className="w-full px-2.5 py-1 text-sm font-bold text-slate-900 dark:text-white bg-white dark:bg-slate-900 border-2 border-sky-500 rounded-lg focus:outline-hidden"
                                         />
                                         <button
                                           type="button"
@@ -950,7 +950,7 @@ export const AdminCategories: React.FC<AdminCategoriesProps> = ({
                                         <button
                                           type="button"
                                           onClick={() => setEditingSubKey(null)}
-                                          className="p-1.5 rounded-lg bg-slate-200 hover:bg-slate-300 text-slate-700 cursor-pointer"
+                                          className="p-1.5 rounded-lg bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 text-slate-700 dark:text-slate-200 cursor-pointer"
                                           title="Cancel"
                                         >
                                           <X className="w-3.5 h-3.5" />
@@ -958,7 +958,7 @@ export const AdminCategories: React.FC<AdminCategoriesProps> = ({
                                       </div>
                                     ) : (
                                       <div className="flex items-center gap-1.5 min-w-0">
-                                        <span className="font-black text-slate-900 text-sm sm:text-base truncate">
+                                        <span className="font-black text-slate-900 dark:text-white text-sm sm:text-base truncate">
                                           {sub.name}
                                         </span>
                                         <button
@@ -967,7 +967,7 @@ export const AdminCategories: React.FC<AdminCategoriesProps> = ({
                                             setEditingSubKey(`${cat.id}_${sIdx}`);
                                             setEditingSubVal(sub.name);
                                           }}
-                                          className="p-1 text-slate-400 hover:text-sky-600 rounded hover:bg-sky-50 transition-colors cursor-pointer"
+                                          className="p-1 text-slate-400 hover:text-sky-600 dark:hover:text-sky-400 rounded hover:bg-sky-50 dark:hover:bg-slate-700 transition-colors cursor-pointer"
                                           title="Rename Subcategory"
                                         >
                                           <Edit2 className="w-3.5 h-3.5" />
@@ -983,11 +983,11 @@ export const AdminCategories: React.FC<AdminCategoriesProps> = ({
                                       onChange={(e) =>
                                         handleSetSubcategoryPosition(cat, sIdx, Number(e.target.value))
                                       }
-                                      className="text-xs font-bold text-slate-700 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 cursor-pointer focus:outline-hidden"
+                                      className="text-xs font-bold text-slate-700 dark:text-slate-200 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg px-2 py-1 cursor-pointer focus:outline-hidden"
                                       title="Change Position Order"
                                     >
                                       {parsedSubs.map((_, pIdx) => (
-                                        <option key={pIdx} value={pIdx}>
+                                        <option key={pIdx} value={pIdx} className="dark:bg-slate-900 dark:text-white">
                                           Pos #{pIdx + 1}
                                         </option>
                                       ))}
@@ -996,7 +996,7 @@ export const AdminCategories: React.FC<AdminCategoriesProps> = ({
                                     <button
                                       type="button"
                                       onClick={() => handleQuickRemoveSubcategory(cat, sub.id)}
-                                      className="text-slate-400 hover:text-rose-600 p-1.5 rounded-lg hover:bg-rose-50 cursor-pointer transition-colors"
+                                      className="text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 p-1.5 rounded-lg hover:bg-rose-50 dark:hover:bg-slate-700 cursor-pointer transition-colors"
                                       title="Delete Subcategory"
                                     >
                                       <Trash2 className="w-4 h-4" />
@@ -1006,23 +1006,23 @@ export const AdminCategories: React.FC<AdminCategoriesProps> = ({
 
                                 {/* Child Subcategories (৩য় স্তর - 3rd Tier) Tags Section */}
                                 <div className="space-y-2.5">
-                                  <div className="flex items-center justify-between text-xs font-bold text-slate-700">
+                                  <div className="flex items-center justify-between text-xs font-bold text-slate-700 dark:text-slate-300">
                                     <span className="flex items-center gap-1.5">
-                                      <Tag className="w-3.5 h-3.5 text-sky-600" />
+                                      <Tag className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400" />
                                       <span>Child Subcategories ({subSubCount})</span>
                                     </span>
-                                    <span className="text-[10px] font-extrabold text-sky-700 bg-sky-50 px-2 py-0.5 rounded-full border border-sky-200">
+                                    <span className="text-[10px] font-extrabold text-sky-700 dark:text-sky-300 bg-sky-50 dark:bg-sky-950/80 px-2 py-0.5 rounded-full border border-sky-200 dark:border-sky-800">
                                       ৩য় স্তর
                                     </span>
                                   </div>
 
-                                  {/* Child Tags Chips List (Generously sized with clear edit & delete) */}
+                                  {/* Child Tags Chips List */}
                                   <div className="flex flex-wrap gap-2 min-h-[36px]">
                                     {sub.subSubcategories && sub.subSubcategories.length > 0 ? (
                                       sub.subSubcategories.map((subSub, ssIdx) => (
                                         <div
                                           key={ssIdx}
-                                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-50 border border-slate-200 hover:border-sky-300 text-slate-900 text-xs font-semibold shadow-2xs transition-all group"
+                                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 hover:border-sky-300 dark:hover:border-sky-600 text-slate-900 dark:text-slate-100 text-xs font-semibold shadow-2xs transition-all group"
                                         >
                                           {editingSubSubKey === `${cat.id}_${sIdx}_${ssIdx}` ? (
                                             <div className="flex items-center gap-1">
@@ -1039,12 +1039,12 @@ export const AdminCategories: React.FC<AdminCategoriesProps> = ({
                                                   }
                                                 }}
                                                 autoFocus
-                                                className="w-28 px-2 py-0.5 text-xs bg-white border border-sky-500 rounded focus:outline-hidden font-bold"
+                                                className="w-28 px-2 py-0.5 text-xs bg-white dark:bg-slate-800 border border-sky-500 rounded focus:outline-hidden font-bold dark:text-white"
                                               />
                                               <button
                                                 type="button"
                                                 onClick={() => handleSaveRenameSubSubcategory(cat, sIdx, ssIdx)}
-                                                className="text-emerald-600 hover:text-emerald-800 p-0.5 cursor-pointer"
+                                                className="text-emerald-600 hover:text-emerald-800 dark:text-emerald-400 p-0.5 cursor-pointer"
                                               >
                                                 <Check className="w-3 h-3" />
                                               </button>
@@ -1058,7 +1058,7 @@ export const AdminCategories: React.FC<AdminCategoriesProps> = ({
                                             </div>
                                           ) : (
                                             <>
-                                              <span className="w-4 h-4 rounded-md bg-sky-100 text-sky-800 flex items-center justify-center font-black text-[9px]">
+                                              <span className="w-4 h-4 rounded-md bg-sky-100 dark:bg-sky-950 text-sky-800 dark:text-sky-300 flex items-center justify-center font-black text-[9px]">
                                                 {ssIdx + 1}
                                               </span>
                                               <span>{subSub}</span>
@@ -1068,7 +1068,7 @@ export const AdminCategories: React.FC<AdminCategoriesProps> = ({
                                                   setEditingSubSubKey(`${cat.id}_${sIdx}_${ssIdx}`);
                                                   setEditingSubSubVal(subSub);
                                                 }}
-                                                className="text-slate-400 hover:text-sky-600 p-0.5 cursor-pointer"
+                                                className="text-slate-400 hover:text-sky-600 dark:hover:text-sky-400 p-0.5 cursor-pointer"
                                                 title="Rename Tag"
                                               >
                                                 <Edit2 className="w-3 h-3" />
@@ -1078,7 +1078,7 @@ export const AdminCategories: React.FC<AdminCategoriesProps> = ({
                                                 onClick={() =>
                                                   handleQuickRemoveSubSubcategory(cat, sIdx, subSub)
                                                 }
-                                                className="text-slate-400 hover:text-rose-600 p-0.5 cursor-pointer"
+                                                className="text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 p-0.5 cursor-pointer"
                                                 title="Remove Tag"
                                               >
                                                 <X className="w-3 h-3" />
@@ -1088,14 +1088,14 @@ export const AdminCategories: React.FC<AdminCategoriesProps> = ({
                                         </div>
                                       ))
                                     ) : (
-                                      <span className="text-xs text-slate-400 italic py-1">
+                                      <span className="text-xs text-slate-400 dark:text-slate-500 italic py-1">
                                         No child tags added yet
                                       </span>
                                     )}
                                   </div>
 
                                   {/* Comfortable Add Child Tag Input */}
-                                  <div className="flex items-center gap-1.5 pt-2 border-t border-slate-100">
+                                  <div className="flex items-center gap-1.5 pt-2 border-t border-slate-100 dark:border-slate-700/80">
                                     <input
                                       type="text"
                                       placeholder="+ Add child tag (e.g. AMOLED Display)..."
@@ -1112,12 +1112,12 @@ export const AdminCategories: React.FC<AdminCategoriesProps> = ({
                                           handleQuickAddSubSubcategory(cat, sIdx);
                                         }
                                       }}
-                                      className="flex-1 px-3 py-1.5 text-xs rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:outline-hidden focus:border-sky-500 font-medium"
+                                      className="flex-1 px-3 py-1.5 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-white focus:bg-white dark:focus:bg-slate-900 focus:outline-hidden focus:border-sky-500 font-medium"
                                     />
                                     <button
                                       type="button"
                                       onClick={() => handleQuickAddSubSubcategory(cat, sIdx)}
-                                      className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold transition-all cursor-pointer shrink-0"
+                                      className="px-3 py-1.5 rounded-xl bg-slate-800 dark:bg-slate-700 hover:bg-slate-900 dark:hover:bg-slate-600 text-white text-xs font-bold transition-all cursor-pointer shrink-0"
                                     >
                                       + Add Tag
                                     </button>

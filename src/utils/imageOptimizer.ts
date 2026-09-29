@@ -9,12 +9,38 @@ export function extractGoogleDriveFileId(url?: string): string | null {
   if (!url || typeof url !== 'string' || !url.trim()) return null;
   const trimmed = url.trim();
   const match =
-    trimmed.match(/\/file\/d\/([a-zA-Z0-9_-]+)/) ||
+    trimmed.match(/\/file(?:\/u\/\d+)?\/d\/([a-zA-Z0-9_-]+)/) ||
+    trimmed.match(/googleusercontent\.com\/d\/([a-zA-Z0-9_-]+)/) ||
     trimmed.match(/[?&]id=([a-zA-Z0-9_-]+)/) ||
     trimmed.match(/\/d\/([a-zA-Z0-9_-]+)/) ||
     trimmed.match(/\/open\?id=([a-zA-Z0-9_-]+)/) ||
-    trimmed.match(/\/uc\?.*id=([a-zA-Z0-9_-]+)/);
+    trimmed.match(/\/uc\?.*id=([a-zA-Z0-9_-]+)/) ||
+    trimmed.match(/\/thumbnail\?.*id=([a-zA-Z0-9_-]+)/);
   return match && match[1] ? match[1] : null;
+}
+
+export function formatGoogleDriveImageUrl(url?: string): string {
+  if (!url || typeof url !== 'string' || !url.trim()) return '';
+  const fileId = extractGoogleDriveFileId(url);
+  if (fileId) {
+    return `https://lh3.googleusercontent.com/d/${fileId}`;
+  }
+  return url.trim();
+}
+
+/**
+ * Extracts preview thumbnail URL from video (e.g. YouTube HQ thumbnail)
+ */
+export function getVideoThumbnail(videoUrl?: string, fallbackImage?: string): string | null {
+  if (!videoUrl || typeof videoUrl !== 'string' || !videoUrl.trim()) {
+    return fallbackImage || null;
+  }
+  const trimmed = videoUrl.trim();
+  const ytMatch = trimmed.match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=))([\w-]{11})/i);
+  if (ytMatch && ytMatch[1]) {
+    return `https://img.youtube.com/vi/${ytMatch[1]}/hqdefault.jpg`;
+  }
+  return fallbackImage || null;
 }
 
 /**
@@ -35,7 +61,7 @@ export function handleImageError(
       return;
     }
     if (!currentSrc.includes(`drive.google.com/thumbnail?id=${fileId}`)) {
-      target.src = `https://drive.google.com/thumbnail?id=${fileId}&sz=w800`;
+      target.src = `https://drive.google.com/thumbnail?id=${fileId}&sz=w2560`;
       return;
     }
     if (!currentSrc.includes(`drive.google.com/uc?export=view`)) {
@@ -50,21 +76,21 @@ export function handleImageError(
 }
 
 /**
- * Optimizes an image URL for lightning-fast delivery while preserving crystal-clear sharpness
+ * Optimizes an image URL for lightning-fast delivery while preserving 100% crystal-clear sharpness and original high resolution
  */
-export function getOptimizedImageUrl(url?: string, width = 400): string {
+export function getOptimizedImageUrl(url?: string, width = 800): string {
   if (!url || typeof url !== 'string' || !url.trim()) {
     return NEUTRAL_PRODUCT_PLACEHOLDER;
   }
 
   const trimmed = url.trim();
 
-  // Preserve Base64, Blob, and internal media:// references
+  // Preserve Base64, Blob, and internal media:// references intact without quality loss
   if (trimmed.startsWith('data:') || trimmed.startsWith('blob:') || trimmed.startsWith('media://')) {
     return trimmed;
   }
 
-  // Convert Google Drive sharing links to fast direct-CDN thumbnail streaming URLs
+  // Convert Google Drive sharing links to fast direct-CDN streaming URLs (lh3.googleusercontent.com is Google's direct public CDN)
   if (
     trimmed.includes('drive.google.com') ||
     trimmed.includes('docs.google.com') ||
@@ -72,8 +98,7 @@ export function getOptimizedImageUrl(url?: string, width = 400): string {
   ) {
     const fileId = extractGoogleDriveFileId(trimmed);
     if (fileId) {
-      const targetWidth = Math.max(width, 800);
-      return `https://drive.google.com/thumbnail?id=${fileId}&sz=w${targetWidth}`;
+      return `https://lh3.googleusercontent.com/d/${fileId}`;
     }
   }
 
@@ -82,14 +107,21 @@ export function getOptimizedImageUrl(url?: string, width = 400): string {
     return url.replace('dl=0', 'raw=1').replace('?dl=1', '?raw=1');
   }
 
-  // Unsplash images: deliver next-gen WebP/AVIF format with 75% quality and exact screen-responsive width
+  // Unsplash images: deliver crystal-clear sharpness and preserve original high resolution (q=95, max clarity)
   if (url.includes('images.unsplash.com')) {
     try {
       const parsed = new URL(url);
       parsed.searchParams.set('auto', 'format');
       parsed.searchParams.set('fit', 'crop');
-      parsed.searchParams.set('q', '75'); // High-efficiency visual quality
-      parsed.searchParams.set('w', String(width));
+      // Preserve maximum high-definition visual fidelity
+      const existingQ = parsed.searchParams.get('q');
+      if (!existingQ || Number(existingQ) < 90) {
+        parsed.searchParams.set('q', '95');
+      }
+      const existingW = parsed.searchParams.get('w');
+      if (!existingW || Number(existingW) < 1200) {
+        parsed.searchParams.set('w', String(Math.max(width * 2, 1600)));
+      }
       return parsed.toString();
     } catch {
       return url;

@@ -1,6 +1,6 @@
-import { SMSSettings, SMSTemplate, SMSEventType, SMSLog, Order } from '../types';
-import { saveSMSLogToDB, getSMSSettingsFromDB } from './firebase';
-import { triggerOrderPlacedWorkflow } from './emailService';
+import { SMSSettings, SMSTemplate, SMSEventType, SMSLog, Order } from '../types/index.ts';
+import { saveSMSLogToDB, getSMSSettingsFromDB } from './firebase.ts';
+import { triggerOrderPlacedWorkflow } from './emailService.ts';
 
 export const DEFAULT_SMS_TEMPLATES: Record<SMSEventType, SMSTemplate> = {
   order_placed: {

@@ -1,4 +1,4 @@
-import { ProductHighlight } from '../types';
+import { ProductHighlight } from '../types/index.ts';
 
 export const DEFAULT_PRODUCT_HIGHLIGHTS: ProductHighlight[] = [
   {

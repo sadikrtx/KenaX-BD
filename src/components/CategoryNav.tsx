@@ -14,6 +14,7 @@ import {
   ChevronLeft,
 } from 'lucide-react';
 import { Category } from '../types';
+import { useLanguage } from '../context/LanguageContext';
 
 interface CategoryNavProps {
   categories: Category[];
@@ -28,6 +29,23 @@ export const CategoryNav: React.FC<CategoryNavProps> = ({
   onSelectCategory,
   onNavigate,
 }) => {
+  const { t } = useLanguage();
+
+  const getCategoryDisplayName = (name: string) => {
+    const map: Record<string, string> = {
+      'Electronics & Gadgets': 'ইলেকট্রনিক্স ও গ্যাজেট',
+      'Fashion & Clothing': 'ফ্যাশন ও ক্লথিং',
+      'Fashion & Lifestyle': 'ফ্যাশন ও লাইফস্টাইল',
+      'Home & Living': 'হোম ও লিভিং',
+      'Beauty & Personal Care': 'বিউটি ও পার্সোনাল কেয়ার',
+      'Sports & Fitness': 'স্পোর্টস ও ফিটনেস',
+      'Toys & Kids': 'টয় ও বেবি কেয়ার',
+      'Automotive': 'অটোমোটিভ',
+      'Health & Wellness': 'হেলথ ও ওয়েলনেস',
+      'Accessories': 'অ্যাক্সেসরিজ',
+    };
+    return t(map[name] || name, name);
+  };
   const getIcon = (slug: string) => {
     switch (slug) {
       case 'electronics-gadgets':
@@ -59,193 +77,23 @@ export const CategoryNav: React.FC<CategoryNavProps> = ({
 
   const hasMoreThanNine = sortedCategories.length > 9;
 
-  // Auto-scrolling carousel state & refs
+  // Manual smooth scroll helpers
   const scrollContainerRef = useRef<HTMLDivElement>(null);
-  const firstSetRef = useRef<HTMLDivElement>(null);
-  const isPausedRef = useRef(false);
-  const isDraggingRef = useRef(false);
-  const dragStartXRef = useRef(0);
-  const dragStartScrollLeftRef = useRef(0);
-  const hasMovedRef = useRef(false);
-  const resumeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-
-  // Auto-scroll loop using requestAnimationFrame
-  useEffect(() => {
-    let animationFrameId: number;
-    const container = scrollContainerRef.current;
-    if (!container) return;
-
-    // Center initial position to firstSetWidth to allow bidirectional infinite scrolling
-    const initTimer = setTimeout(() => {
-      if (container && firstSetRef.current) {
-        const setWidth = firstSetRef.current.offsetWidth;
-        if (setWidth > 0 && container.scrollLeft === 0) {
-          container.scrollLeft = setWidth;
-        }
-      }
-    }, 100);
-
-    let lastTimestamp: number | null = null;
-    const pixelsPerSecond = 14; // Calm, very slow, and gentle pace moving right-to-left
-
-    const step = (timestamp: number) => {
-      if (lastTimestamp === null) {
-        lastTimestamp = timestamp;
-      }
-      const delta = Math.min((timestamp - lastTimestamp) / 1000, 0.05);
-      lastTimestamp = timestamp;
-
-      if (container && !isPausedRef.current && !isDraggingRef.current) {
-        const setWidth = firstSetRef.current?.offsetWidth || container.scrollWidth / 4;
-        if (setWidth > 0) {
-          container.scrollLeft += pixelsPerSecond * delta;
-          // Seamless wrap when reaching boundary
-          if (container.scrollLeft >= setWidth * 2.5) {
-            container.scrollLeft -= setWidth;
-          } else if (container.scrollLeft <= setWidth * 0.2) {
-            container.scrollLeft += setWidth;
-          }
-        }
-      } else {
-        lastTimestamp = null;
-      }
-      animationFrameId = requestAnimationFrame(step);
-    };
-
-    animationFrameId = requestAnimationFrame(step);
-
-    return () => {
-      clearTimeout(initTimer);
-      cancelAnimationFrame(animationFrameId);
-      if (resumeTimeoutRef.current) clearTimeout(resumeTimeoutRef.current);
-    };
-  }, [sortedCategories]);
-
-  // Touch and mouse drag handlers
-  const handleTouchStart = () => {
-    const container = scrollContainerRef.current;
-    if (!container) return;
-    isPausedRef.current = true;
-    hasMovedRef.current = false;
-    dragStartScrollLeftRef.current = container.scrollLeft;
-    if (resumeTimeoutRef.current) clearTimeout(resumeTimeoutRef.current);
-  };
-
-  const handleTouchMove = () => {
-    hasMovedRef.current = true;
-  };
-
-  const handleTouchEnd = () => {
-    if (resumeTimeoutRef.current) clearTimeout(resumeTimeoutRef.current);
-    resumeTimeoutRef.current = setTimeout(() => {
-      isPausedRef.current = false;
-      hasMovedRef.current = false;
-    }, 1200);
-  };
-
-  const handleMouseDown = (e: React.MouseEvent) => {
-    const container = scrollContainerRef.current;
-    if (!container) return;
-    isDraggingRef.current = true;
-    isPausedRef.current = true;
-    hasMovedRef.current = false;
-    dragStartXRef.current = e.pageX;
-    dragStartScrollLeftRef.current = container.scrollLeft;
-    if (resumeTimeoutRef.current) clearTimeout(resumeTimeoutRef.current);
-  };
-
-  const handleMouseMove = (e: React.MouseEvent) => {
-    if (!isDraggingRef.current) return;
-    const container = scrollContainerRef.current;
-    if (!container) return;
-    const dx = e.pageX - dragStartXRef.current;
-    if (Math.abs(dx) > 5) {
-      hasMovedRef.current = true;
-    }
-    container.scrollLeft = dragStartScrollLeftRef.current - dx;
-  };
-
-  const handleMouseUp = () => {
-    if (!isDraggingRef.current) return;
-    isDraggingRef.current = false;
-    if (resumeTimeoutRef.current) clearTimeout(resumeTimeoutRef.current);
-    resumeTimeoutRef.current = setTimeout(() => {
-      isPausedRef.current = false;
-      hasMovedRef.current = false;
-    }, 1200);
-  };
 
   const handleManualScroll = (direction: 'left' | 'right') => {
     const container = scrollContainerRef.current;
     if (!container) return;
-    isPausedRef.current = true;
-    const delta = direction === 'left' ? -260 : 260;
+    const delta = direction === 'left' ? -280 : 280;
     container.scrollBy({ left: delta, behavior: 'smooth' });
-    if (resumeTimeoutRef.current) clearTimeout(resumeTimeoutRef.current);
-    resumeTimeoutRef.current = setTimeout(() => {
-      isPausedRef.current = false;
-    }, 2000);
-  };
-
-  const handleContainerScroll = () => {
-    const container = scrollContainerRef.current;
-    if (!container) return;
-    const setWidth = firstSetRef.current?.offsetWidth || container.scrollWidth / 4;
-    if (setWidth > 0) {
-      if (container.scrollLeft >= setWidth * 2.8) {
-        container.scrollLeft -= setWidth;
-      } else if (container.scrollLeft <= setWidth * 0.1) {
-        container.scrollLeft += setWidth;
-      }
-    }
-  };
-
-  // Reusable Category Card component
-  const renderCard = (cat: Category, uniqueKey: string) => {
-    const isSelected = selectedCategory === cat.name;
-    return (
-      <button
-        key={uniqueKey}
-        type="button"
-        onClick={() => {
-          if (hasMovedRef.current) return;
-          onSelectCategory(cat.name);
-          onNavigate('shop');
-        }}
-        onMouseEnter={() => {
-          isPausedRef.current = true;
-        }}
-        onMouseLeave={() => {
-          if (!isDraggingRef.current) {
-            isPausedRef.current = false;
-          }
-        }}
-        className={`flex flex-col items-center justify-center p-3 sm:p-3.5 rounded-2xl border transition-all cursor-pointer text-center shrink-0 select-none group ${
-          isSelected
-            ? 'bg-sky-50 border-sky-500 shadow-xs ring-2 ring-sky-500/20'
-            : 'bg-white border-slate-200 hover:border-sky-300 hover:shadow-xs'
-        } w-[134px] sm:w-[145px] md:w-[155px]`}
-      >
-        <div className="w-12 h-12 rounded-xl bg-slate-50 group-hover:bg-sky-100 flex items-center justify-center mb-2 transition-colors">
-          {getIcon(cat.slug)}
-        </div>
-        <span className="text-xs font-bold text-slate-800 line-clamp-1 leading-tight group-hover:text-sky-600 w-full px-1">
-          {cat.name}
-        </span>
-        <span className="text-[10px] text-slate-400 mt-0.5">
-          {cat.itemCount}+ items
-        </span>
-      </button>
-    );
   };
 
   return (
-    <section className="max-w-[1536px] mx-auto px-3 sm:px-6 lg:px-8 py-5">
+    <section className="max-w-[1536px] mx-auto px-3 sm:px-6 lg:px-8 py-3.5 sm:py-5">
       {/* Header section with title, subtitle & View All */}
-      <div className="flex items-center justify-between mb-3.5">
+      <div className="flex items-center justify-between mb-3">
         <div>
-          <h2 className="text-xl sm:text-2xl font-black text-slate-900">Shop by Category</h2>
-          <p className="text-xs text-slate-500 mt-0.5">Explore our wide collection of categories</p>
+          <h2 className="text-lg sm:text-2xl font-black text-slate-900 dark:text-white">{t('ক্যাটাগরি অনুযায়ী শপ করুন', 'Shop by Category')}</h2>
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">{t('সেরা কালেকশন থেকে আপনার পছন্দের ক্যাটাগরি বেছে নিন', 'Explore our wide collection of categories')}</p>
         </div>
         <div className="flex items-center gap-2">
           {/* Manual arrow controls visible on desktop and tablet */}
@@ -253,16 +101,18 @@ export const CategoryNav: React.FC<CategoryNavProps> = ({
             <button
               type="button"
               onClick={() => handleManualScroll('left')}
-              className="w-7 h-7 rounded-full border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 flex items-center justify-center transition-colors cursor-pointer"
+              className="w-7 h-7 rounded-full border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 flex items-center justify-center transition-colors cursor-pointer"
               title="Scroll Left"
+              aria-label="Scroll Left"
             >
               <ChevronLeft className="w-4 h-4" />
             </button>
             <button
               type="button"
               onClick={() => handleManualScroll('right')}
-              className="w-7 h-7 rounded-full border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 flex items-center justify-center transition-colors cursor-pointer"
+              className="w-7 h-7 rounded-full border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 flex items-center justify-center transition-colors cursor-pointer"
               title="Scroll Right"
+              aria-label="Scroll Right"
             >
               <ChevronRight className="w-4 h-4" />
             </button>
@@ -272,54 +122,49 @@ export const CategoryNav: React.FC<CategoryNavProps> = ({
               onSelectCategory('All');
               onNavigate('shop');
             }}
-            className="text-xs font-bold text-sky-600 hover:text-sky-700 flex items-center gap-1 cursor-pointer py-1"
+            className="text-xs font-bold text-sky-600 dark:text-sky-400 hover:text-sky-700 flex items-center gap-1 cursor-pointer py-1"
           >
-            <span>View All</span>
+            <span>{t('সব দেখুন', 'View All')}</span>
             <ChevronRight className="w-4 h-4" />
           </button>
         </div>
       </div>
 
-      {/* 
-        Single line continuous auto-scrolling marquee moving right-to-left at a calm slower pace
-      */}
-      <div className="relative block">
-        {/* Subtle Edge Fade Gradients */}
-        <div className="absolute left-0 top-0 bottom-0 w-6 bg-gradient-to-r from-slate-50 to-transparent z-10 pointer-events-none" />
-        <div className="absolute right-0 top-0 bottom-0 w-6 bg-gradient-to-l from-slate-50 to-transparent z-10 pointer-events-none" />
-
+      {/* High performance native momentum touch scroll */}
+      <div className="relative">
         <div
           ref={scrollContainerRef}
-          onScroll={handleContainerScroll}
-          onTouchStart={handleTouchStart}
-          onTouchMove={handleTouchMove}
-          onTouchEnd={handleTouchEnd}
-          onMouseDown={handleMouseDown}
-          onMouseMove={handleMouseMove}
-          onMouseUp={handleMouseUp}
-          onMouseLeave={handleMouseUp}
-          className="flex items-center gap-3 overflow-x-auto scrollbar-none py-1 cursor-grab active:cursor-grabbing touch-pan-x"
+          className="flex items-center gap-2.5 sm:gap-3.5 overflow-x-auto scrollbar-none py-1 px-0.5 overscroll-x-contain touch-pan-x"
           style={{ WebkitOverflowScrolling: 'touch' }}
         >
-          {/* Set 1: Used for width measurement */}
-          <div ref={firstSetRef} className="flex items-center gap-3 shrink-0">
-            {sortedCategories.map((cat, idx) => renderCard(cat, `s1-${cat.id}-${idx}`))}
-          </div>
-
-          {/* Set 2 */}
-          <div className="flex items-center gap-3 shrink-0">
-            {sortedCategories.map((cat, idx) => renderCard(cat, `s2-${cat.id}-${idx}`))}
-          </div>
-
-          {/* Set 3 */}
-          <div className="flex items-center gap-3 shrink-0">
-            {sortedCategories.map((cat, idx) => renderCard(cat, `s3-${cat.id}-${idx}`))}
-          </div>
-
-          {/* Set 4 */}
-          <div className="flex items-center gap-3 shrink-0">
-            {sortedCategories.map((cat, idx) => renderCard(cat, `s4-${cat.id}-${idx}`))}
-          </div>
+          {sortedCategories.map((cat) => {
+            const isSelected = selectedCategory === cat.name;
+            return (
+              <button
+                key={cat.id || cat.slug}
+                type="button"
+                onClick={() => {
+                  onSelectCategory(cat.name);
+                  onNavigate('shop');
+                }}
+                className={`flex flex-col items-center justify-center p-2.5 sm:p-3.5 rounded-2xl border transition-all cursor-pointer text-center shrink-0 select-none group active:scale-95 ${
+                  isSelected
+                    ? 'bg-sky-50 dark:bg-sky-950/80 border-sky-500 dark:border-sky-500 shadow-xs ring-2 ring-sky-500/30'
+                    : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 hover:border-sky-300 dark:hover:border-sky-500 hover:shadow-xs'
+                } w-[112px] sm:w-[136px] md:w-[150px]`}
+              >
+                <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-slate-100 dark:bg-slate-800/80 border border-slate-200/60 dark:border-slate-700/60 group-hover:bg-sky-50 dark:group-hover:bg-sky-950/50 flex items-center justify-center mb-1.5 sm:mb-2 transition-colors">
+                  {getIcon(cat.slug)}
+                </div>
+                <span className="text-[11px] sm:text-xs font-black text-slate-900 dark:text-white line-clamp-1 leading-tight group-hover:text-sky-600 dark:group-hover:text-sky-400 w-full px-1">
+                  {getCategoryDisplayName(cat.name)}
+                </span>
+                <span className="text-[9px] sm:text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
+                  {cat.itemCount ?? 10}+ {t('টি পণ্য', 'items')}
+                </span>
+              </button>
+            );
+          })}
         </div>
       </div>
     </section>

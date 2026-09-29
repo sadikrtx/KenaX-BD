@@ -1,4 +1,4 @@
-import { SourcingLocation } from '../types';
+import { SourcingLocation } from '../types/index.ts';
 
 export const INITIAL_SOURCING_LOCATIONS: SourcingLocation[] = [
   {

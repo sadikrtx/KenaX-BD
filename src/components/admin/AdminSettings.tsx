@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Settings,
   Save,
@@ -33,6 +33,7 @@ import {
   Film,
   Play,
   Server,
+  FileSpreadsheet,
 } from 'lucide-react';
 import { extractYouTubeId } from '../HeroBanner';
 import { saveHeroVideoToFirestore, deleteHeroVideoFromFirestore, saveSettingsToDB, saveHeroBannersToDB } from '../../lib/firebase';
@@ -41,6 +42,8 @@ import { AdminTagBannersManager } from './AdminTagBannersManager';
 import { AdminNavItemsManager } from './AdminNavItemsManager';
 import { AdminPromoGridManager } from './AdminPromoGridManager';
 import { AdminMaintenanceSettings } from './AdminMaintenanceSettings';
+import { AdminPoliciesSettings } from './AdminPoliciesSettings';
+import { AdminGoogleSheets } from './AdminGoogleSheets';
 import {
   SiteSettings,
   UserRole,
@@ -50,6 +53,8 @@ import {
   HeroSideBannerSettings,
   DEFAULT_HERO_SIDE_BANNER,
   PromoGridSettings,
+  DEFAULT_ORDER_STEP_NAMES,
+  CustomOrderStepName,
 } from '../../types';
 import { DEFAULT_PROMO_GRID_SETTINGS } from '../../data/defaultPromoBanners';
 
@@ -59,7 +64,7 @@ interface AdminSettingsProps {
   currentUserRole?: UserRole;
   currentRole?: UserRole;
   currentStaff?: StaffUser | null;
-  initialSubTab?: 'hero' | 'nav_items' | 'tag_banners' | 'promo_grid' | 'promo' | 'profile' | 'delivery' | 'footer' | 'seo' | 'system';
+  initialSubTab?: 'hero' | 'nav_items' | 'tag_banners' | 'promo_grid' | 'promo' | 'profile' | 'delivery' | 'footer' | 'seo' | 'system' | 'order_steps' | 'policies' | 'google_sheets';
 }
 
 const DEFAULT_HERO_FEATURES = [
@@ -82,7 +87,12 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
     effectiveRole === 'super_admin' ||
     currentStaff?.role === 'super_admin';
 
-  const [activeTab, setActiveTab] = useState<'hero' | 'nav_items' | 'tag_banners' | 'promo_grid' | 'promo' | 'profile' | 'delivery' | 'footer' | 'seo' | 'system'>(initialSubTab || 'hero');
+  const [activeTab, setActiveTab] = useState<'hero' | 'nav_items' | 'tag_banners' | 'promo_grid' | 'promo' | 'profile' | 'delivery' | 'footer' | 'seo' | 'system' | 'order_steps' | 'policies' | 'google_sheets'>(initialSubTab || 'hero');
+
+
+  const [orderStepNames, setOrderStepNames] = useState<Record<string, CustomOrderStepName>>(
+    settings.customOrderStepNames || DEFAULT_ORDER_STEP_NAMES
+  );
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [isSavingHeroDirectly, setIsSavingHeroDirectly] = useState(false);
@@ -137,6 +147,9 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
   const [siteName, setSiteName] = useState(settings.siteName || 'KenaX BD');
   const [tagline, setTagline] = useState(settings.tagline || 'Your Need, Our Promise');
   const [phone, setPhone] = useState(settings.phone || '+880 1700-000000');
+  const [whatsappNumber, setWhatsappNumber] = useState(settings.whatsappNumber || '01719143897');
+  const [messengerLink, setMessengerLink] = useState(settings.messengerLink || 'https://m.me/kenaxbd');
+  const [telegramBotUsername, setTelegramBotUsername] = useState(settings.telegramBotUsername || 'kenaxbd_bot');
   const [email, setEmail] = useState(settings.email || 'support@kenaxbd.com');
   const [address, setAddress] = useState(settings.address || 'Dhaka, Bangladesh');
   const [announcementBarText, setAnnouncementBarText] = useState(
@@ -152,14 +165,41 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
   const [enableRocket, setEnableRocket] = useState(settings.enableRocket ?? true);
   const [enableCOD, setEnableCOD] = useState(settings.enableCOD ?? true);
   const [autoConfirmOrders, setAutoConfirmOrders] = useState(settings.autoConfirmOrders ?? false);
+  const [bkashNumber, setBkashNumber] = useState(settings.bkashNumber || '01719143897');
+  const [bkashType, setBkashType] = useState(settings.bkashType || 'Personal');
+  const [nagadNumber, setNagadNumber] = useState(settings.nagadNumber || '01887713212');
+  const [nagadType, setNagadType] = useState(settings.nagadType || 'Merchant');
+
+  useEffect(() => {
+    if (settings.bkashNumber) setBkashNumber(settings.bkashNumber);
+    if (settings.bkashType) setBkashType(settings.bkashType);
+    if (settings.nagadNumber) setNagadNumber(settings.nagadNumber);
+    if (settings.nagadType) setNagadType(settings.nagadType);
+  }, [settings.bkashNumber, settings.bkashType, settings.nagadNumber, settings.nagadType]);
 
   // Hero Banners & Badges
   const [heroBanners, setHeroBanners] = useState<HeroBannerSlide[]>(
     settings.heroBanners && settings.heroBanners.length > 0 ? settings.heroBanners : DEFAULT_HERO_BANNERS
   );
+  const isHeroBannersDirtyRef = useRef(false);
+  const isSavingHeroDirectlyRef = useRef(false);
+  const lastSavedHeroBannersRef = useRef<string>('');
+
+  const handleSetHeroBanners: React.Dispatch<React.SetStateAction<HeroBannerSlide[]>> = (valOrFn) => {
+    isHeroBannersDirtyRef.current = true;
+    setHeroBanners(valOrFn);
+  };
 
   useEffect(() => {
+    // Only synchronize from external Firestore if the admin has not made unsaved edits and no save is pending
+    if (isHeroBannersDirtyRef.current || isSavingHeroDirectlyRef.current) {
+      return;
+    }
     if (settings.heroBanners && Array.isArray(settings.heroBanners) && settings.heroBanners.length > 0) {
+      const incomingStr = JSON.stringify(settings.heroBanners);
+      if (lastSavedHeroBannersRef.current && incomingStr === lastSavedHeroBannersRef.current) {
+        return;
+      }
       setHeroBanners(settings.heroBanners);
     }
   }, [settings.heroBanners]);
@@ -277,20 +317,22 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
   const handleSaveHeroBannersInstant = async (customBanners?: HeroBannerSlide[]) => {
     const bannersToSave = customBanners || heroBanners;
     setIsSavingHeroDirectly(true);
+    isSavingHeroDirectlyRef.current = true;
     setHeroDirectSaveToast(null);
 
+    const savedStr = JSON.stringify(bannersToSave);
+    lastSavedHeroBannersRef.current = savedStr;
+
     try {
-      // 1. Direct targeted write to Firestore with timeout safety
-      await Promise.race([
-        saveHeroBannersToDB(bannersToSave),
-        new Promise((resolve) => setTimeout(resolve, 2500)),
-      ]);
+      // 1. Direct targeted write to Firestore, server endpoint & local storage
+      await saveHeroBannersToDB(bannersToSave);
 
       // 2. Also inform parent state
       if (onUpdateSettings) {
         await Promise.resolve(onUpdateSettings({ heroBanners: bannersToSave })).catch(() => {});
       }
 
+      isHeroBannersDirtyRef.current = false;
       setHeroDirectSaveToast('Hero slides saved & published directly to Firestore!');
       setTimeout(() => setHeroDirectSaveToast(null), 4000);
     } catch (err) {
@@ -298,6 +340,10 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
       setHeroDirectSaveToast('Hero slides saved & updated successfully!');
       setTimeout(() => setHeroDirectSaveToast(null), 4000);
     } finally {
+      // Keep save lock active for 3 seconds to absorb stale Firestore onSnapshot callbacks
+      setTimeout(() => {
+        isSavingHeroDirectlyRef.current = false;
+      }, 3000);
       setIsSavingHeroDirectly(false);
     }
   };
@@ -322,7 +368,7 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
       reader.onload = (event) => {
         const updated = [...heroBanners];
         updated[index].image = event.target?.result as string;
-        setHeroBanners(updated);
+        handleSetHeroBanners(updated);
       };
       reader.readAsDataURL(file);
     }
@@ -335,7 +381,7 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
       reader.onload = (event) => {
         const updated = [...heroBanners];
         updated[index].mobileImage = event.target?.result as string;
-        setHeroBanners(updated);
+        handleSetHeroBanners(updated);
       };
       reader.readAsDataURL(file);
     }
@@ -353,13 +399,13 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
           const updated = [...heroBanners];
           updated[index].videoUrl = dataUrl;
           updated[index].mediaType = 'video';
-          setHeroBanners(updated);
+          handleSetHeroBanners(updated);
         } catch (err) {
           console.error('Video upload failed:', err);
           const updated = [...heroBanners];
           updated[index].videoUrl = dataUrl;
           updated[index].mediaType = 'video';
-          setHeroBanners(updated);
+          handleSetHeroBanners(updated);
         }
       };
       reader.readAsDataURL(file);
@@ -389,6 +435,9 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
       siteName,
       tagline,
       phone,
+      whatsappNumber,
+      messengerLink,
+      telegramBotUsername,
       email,
       address,
       announcementBarText,
@@ -400,6 +449,25 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
       enableRocket,
       enableCOD,
       autoConfirmOrders,
+      bkashNumber,
+      bkashType,
+      nagadNumber,
+      nagadType,
+      paymentGateways: (settings.paymentGateways && settings.paymentGateways.length > 0
+        ? settings.paymentGateways
+        : [
+            { id: 'bkash', name: 'bKash', accountNumber: bkashNumber, accountType: bkashType as any, isEnabled: enableBkash, instructions: 'পেমেন্ট করুন', assignedTo: 'all' as const },
+            { id: 'nagad', name: 'Nagad', accountNumber: nagadNumber, accountType: nagadType as any, isEnabled: enableNagad, instructions: 'পেমেন্ট করুন', assignedTo: 'all' as const },
+          ]
+      ).map((g) => {
+        if (g.id === 'bkash' || g.name.toLowerCase().includes('bkash')) {
+          return { ...g, accountNumber: bkashNumber, accountType: bkashType as any, isEnabled: enableBkash };
+        }
+        if (g.id === 'nagad' || g.name.toLowerCase().includes('nagad')) {
+          return { ...g, accountNumber: nagadNumber, accountType: nagadType as any, isEnabled: enableNagad };
+        }
+        return g;
+      }),
       heroBanners,
       heroSideBanner,
       heroFeatures,
@@ -419,23 +487,29 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
       emailFooterEmail,
       emailFooterAddress,
       emailFooterTrustText,
+      customOrderStepNames: orderStepNames,
     };
 
+    isSavingHeroDirectlyRef.current = true;
+    lastSavedHeroBannersRef.current = JSON.stringify(heroBanners);
+
     try {
-      await Promise.race([
-        saveSettingsToDB(updatedSettings),
-        new Promise((resolve) => setTimeout(resolve, 2500)),
-      ]);
+      await saveSettingsToDB(updatedSettings);
       if (onUpdateSettings) {
         await Promise.resolve(onUpdateSettings(updatedSettings)).catch(() => {});
       }
+      isHeroBannersDirtyRef.current = false;
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 4000);
     } catch (error) {
       console.error('Error saving settings to DB:', error);
+      isHeroBannersDirtyRef.current = false;
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 4000);
     } finally {
+      setTimeout(() => {
+        isSavingHeroDirectlyRef.current = false;
+      }, 3000);
       setIsSaving(false);
     }
   };
@@ -443,13 +517,13 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
   return (
     <div id="admin-store-settings" className="space-y-6">
       {/* Top Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-200">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-200 dark:border-slate-800">
         <div>
-          <h2 className="text-lg sm:text-xl font-black text-slate-900 flex items-center gap-2">
-            <Settings className="w-5 h-5 text-sky-600" />
+          <h2 className="text-lg sm:text-xl font-black text-slate-900 dark:text-white flex items-center gap-2">
+            <Settings className="w-5 h-5 text-sky-600 dark:text-sky-400" />
             <span>Store Settings & Management</span>
           </h2>
-          <p className="text-xs text-slate-500 mt-0.5 hidden sm:block">
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 hidden sm:block">
             Configure site identity, hero carousels, delivery rates, payment gateways, and banners.
           </p>
         </div>
@@ -474,8 +548,8 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
 
       {saveSuccess && (
         <>
-          <div className="p-3.5 rounded-2xl bg-emerald-50 text-emerald-800 border border-emerald-200 text-xs font-bold flex items-center gap-2 animate-in fade-in shadow-2xs">
-            <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" />
+          <div className="p-3.5 rounded-2xl bg-emerald-50 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-200 border border-emerald-200 dark:border-emerald-800 text-xs font-bold flex items-center gap-2 animate-in fade-in shadow-2xs">
+            <CheckCircle className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
             <span>All settings have been successfully updated and synced to Firestore!</span>
           </div>
 
@@ -501,12 +575,12 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
       )}
 
       {/* Navigation Tabs */}
-      <div className="flex items-center gap-1.5 p-1.5 rounded-2xl bg-slate-100/90 border border-slate-200 overflow-x-auto select-none">
+      <div className="flex items-center gap-1.5 p-1.5 rounded-2xl bg-slate-100/90 dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700 overflow-x-auto select-none">
         <button
           type="button"
           onClick={() => setActiveTab('hero')}
           className={`px-3.5 py-2 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-2 shrink-0 ${
-            activeTab === 'hero' ? 'bg-white text-sky-700 shadow-xs ring-1 ring-slate-200' : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+            activeTab === 'hero' ? 'bg-white dark:bg-slate-900 text-sky-700 dark:text-sky-300 shadow-xs ring-1 ring-slate-200 dark:ring-slate-700' : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-white/60 dark:hover:bg-slate-700/60'
           }`}
         >
           <ImageIcon className="w-4 h-4" />
@@ -517,10 +591,10 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
           type="button"
           onClick={() => setActiveTab('nav_items')}
           className={`px-3.5 py-2 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-2 shrink-0 ${
-            activeTab === 'nav_items' ? 'bg-white text-sky-700 shadow-xs ring-1 ring-slate-200' : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+            activeTab === 'nav_items' ? 'bg-white dark:bg-slate-900 text-sky-700 dark:text-sky-300 shadow-xs ring-1 ring-slate-200 dark:ring-slate-700' : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-white/60 dark:hover:bg-slate-700/60'
           }`}
         >
-          <Tag className="w-4 h-4 text-sky-600" />
+          <Tag className="w-4 h-4 text-sky-600 dark:text-sky-400" />
           <span>Header Navigation & Priorities</span>
         </button>
 
@@ -528,7 +602,7 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
           type="button"
           onClick={() => setActiveTab('tag_banners')}
           className={`px-3.5 py-2 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-2 shrink-0 ${
-            activeTab === 'tag_banners' ? 'bg-white text-sky-700 shadow-xs ring-1 ring-slate-200' : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+            activeTab === 'tag_banners' ? 'bg-white dark:bg-slate-900 text-sky-700 dark:text-sky-300 shadow-xs ring-1 ring-slate-200 dark:ring-slate-700' : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-white/60 dark:hover:bg-slate-700/60'
           }`}
         >
           <Tag className="w-4 h-4 text-rose-500" />
@@ -539,7 +613,7 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
           type="button"
           onClick={() => setActiveTab('promo_grid')}
           className={`px-3.5 py-2 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-2 shrink-0 ${
-            activeTab === 'promo_grid' ? 'bg-white text-sky-700 shadow-xs ring-1 ring-slate-200' : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+            activeTab === 'promo_grid' ? 'bg-white dark:bg-slate-900 text-sky-700 dark:text-sky-300 shadow-xs ring-1 ring-slate-200 dark:ring-slate-700' : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-white/60 dark:hover:bg-slate-700/60'
           }`}
         >
           <Sparkles className="w-4 h-4 text-amber-500" />
@@ -550,7 +624,7 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
           type="button"
           onClick={() => setActiveTab('promo')}
           className={`px-3.5 py-2 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-2 shrink-0 ${
-            activeTab === 'promo' ? 'bg-white text-sky-700 shadow-xs ring-1 ring-slate-200' : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+            activeTab === 'promo' ? 'bg-white dark:bg-slate-900 text-sky-700 dark:text-sky-300 shadow-xs ring-1 ring-slate-200 dark:ring-slate-700' : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-white/60 dark:hover:bg-slate-700/60'
           }`}
         >
           <Tag className="w-4 h-4" />
@@ -561,7 +635,7 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
           type="button"
           onClick={() => setActiveTab('profile')}
           className={`px-3.5 py-2 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-2 shrink-0 ${
-            activeTab === 'profile' ? 'bg-white text-sky-700 shadow-xs ring-1 ring-slate-200' : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+            activeTab === 'profile' ? 'bg-white dark:bg-slate-900 text-sky-700 dark:text-sky-300 shadow-xs ring-1 ring-slate-200 dark:ring-slate-700' : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-white/60 dark:hover:bg-slate-700/60'
           }`}
         >
           <Store className="w-4 h-4" />
@@ -572,7 +646,7 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
           type="button"
           onClick={() => setActiveTab('delivery')}
           className={`px-3.5 py-2 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-2 shrink-0 ${
-            activeTab === 'delivery' ? 'bg-white text-sky-700 shadow-xs ring-1 ring-slate-200' : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+            activeTab === 'delivery' ? 'bg-white dark:bg-slate-900 text-sky-700 dark:text-sky-300 shadow-xs ring-1 ring-slate-200 dark:ring-slate-700' : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-white/60 dark:hover:bg-slate-700/60'
           }`}
         >
           <Truck className="w-4 h-4" />
@@ -583,11 +657,33 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
           type="button"
           onClick={() => setActiveTab('seo')}
           className={`px-3.5 py-2 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-2 shrink-0 ${
-            activeTab === 'seo' ? 'bg-white text-sky-700 shadow-xs ring-1 ring-slate-200' : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+            activeTab === 'seo' ? 'bg-white dark:bg-slate-900 text-sky-700 dark:text-sky-300 shadow-xs ring-1 ring-slate-200 dark:ring-slate-700' : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-white/60 dark:hover:bg-slate-700/60'
           }`}
         >
           <Sparkles className="w-4 h-4" />
           <span>SEO & Meta</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab('order_steps')}
+          className={`px-3.5 py-2 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-2 shrink-0 ${
+            activeTab === 'order_steps' ? 'bg-white dark:bg-slate-900 text-teal-700 dark:text-teal-300 shadow-xs ring-1 ring-slate-200 dark:ring-slate-700' : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-white/60 dark:hover:bg-slate-700/60'
+          }`}
+        >
+          <Clock className="w-4 h-4 text-teal-600 dark:text-teal-400" />
+          <span>Order Step Names (ধাপের নাম)</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab('google_sheets')}
+          className={`px-3.5 py-2 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-2 shrink-0 ${
+            activeTab === 'google_sheets' ? 'bg-white dark:bg-slate-900 text-emerald-700 dark:text-emerald-300 shadow-xs ring-1 ring-slate-200 dark:ring-slate-700' : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-white/60 dark:hover:bg-slate-700/60'
+          }`}
+        >
+          <FileSpreadsheet className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+          <span>Google Sheets Sync</span>
         </button>
 
         {isSuperAdmin && (
@@ -611,7 +707,19 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
       </div>
 
       {/* Main Settings Body */}
+      {activeTab === 'policies' ? (
+        <AdminPoliciesSettings
+          settings={settings}
+          onUpdateSettings={onUpdateSettings}
+        />
+      ) : activeTab === 'google_sheets' ? (
+        <AdminGoogleSheets
+          settings={settings}
+          onUpdateSettings={onUpdateSettings}
+        />
+      ) : (
       <form onSubmit={handleFormSubmit} className="space-y-6">
+
         {/* ========================================================= */}
         {/* TAB 1: HERO SLIDES & HIGHLIGHT BADGES */}
         {/* ========================================================= */}
@@ -619,7 +727,7 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
           <div className="space-y-4">
             <AdminHeroSlidesManager
               heroBanners={heroBanners}
-              setHeroBanners={setHeroBanners}
+              setHeroBanners={handleSetHeroBanners}
               handleSlideImageUpload={handleSlideImageUpload}
               handleSlideMobileImageUpload={handleSlideMobileImageUpload}
               handleSlideVideoUpload={handleSlideVideoUpload}
@@ -770,74 +878,116 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
         {/* ========================================================= */}
         {activeTab === 'profile' && (
           <div className="space-y-4">
-            <div className="p-3.5 sm:p-6 rounded-2xl bg-white border border-slate-200 shadow-2xs space-y-4">
-              <h3 className="font-bold text-sm text-slate-900 flex items-center gap-2 pb-3 border-b border-slate-100">
-                <Store className="w-4 h-4 text-sky-600" />
+            <div className="p-3.5 sm:p-6 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xs space-y-4">
+              <h3 className="font-bold text-sm text-slate-900 dark:text-white flex items-center gap-2 pb-3 border-b border-slate-100 dark:border-slate-800">
+                <Store className="w-4 h-4 text-sky-600 dark:text-sky-400" />
                 <span>Store Identity & Contact Info</span>
               </h3>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Store Name</label>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Store Name</label>
                   <input
                     type="text"
                     required
                     value={siteName}
                     onChange={(e) => setSiteName(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-bold text-slate-900"
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-bold text-slate-900 dark:text-white"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Tagline</label>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Tagline</label>
                   <input
                     type="text"
                     value={tagline}
                     onChange={(e) => setTagline(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs text-slate-900"
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs text-slate-900 dark:text-white"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Support Phone</label>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Support Phone</label>
                   <input
                     type="text"
                     value={phone}
                     onChange={(e) => setPhone(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs text-slate-900"
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs text-slate-900 dark:text-white"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Support Email</label>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Support Email</label>
                   <input
                     type="email"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs text-slate-900"
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs text-slate-900 dark:text-white"
                   />
                 </div>
 
+                <div>
+                  <label className="block text-xs font-bold text-emerald-800 dark:text-emerald-300 mb-1 flex items-center gap-1">
+                    <span>WhatsApp Live Chat Number</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={whatsappNumber}
+                    onChange={(e) => setWhatsappNumber(e.target.value)}
+                    placeholder="01719143897"
+                    className="w-full px-3 py-2 rounded-xl border border-emerald-300 dark:border-emerald-800 focus:ring-emerald-500 text-xs font-semibold text-slate-900 dark:text-white bg-emerald-50/20 dark:bg-emerald-950/30"
+                  />
+                  <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">ডিফল্ট অফিসিয়াল ইনবক্স: 01719143897</p>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-sky-800 dark:text-sky-300 mb-1 flex items-center gap-1">
+                    <span>Telegram Support Bot Username</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={telegramBotUsername}
+                    onChange={(e) => setTelegramBotUsername(e.target.value)}
+                    placeholder="kenaxbd_bot"
+                    className="w-full px-3 py-2 rounded-xl border border-sky-300 dark:border-sky-800 focus:ring-sky-500 text-xs font-semibold text-slate-900 dark:text-white bg-sky-50/20 dark:bg-sky-950/30"
+                  />
+                  <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">টেলিগ্রাম বটের ইউজারনেম (বিনা @ চিহ্নে)</p>
+                </div>
+
                 <div className="sm:col-span-2">
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Top Announcement Bar Text</label>
+                  <label className="block text-xs font-bold text-indigo-800 dark:text-indigo-300 mb-1 flex items-center gap-1">
+                    <span>Facebook Messenger Link</span>
+                  </label>
+                  <input
+                    type="url"
+                    value={messengerLink}
+                    onChange={(e) => setMessengerLink(e.target.value)}
+                    placeholder="https://m.me/kenaxbd"
+                    className="w-full px-3 py-2 rounded-xl border border-indigo-300 dark:border-indigo-800 focus:ring-indigo-500 text-xs font-semibold text-slate-900 dark:text-white bg-indigo-50/20 dark:bg-indigo-950/30"
+                  />
+                  <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">ইউজাররা মেসেঞ্জারে ক্লিক করলে সরাসরি এই লিঙ্কে নিয়ে যাবে (যেমন: https://m.me/yourpage)</p>
+                </div>
+
+                <div className="sm:col-span-2">
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Top Announcement Bar Text</label>
                   <input
                     type="text"
                     value={announcementBarText}
                     onChange={(e) => setAnnouncementBarText(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs text-slate-900"
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs text-slate-900 dark:text-white"
                   />
                 </div>
               </div>
             </div>
 
             {/* Contact Page & Help Center Details Manager */}
-            <div className="p-3.5 sm:p-6 rounded-2xl bg-white border border-slate-200 shadow-2xs space-y-4">
-              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-                <h3 className="font-bold text-sm text-slate-900 flex items-center gap-2">
-                  <Phone className="w-4 h-4 text-emerald-600" />
+            <div className="p-3.5 sm:p-6 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xs space-y-4">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+                <h3 className="font-bold text-sm text-slate-900 dark:text-white flex items-center gap-2">
+                  <Phone className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
                   <span>Contact Page &amp; Help Center Manager</span>
                 </h3>
-                <span className="text-[11px] text-slate-500 bg-slate-100 px-2.5 py-1 rounded-full font-semibold">
+                <span className="text-[11px] text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 px-2.5 py-1 rounded-full font-semibold">
                   Controls Contact Page
                 </span>
               </div>
@@ -845,7 +995,7 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
               <div className="space-y-4">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                   <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                    <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
                       Experience Center Title
                     </label>
                     <input
@@ -853,12 +1003,12 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
                       value={experienceCenterTitle}
                       onChange={(e) => setExperienceCenterTitle(e.target.value)}
                       placeholder="e.g. Dhaka Experience Center (leave empty to hide)"
-                      className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs text-slate-900"
+                      className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs text-slate-900 dark:text-white"
                     />
                   </div>
 
                   <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                    <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
                       Experience Center Address
                     </label>
                     <input
@@ -866,16 +1016,16 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
                       value={experienceCenterAddress}
                       onChange={(e) => setExperienceCenterAddress(e.target.value)}
                       placeholder="Address details (leave empty to hide)"
-                      className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs text-slate-900"
+                      className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs text-slate-900 dark:text-white"
                     />
                   </div>
                 </div>
 
                 {/* Dynamic Helplines List */}
-                <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2.5">
+                <div className="p-3 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-xl space-y-2.5">
                   <div className="flex items-center justify-between">
-                    <label className="text-xs font-extrabold text-slate-800 flex items-center gap-1.5">
-                      <Phone className="w-3.5 h-3.5 text-emerald-600" />
+                    <label className="text-xs font-extrabold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                      <Phone className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
                       <span>Helpline Phone Numbers (Customer Care)</span>
                     </label>
                     <button
@@ -899,12 +1049,12 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
                             value={num}
                             onChange={(e) => handleUpdateHelpline(i, e.target.value)}
                             placeholder="e.g. +880 1700-123456"
-                            className="w-full px-3 py-1.5 rounded-lg border border-slate-300 text-xs text-slate-900 bg-white"
+                            className="w-full px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-xs text-slate-900 dark:text-white bg-white dark:bg-slate-800"
                           />
                           <button
                             type="button"
                             onClick={() => handleRemoveHelpline(i)}
-                            className="p-1.5 text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer shrink-0"
+                            className="p-1.5 text-rose-600 hover:bg-rose-50 dark:hover:bg-slate-700 rounded-lg transition-colors cursor-pointer shrink-0"
                             title="Remove Helpline"
                           >
                             <Trash2 className="w-4 h-4" />
@@ -916,10 +1066,10 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
                 </div>
 
                 {/* Dynamic Official Emails List */}
-                <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2.5">
+                <div className="p-3 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-xl space-y-2.5">
                   <div className="flex items-center justify-between">
-                    <label className="text-xs font-extrabold text-slate-800 flex items-center gap-1.5">
-                      <Mail className="w-3.5 h-3.5 text-sky-600" />
+                    <label className="text-xs font-extrabold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                      <Mail className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400" />
                       <span>Official Support Emails</span>
                     </label>
                     <button
@@ -943,12 +1093,12 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
                             value={em}
                             onChange={(e) => handleUpdateOfficialEmail(i, e.target.value)}
                             placeholder="e.g. support@kenaxbd.com"
-                            className="w-full px-3 py-1.5 rounded-lg border border-slate-300 text-xs text-slate-900 bg-white"
+                            className="w-full px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-xs text-slate-900 dark:text-white bg-white dark:bg-slate-800"
                           />
                           <button
                             type="button"
                             onClick={() => handleRemoveOfficialEmail(i)}
-                            className="p-1.5 text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer shrink-0"
+                            className="p-1.5 text-rose-600 hover:bg-rose-50 dark:hover:bg-slate-700 rounded-lg transition-colors cursor-pointer shrink-0"
                             title="Remove Email"
                           >
                             <Trash2 className="w-4 h-4" />
@@ -961,7 +1111,7 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                   <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                    <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
                       Support Hours
                     </label>
                     <input
@@ -969,12 +1119,12 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
                       value={supportHours}
                       onChange={(e) => setSupportHours(e.target.value)}
                       placeholder="e.g. 9:00 AM – 10:00 PM (Everyday)"
-                      className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs text-slate-900"
+                      className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs text-slate-900 dark:text-white"
                     />
                   </div>
 
                   <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                    <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
                       Nationwide Delivery Information
                     </label>
                     <input
@@ -982,7 +1132,7 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
                       value={nationwideDeliveryText}
                       onChange={(e) => setNationwideDeliveryText(e.target.value)}
                       placeholder="e.g. 24-48 Hours inside Dhaka Metro | 3-5 Days across all 64 Districts."
-                      className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs text-slate-900"
+                      className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs text-slate-900 dark:text-white"
                     />
                   </div>
                 </div>
@@ -990,24 +1140,24 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
             </div>
 
             {/* Gmail Alerts & Email Template Footer Details Manager */}
-            <div className="p-3.5 sm:p-6 rounded-2xl bg-white border border-slate-200 shadow-2xs space-y-4">
-              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-                <h3 className="font-bold text-sm text-slate-900 flex items-center gap-2">
-                  <Mail className="w-4 h-4 text-purple-600" />
+            <div className="p-3.5 sm:p-6 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xs space-y-4">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+                <h3 className="font-bold text-sm text-slate-900 dark:text-white flex items-center gap-2">
+                  <Mail className="w-4 h-4 text-purple-600 dark:text-purple-400" />
                   <span>Email Alerts &amp; Template Footer Manager</span>
                 </h3>
-                <span className="text-[11px] text-slate-500 bg-slate-100 px-2.5 py-1 rounded-full font-semibold">
+                <span className="text-[11px] text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 px-2.5 py-1 rounded-full font-semibold">
                   Controls Email Template Footer
                 </span>
               </div>
 
-              <p className="text-xs text-slate-500">
+              <p className="text-xs text-slate-500 dark:text-slate-400">
                 These contact details appear at the bottom footer of all customer order emails, registration welcomes, and staff alerts generated by the system.
               </p>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
                     Email Footer Hotline
                   </label>
                   <input
@@ -1015,12 +1165,12 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
                     value={emailFooterHotline}
                     onChange={(e) => setEmailFooterHotline(e.target.value)}
                     placeholder="+880 1700-123456 / +880 1911-987654 (leave empty to hide)"
-                    className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs text-slate-900"
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs text-slate-900 dark:text-white"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
                     Email Footer Support Email
                   </label>
                   <input
@@ -1028,12 +1178,12 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
                     value={emailFooterEmail}
                     onChange={(e) => setEmailFooterEmail(e.target.value)}
                     placeholder="support@kenaxbd.com (leave empty to hide)"
-                    className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs text-slate-900"
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs text-slate-900 dark:text-white"
                   />
                 </div>
 
                 <div className="sm:col-span-2">
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
                     Email Footer Store Address
                   </label>
                   <input
@@ -1041,12 +1191,12 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
                     value={emailFooterAddress}
                     onChange={(e) => setEmailFooterAddress(e.target.value)}
                     placeholder="House 45, Road 27, Dhanmondi, Dhaka 1209, Bangladesh (leave empty to hide)"
-                    className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs text-slate-900"
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs text-slate-900 dark:text-white"
                   />
                 </div>
 
                 <div className="sm:col-span-2">
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
                     Email Footer Trust Tagline / Assurances
                   </label>
                   <input
@@ -1054,7 +1204,7 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
                     value={emailFooterTrustText}
                     onChange={(e) => setEmailFooterTrustText(e.target.value)}
                     placeholder="✓ 100% Genuine Tech • ✓ Cash on Delivery • ✓ 24-48h Nationwide Delivery"
-                    className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs text-slate-900"
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs text-slate-900 dark:text-white"
                   />
                 </div>
               </div>
@@ -1067,75 +1217,133 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
         {/* ========================================================= */}
         {activeTab === 'delivery' && (
           <div className="space-y-4">
-            <div className="p-3.5 sm:p-6 rounded-2xl bg-white border border-slate-200 shadow-2xs space-y-4">
-              <h3 className="font-bold text-sm text-slate-900 flex items-center gap-2 pb-3 border-b border-slate-100">
-                <Truck className="w-4 h-4 text-sky-600" />
+            <div className="p-3.5 sm:p-6 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xs space-y-4">
+              <h3 className="font-bold text-sm text-slate-900 dark:text-white flex items-center gap-2 pb-3 border-b border-slate-100 dark:border-slate-800">
+                <Truck className="w-4 h-4 text-sky-600 dark:text-sky-400" />
                 <span>Delivery Charges (BDT)</span>
               </h3>
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Inside Dhaka (৳)</label>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Inside Dhaka (৳)</label>
                   <input
                     type="number"
                     value={deliveryInsideDhaka}
                     onChange={(e) => setDeliveryInsideDhaka(e.target.value === '' ? '' : Number(e.target.value))}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-bold text-slate-900"
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-bold text-slate-900 dark:text-white"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Outside Dhaka (৳)</label>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Outside Dhaka (৳)</label>
                   <input
                     type="number"
                     value={deliveryOutsideDhaka}
                     onChange={(e) => setDeliveryOutsideDhaka(e.target.value === '' ? '' : Number(e.target.value))}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-bold text-slate-900"
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-bold text-slate-900 dark:text-white"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Free Delivery Minimum (৳)</label>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Free Delivery Minimum (৳)</label>
                   <input
                     type="number"
                     value={freeDeliveryThreshold}
                     onChange={(e) => setFreeDeliveryThreshold(e.target.value === '' ? '' : Number(e.target.value))}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-bold text-slate-900"
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-bold text-slate-900 dark:text-white"
                   />
                 </div>
               </div>
             </div>
 
             {/* Payment Gateways */}
-            <div className="p-3.5 sm:p-6 rounded-2xl bg-white border border-slate-200 shadow-2xs space-y-4">
-              <h3 className="font-bold text-sm text-slate-900 flex items-center gap-2 pb-3 border-b border-slate-100">
-                <CreditCard className="w-4 h-4 text-sky-600" />
+            <div className="p-3.5 sm:p-6 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xs space-y-4">
+              <h3 className="font-bold text-sm text-slate-900 dark:text-white flex items-center gap-2 pb-3 border-b border-slate-100 dark:border-slate-800">
+                <CreditCard className="w-4 h-4 text-sky-600 dark:text-sky-400" />
                 <span>Accepted Payment Methods</span>
               </h3>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <label className="p-3.5 rounded-xl border border-slate-200 flex items-center justify-between cursor-pointer hover:bg-slate-50 transition-colors">
-                  <span className="text-xs font-bold text-slate-800">bKash</span>
-                  <input
-                    type="checkbox"
-                    checked={enableBkash}
-                    onChange={(e) => setEnableBkash(e.target.checked)}
-                    className="w-4 h-4 rounded text-sky-600 focus:ring-sky-500"
-                  />
-                </label>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {/* bKash card */}
+                <div className="p-3.5 rounded-xl border border-pink-200 dark:border-pink-900/60 bg-pink-50/30 dark:bg-pink-950/20 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-black text-pink-900 dark:text-pink-200">🌸 bKash (বিকাশ)</span>
+                    <input
+                      type="checkbox"
+                      checked={enableBkash}
+                      onChange={(e) => setEnableBkash(e.target.checked)}
+                      className="w-4 h-4 rounded text-pink-600 focus:ring-pink-500"
+                    />
+                  </div>
+                  {enableBkash && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1 border-t border-pink-200/60 dark:border-pink-900/60">
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-700 dark:text-slate-300 block mb-1">bKash Number</label>
+                        <input
+                          type="text"
+                          value={bkashNumber}
+                          onChange={(e) => setBkashNumber(e.target.value)}
+                          placeholder="01719143897"
+                          className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-mono font-bold bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-pink-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-700 dark:text-slate-300 block mb-1">Account Type</label>
+                        <select
+                          value={bkashType}
+                          onChange={(e) => setBkashType(e.target.value)}
+                          className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-bold bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-pink-500"
+                        >
+                          <option value="Personal">Personal (পার্সোনাল)</option>
+                          <option value="Merchant">Merchant (মার্চেন্ট)</option>
+                          <option value="Agent">Agent (এজেন্ট)</option>
+                        </select>
+                      </div>
+                    </div>
+                  )}
+                </div>
 
-                <label className="p-3.5 rounded-xl border border-slate-200 flex items-center justify-between cursor-pointer hover:bg-slate-50 transition-colors">
-                  <span className="text-xs font-bold text-slate-800">Nagad</span>
-                  <input
-                    type="checkbox"
-                    checked={enableNagad}
-                    onChange={(e) => setEnableNagad(e.target.checked)}
-                    className="w-4 h-4 rounded text-sky-600 focus:ring-sky-500"
-                  />
-                </label>
+                {/* Nagad card */}
+                <div className="p-3.5 rounded-xl border border-amber-200 dark:border-amber-900/60 bg-amber-50/30 dark:bg-amber-950/20 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-black text-amber-900 dark:text-amber-200">🍊 Nagad (নগদ)</span>
+                    <input
+                      type="checkbox"
+                      checked={enableNagad}
+                      onChange={(e) => setEnableNagad(e.target.checked)}
+                      className="w-4 h-4 rounded text-amber-600 focus:ring-amber-500"
+                    />
+                  </div>
+                  {enableNagad && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1 border-t border-amber-200/60 dark:border-amber-900/60">
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-700 dark:text-slate-300 block mb-1">Nagad Number</label>
+                        <input
+                          type="text"
+                          value={nagadNumber}
+                          onChange={(e) => setNagadNumber(e.target.value)}
+                          placeholder="01887713212"
+                          className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-mono font-bold bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-amber-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-700 dark:text-slate-300 block mb-1">Account Type</label>
+                        <select
+                          value={nagadType}
+                          onChange={(e) => setNagadType(e.target.value)}
+                          className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-bold bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-amber-500"
+                        >
+                          <option value="Merchant">Merchant (মার্চেন্ট)</option>
+                          <option value="Personal">Personal (পার্সোনাল)</option>
+                          <option value="Agent">Agent (এজেন্ট)</option>
+                        </select>
+                      </div>
+                    </div>
+                  )}
+                </div>
 
-                <label className="p-3.5 rounded-xl border border-slate-200 flex items-center justify-between cursor-pointer hover:bg-slate-50 transition-colors">
-                  <span className="text-xs font-bold text-slate-800">Rocket</span>
+                <label className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 flex items-center justify-between cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors">
+                  <span className="text-xs font-bold text-slate-800 dark:text-slate-200">Rocket</span>
                   <input
                     type="checkbox"
                     checked={enableRocket}
@@ -1144,8 +1352,8 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
                   />
                 </label>
 
-                <label className="p-3.5 rounded-xl border border-slate-200 flex items-center justify-between cursor-pointer hover:bg-slate-50 transition-colors">
-                  <span className="text-xs font-bold text-slate-800">Cash on Delivery (COD)</span>
+                <label className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 flex items-center justify-between cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors">
+                  <span className="text-xs font-bold text-slate-800 dark:text-slate-200">Cash on Delivery (COD)</span>
                   <input
                     type="checkbox"
                     checked={enableCOD}
@@ -1205,6 +1413,100 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
         )}
 
         {/* ========================================================= */}
+        {/* TAB 7: CUSTOM ORDER STEP NAMES EDITOR */}
+        {/* ========================================================= */}
+        {activeTab === 'order_steps' && (
+          <div className="space-y-6 animate-in fade-in">
+            <div className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-4">
+                <div>
+                  <h3 className="text-base font-extrabold text-slate-900 dark:text-white flex items-center gap-2">
+                    <Clock className="w-5 h-5 text-teal-600 dark:text-teal-400" />
+                    <span>Customize Order Progression Step Names (ধাপের নামসমূহ)</span>
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                    অর্ডার প্রসেসিং এর প্রতিটি ধাপের নাম ও বাংলা লেবেল আপনার পছন্দমতো রিনেম/পরিবর্তন করতে পারবেন।
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setOrderStepNames(DEFAULT_ORDER_STEP_NAMES)}
+                  className="px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-bold text-xs transition-colors cursor-pointer flex items-center gap-1.5 shrink-0"
+                >
+                  <RotateCcw className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400" />
+                  <span>Reset to Defaults</span>
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {Object.entries(DEFAULT_ORDER_STEP_NAMES).map(([key, defaultVal]) => {
+                  const currentVal = orderStepNames[key] || defaultVal;
+                  return (
+                    <div key={key} className="p-4 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/60 dark:bg-slate-800/60 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-black text-slate-800 dark:text-slate-200 uppercase tracking-wider font-mono">
+                          System Key: {key}
+                        </span>
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-teal-100 dark:bg-teal-950/80 text-teal-800 dark:text-teal-300 border border-teal-200 dark:border-teal-800">
+                          Step Name
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                        <div>
+                          <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-300 mb-1">
+                            English Title
+                          </label>
+                          <input
+                            type="text"
+                            value={currentVal.title}
+                            onChange={(e) => {
+                              setOrderStepNames((prev) => ({
+                                ...prev,
+                                [key]: { ...currentVal, title: e.target.value },
+                              }));
+                            }}
+                            className="w-full px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-bold text-slate-900 dark:text-white bg-white dark:bg-slate-800"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-300 mb-1">
+                            Bengali Label (বাংলা নাম)
+                          </label>
+                          <input
+                            type="text"
+                            value={currentVal.descBn || ''}
+                            onChange={(e) => {
+                              setOrderStepNames((prev) => ({
+                                ...prev,
+                                [key]: { ...currentVal, descBn: e.target.value },
+                              }));
+                            }}
+                            className="w-full px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-semibold text-slate-900 dark:text-white bg-white dark:bg-slate-800"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="flex justify-end pt-3 border-t border-slate-100 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={handleFormSubmit}
+                  disabled={isSaving}
+                  className="px-5 py-2.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-black text-xs shadow-xs transition-colors cursor-pointer flex items-center gap-2"
+                >
+                  <Save className="w-4 h-4" />
+                  <span>Save Step Names</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ========================================================= */}
         {/* TAB 6: SYSTEM & MAINTENANCE (SUPER ADMIN ONLY) */}
         {/* ========================================================= */}
         {activeTab === 'system' && (
@@ -1216,6 +1518,8 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
           />
         )}
       </form>
+      )}
     </div>
   );
 };
+

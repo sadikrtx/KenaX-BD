@@ -18,12 +18,13 @@ import {
   disableNetwork,
 } from 'firebase/firestore';
 import { getAuth } from 'firebase/auth';
-import { safeSetLocalStorage, safeSetCartActivitiesCache, getIdbItem, setIdbItem } from './storage';
-import firebaseConfig from '../../firebase-applet-config.json';
-import { Product, Order, Category, SubCategoryItem, WebsiteSettings, DeliveryZone, Coupon, OrderItem, HeroBannerItem, Review, Supplier, SourcingLocation } from '../types';
-import { INITIAL_PRODUCTS, DEMO_PRODUCT_IDS } from '../data/initialProducts';
-import { INITIAL_SUPPLIERS } from '../data/initialSuppliers';
-import { INITIAL_SOURCING_LOCATIONS } from '../data/initialSourcingLocations';
+import { safeSetLocalStorage, safeSetCartActivitiesCache, getIdbItem, setIdbItem } from './storage.ts';
+import { getEnvCollectionName, getEnvStorageKey, getEnvApiHeaders, isPreviewEnvironment } from '../utils/envHelper.ts';
+import firebaseConfig from '../../firebase-applet-config.json' with { type: 'json' };
+import { Product, Order, OrderStatus, Category, SubCategoryItem, WebsiteSettings, DeliveryZone, Coupon, OrderItem, HeroBannerItem, Review, Supplier, SourcingLocation } from '../types/index.ts';
+import { INITIAL_PRODUCTS, PRODUCTION_PRODUCTS, DEMO_PRODUCT_IDS, isDemoProductId } from '../data/initialProducts.ts';
+import { INITIAL_SUPPLIERS } from '../data/initialSuppliers.ts';
+import { INITIAL_SOURCING_LOCATIONS } from '../data/initialSourcingLocations.ts';
 import {
   INITIAL_CATEGORIES,
   INITIAL_WEBSITE_SETTINGS,
@@ -37,7 +38,7 @@ import {
   INITIAL_STOCK_LOGS,
   INITIAL_OTHER_PROFITS,
   INITIAL_REVIEWS,
-} from '../data/initialSettings';
+} from '../data/initialSettings.ts';
 import {
   StaffUser,
   ActivityLog,
@@ -52,8 +53,9 @@ import {
   isDemoOtherProfit,
   SMSSettings,
   SMSLog,
-} from '../types';
-import { NEUTRAL_PRODUCT_PLACEHOLDER } from '../utils/imageOptimizer';
+  NewsletterSubscriber,
+} from '../types/index.ts';
+import { NEUTRAL_PRODUCT_PLACEHOLDER } from '../utils/imageOptimizer.ts';
 
 // Initialize Firebase App
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
@@ -194,28 +196,54 @@ export function normalizePhoneNumber(phone?: string): string {
 export function mergeOrdersLists(existing: Order[], incoming: Order[]): Order[] {
   const map = new Map<string, Order>();
 
+  const normalizeOrder = (o: Order): Order => {
+    const rawStatus = (o.orderStatus || (o as any).status || 'Pending').toString().trim();
+    const lower = rawStatus.toLowerCase();
+    const normalizedStatus =
+      lower === 'pending'
+        ? 'Pending'
+        : lower === 'confirmed'
+        ? 'Confirmed'
+        : lower === 'cancelled'
+        ? 'Cancelled'
+        : lower === 'delivered'
+        ? 'Delivered'
+        : lower === 'processing'
+        ? 'Processing'
+        : lower === 'shipped'
+        ? 'Shipped'
+        : rawStatus.charAt(0).toUpperCase() + rawStatus.slice(1);
+
+    return {
+      ...o,
+      orderStatus: normalizedStatus as OrderStatus,
+      status: normalizedStatus as any,
+      isV2Order: true,
+    };
+  };
+
   const isValidOrder = (o: Order) => {
     if (!o || !o.id) return false;
-    if (o.isV2Order === true) return true;
-    return false;
+    return true;
   };
 
   // 1. Put existing
   (existing || []).forEach((o) => {
-    if (o && isValidOrder(o)) map.set(o.id, o);
+    if (o && isValidOrder(o)) map.set(o.id, normalizeOrder(o));
   });
   // 2. Put incoming (overwrites with fresher version if present)
   (incoming || []).forEach((o) => {
     if (o && isValidOrder(o)) {
       const prev = map.get(o.id);
+      const normalizedIncoming = normalizeOrder(o);
       if (!prev) {
-        map.set(o.id, o);
+        map.set(o.id, normalizedIncoming);
       } else {
         // Compare updated timestamps if available
         const prevTime = new Date(prev.updatedAt || prev.createdAt || 0).getTime();
         const nextTime = new Date(o.updatedAt || o.createdAt || 0).getTime();
         if (nextTime >= prevTime) {
-          map.set(o.id, { ...prev, ...o });
+          map.set(o.id, { ...prev, ...normalizedIncoming });
         }
       }
     }
@@ -387,8 +415,8 @@ export function mergeCategoriesLists(baseList: Category[] = INITIAL_CATEGORIES, 
   return list;
 }
 
-// Helper to compress image data URL or File to lightweight, high-performance base64 data URL
-export function compressImage(input: File | string, maxWidth = 1200, maxHeight = 1200, quality = 0.82): Promise<string> {
+// Helper to process and preserve high-performance, crystal-clear base64 data URLs without quality loss
+export function compressImage(input: File | string, maxWidth = 2560, maxHeight = 2560, quality = 0.95): Promise<string> {
   return new Promise((resolve) => {
     if (!input) {
       resolve('');
@@ -401,17 +429,12 @@ export function compressImage(input: File | string, maxWidth = 1200, maxHeight =
         return;
       }
 
-      // If already lightweight base64 (<120KB), return directly
-      if (dataUrl.length < 120000) {
-        resolve(dataUrl);
-        return;
-      }
-
       const img = new Image();
       img.onload = () => {
         let width = img.width;
         let height = img.height;
 
+        // Only scale down if image exceeds ultra-HD 2560px dimensions
         if (width > maxWidth || height > maxHeight) {
           if (width > height) {
             height = Math.round((height * maxWidth) / width);
@@ -431,8 +454,12 @@ export function compressImage(input: File | string, maxWidth = 1200, maxHeight =
           return;
         }
 
+        // Enable high-quality smoothing algorithms for sharp edges and color precision
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
         ctx.drawImage(img, 0, 0, width, height);
-        // Convert to high-efficiency JPEG
+
+        // Convert to high-fidelity JPEG maintaining maximum clarity
         const compressed = canvas.toDataURL('image/jpeg', quality);
         resolve(compressed);
       };
@@ -457,14 +484,16 @@ export function compressImage(input: File | string, maxWidth = 1200, maxHeight =
 
 // Helper to merge and deduplicate products safely without losing any products
 export function mergeProductsLists(
-  baseList: Product[] = INITIAL_PRODUCTS,
+  baseList?: Product[],
   incomingList: Product[] = [],
   explicitDeletedSet?: Set<string>
 ): Product[] {
+  const defaultBase = INITIAL_PRODUCTS;
+  const effectiveBase = baseList !== undefined ? baseList : defaultBase;
   const map = new Map<string, Product>();
   let deletedIds = new Set<string>();
   try {
-    const rawDeleted = localStorage.getItem('kenax_deleted_product_ids');
+    const rawDeleted = localStorage.getItem(getEnvStorageKey('kenax_deleted_product_ids'));
     if (rawDeleted) {
       const parsed = JSON.parse(rawDeleted);
       if (Array.isArray(parsed)) parsed.forEach((id) => deletedIds.add(id));
@@ -475,9 +504,12 @@ export function mergeProductsLists(
     explicitDeletedSet.forEach((id) => deletedIds.add(id));
   }
 
-  // 1. Add base products (e.g. INITIAL_PRODUCTS) if not explicitly deleted
-  (baseList || INITIAL_PRODUCTS || []).forEach((p) => {
+  const isProduction = !isPreviewEnvironment();
+
+  // 1. Add base products if not explicitly deleted
+  (effectiveBase || []).forEach((p) => {
     if (p && p.id && !deletedIds.has(p.id)) {
+      if (isProduction && isDemoProductId(p.id)) return; // Strictly isolate demo products from production website
       map.set(p.id, { ...p });
     }
   });
@@ -485,6 +517,7 @@ export function mergeProductsLists(
   // 2. Add or update incoming products (from Firestore, Cloud SQL, or local cache)
   (incomingList || []).forEach((p) => {
     if (p && p.id && !deletedIds.has(p.id)) {
+      if (isProduction && isDemoProductId(p.id)) return; // Strictly isolate demo products from production website
       const existing = map.get(p.id);
       if (!existing) {
         map.set(p.id, { ...p });
@@ -494,10 +527,12 @@ export function mergeProductsLists(
         const validPrev = isNaN(prevTime) ? 0 : prevTime;
         const validNext = isNaN(nextTime) ? 0 : nextTime;
 
+        // When incoming p is newer or has updatedAt, p is the authoritative product state.
+        // We set p directly so deleted fields (like cleared videoUrl, deleted sizes/colors) are not resurrected from existing.
         if (validNext >= validPrev || (!existing.updatedAt && p.updatedAt)) {
-          map.set(p.id, { ...existing, ...p });
+          map.set(p.id, { ...p });
         } else {
-          map.set(p.id, { ...p, ...existing });
+          map.set(p.id, { ...existing });
         }
       }
     }
@@ -508,25 +543,25 @@ export function mergeProductsLists(
 
 // Automatically and permanently purge demo products from local caches, cart, wishlist, and Firestore
 export function purgeDemoProducts() {
-  if (typeof window === 'undefined') return;
+  if (typeof window === 'undefined' || isPreviewEnvironment()) return;
   try {
-    const demoSet = new Set(DEMO_PRODUCT_IDS);
+    const isDemo = (id: string) => isDemoProductId(id);
 
     // 1. Record demo IDs in deleted list
-    const rawDel = localStorage.getItem('kenax_deleted_product_ids');
+    const rawDel = localStorage.getItem(getEnvStorageKey('kenax_deleted_product_ids'));
     const delList: string[] = rawDel ? JSON.parse(rawDel) : [];
     DEMO_PRODUCT_IDS.forEach((id) => {
       if (!delList.includes(id)) delList.push(id);
     });
-    safeSetLocalStorage('kenax_deleted_product_ids', JSON.stringify(delList));
+    safeSetLocalStorage(getEnvStorageKey('kenax_deleted_product_ids'), JSON.stringify(delList));
 
     // 2. Clean products cache
-    const rawCache = localStorage.getItem('kenax_products_cache');
+    const rawCache = localStorage.getItem(getEnvStorageKey('kenax_products_cache'));
     if (rawCache) {
       const parsed: Product[] = JSON.parse(rawCache);
       if (Array.isArray(parsed)) {
-        const filtered = parsed.filter((p) => p && p.id && !demoSet.has(p.id));
-        safeSetLocalStorage('kenax_products_cache', JSON.stringify(filtered));
+        const filtered = parsed.filter((p) => p && p.id && !isDemo(p.id));
+        safeSetLocalStorage(getEnvStorageKey('kenax_products_cache'), JSON.stringify(filtered));
       }
     }
 
@@ -535,7 +570,7 @@ export function purgeDemoProducts() {
     if (rawCart) {
       const parsed = JSON.parse(rawCart);
       if (Array.isArray(parsed)) {
-        const filtered = parsed.filter((item: any) => item && !demoSet.has(item.productId));
+        const filtered = parsed.filter((item: any) => item && !isDemo(item.productId));
         safeSetLocalStorage('kenax_cart', JSON.stringify(filtered));
       }
     }
@@ -545,17 +580,17 @@ export function purgeDemoProducts() {
     if (rawWish) {
       const parsed = JSON.parse(rawWish);
       if (Array.isArray(parsed)) {
-        const filtered = parsed.filter((p: any) => p && !demoSet.has(p.id || p.productId));
+        const filtered = parsed.filter((p: any) => p && !isDemo(p.id || p.productId));
         safeSetLocalStorage('kenax_wishlist', JSON.stringify(filtered));
       }
     }
 
     // 5. Asynchronously remove demo products from Firestore & server
     DEMO_PRODUCT_IDS.forEach((id) => {
-      fetch(`/api/products/${encodeURIComponent(id)}`, { method: 'DELETE' }).catch(() => {});
+      fetch(`/api/products/${encodeURIComponent(id)}`, { method: 'DELETE', headers: getEnvApiHeaders() }).catch(() => {});
       if (!isQuotaExceededFlag) {
-        deleteDoc(doc(db, 'products', id)).catch(() => {});
-        setDoc(doc(db, 'deletedProducts', id), { id, deletedAt: new Date().toISOString() }).catch(() => {});
+        deleteDoc(doc(db, getEnvCollectionName('products'), id)).catch(() => {});
+        setDoc(doc(db, getEnvCollectionName('deletedProducts'), id), { id, deletedAt: new Date().toISOString() }).catch(() => {});
       }
     });
   } catch (err) {
@@ -567,9 +602,9 @@ purgeDemoProducts();
 // Push all default catalog data to Firestore
 export async function seedAllDataToFirestore(force = false): Promise<{ success: boolean; message: string }> {
   // Always mark seeded flag as true to avoid looping seed calls across renders
-  safeSetLocalStorage('kenax_seeded_flag', 'true');
+  safeSetLocalStorage(getEnvStorageKey('kenax_seeded_flag'), 'true');
 
-  if (isQuotaExceededFlag || (typeof window !== 'undefined' && localStorage.getItem('kenax_quota_exceeded') === 'true')) {
+  if (isQuotaExceededFlag || (typeof window !== 'undefined' && localStorage.getItem(getEnvStorageKey('kenax_quota_exceeded')) === 'true')) {
     console.log('[KenaX BD] Quota limit active. Operating seamlessly with local catalog cache.');
     return { success: true, message: 'Quota active. Operating with local catalog cache.' };
   }
@@ -578,15 +613,15 @@ export async function seedAllDataToFirestore(force = false): Promise<{ success: 
     // Check if Cloud DB is already initialized in Firestore
     if (!force) {
       try {
-        const seedDoc = await getDoc(doc(db, 'system', 'seedInfo'));
+        const seedDoc = await getDoc(doc(db, getEnvCollectionName('system'), 'seedInfo'));
         if (seedDoc.exists() && seedDoc.data()?.seeded) {
           console.log('[KenaX BD] Cloud database is already seeded. Skipping auto-reseed.');
           return { success: true, message: 'Database already seeded.' };
         }
-        const settingsSnap = await getDoc(doc(db, 'websiteSettings', INITIAL_WEBSITE_SETTINGS.id));
+        const settingsSnap = await getDoc(doc(db, getEnvCollectionName('websiteSettings'), INITIAL_WEBSITE_SETTINGS.id));
         if (settingsSnap.exists()) {
           console.log('[KenaX BD] Website settings exist in Cloud Firestore. Marking seeded.');
-          await setDoc(doc(db, 'system', 'seedInfo'), { seeded: true, seededAt: new Date().toISOString() }, { merge: true }).catch((e) => {
+          await setDoc(doc(db, getEnvCollectionName('system'), 'seedInfo'), { seeded: true, seededAt: new Date().toISOString() }, { merge: true }).catch((e) => {
             if (isQuotaExceededError(e)) markQuotaExceeded(e);
           });
           return { success: true, message: 'Database already seeded.' };
@@ -607,7 +642,7 @@ export async function seedAllDataToFirestore(force = false): Promise<{ success: 
     // Fetch existing products from Firestore first to guarantee no admin-added product is lost
     let existingFirestoreProds: Product[] = [];
     try {
-      const snap = await getDocs(collection(db, 'products'));
+      const snap = await getDocs(collection(db, getEnvCollectionName('products')));
       if (!snap.empty) {
         snap.forEach((d) => {
           if (d.data()) existingFirestoreProds.push(d.data() as Product);
@@ -625,17 +660,34 @@ export async function seedAllDataToFirestore(force = false): Promise<{ success: 
 
     // 1. Seed Products (ONLY if Firestore products collection is completely empty)
     if (existingFirestoreProds.length === 0) {
-      let deletedSet = new Set<string>();
+      const deletedSet = new Set<string>();
       try {
-        const delSnap = await getDocs(collection(db, 'deletedProducts'));
-        delSnap.forEach((d) => deletedSet.add(d.id));
+        const [delSnap1, delSnap2] = await Promise.all([
+          getDocs(collection(db, 'deletedProducts')).catch(() => ({ empty: true, forEach: () => {} } as any)),
+          getDocs(collection(db, 'preview_deletedProducts')).catch(() => ({ empty: true, forEach: () => {} } as any)),
+        ]);
+        if (!delSnap1.empty) delSnap1.forEach((d: any) => deletedSet.add(d.id));
+        if (!delSnap2.empty) delSnap2.forEach((d: any) => deletedSet.add(d.id));
       } catch {}
+
+      try {
+        ['kenax_deleted_product_ids', 'preview_kenax_deleted_product_ids', 'prod_kenax_deleted_product_ids', getEnvStorageKey('kenax_deleted_product_ids')].forEach((k) => {
+          const raw = localStorage.getItem(k);
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed)) parsed.forEach((id) => deletedSet.add(id));
+          }
+        });
+      } catch {}
+
+      const isProd = !isPreviewEnvironment();
 
       for (const product of INITIAL_PRODUCTS) {
         if (isQuotaExceededFlag) break;
         if (deletedSet.has(product.id)) continue;
+        if (isProd && isDemoProductId(product.id)) continue;
         try {
-          await setDoc(doc(db, 'products', product.id), cleanFirestoreData(product), { merge: true });
+          await setDoc(doc(db, getEnvCollectionName('products'), product.id), cleanFirestoreData(product), { merge: true });
         } catch (err) {
           if (isQuotaExceededError(err)) { markQuotaExceeded(err); break; }
         }
@@ -646,7 +698,7 @@ export async function seedAllDataToFirestore(force = false): Promise<{ success: 
     for (const cat of INITIAL_CATEGORIES) {
       if (isQuotaExceededFlag) break;
       try {
-        await setDoc(doc(db, 'categories', cat.id), cleanFirestoreData(cat), { merge: true });
+        await setDoc(doc(db, getEnvCollectionName('categories'), cat.id), cleanFirestoreData(cat), { merge: true });
       } catch (err) {
         if (isQuotaExceededError(err)) { markQuotaExceeded(err); break; }
       }
@@ -655,7 +707,7 @@ export async function seedAllDataToFirestore(force = false): Promise<{ success: 
     // 3. Seed Website Settings
     if (!isQuotaExceededFlag) {
       try {
-        await setDoc(doc(db, 'websiteSettings', INITIAL_WEBSITE_SETTINGS.id), INITIAL_WEBSITE_SETTINGS, { merge: true });
+        await setDoc(doc(db, getEnvCollectionName('websiteSettings'), INITIAL_WEBSITE_SETTINGS.id), INITIAL_WEBSITE_SETTINGS, { merge: true });
       } catch (err) {
         if (isQuotaExceededError(err)) markQuotaExceeded(err);
       }
@@ -665,7 +717,7 @@ export async function seedAllDataToFirestore(force = false): Promise<{ success: 
     for (const zone of INITIAL_DELIVERY_ZONES) {
       if (isQuotaExceededFlag) break;
       try {
-        await setDoc(doc(db, 'deliveryZones', zone.id), zone, { merge: true });
+        await setDoc(doc(db, getEnvCollectionName('deliveryZones'), zone.id), zone, { merge: true });
       } catch (err) {
         if (isQuotaExceededError(err)) { markQuotaExceeded(err); break; }
       }
@@ -675,7 +727,7 @@ export async function seedAllDataToFirestore(force = false): Promise<{ success: 
     for (const coupon of INITIAL_COUPONS) {
       if (isQuotaExceededFlag) break;
       try {
-        await setDoc(doc(db, 'coupons', coupon.id), coupon, { merge: true });
+        await setDoc(doc(db, getEnvCollectionName('coupons'), coupon.id), coupon, { merge: true });
       } catch (err) {
         if (isQuotaExceededError(err)) { markQuotaExceeded(err); break; }
       }
@@ -685,7 +737,7 @@ export async function seedAllDataToFirestore(force = false): Promise<{ success: 
     for (const order of INITIAL_ORDERS) {
       if (isQuotaExceededFlag) break;
       try {
-        await setDoc(doc(db, 'orders', order.id), order, { merge: true });
+        await setDoc(doc(db, getEnvCollectionName('orders'), order.id), order, { merge: true });
       } catch (err) {
         if (isQuotaExceededError(err)) { markQuotaExceeded(err); break; }
       }
@@ -695,7 +747,7 @@ export async function seedAllDataToFirestore(force = false): Promise<{ success: 
     for (const customer of INITIAL_CUSTOMERS) {
       if (isQuotaExceededFlag) break;
       try {
-        await setDoc(doc(db, 'customers', customer.id), customer, { merge: true });
+        await setDoc(doc(db, getEnvCollectionName('customers'), customer.id), customer, { merge: true });
       } catch (err) {
         if (isQuotaExceededError(err)) { markQuotaExceeded(err); break; }
       }
@@ -705,7 +757,7 @@ export async function seedAllDataToFirestore(force = false): Promise<{ success: 
     for (const log of INITIAL_ACTIVITY_LOGS) {
       if (isQuotaExceededFlag) break;
       try {
-        await setDoc(doc(db, 'activityLogs', log.id), cleanFirestoreData(log), { merge: true });
+        await setDoc(doc(db, getEnvCollectionName('activityLogs'), log.id), cleanFirestoreData(log), { merge: true });
       } catch (err) {
         if (isQuotaExceededError(err)) { markQuotaExceeded(err); break; }
       }
@@ -849,7 +901,7 @@ export async function saveOriginalImageMedia(mediaId: string, base64Data: string
   const CHUNK_SIZE = 600000; // ~600KB
   if (base64Data.length <= CHUNK_SIZE) {
     try {
-      await setDoc(doc(db, 'productImageMedia', mediaId), {
+      await setDoc(doc(db, getEnvCollectionName('productImageMedia'), mediaId), {
         id: mediaId,
         data: base64Data,
         isChunked: false,
@@ -865,7 +917,7 @@ export async function saveOriginalImageMedia(mediaId: string, base64Data: string
   // Chunked upload for heavy/4K high-res images (> 600KB base64)
   const totalChunks = Math.ceil(base64Data.length / CHUNK_SIZE);
   try {
-    const metaRef = doc(db, 'productImageMedia', mediaId);
+    const metaRef = doc(db, getEnvCollectionName('productImageMedia'), mediaId);
     await setDoc(metaRef, {
       id: mediaId,
       isChunked: true,
@@ -876,7 +928,7 @@ export async function saveOriginalImageMedia(mediaId: string, base64Data: string
 
     for (let i = 0; i < totalChunks; i++) {
       const chunkStr = base64Data.substring(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
-      const chunkRef = doc(db, 'productImageMedia', mediaId, 'chunks', `chunk_${i}`);
+      const chunkRef = doc(db, getEnvCollectionName('productImageMedia'), mediaId, 'chunks', `chunk_${i}`);
       await setDoc(chunkRef, {
         index: i,
         data: chunkStr,
@@ -947,7 +999,7 @@ export async function resolveOriginalImageMedia(mediaUrl: string, productId?: st
   // 4. Firestore Cloud Fetch
   if (!isQuotaExceededFlag) {
     try {
-      const docRef = doc(db, 'productImageMedia', mediaId);
+      const docRef = doc(db, getEnvCollectionName('productImageMedia'), mediaId);
       const snap = await getDoc(docRef);
       if (snap.exists()) {
         const data = snap.data();
@@ -958,7 +1010,7 @@ export async function resolveOriginalImageMedia(mediaUrl: string, productId?: st
           const totalChunks = data.totalChunks || 0;
           const chunks: string[] = [];
           for (let i = 0; i < totalChunks; i++) {
-            const chunkRef = doc(db, 'productImageMedia', mediaId, 'chunks', `chunk_${i}`);
+            const chunkRef = doc(db, getEnvCollectionName('productImageMedia'), mediaId, 'chunks', `chunk_${i}`);
             const chunkSnap = await getDoc(chunkRef);
             if (chunkSnap.exists()) {
               chunks.push(chunkSnap.data().data || '');
@@ -1023,7 +1075,7 @@ export async function resolveProductOriginalImages(product: Product): Promise<Pr
 
 export async function fetchServerProducts(): Promise<Product[]> {
   try {
-    const res = await fetch('/api/products');
+    const res = await fetch('/api/products', { headers: getEnvApiHeaders() });
     if (res.ok) {
       const serverProducts = await res.json();
       if (Array.isArray(serverProducts) && serverProducts.length > 0) {
@@ -1038,7 +1090,7 @@ export async function fetchServerProducts(): Promise<Product[]> {
 
 export async function fetchServerDeletedIds(): Promise<string[]> {
   try {
-    const res = await fetch('/api/products/deleted-ids');
+    const res = await fetch('/api/products/deleted-ids', { headers: getEnvApiHeaders() });
     if (res.ok) {
       const ids = await res.json();
       if (Array.isArray(ids)) return ids;
@@ -1056,10 +1108,16 @@ export async function getProductsFromDB(): Promise<Product[]> {
 
   let cachedItems: Product[] = [];
   try {
-    const cached = localStorage.getItem('kenax_products_cache');
-    if (cached) {
-      const parsed = JSON.parse(cached);
-      if (Array.isArray(parsed) && parsed.length > 0) cachedItems = parsed;
+    const cachedKeys = ['kenax_products_cache', 'preview_kenax_products_cache', 'prod_kenax_products_cache', getEnvStorageKey('kenax_products_cache')];
+    for (const key of cachedKeys) {
+      const cached = localStorage.getItem(key);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          cachedItems = parsed;
+          break;
+        }
+      }
     }
   } catch {}
 
@@ -1068,9 +1126,15 @@ export async function getProductsFromDB(): Promise<Product[]> {
 
   if (!isQuotaExceededFlag) {
     try {
-      const deletedSnap = await getDocs(collection(db, 'deletedProducts'));
-      if (!deletedSnap.empty) {
-        deletedSnap.forEach((d) => firestoreDeletedIds.push(d.id));
+      const [deletedSnap1, deletedSnap2] = await Promise.all([
+        getDocs(collection(db, 'deletedProducts')).catch(() => ({ empty: true, forEach: () => {} } as any)),
+        getDocs(collection(db, 'preview_deletedProducts')).catch(() => ({ empty: true, forEach: () => {} } as any)),
+      ]);
+      if (!deletedSnap1.empty) {
+        deletedSnap1.forEach((d: any) => firestoreDeletedIds.push(d.id));
+      }
+      if (!deletedSnap2.empty) {
+        deletedSnap2.forEach((d: any) => firestoreDeletedIds.push(d.id));
       }
     } catch (err) {
       if (isQuotaExceededError(err)) markQuotaExceeded(err);
@@ -1078,7 +1142,7 @@ export async function getProductsFromDB(): Promise<Product[]> {
     }
 
     try {
-      const colRef = collection(db, 'products');
+      const colRef = collection(db, getEnvCollectionName('products'));
       const snapshot = await getDocs(colRef);
       if (!snapshot.empty) {
         snapshot.forEach((docSnap) => {
@@ -1096,8 +1160,13 @@ export async function getProductsFromDB(): Promise<Product[]> {
 
   let localDeletedIds: string[] = [];
   try {
-    const rawDel = localStorage.getItem('kenax_deleted_product_ids');
-    if (rawDel) localDeletedIds = JSON.parse(rawDel);
+    ['kenax_deleted_product_ids', 'preview_kenax_deleted_product_ids', 'prod_kenax_deleted_product_ids', getEnvStorageKey('kenax_deleted_product_ids')].forEach((k) => {
+      const rawDel = localStorage.getItem(k);
+      if (rawDel) {
+        const parsed = JSON.parse(rawDel);
+        if (Array.isArray(parsed)) localDeletedIds.push(...parsed);
+      }
+    });
   } catch {}
 
   const allDeletedSet = new Set([
@@ -1106,24 +1175,32 @@ export async function getProductsFromDB(): Promise<Product[]> {
     ...serverDeletedIds,
   ]);
 
-  // Authoritative merging: Always merge INITIAL_PRODUCTS baseline with cached, server, and firestore items
-  let activeSources: Product[] = [...INITIAL_PRODUCTS, ...cachedItems, ...serverItems, ...firestoreItems];
+  const deletedList = Array.from(allDeletedSet);
+  ['kenax_deleted_product_ids', 'preview_kenax_deleted_product_ids', 'prod_kenax_deleted_product_ids', getEnvStorageKey('kenax_deleted_product_ids')].forEach((k) => {
+    safeSetLocalStorage(k, JSON.stringify(deletedList));
+  });
+
+  // Authoritative merging: Exclude any deleted items from baseline, cached, server, and firestore
+  const baseline = INITIAL_PRODUCTS.filter((p) => p && p.id && !allDeletedSet.has(p.id));
+  let activeSources: Product[] = [...baseline, ...cachedItems, ...serverItems, ...firestoreItems];
 
   const filteredSources = activeSources.filter((p) => p && p.id && !allDeletedSet.has(p.id));
-  const rawMerged = mergeProductsLists(INITIAL_PRODUCTS, filteredSources, allDeletedSet);
-  safeSetLocalStorage('kenax_deleted_product_ids', JSON.stringify(Array.from(allDeletedSet)));
+  const rawMerged = mergeProductsLists(baseline, filteredSources, allDeletedSet);
 
-  // Background sync any newly merged items to server storage if missing
+  // Background sync any newly merged items to server storage (only non-deleted items)
   if (rawMerged.length > serverItems.length) {
+    const syncable = rawMerged.filter((p) => p && p.id && !allDeletedSet.has(p.id));
     fetch('/api/products/batch-sync', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ products: rawMerged }),
+      headers: { 'Content-Type': 'application/json', ...getEnvApiHeaders() },
+      body: JSON.stringify({ products: syncable }),
     }).catch(() => {});
   }
 
   const merged = await Promise.all(rawMerged.map((p) => resolveProductOriginalImages(p)));
-  safeSetLocalStorage('kenax_products_cache', JSON.stringify(merged));
+  ['kenax_products_cache', 'preview_kenax_products_cache', 'prod_kenax_products_cache', getEnvStorageKey('kenax_products_cache')].forEach((k) => {
+    safeSetLocalStorage(k, JSON.stringify(merged));
+  });
 
   return merged;
 }
@@ -1132,22 +1209,29 @@ export async function getProductsFromDB(): Promise<Product[]> {
 export async function saveProductToDB(product: Product): Promise<void> {
   const productId = product.id;
 
+  // If in production environment, reject demo products from being saved
+  if (!isPreviewEnvironment() && isDemoProductId(productId)) {
+    console.warn(`[KenaX BD] Rejected saving demo product ${productId} in production mode.`);
+    return;
+  }
+
   // 0. Remove from deleted tombstones if being created or updated
   try {
-    const rawDel = localStorage.getItem('kenax_deleted_product_ids');
+    const rawDel = localStorage.getItem(getEnvStorageKey('kenax_deleted_product_ids'));
     if (rawDel) {
       const delList: string[] = JSON.parse(rawDel);
       const filtered = delList.filter((id) => id !== productId);
-      safeSetLocalStorage('kenax_deleted_product_ids', JSON.stringify(filtered));
+      safeSetLocalStorage(getEnvStorageKey('kenax_deleted_product_ids'), JSON.stringify(filtered));
     }
   } catch {}
 
   // 1. Immediately update local cache with product as incoming/latest
   try {
-    const cached = localStorage.getItem('kenax_products_cache');
-    const currentProducts: Product[] = cached ? JSON.parse(cached) : INITIAL_PRODUCTS;
+    const cached = localStorage.getItem(getEnvStorageKey('kenax_products_cache'));
+    const defaultBase = INITIAL_PRODUCTS;
+    const currentProducts: Product[] = cached ? JSON.parse(cached) : defaultBase;
     const updated = mergeProductsLists(currentProducts, [product]);
-    safeSetLocalStorage('kenax_products_cache', JSON.stringify(updated));
+    safeSetLocalStorage(getEnvStorageKey('kenax_products_cache'), JSON.stringify(updated));
   } catch (e) {
     console.error('[KenaX BD] Local cache update error in saveProductToDB:', e);
   }
@@ -1156,7 +1240,7 @@ export async function saveProductToDB(product: Product): Promise<void> {
   try {
     await fetch('/api/products', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...getEnvApiHeaders() },
       body: JSON.stringify(product),
     });
   } catch (err) {
@@ -1165,19 +1249,19 @@ export async function saveProductToDB(product: Product): Promise<void> {
 
   if (isQuotaExceededFlag) return;
 
-  // 3. Process images: compress base64 and preserve directly in doc if < 350KB, or chunk if large
+  // 3. Process images: preserve high quality base64 directly or chunk if large
   let cloudImages = product.images || [];
   if (Array.isArray(product.images)) {
     cloudImages = await Promise.all(
       product.images.map(async (img, idx) => {
         if (!img) return '';
         if (typeof img === 'string' && img.startsWith('data:image')) {
-          const compressed = await compressImage(img, 900, 900, 0.78);
-          if (compressed.length < 350000) {
-            return compressed;
+          const highRes = await compressImage(img, 2048, 2048, 0.94);
+          if (highRes.length < 450000) {
+            return highRes;
           }
           const mediaId = `img_${productId}_${idx}_${Math.random().toString(36).substring(2, 7)}`;
-          return await saveOriginalImageMedia(mediaId, compressed);
+          return await saveOriginalImageMedia(mediaId, highRes);
         }
         return img;
       })
@@ -1189,12 +1273,12 @@ export async function saveProductToDB(product: Product): Promise<void> {
     cloudColors = await Promise.all(
       product.colors.map(async (color, idx) => {
         if (color.imageUrl && color.imageUrl.startsWith('data:image')) {
-          const compressed = await compressImage(color.imageUrl, 900, 900, 0.78);
-          if (compressed.length < 350000) {
-            return { ...color, imageUrl: compressed };
+          const highRes = await compressImage(color.imageUrl, 2048, 2048, 0.94);
+          if (highRes.length < 450000) {
+            return { ...color, imageUrl: highRes };
           }
           const mediaId = `img_${productId}_color_${idx}_${Math.random().toString(36).substring(2, 7)}`;
-          const mediaUrl = await saveOriginalImageMedia(mediaId, compressed);
+          const mediaUrl = await saveOriginalImageMedia(mediaId, highRes);
           return { ...color, imageUrl: mediaUrl };
         }
         return color;
@@ -1209,12 +1293,44 @@ export async function saveProductToDB(product: Product): Promise<void> {
     updatedAt: product.updatedAt || new Date().toISOString(),
   };
 
+  // Sync with local cache immediately to ensure cleared fields (like videoUrl) are not resurrected
+  try {
+    const cacheKeys = [getEnvStorageKey('kenax_products_cache'), 'kenax_products_cache', 'kenax_products'];
+    cacheKeys.forEach((key) => {
+      const raw = localStorage.getItem(key);
+      if (raw) {
+        try {
+          const list = JSON.parse(raw);
+          if (Array.isArray(list)) {
+            const updatedList = list.map((p) => (p.id === cloudProduct.id ? cloudProduct : p));
+            if (!updatedList.some((p) => p.id === cloudProduct.id)) {
+              updatedList.push(cloudProduct);
+            }
+            localStorage.setItem(key, JSON.stringify(updatedList));
+          }
+        } catch {}
+      }
+    });
+  } catch {}
+
+  // Sync to backend Server Store (JSON file & PostgreSQL)
+  try {
+    fetch('/api/products', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...getEnvApiHeaders(),
+      },
+      body: JSON.stringify(cloudProduct),
+    }).catch((e) => console.warn('[Server Store] API product sync error:', e));
+  } catch {}
+
   const cleaned = cleanFirestoreData(cloudProduct);
 
   try {
-    const docRef = doc(db, 'products', cloudProduct.id);
-    await setDoc(docRef, cleaned, { merge: true });
-    await deleteDoc(doc(db, 'deletedProducts', cloudProduct.id)).catch(() => {});
+    const docRef = doc(db, getEnvCollectionName('products'), cloudProduct.id);
+    await setDoc(docRef, cleaned); // Full overwrite to permanently remove deleted/cleared fields in Firestore
+    await deleteDoc(doc(db, getEnvCollectionName('deletedProducts'), cloudProduct.id)).catch(() => {});
     console.log(`[KenaX BD] Successfully saved product ${cloudProduct.id} to Cloud Firestore.`);
   } catch (err) {
     if (isQuotaExceededError(err)) {
@@ -1229,43 +1345,53 @@ export async function saveProductToDB(product: Product): Promise<void> {
 export async function deleteProductFromDB(productId: string): Promise<void> {
   if (!productId) return;
 
-  // 1. Record in local deleted product IDs tombstone
+  // 1. Record in local deleted product IDs tombstone across all keys
   try {
-    const rawDel = localStorage.getItem('kenax_deleted_product_ids');
-    const delList: string[] = rawDel ? JSON.parse(rawDel) : [];
-    if (!delList.includes(productId)) {
-      delList.push(productId);
-      safeSetLocalStorage('kenax_deleted_product_ids', JSON.stringify(delList));
-    }
+    const deletedKeys = ['kenax_deleted_product_ids', 'preview_kenax_deleted_product_ids', 'prod_kenax_deleted_product_ids', getEnvStorageKey('kenax_deleted_product_ids')];
+    deletedKeys.forEach((k) => {
+      const rawDel = localStorage.getItem(k);
+      const delList: string[] = rawDel ? JSON.parse(rawDel) : [];
+      if (!delList.includes(productId)) {
+        delList.push(productId);
+        safeSetLocalStorage(k, JSON.stringify(delList));
+      }
+    });
   } catch {}
 
-  // 2. Local products cache update
+  // 2. Local products cache update across all keys
   try {
-    const cached = localStorage.getItem('kenax_products_cache');
-    if (cached) {
-      const currentProducts: Product[] = JSON.parse(cached);
-      const filtered = currentProducts.filter((p) => p && p.id !== productId);
-      safeSetLocalStorage('kenax_products_cache', JSON.stringify(filtered));
-    }
+    const cacheKeys = ['kenax_products_cache', 'preview_kenax_products_cache', 'prod_kenax_products_cache', getEnvStorageKey('kenax_products_cache')];
+    cacheKeys.forEach((k) => {
+      const cached = localStorage.getItem(k);
+      if (cached) {
+        const currentProducts: Product[] = JSON.parse(cached);
+        const filtered = currentProducts.filter((p) => p && p.id !== productId);
+        safeSetLocalStorage(k, JSON.stringify(filtered));
+      }
+    });
   } catch {}
 
-  // 3. Remove deleted item from active cart and wishlist if present
+  // 3. Remove deleted item from active cart and wishlist if present across all keys
   try {
-    const cartRaw = localStorage.getItem('kenax_cart');
-    if (cartRaw) {
-      const cartItems: any[] = JSON.parse(cartRaw);
-      const filteredCart = cartItems.filter((it) => it && it.productId !== productId);
-      safeSetLocalStorage('kenax_cart', JSON.stringify(filteredCart));
-    }
+    ['kenax_cart', 'preview_kenax_cart', 'prod_kenax_cart'].forEach((k) => {
+      const cartRaw = localStorage.getItem(k);
+      if (cartRaw) {
+        const cartItems: any[] = JSON.parse(cartRaw);
+        const filteredCart = cartItems.filter((it) => it && it.productId !== productId);
+        safeSetLocalStorage(k, JSON.stringify(filteredCart));
+      }
+    });
   } catch {}
 
   try {
-    const wishRaw = localStorage.getItem('kenax_wishlist');
-    if (wishRaw) {
-      const wishItems: any[] = JSON.parse(wishRaw);
-      const filteredWish = wishItems.filter((it) => it && (it.id !== productId && it.productId !== productId));
-      safeSetLocalStorage('kenax_wishlist', JSON.stringify(filteredWish));
-    }
+    ['kenax_wishlist', 'preview_kenax_wishlist', 'prod_kenax_wishlist'].forEach((k) => {
+      const wishRaw = localStorage.getItem(k);
+      if (wishRaw) {
+        const wishItems: any[] = JSON.parse(wishRaw);
+        const filteredWish = wishItems.filter((it) => it && (it.id !== productId && it.productId !== productId));
+        safeSetLocalStorage(k, JSON.stringify(filteredWish));
+      }
+    });
   } catch {}
 
   // 4. Dispatch instant UI deletion event across components
@@ -1275,17 +1401,21 @@ export async function deleteProductFromDB(productId: string): Promise<void> {
     } catch {}
   }
 
-  // 5. Permanent delete from Cloud SQL / Central Server Store
-  fetch(`/api/products/${encodeURIComponent(productId)}`, { method: 'DELETE' }).catch((err) => {
+  // 5. Permanent delete from Cloud SQL / Central Server Store (both preview and production stores)
+  fetch(`/api/products/${encodeURIComponent(productId)}`, { method: 'DELETE', headers: getEnvApiHeaders() }).catch((err) => {
     console.warn('[KenaX BD] Cloud SQL deleteProductFromDB non-blocking error:', err);
   });
 
   if (isQuotaExceededFlag) return;
 
-  // 6. Delete doc from Firestore products & record in deletedProducts collection
+  // 6. Delete doc from Firestore products & record in deletedProducts collection (both collections)
   try {
-    await deleteDoc(doc(db, 'products', productId));
-    await setDoc(doc(db, 'deletedProducts', productId), { id: productId, deletedAt: new Date().toISOString() });
+    await Promise.allSettled([
+      deleteDoc(doc(db, 'products', productId)),
+      deleteDoc(doc(db, 'preview_products', productId)),
+      setDoc(doc(db, 'deletedProducts', productId), { id: productId, deletedAt: new Date().toISOString() }),
+      setDoc(doc(db, 'preview_deletedProducts', productId), { id: productId, deletedAt: new Date().toISOString() }),
+    ]);
     console.log(`[KenaX BD] Successfully deleted product ${productId} from Cloud Firestore.`);
   } catch (err) {
     if (isQuotaExceededError(err)) {
@@ -1300,42 +1430,29 @@ export async function deleteProductFromDB(productId: string): Promise<void> {
 export function subscribeToProducts(onProductsChanged: (products: Product[]) => void): Unsubscribe {
   if (isQuotaExceededFlag) return () => {};
   try {
-    const colRef = collection(db, 'products');
+    const colRef = collection(db, getEnvCollectionName('products'));
     return onSnapshot(
       colRef,
       async (snapshot) => {
         let firestoreDeletedIds: string[] = [];
         try {
-          const deletedSnap = await getDocs(collection(db, 'deletedProducts'));
-          if (!deletedSnap.empty) {
-            deletedSnap.forEach((d) => firestoreDeletedIds.push(d.id));
-          }
+          const [deletedSnap1, deletedSnap2] = await Promise.all([
+            getDocs(collection(db, 'deletedProducts')).catch(() => ({ empty: true, forEach: () => {} } as any)),
+            getDocs(collection(db, 'preview_deletedProducts')).catch(() => ({ empty: true, forEach: () => {} } as any)),
+          ]);
+          if (!deletedSnap1.empty) deletedSnap1.forEach((d: any) => firestoreDeletedIds.push(d.id));
+          if (!deletedSnap2.empty) deletedSnap2.forEach((d: any) => firestoreDeletedIds.push(d.id));
         } catch {}
-
-        const deletedSet = new Set(firestoreDeletedIds);
-        const firestoreItems: Product[] = [];
-        snapshot.forEach((docSnap) => {
-          const data = docSnap.data() as Product;
-          if (data && data.id && !deletedSet.has(data.id)) {
-            firestoreItems.push(data);
-          }
-        });
-
-        let cachedItems: Product[] = [];
-        try {
-          const cached = localStorage.getItem('kenax_products_cache');
-          if (cached) {
-            const parsed = JSON.parse(cached);
-            if (Array.isArray(parsed)) cachedItems = parsed;
-          }
-        } catch {}
-
-        const serverItems = await fetchServerProducts();
 
         let localDeletedIds: string[] = [];
         try {
-          const rawDel = localStorage.getItem('kenax_deleted_product_ids');
-          if (rawDel) localDeletedIds = JSON.parse(rawDel);
+          ['kenax_deleted_product_ids', 'preview_kenax_deleted_product_ids', 'prod_kenax_deleted_product_ids', getEnvStorageKey('kenax_deleted_product_ids')].forEach((k) => {
+            const rawDel = localStorage.getItem(k);
+            if (rawDel) {
+              const parsed = JSON.parse(rawDel);
+              if (Array.isArray(parsed)) localDeletedIds.push(...parsed);
+            }
+          });
         } catch {}
 
         const serverDeletedIds = await fetchServerDeletedIds();
@@ -1346,7 +1463,33 @@ export function subscribeToProducts(onProductsChanged: (products: Product[]) => 
           ...serverDeletedIds,
         ]);
 
+        const firestoreItems: Product[] = [];
+        snapshot.forEach((docSnap) => {
+          const data = docSnap.data() as Product;
+          if (data && data.id && !allDeletedSet.has(data.id)) {
+            firestoreItems.push(data);
+          }
+        });
+
+        let cachedItems: Product[] = [];
+        try {
+          const cachedKeys = ['kenax_products_cache', 'preview_kenax_products_cache', 'prod_kenax_products_cache', getEnvStorageKey('kenax_products_cache')];
+          for (const key of cachedKeys) {
+            const cached = localStorage.getItem(key);
+            if (cached) {
+              const parsed = JSON.parse(cached);
+              if (Array.isArray(parsed) && parsed.length > 0) {
+                cachedItems = parsed;
+                break;
+              }
+            }
+          }
+        } catch {}
+
+        const serverItems = await fetchServerProducts();
+
         let activeSources: Product[] = [];
+        const envBaseline = INITIAL_PRODUCTS.filter((p) => p && p.id && !allDeletedSet.has(p.id));
         if (firestoreItems.length > 0) {
           activeSources = [...cachedItems, ...serverItems, ...firestoreItems];
         } else if (serverItems.length > 0) {
@@ -1354,17 +1497,20 @@ export function subscribeToProducts(onProductsChanged: (products: Product[]) => 
         } else if (cachedItems.length > 0) {
           activeSources = [...cachedItems];
         } else {
-          activeSources = [...INITIAL_PRODUCTS];
+          activeSources = [...envBaseline];
         }
 
         const allSources = activeSources.filter((p) => p && p.id && !allDeletedSet.has(p.id));
 
-        const rawProducts = mergeProductsLists([], allSources, allDeletedSet);
-        safeSetLocalStorage('kenax_deleted_product_ids', JSON.stringify(Array.from(allDeletedSet)));
+        const rawProducts = mergeProductsLists(envBaseline, allSources, allDeletedSet);
+        const deletedArr = Array.from(allDeletedSet);
+        ['kenax_deleted_product_ids', 'preview_kenax_deleted_product_ids', 'prod_kenax_deleted_product_ids', getEnvStorageKey('kenax_deleted_product_ids')].forEach((k) => {
+          safeSetLocalStorage(k, JSON.stringify(deletedArr));
+        });
 
         const fullyResolved = await Promise.all(rawProducts.map((p) => resolveProductOriginalImages(p)));
         if (fullyResolved.length > 0) {
-          safeSetLocalStorage('kenax_products_cache', JSON.stringify(fullyResolved));
+          safeSetLocalStorage(getEnvStorageKey('kenax_products_cache'), JSON.stringify(fullyResolved));
           onProductsChanged(fullyResolved);
         }
       },
@@ -1389,7 +1535,7 @@ export function subscribeToProducts(onProductsChanged: (products: Product[]) => 
 // Central Server Orders Helper
 export async function fetchServerOrders(): Promise<Order[]> {
   try {
-    const res = await fetch('/api/orders');
+    const res = await fetch('/api/orders', { headers: getEnvApiHeaders() });
     if (res.ok) {
       const data = await res.json();
       if (Array.isArray(data)) return data;
@@ -1403,19 +1549,25 @@ export async function saveOrderToDB(order: Order): Promise<void> {
   order.isV2Order = true;
   const cleaned = cleanFirestoreData(order);
 
-  // 1. Immediately update local permanent order cache
+  // 1. Immediately update local permanent order cache across all keys
   try {
-    const cached = localStorage.getItem('kenax_orders_cache');
+    const primaryKey = getEnvStorageKey('kenax_orders_cache');
+    const cached = localStorage.getItem(primaryKey) || localStorage.getItem('kenax_orders_cache');
     const currentOrders: Order[] = cached ? JSON.parse(cached) : [];
     const updatedOrders = mergeOrdersLists(currentOrders, [order]);
+    safeSetLocalStorage(primaryKey, JSON.stringify(updatedOrders));
     safeSetLocalStorage('kenax_orders_cache', JSON.stringify(updatedOrders));
+    safeSetLocalStorage('preview_kenax_orders_cache', JSON.stringify(updatedOrders));
 
     // Also track in personal order history list
-    const myOrdersRaw = localStorage.getItem('kenax_my_orders');
+    const myOrdersKey = getEnvStorageKey('kenax_my_orders');
+    const myOrdersRaw = localStorage.getItem(myOrdersKey) || localStorage.getItem('kenax_my_orders');
     const myOrders: string[] = myOrdersRaw ? JSON.parse(myOrdersRaw) : [];
     if (!myOrders.includes(order.id)) {
       myOrders.unshift(order.id);
+      safeSetLocalStorage(myOrdersKey, JSON.stringify(myOrders));
       safeSetLocalStorage('kenax_my_orders', JSON.stringify(myOrders));
+      safeSetLocalStorage('preview_kenax_my_orders', JSON.stringify(myOrders));
     }
   } catch (e) {
     console.error('[KenaX BD] Error updating local orders cache:', e);
@@ -1425,7 +1577,7 @@ export async function saveOrderToDB(order: Order): Promise<void> {
   try {
     fetch('/api/orders', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...getEnvApiHeaders() },
       body: JSON.stringify(order),
     }).catch((e) => console.warn('[KenaX BD] Server order sync error:', e));
   } catch {}
@@ -1434,8 +1586,13 @@ export async function saveOrderToDB(order: Order): Promise<void> {
   if (!isQuotaExceededFlag) {
     const timeoutPromise = new Promise((resolve) => setTimeout(resolve, 1500));
     try {
+      const mainCol = getEnvCollectionName('orders');
+      const writes = [setDoc(doc(db, mainCol, order.id), cleaned, { merge: true })];
+      if (mainCol !== 'orders') {
+        writes.push(setDoc(doc(db, 'orders', order.id), cleaned, { merge: true }));
+      }
       await Promise.race([
-        setDoc(doc(db, 'orders', order.id), cleaned, { merge: true }),
+        Promise.all(writes),
         timeoutPromise,
       ]);
       console.log(`[KenaX BD] Order #${order.id} permanently saved to Cloud Firestore.`);
@@ -1479,17 +1636,16 @@ export async function saveOrderToDB(order: Order): Promise<void> {
 
       // Sync active customer in localStorage if active
       try {
-        const activeCustRaw = localStorage.getItem('kenax_current_customer');
+        const activeCustRaw = localStorage.getItem(getEnvStorageKey('kenax_current_customer')) || localStorage.getItem('kenax_current_customer');
         if (activeCustRaw) {
           const activeCust = JSON.parse(activeCustRaw);
           if (activeCust && (activeCust.id === targetCustomer.id || activeCust.id === order.customerId)) {
-            localStorage.setItem(
-              'kenax_current_customer',
-              JSON.stringify({
-                ...activeCust,
-                ...updatedCustomer,
-              })
-            );
+            const mergedCust = {
+              ...activeCust,
+              ...updatedCustomer,
+            };
+            safeSetLocalStorage(getEnvStorageKey('kenax_current_customer'), JSON.stringify(mergedCust));
+            safeSetLocalStorage('kenax_current_customer', JSON.stringify(mergedCust));
           }
         }
       } catch {}
@@ -1498,11 +1654,18 @@ export async function saveOrderToDB(order: Order): Promise<void> {
     console.warn('[KenaX BD] Linking order to customer record error:', err);
   }
 
-  // 4. Trigger simulated background email & sheets sync
+  // 4. Dispatch custom event for immediate UI update
+  try {
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('kenax_order_placed', { detail: order }));
+    }
+  } catch {}
+
+  // 5. Trigger simulated background email & sheets sync
   try {
     fetch('/api/email/send', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...getEnvApiHeaders() },
       body: JSON.stringify({
         to: order.customerEmail,
         subject: `Order Confirmed #${order.id} - KenaX BD`,
@@ -1513,7 +1676,7 @@ export async function saveOrderToDB(order: Order): Promise<void> {
 
     fetch('/api/sheets/sync', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...getEnvApiHeaders() },
       body: JSON.stringify({
         type: 'Orders',
         records: [order],
@@ -1529,15 +1692,30 @@ export async function getOrdersFromDB(): Promise<Order[]> {
   let remoteItems: Order[] = [];
   if (!isQuotaExceededFlag) {
     try {
-      const colRef = collection(db, 'orders');
+      const colName = getEnvCollectionName('orders');
+      const colRef = collection(db, colName);
       const snapshot = await getDocs(colRef);
       if (!snapshot.empty) {
         snapshot.forEach((docSnap) => {
           const data = docSnap.data() as Order;
-          if (data && data.isV2Order) {
+          if (data && (data.isV2Order || data.id)) {
             remoteItems.push(data);
           }
         });
+      }
+
+      if (colName !== 'orders') {
+        try {
+          const baseSnap = await getDocs(collection(db, 'orders'));
+          if (!baseSnap.empty) {
+            baseSnap.forEach((docSnap) => {
+              const data = docSnap.data() as Order;
+              if (data && (data.isV2Order || data.id)) {
+                remoteItems.push(data);
+              }
+            });
+          }
+        } catch {}
       }
     } catch (err) {
       if (isQuotaExceededError(err)) {
@@ -1550,11 +1728,12 @@ export async function getOrdersFromDB(): Promise<Order[]> {
 
   let localOrders: Order[] = [];
   try {
-    const cached = localStorage.getItem('kenax_orders_cache');
+    const cached = localStorage.getItem(getEnvStorageKey('kenax_orders_cache')) || localStorage.getItem('kenax_orders_cache') || localStorage.getItem('preview_kenax_orders_cache');
     if (cached) localOrders = JSON.parse(cached);
   } catch {}
 
   const merged = mergeOrdersLists(localOrders, [...serverOrders, ...remoteItems]);
+  safeSetLocalStorage(getEnvStorageKey('kenax_orders_cache'), JSON.stringify(merged));
   safeSetLocalStorage('kenax_orders_cache', JSON.stringify(merged));
   return merged;
 }
@@ -1563,20 +1742,20 @@ export async function getOrdersFromDB(): Promise<Order[]> {
 export function subscribeToOrders(onOrdersChanged: (orders: Order[]) => void): Unsubscribe {
   if (isQuotaExceededFlag) return () => {};
   try {
-    const colRef = collection(db, 'orders');
+    const colRef = collection(db, getEnvCollectionName('orders'));
     return onSnapshot(
       colRef,
       (snapshot) => {
         const remoteOrders: Order[] = [];
         snapshot.forEach((docSnap) => {
           const data = docSnap.data() as Order;
-          if (data && data.isV2Order) {
+          if (data && (data.isV2Order || data.id)) {
             remoteOrders.push(data);
           }
         });
         let localOrders: Order[] = [];
         try {
-          const cached = localStorage.getItem('kenax_orders_cache');
+          const cached = localStorage.getItem(getEnvStorageKey('kenax_orders_cache'));
           if (cached) localOrders = JSON.parse(cached);
         } catch {}
         const merged = mergeOrdersLists(localOrders, remoteOrders);
@@ -1741,233 +1920,385 @@ export async function updateOrderInDB(orderId: string, updates: Partial<Order>):
 }
 
 // ----------------------------------------------------
-// STAFF OPERATIONS
 // ----------------------------------------------------
+// STAFF OPERATIONS (Permanent Multi-Device Persistence)
+// ----------------------------------------------------
+export async function fetchServerStaff(): Promise<StaffUser[]> {
+  try {
+    const res = await fetch('/api/staff', { headers: getEnvApiHeaders() });
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data) && data.length > 0) return data;
+    }
+  } catch (err) {}
+  return [];
+}
+
 export async function getStaffFromDB(): Promise<StaffUser[]> {
-  const REMOVED_STAFF_EMAILS = new Set(['admin@kenaxbd.com', 'manager@kenaxbd.com', 'moderator@kenaxbd.com', 'sadikrtx3060@gmail.com']);
-  
-  // 1. Gather deleted staff set from local storage and Firestore
+  // 1. Gather deleted staff tombstones from local storage and Firestore
   const deletedStaffIds = new Set<string>();
   const deletedStaffEmails = new Set<string>();
+
+  const checkDeletedCache = (key: string) => {
+    try {
+      const raw = localStorage.getItem(key);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          parsed.forEach((item) => {
+            if (typeof item === 'string') deletedStaffIds.add(item);
+            else if (item && typeof item === 'object') {
+              if (item.id) deletedStaffIds.add(item.id);
+              if (item.email) deletedStaffEmails.add(item.email.toLowerCase());
+            }
+          });
+        }
+      }
+    } catch {}
+  };
+
+  checkDeletedCache('kenax_deleted_staff_cache');
+  checkDeletedCache('preview_kenax_deleted_staff_cache');
+  checkDeletedCache(getEnvStorageKey('kenax_deleted_staff_cache'));
+
   try {
-    const cachedDeleted = localStorage.getItem('kenax_deleted_staff_cache');
-    if (cachedDeleted) {
-      const parsed = JSON.parse(cachedDeleted);
-      if (Array.isArray(parsed)) {
-        parsed.forEach((item) => {
-          if (typeof item === 'string') deletedStaffIds.add(item);
-          else if (item && typeof item === 'object') {
-            if (item.id) deletedStaffIds.add(item.id);
-            if (item.email) deletedStaffEmails.add(item.email.toLowerCase());
+    const [delSnap1, delSnap2] = await Promise.allSettled([
+      getDocs(collection(db, 'deletedStaff')),
+      getDocs(collection(db, 'preview_deletedStaff')),
+    ]);
+
+    const processDelSnap = (snap: any) => {
+      if (snap && snap.status === 'fulfilled' && snap.value && !snap.value.empty) {
+        snap.value.forEach((docSnap: any) => {
+          deletedStaffIds.add(docSnap.id);
+          const data = docSnap.data();
+          if (data?.email) deletedStaffEmails.add(data.email.toLowerCase());
+        });
+      }
+    };
+
+    processDelSnap(delSnap1);
+    processDelSnap(delSnap2);
+  } catch {}
+
+  // 2. Fetch staff from central server store
+  const serverStaff = await fetchServerStaff();
+
+  // 3. Read staff from local caches (including active session accounts)
+  const localCandidates: StaffUser[] = [];
+  const readCache = (key: string) => {
+    try {
+      const raw = localStorage.getItem(key);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          localCandidates.push(...parsed);
+        } else if (parsed && typeof parsed === 'object' && (parsed.id || parsed.email)) {
+          localCandidates.push(parsed);
+        }
+      }
+    } catch {}
+  };
+
+  readCache('kenax_staff_cache');
+  readCache('preview_kenax_staff_cache');
+  readCache(getEnvStorageKey('kenax_staff_cache'));
+  readCache('kenax_current_staff');
+  readCache('kenax_authenticated_staff');
+  readCache('preview_kenax_current_staff');
+  readCache('preview_kenax_authenticated_staff');
+
+  // 4. Read staff from both Firestore collections ('staff' and 'preview_staff')
+  const firestoreStaff: StaffUser[] = [];
+  try {
+    const [snap1, snap2] = await Promise.allSettled([
+      getDocs(collection(db, 'staff')),
+      getDocs(collection(db, 'preview_staff')),
+    ]);
+
+    const processSnap = (snap: any) => {
+      if (snap && snap.status === 'fulfilled' && snap.value && !snap.value.empty) {
+        snap.value.forEach((docSnap: any) => {
+          const data = docSnap.data() as StaffUser;
+          if (data && (data.id || data.email)) {
+            firestoreStaff.push({ ...data, id: data.id || docSnap.id });
           }
         });
       }
-    }
-  } catch {}
+    };
 
-  try {
-    const deletedSnap = await getDocs(collection(db, 'deletedStaff'));
-    if (deletedSnap && !deletedSnap.empty) {
-      const deletedList: { id: string; email?: string }[] = [];
-      deletedSnap.forEach((docSnap) => {
-        deletedStaffIds.add(docSnap.id);
-        const data = docSnap.data();
-        if (data?.email) {
-          deletedStaffEmails.add(data.email.toLowerCase());
-          deletedList.push({ id: docSnap.id, email: data.email.toLowerCase() });
-        } else {
-          deletedList.push({ id: docSnap.id });
-        }
-      });
-      safeSetLocalStorage('kenax_deleted_staff_cache', JSON.stringify(deletedList));
-    }
-  } catch {}
-
-  try {
-    const colRef = collection(db, 'staff');
-    const snapshot = await getDocs(colRef);
-    if (!snapshot.empty) {
-      const items: StaffUser[] = [];
-      snapshot.forEach((docSnap) => {
-        const data = docSnap.data() as StaffUser;
-        const isPermanentlyDeleted =
-          deletedStaffIds.has(docSnap.id) ||
-          (data && data.id && deletedStaffIds.has(data.id)) ||
-          (data && data.email && deletedStaffEmails.has(data.email.toLowerCase()));
-
-        if (isPermanentlyDeleted || (data && data.email && REMOVED_STAFF_EMAILS.has(data.email.toLowerCase())) || data?.role === 'moderator') {
-          deleteDoc(doc(db, 'staff', docSnap.id)).catch(() => {});
-        } else if (data && data.email) {
-          items.push(data);
-        }
-      });
-      
-      // Ensure default initial staff exist in the list only if NOT deleted by admin
-      const mergedList = [...items];
-      for (const initial of INITIAL_STAFF) {
-        const isDeleted =
-          deletedStaffIds.has(initial.id) ||
-          deletedStaffEmails.has(initial.email.toLowerCase()) ||
-          REMOVED_STAFF_EMAILS.has(initial.email.toLowerCase());
-
-        if (!isDeleted) {
-          const exists = mergedList.some((s) => s.id === initial.id || s.email.toLowerCase() === initial.email.toLowerCase());
-          if (!exists) {
-            mergedList.push(initial);
-            try {
-              setDoc(doc(db, 'staff', initial.id), initial).catch(() => {});
-            } catch {}
-          }
-        }
-      }
-
-      const cleanList = mergedList.filter(
-        (s) =>
-          s &&
-          s.email &&
-          !REMOVED_STAFF_EMAILS.has(s.email.toLowerCase()) &&
-          !deletedStaffIds.has(s.id) &&
-          !deletedStaffEmails.has(s.email.toLowerCase()) &&
-          s.role !== 'moderator'
-      );
-      safeSetLocalStorage('kenax_staff_cache', JSON.stringify(cleanList));
-      return cleanList;
-    } else {
-      // First time initialization in Firestore - only for non-deleted staff
-      for (const initial of INITIAL_STAFF) {
-        const isDeleted =
-          deletedStaffIds.has(initial.id) ||
-          deletedStaffEmails.has(initial.email.toLowerCase()) ||
-          REMOVED_STAFF_EMAILS.has(initial.email.toLowerCase());
-        if (!isDeleted) {
-          try {
-            await setDoc(doc(db, 'staff', initial.id), initial);
-          } catch {}
-        }
-      }
-    }
+    processSnap(snap1);
+    processSnap(snap2);
   } catch (err) {
     console.warn('[KenaX BD] Firestore getStaffFromDB fallback:', err);
   }
 
-  const cached = localStorage.getItem('kenax_staff_cache');
-  if (cached) {
-    try {
-      const parsed: StaffUser[] = JSON.parse(cached);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        const clean = parsed.filter(
-          (s) =>
-            s &&
-            s.email &&
-            !REMOVED_STAFF_EMAILS.has(s.email.toLowerCase()) &&
-            !deletedStaffIds.has(s.id) &&
-            !deletedStaffEmails.has(s.email.toLowerCase()) &&
-            s.role !== 'moderator'
-        );
-        return clean;
-      }
-    } catch {}
+  // 5. Merge all sources with strict priority:
+  // INITIAL_STAFF (baseline) -> local caches -> serverStaff -> firestoreStaff (authoritative)
+  const staffById = new Map<string, StaffUser>();
+  const staffByEmail = new Map<string, StaffUser>();
+
+  const addOrUpdateStaff = (s: StaffUser) => {
+    if (!s || (!s.id && !s.email)) return;
+    const isDeleted =
+      (s.id && deletedStaffIds.has(s.id)) ||
+      (s.email && deletedStaffEmails.has(s.email.toLowerCase()));
+    if (isDeleted) return;
+
+    const lowerEmail = s.email ? s.email.trim().toLowerCase() : '';
+    const idKey = s.id ? s.id.trim() : '';
+
+    // Check existing by id or email
+    const existing = (idKey ? staffById.get(idKey) : null) || (lowerEmail ? staffByEmail.get(lowerEmail) : null);
+    const resolvedPhone = (s.phone && s.phone.trim() !== '') ? s.phone.trim() : (existing?.phone || s.phone);
+    const resolvedName = (s.name && s.name.trim() !== '') ? s.name.trim() : (existing?.name || s.name);
+    const merged: StaffUser = existing
+      ? {
+          ...existing,
+          ...s,
+          phone: resolvedPhone,
+          name: resolvedName,
+        }
+      : { ...s };
+
+    if (idKey) staffById.set(idKey, merged);
+    if (lowerEmail) staffByEmail.set(lowerEmail, merged);
+  };
+
+  // Seed baseline
+  INITIAL_STAFF.forEach((s) => addOrUpdateStaff(s as StaffUser));
+  // Apply local candidates
+  localCandidates.forEach((s) => addOrUpdateStaff(s));
+  // Apply server store
+  serverStaff.forEach((s) => addOrUpdateStaff(s));
+  // Apply Firestore (highest authority)
+  firestoreStaff.forEach((s) => addOrUpdateStaff(s));
+
+  // Deduplicate unique staff items
+  const seenIds = new Set<string>();
+  const resultList: StaffUser[] = [];
+  for (const s of staffById.values()) {
+    const key = s.id || (s.email ? s.email.toLowerCase() : '');
+    if (key && !seenIds.has(key)) {
+      seenIds.add(key);
+      resultList.push(s);
+    }
   }
-  return INITIAL_STAFF.filter(
-    (s) => !deletedStaffIds.has(s.id) && !deletedStaffEmails.has(s.email.toLowerCase())
-  );
+
+  // Save unified list to all local caches for seamless offline/online persistence
+  try {
+    const serialized = JSON.stringify(resultList);
+    localStorage.setItem('kenax_staff_cache', serialized);
+    localStorage.setItem('preview_kenax_staff_cache', serialized);
+    safeSetLocalStorage(getEnvStorageKey('kenax_staff_cache'), serialized);
+
+    // Keep active session user in sync with updated profile/phone
+    const activeStaffRaw = localStorage.getItem('kenax_current_staff') || localStorage.getItem('kenax_authenticated_staff');
+    if (activeStaffRaw) {
+      try {
+        const parsedActive = JSON.parse(activeStaffRaw);
+        const matched = resultList.find(
+          (s) => s.id === parsedActive.id || (s.email && parsedActive.email && s.email.toLowerCase() === parsedActive.email.toLowerCase())
+        );
+        if (matched) {
+          const activeSerialized = JSON.stringify(matched);
+          localStorage.setItem('kenax_current_staff', activeSerialized);
+          localStorage.setItem('kenax_authenticated_staff', activeSerialized);
+          localStorage.setItem('preview_kenax_current_staff', activeSerialized);
+          localStorage.setItem('preview_kenax_authenticated_staff', activeSerialized);
+        }
+      } catch {}
+    }
+  } catch {}
+
+  return resultList;
 }
 
 export async function saveStaffToDB(staff: StaffUser): Promise<void> {
-  // If restoring or registering a staff, remove from deleted tombstones
+  if (!staff || (!staff.id && !staff.email)) return;
+
+  const staffId = staff.id || 'staff-' + Date.now();
+  const staffObj: StaffUser = { ...staff, id: staffId };
+
+  // 1. Purge any deleted tombstones
   try {
-    const cachedDeleted = localStorage.getItem('kenax_deleted_staff_cache');
-    if (cachedDeleted) {
-      const parsed = JSON.parse(cachedDeleted);
-      if (Array.isArray(parsed)) {
-        const filtered = parsed.filter((item) => {
-          if (typeof item === 'string') return item !== staff.id;
-          return item.id !== staff.id && item.email !== staff.email?.toLowerCase();
-        });
-        safeSetLocalStorage('kenax_deleted_staff_cache', JSON.stringify(filtered));
+    const clearDeletedCache = (key: string) => {
+      const cached = localStorage.getItem(key);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed)) {
+          const filtered = parsed.filter((item) => {
+            if (typeof item === 'string') return item !== staffId;
+            return item.id !== staffId && item.email?.toLowerCase() !== staffObj.email?.toLowerCase();
+          });
+          safeSetLocalStorage(key, JSON.stringify(filtered));
+        }
       }
-    }
-    await deleteDoc(doc(db, 'deletedStaff', staff.id));
+    };
+    clearDeletedCache('kenax_deleted_staff_cache');
+    clearDeletedCache('preview_kenax_deleted_staff_cache');
+    clearDeletedCache(getEnvStorageKey('kenax_deleted_staff_cache'));
+
+    deleteDoc(doc(db, 'deletedStaff', staffId)).catch(() => {});
+    deleteDoc(doc(db, 'preview_deletedStaff', staffId)).catch(() => {});
   } catch {}
 
+  // 2. Instantly update local caches
+  const updateLocalCache = (key: string) => {
+    try {
+      const cached = localStorage.getItem(key);
+      let list: StaffUser[] = cached ? JSON.parse(cached) : INITIAL_STAFF;
+      if (!Array.isArray(list)) list = INITIAL_STAFF;
+      const idx = list.findIndex(
+        (s) => s.id === staffObj.id || (s.email && staffObj.email && s.email.toLowerCase() === staffObj.email.toLowerCase())
+      );
+      if (idx >= 0) {
+        list[idx] = { ...list[idx], ...staffObj };
+      } else {
+        list.unshift(staffObj);
+      }
+      localStorage.setItem(key, JSON.stringify(list));
+    } catch {}
+  };
+
+  updateLocalCache('kenax_staff_cache');
+  updateLocalCache('preview_kenax_staff_cache');
+  updateLocalCache(getEnvStorageKey('kenax_staff_cache'));
+
+  // Update active session keys if the updated staff is currently logged in or super_admin
   try {
-    await setDoc(doc(db, 'staff', staff.id), staff);
+    const serializedUser = JSON.stringify(staffObj);
+    const checkActiveSession = (key: string) => {
+      const raw = localStorage.getItem(key);
+      if (raw) {
+        try {
+          const parsed = JSON.parse(raw);
+          if (
+            parsed.id === staffObj.id ||
+            (parsed.email && staffObj.email && parsed.email.toLowerCase() === staffObj.email.toLowerCase()) ||
+            (staffObj.role === 'super_admin' && parsed.role === 'super_admin')
+          ) {
+            localStorage.setItem(key, serializedUser);
+          }
+        } catch {}
+      }
+    };
+
+    checkActiveSession('kenax_current_staff');
+    checkActiveSession('kenax_authenticated_staff');
+    checkActiveSession('preview_kenax_current_staff');
+    checkActiveSession('preview_kenax_authenticated_staff');
+    checkActiveSession('kenax_admin_session');
+    checkActiveSession('preview_kenax_admin_session');
+  } catch {}
+
+  // 3. Sync to central server store
+  fetch('/api/staff', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getEnvApiHeaders() },
+    body: JSON.stringify(staffObj),
+  }).catch(() => {});
+
+  // 4. Save to Firestore in both collections ('staff' and 'preview_staff')
+  try {
+    await Promise.allSettled([
+      setDoc(doc(db, 'staff', staffId), staffObj, { merge: true }),
+      setDoc(doc(db, 'preview_staff', staffId), staffObj, { merge: true }),
+    ]);
   } catch (err) {
     console.warn('[KenaX BD] Firestore saveStaffToDB fallback:', err);
   }
-
-  // Sync to central server store
-  fetch('/api/staff', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(staff),
-  }).catch(() => {});
-
-  const cached = localStorage.getItem('kenax_staff_cache');
-  let list: StaffUser[] = cached ? JSON.parse(cached) : INITIAL_STAFF;
-  const idx = list.findIndex((s) => s.id === staff.id);
-  if (idx >= 0) {
-    list[idx] = staff;
-  } else {
-    list.push(staff);
-  }
-  safeSetLocalStorage('kenax_staff_cache', JSON.stringify(list));
 }
 
 export async function deleteStaffFromDB(staffId: string, staffEmail?: string): Promise<void> {
-  // 1. Delete from central server store
+  const lowerEmail = staffEmail ? staffEmail.toLowerCase() : '';
+
+  // 1. Add to local deleted tombstone caches
+  const addDeletedCache = (key: string) => {
+    try {
+      const cachedDeleted = localStorage.getItem(key);
+      const parsed: any[] = cachedDeleted ? JSON.parse(cachedDeleted) : [];
+      parsed.push({ id: staffId, email: lowerEmail });
+      localStorage.setItem(key, JSON.stringify(parsed));
+    } catch {}
+  };
+  addDeletedCache('kenax_deleted_staff_cache');
+  addDeletedCache('preview_kenax_deleted_staff_cache');
+  addDeletedCache(getEnvStorageKey('kenax_deleted_staff_cache'));
+
+  // 2. Remove from local staff caches
+  const removeStaffCache = (key: string) => {
+    try {
+      const cached = localStorage.getItem(key);
+      if (cached) {
+        const list: StaffUser[] = JSON.parse(cached);
+        if (Array.isArray(list)) {
+          const filtered = list.filter(
+            (s) => s.id !== staffId && (!lowerEmail || s.email?.toLowerCase() !== lowerEmail)
+          );
+          localStorage.setItem(key, JSON.stringify(filtered));
+        }
+      }
+    } catch {}
+  };
+  removeStaffCache('kenax_staff_cache');
+  removeStaffCache('preview_kenax_staff_cache');
+  removeStaffCache(getEnvStorageKey('kenax_staff_cache'));
+
+  // 3. Delete from central server store
   fetch(`/api/staff/${encodeURIComponent(staffId)}`, {
     method: 'DELETE',
+    headers: getEnvApiHeaders(),
   }).catch(() => {});
 
-  // 2. Delete from Firestore staff collection
+  // 4. Delete document from Firestore & record tombstones
   try {
-    await deleteDoc(doc(db, 'staff', staffId));
-  } catch (err) {
-    console.warn('[KenaX BD] Firestore deleteStaffFromDB error:', err);
-  }
-
-  // 2. Add permanent tombstone to deletedStaff collection in Firestore
-  try {
-    await setDoc(doc(db, 'deletedStaff', staffId), {
-      id: staffId,
-      email: (staffEmail || '').toLowerCase(),
-      deletedAt: new Date().toISOString(),
-    });
-  } catch (err) {
-    console.warn('[KenaX BD] Firestore record deletedStaff error:', err);
-  }
-
-  // 3. Update local deleted staff cache
-  try {
-    const cachedDeleted = localStorage.getItem('kenax_deleted_staff_cache');
-    const list: { id: string; email?: string }[] = cachedDeleted ? JSON.parse(cachedDeleted) : [];
-    if (!list.some((item) => item.id === staffId || (staffEmail && item.email === staffEmail.toLowerCase()))) {
-      list.push({ id: staffId, email: (staffEmail || '').toLowerCase() });
-      safeSetLocalStorage('kenax_deleted_staff_cache', JSON.stringify(list));
-    }
+    await Promise.allSettled([
+      deleteDoc(doc(db, 'staff', staffId)),
+      deleteDoc(doc(db, 'preview_staff', staffId)),
+      setDoc(doc(db, 'deletedStaff', staffId), { id: staffId, email: lowerEmail, deletedAt: new Date().toISOString() }),
+      setDoc(doc(db, 'preview_deletedStaff', staffId), { id: staffId, email: lowerEmail, deletedAt: new Date().toISOString() }),
+    ]);
   } catch {}
-
-  // 4. Clean local staff cache
-  const cached = localStorage.getItem('kenax_staff_cache');
-  if (cached) {
-    try {
-      let list: StaffUser[] = JSON.parse(cached);
-      list = list.filter((s) => s.id !== staffId && (!staffEmail || s.email.toLowerCase() !== staffEmail.toLowerCase()));
-      safeSetLocalStorage('kenax_staff_cache', JSON.stringify(list));
-    } catch {}
-  }
 
   // 5. Invalidate active staff session if this staff is currently signed in
   try {
-    const activeStaffRaw = localStorage.getItem('kenax_admin_session');
-    if (activeStaffRaw) {
-      const active = JSON.parse(activeStaffRaw);
-      if (active && (active.id === staffId || (staffEmail && active.email?.toLowerCase() === staffEmail.toLowerCase()))) {
-        localStorage.removeItem('kenax_admin_session');
+    const checkActiveSession = (key: string) => {
+      const activeStaffRaw = localStorage.getItem(key);
+      if (activeStaffRaw) {
+        const active = JSON.parse(activeStaffRaw);
+        if (active && (active.id === staffId || (lowerEmail && active.email?.toLowerCase() === lowerEmail))) {
+          localStorage.removeItem(key);
+        }
       }
-    }
+    };
+    checkActiveSession('kenax_admin_session');
+    checkActiveSession('kenax_current_staff');
+    checkActiveSession('kenax_authenticated_staff');
+    checkActiveSession(getEnvStorageKey('kenax_admin_session'));
+    checkActiveSession(getEnvStorageKey('kenax_current_staff'));
   } catch {}
+}
+
+export function subscribeToStaff(callback: (staff: StaffUser[]) => void): () => void {
+  try {
+    const unsub = onSnapshot(
+      collection(db, 'staff'),
+      (snapshot) => {
+        if (!snapshot.empty) {
+          getStaffFromDB().then((list) => {
+            if (list && list.length > 0) callback(list);
+          });
+        }
+      },
+      (err) => {
+        console.warn('[KenaX BD] Staff snapshot notice:', err);
+      }
+    );
+    return unsub;
+  } catch {
+    return () => {};
+  }
 }
 
 // ----------------------------------------------------
@@ -1979,7 +2310,7 @@ export async function fetchCustomerRecordFromDB(customerId: string): Promise<Cus
 
   // Check if customer was deleted
   try {
-    const cachedDeleted = localStorage.getItem('kenax_deleted_customers_cache');
+    const cachedDeleted = localStorage.getItem(getEnvStorageKey('kenax_deleted_customers_cache'));
     if (cachedDeleted) {
       const deletedIds: string[] = JSON.parse(cachedDeleted);
       if (Array.isArray(deletedIds) && deletedIds.includes(customerId)) {
@@ -1989,7 +2320,7 @@ export async function fetchCustomerRecordFromDB(customerId: string): Promise<Cus
   } catch {}
 
   try {
-    const docRef = doc(db, 'customers', customerId);
+    const docRef = doc(db, getEnvCollectionName('customers'), customerId);
     const snap = await getDoc(docRef);
     if (snap.exists()) {
       const data = snap.data() as CustomerRecord;
@@ -2012,7 +2343,7 @@ export async function fetchCustomerRecordFromDB(customerId: string): Promise<Cus
 // Central Server Customers Helper
 export async function fetchServerCustomers(): Promise<CustomerRecord[]> {
   try {
-    const res = await fetch('/api/customers');
+    const res = await fetch('/api/customers', { headers: getEnvApiHeaders() });
     if (res.ok) {
       const data = await res.json();
       if (Array.isArray(data)) return data;
@@ -2025,7 +2356,7 @@ export async function getCustomersFromDB(): Promise<CustomerRecord[]> {
   // 1. Gather deleted customers tombstone set
   const deletedCustomerIds = new Set<string>();
   try {
-    const cachedDeleted = localStorage.getItem('kenax_deleted_customers_cache');
+    const cachedDeleted = localStorage.getItem(getEnvStorageKey('kenax_deleted_customers_cache'));
     if (cachedDeleted) {
       const parsed: string[] = JSON.parse(cachedDeleted);
       if (Array.isArray(parsed)) parsed.forEach((id) => deletedCustomerIds.add(id));
@@ -2033,10 +2364,10 @@ export async function getCustomersFromDB(): Promise<CustomerRecord[]> {
   } catch {}
 
   try {
-    const deletedSnap = await getDocs(collection(db, 'deletedCustomers'));
+    const deletedSnap = await getDocs(collection(db, getEnvCollectionName('deletedCustomers')));
     if (deletedSnap && !deletedSnap.empty) {
       deletedSnap.forEach((d) => deletedCustomerIds.add(d.id));
-      safeSetLocalStorage('kenax_deleted_customers_cache', JSON.stringify(Array.from(deletedCustomerIds)));
+      safeSetLocalStorage(getEnvStorageKey('kenax_deleted_customers_cache'), JSON.stringify(Array.from(deletedCustomerIds)));
     }
   } catch {}
 
@@ -2046,7 +2377,7 @@ export async function getCustomersFromDB(): Promise<CustomerRecord[]> {
   // 3. Read local cached customers and purge any deleted items
   let localCache: CustomerRecord[] = [];
   try {
-    const cached = localStorage.getItem('kenax_customers_cache');
+    const cached = localStorage.getItem(getEnvStorageKey('kenax_customers_cache'));
     if (cached) {
       const parsed: CustomerRecord[] = JSON.parse(cached);
       if (Array.isArray(parsed)) {
@@ -2056,7 +2387,7 @@ export async function getCustomersFromDB(): Promise<CustomerRecord[]> {
   } catch {}
 
   try {
-    const colRef = collection(db, 'customers');
+    const colRef = collection(db, getEnvCollectionName('customers'));
     const snapshot = await getDocs(colRef);
     if (snapshot) {
       const dbItems: CustomerRecord[] = [];
@@ -2064,19 +2395,16 @@ export async function getCustomersFromDB(): Promise<CustomerRecord[]> {
         const data = docSnap.data() as CustomerRecord;
         if (deletedCustomerIds.has(docSnap.id) || (data && data.id && deletedCustomerIds.has(data.id))) {
           // Permanently cleanup deleted customer document from Firestore
-          deleteDoc(doc(db, 'customers', docSnap.id)).catch(() => {});
-        } else if (data && data.isV2Account) {
+          deleteDoc(doc(db, getEnvCollectionName('customers'), docSnap.id)).catch(() => {});
+        } else if (data && (data.id || data.email)) {
           dbItems.push(data);
-        } else {
-          // Permanently delete legacy customer document from Firestore
-          deleteDoc(doc(db, 'customers', docSnap.id)).catch(() => {});
         }
       });
 
       const cleanLocal = localCache.filter((c) => c && c.id && !deletedCustomerIds.has(c.id));
       const cleanDb = [...dbItems, ...serverCustomers].filter((c) => c && c.id && !deletedCustomerIds.has(c.id));
       const merged = mergeCustomersLists(cleanLocal, cleanDb).filter((c) => c && c.id && !deletedCustomerIds.has(c.id));
-      safeSetLocalStorage('kenax_customers_cache', JSON.stringify(merged));
+      safeSetLocalStorage(getEnvStorageKey('kenax_customers_cache'), JSON.stringify(merged));
 
       return merged;
     }
@@ -2085,7 +2413,7 @@ export async function getCustomersFromDB(): Promise<CustomerRecord[]> {
   }
 
   const cleanList = mergeCustomersLists(localCache, serverCustomers).filter((c) => c && c.id && !deletedCustomerIds.has(c.id));
-  safeSetLocalStorage('kenax_customers_cache', JSON.stringify(cleanList));
+  safeSetLocalStorage(getEnvStorageKey('kenax_customers_cache'), JSON.stringify(cleanList));
   return cleanList;
 }
 
@@ -2096,12 +2424,12 @@ export async function updateCustomerInDB(
   if (!customerId) return;
   if (customerId.startsWith('staff-cust-')) {
     // For staff preview, only update local active customer session if active
-    const activeCustomerRaw = localStorage.getItem('kenax_current_customer');
+    const activeCustomerRaw = localStorage.getItem(getEnvStorageKey('kenax_current_customer'));
     if (activeCustomerRaw) {
       try {
         const activeCust: CustomerRecord = JSON.parse(activeCustomerRaw);
         if (activeCust.id === customerId) {
-          safeSetLocalStorage('kenax_current_customer', JSON.stringify({ ...activeCust, ...updates }));
+          safeSetLocalStorage(getEnvStorageKey('kenax_current_customer'), JSON.stringify({ ...activeCust, ...updates }));
         }
       } catch {}
     }
@@ -2111,19 +2439,19 @@ export async function updateCustomerInDB(
   // Sync to central server store
   fetch('/api/customers', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...getEnvApiHeaders() },
     body: JSON.stringify({ id: customerId, ...updates, isV2Account: true }),
   }).catch((err) => console.warn('[KenaX BD] Server update customer error:', err));
 
   try {
-    await setDoc(doc(db, 'customers', customerId), updates, { merge: true });
+    await setDoc(doc(db, getEnvCollectionName('customers'), customerId), updates, { merge: true });
   } catch (err) {
     console.warn('[KenaX BD] Firestore updateCustomerInDB fallback:', err);
   }
 
   let localCache: CustomerRecord[] = [];
   try {
-    const cached = localStorage.getItem('kenax_customers_cache');
+    const cached = localStorage.getItem(getEnvStorageKey('kenax_customers_cache'));
     if (cached) localCache = JSON.parse(cached);
   } catch {}
 
@@ -2132,16 +2460,16 @@ export async function updateCustomerInDB(
     localCache[idx] = { ...localCache[idx], ...updates, isV2Account: true };
   }
   const merged = mergeCustomersLists(INITIAL_CUSTOMERS, localCache);
-  safeSetLocalStorage('kenax_customers_cache', JSON.stringify(merged));
+  safeSetLocalStorage(getEnvStorageKey('kenax_customers_cache'), JSON.stringify(merged));
 
   // Also sync active logged-in customer if ID matches
-  const activeCustomerRaw = localStorage.getItem('kenax_current_customer');
+  const activeCustomerRaw = localStorage.getItem(getEnvStorageKey('kenax_current_customer'));
   if (activeCustomerRaw) {
     try {
       const activeCust: CustomerRecord = JSON.parse(activeCustomerRaw);
       if (activeCust.id === customerId) {
         const mergedActive = { ...activeCust, ...updates, isV2Account: true };
-        safeSetLocalStorage('kenax_current_customer', JSON.stringify(mergedActive));
+        safeSetLocalStorage(getEnvStorageKey('kenax_current_customer'), JSON.stringify(mergedActive));
       }
     } catch {}
   }
@@ -2151,49 +2479,50 @@ export async function deleteCustomerFromDB(customerId: string): Promise<void> {
   // 1. Delete from central server store immediately
   fetch(`/api/customers/${encodeURIComponent(customerId)}`, {
     method: 'DELETE',
+    headers: getEnvApiHeaders(),
   }).catch((err) => console.warn('[KenaX BD] Server deleteCustomerFromDB error:', err));
 
   // 2. Add to local deleted tombstones set immediately
   try {
-    const cachedDeleted = localStorage.getItem('kenax_deleted_customers_cache');
+    const cachedDeleted = localStorage.getItem(getEnvStorageKey('kenax_deleted_customers_cache'));
     const deletedIds: string[] = cachedDeleted ? JSON.parse(cachedDeleted) : [];
     if (!deletedIds.includes(customerId)) {
       deletedIds.push(customerId);
-      safeSetLocalStorage('kenax_deleted_customers_cache', JSON.stringify(deletedIds));
+      safeSetLocalStorage(getEnvStorageKey('kenax_deleted_customers_cache'), JSON.stringify(deletedIds));
     }
   } catch {}
 
   // 3. Remove from local customer cache
   try {
-    const cached = localStorage.getItem('kenax_customers_cache');
+    const cached = localStorage.getItem(getEnvStorageKey('kenax_customers_cache'));
     if (cached) {
       const list: CustomerRecord[] = JSON.parse(cached);
       const filtered = list.filter((c) => c.id !== customerId);
-      safeSetLocalStorage('kenax_customers_cache', JSON.stringify(filtered));
+      safeSetLocalStorage(getEnvStorageKey('kenax_customers_cache'), JSON.stringify(filtered));
     }
   } catch {}
 
   // 4. Clear active customer session if it matches
   try {
-    const activeRaw = localStorage.getItem('kenax_current_customer');
+    const activeRaw = localStorage.getItem(getEnvStorageKey('kenax_current_customer'));
     if (activeRaw) {
       const activeCust = JSON.parse(activeRaw);
       if (activeCust.id === customerId) {
-        localStorage.removeItem('kenax_current_customer');
+        localStorage.removeItem(getEnvStorageKey('kenax_current_customer'));
       }
     }
   } catch {}
 
   // 5. Delete document from Firestore customers collection
   try {
-    await deleteDoc(doc(db, 'customers', customerId));
+    await deleteDoc(doc(db, getEnvCollectionName('customers'), customerId));
   } catch (err) {
     console.warn('[KenaX BD] Firestore deleteCustomerFromDB fallback:', err);
   }
 
   // 6. Add tombstone to Firestore deletedCustomers collection
   try {
-    await setDoc(doc(db, 'deletedCustomers', customerId), {
+    await setDoc(doc(db, getEnvCollectionName('deletedCustomers'), customerId), {
       id: customerId,
       deletedAt: new Date().toISOString(),
     });
@@ -2210,7 +2539,7 @@ export async function saveCustomerToDB(customer: CustomerRecord): Promise<void> 
   if (customer.id.startsWith('staff-cust-')) {
     // Never persist staff storefront preview sessions to database
     try {
-      safeSetLocalStorage('kenax_current_customer', JSON.stringify(customer));
+      safeSetLocalStorage(getEnvStorageKey('kenax_current_customer'), JSON.stringify(customer));
     } catch {}
     return;
   }
@@ -2231,42 +2560,44 @@ export async function saveCustomerToDB(customer: CustomerRecord): Promise<void> 
 
   // If newly registering or recreating, remove this customer ID from deleted tombstones
   try {
-    const cachedDeleted = localStorage.getItem('kenax_deleted_customers_cache');
+    const cachedDeleted = localStorage.getItem(getEnvStorageKey('kenax_deleted_customers_cache'));
     if (cachedDeleted) {
       const parsed: string[] = JSON.parse(cachedDeleted);
       const filtered = parsed.filter((id) => id !== customer.id);
-      safeSetLocalStorage('kenax_deleted_customers_cache', JSON.stringify(filtered));
+      safeSetLocalStorage(getEnvStorageKey('kenax_deleted_customers_cache'), JSON.stringify(filtered));
     }
-    await deleteDoc(doc(db, 'deletedCustomers', customer.id));
+    deleteDoc(doc(db, getEnvCollectionName('deletedCustomers'), customer.id)).catch(() => {});
   } catch {}
 
   // 1. Immediately update local customers cache with safe merging
   let localCache: CustomerRecord[] = [];
   try {
-    const cached = localStorage.getItem('kenax_customers_cache');
+    const cached = localStorage.getItem(getEnvStorageKey('kenax_customers_cache'));
     if (cached) localCache = JSON.parse(cached);
   } catch {}
 
   const filteredLocal = localCache.filter((c) => c.id !== customer.id);
   const merged = mergeCustomersLists(filteredLocal, [cleaned]);
-  safeSetLocalStorage('kenax_customers_cache', JSON.stringify(merged));
+  safeSetLocalStorage(getEnvStorageKey('kenax_customers_cache'), JSON.stringify(merged));
 
   // 2. Immediately sync active customer in localStorage if active
-  const activeCustomerRaw = localStorage.getItem('kenax_current_customer');
+  const activeCustomerRaw = localStorage.getItem(getEnvStorageKey('kenax_current_customer'));
   if (activeCustomerRaw) {
     try {
       const activeCust: CustomerRecord = JSON.parse(activeCustomerRaw);
       if (activeCust.id === customer.id || (activeCust.email && activeCust.email.toLowerCase() === customer.email.toLowerCase())) {
-        safeSetLocalStorage('kenax_current_customer', JSON.stringify({ ...activeCust, ...cleaned }));
+        safeSetLocalStorage(getEnvStorageKey('kenax_current_customer'), JSON.stringify({ ...activeCust, ...cleaned }));
       }
     } catch {}
   } else {
-    safeSetLocalStorage('kenax_current_customer', JSON.stringify(cleaned));
+    safeSetLocalStorage(getEnvStorageKey('kenax_current_customer'), JSON.stringify(cleaned));
   }
 
-  // 3. Save directly to Firestore with merge: true
+  // 3. Save directly to Firestore with merge: true (non-blocking)
   try {
-    await setDoc(doc(db, 'customers', customer.id), cleaned, { merge: true });
+    setDoc(doc(db, getEnvCollectionName('customers'), customer.id), cleaned, { merge: true }).catch((err) => {
+      console.warn('[KenaX BD] Firestore saveCustomerToDB fallback:', err);
+    });
   } catch (err) {
     console.warn('[KenaX BD] Firestore saveCustomerToDB fallback:', err);
   }
@@ -2274,7 +2605,7 @@ export async function saveCustomerToDB(customer: CustomerRecord): Promise<void> 
   // 4. Save to central server store for cross-device cloud persistence
   fetch('/api/customers', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...getEnvApiHeaders() },
     body: JSON.stringify(cleaned),
   }).catch((err) => console.warn('[KenaX BD] Server saveCustomerToDB fallback:', err));
 }
@@ -2782,21 +3113,40 @@ export async function hydrateHeroVideosInSettings(settings: WebsiteSettings): Pr
 // WEBSITE SETTINGS OPERATIONS
 // ----------------------------------------------------
 export async function getSettingsFromDB(): Promise<WebsiteSettings> {
+  let serverSettings: any = null;
+  try {
+    const res = await fetch('/api/settings', {
+      headers: { 'Cache-Control': 'no-cache' },
+    });
+    if (res.ok) {
+      serverSettings = await res.json();
+    }
+  } catch (e) {
+    // Non-blocking server fetch
+  }
+
   try {
     const docRef = doc(db, 'websiteSettings', INITIAL_WEBSITE_SETTINGS.id);
     const snap = await getDoc(docRef);
     if (snap.exists()) {
       let data = snap.data() as WebsiteSettings;
       data = await hydrateHeroVideosInSettings(data);
-      safeSetLocalStorage('kenax_settings_cache', JSON.stringify(data));
-      safeSetLocalStorage('kenax_site_settings', JSON.stringify(data));
+      const combined = serverSettings ? { ...data, ...serverSettings } : data;
+      safeSetLocalStorage('kenax_settings_cache', JSON.stringify(combined));
+      safeSetLocalStorage('kenax_site_settings', JSON.stringify(combined));
       try {
-        await setIdbItem('kenax_settings_backup', JSON.stringify(data));
+        await setIdbItem('kenax_settings_backup', JSON.stringify(combined));
       } catch {}
-      return data;
+      return combined;
     }
   } catch (err) {
     console.warn('[KenaX BD] Firestore getSettingsFromDB fallback:', err);
+  }
+
+  if (serverSettings) {
+    safeSetLocalStorage('kenax_settings_cache', JSON.stringify(serverSettings));
+    safeSetLocalStorage('kenax_site_settings', JSON.stringify(serverSettings));
+    return serverSettings;
   }
 
   try {
@@ -2830,6 +3180,17 @@ export async function saveSettingsToDB(settings: any): Promise<void> {
       },
     };
 
+    // Immediately persist to server endpoint for instant all-user synchronization
+    try {
+      await fetch('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(fullMergedSettings),
+      });
+    } catch (e) {
+      console.warn('[Server Settings Save Sync]:', e);
+    }
+
     const settingsToSave = JSON.parse(JSON.stringify(fullMergedSettings));
 
     // If hero banners contain device video data URLs, save video data in chunked Firestore collection
@@ -2860,13 +3221,24 @@ export async function saveSettingsToDB(settings: any): Promise<void> {
   try {
     await setIdbItem('kenax_settings_backup', JSON.stringify(fullMergedSettings));
   } catch {}
+
+  // Broadcast settings update instantly within the client and other tabs
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('kenax_settings_updated', { detail: fullMergedSettings }));
+  }
 }
 
 export async function saveHeroBannersToDB(heroBanners: HeroBannerItem[]): Promise<void> {
   try {
-    const currentSettings = await getSettingsFromDB();
+    const cached = localStorage.getItem('kenax_settings_cache') || localStorage.getItem('kenax_site_settings');
+    let baseSettings: any = INITIAL_WEBSITE_SETTINGS;
+    if (cached) {
+      try {
+        baseSettings = JSON.parse(cached);
+      } catch {}
+    }
     const updatedSettings = {
-      ...currentSettings,
+      ...baseSettings,
       heroBanners,
     };
     await saveSettingsToDB(updatedSettings);
@@ -4038,6 +4410,114 @@ export function subscribeToSourcingLocations(callback: (locations: SourcingLocat
     return () => {};
   }
 }
+
+// ----------------------------------------------------
+// Newsletter Subscribers (Footer Email Signups)
+// ----------------------------------------------------
+
+const NEWSLETTER_CACHE_KEY = 'kenax_newsletter_subscribers_cache';
+
+export async function saveNewsletterSubscriber(
+  email: string,
+  source: string = 'footer'
+): Promise<{ success: boolean; message: string; subscriber?: NewsletterSubscriber }> {
+  const cleanEmail = email.trim().toLowerCase();
+  if (!cleanEmail || !cleanEmail.includes('@')) {
+    return { success: false, message: 'একটি সঠিক ইমেইল এড্রেস প্রদান করুন।' };
+  }
+
+  const subId = `sub_${cleanEmail.replace(/[^a-z0-9]/g, '_')}`;
+  const now = new Date().toISOString();
+
+  const subscriber: NewsletterSubscriber = {
+    id: subId,
+    email: cleanEmail,
+    subscribedAt: now,
+    source,
+    status: 'active',
+  };
+
+  try {
+    const colRef = collection(db, 'newsletter_subscribers');
+    await setDoc(doc(colRef, subId), subscriber);
+  } catch (err) {
+    console.warn('[KenaX BD] Firestore saveNewsletterSubscriber error, fallback to cache:', err);
+  }
+
+  // Update local cache
+  try {
+    const raw = localStorage.getItem(NEWSLETTER_CACHE_KEY);
+    const list: NewsletterSubscriber[] = raw ? JSON.parse(raw) : [];
+    const updated = [subscriber, ...list.filter((s) => s.id !== subId)];
+    safeSetLocalStorage(NEWSLETTER_CACHE_KEY, JSON.stringify(updated));
+  } catch {}
+
+  return { success: true, message: 'ধন্যবাদ! আপনি সফলভাবে সাবস্ক্রাইব করেছেন।', subscriber };
+}
+
+export async function deleteNewsletterSubscriber(subscriberId: string): Promise<boolean> {
+  try {
+    const docRef = doc(db, 'newsletter_subscribers', subscriberId);
+    await deleteDoc(docRef);
+  } catch (err) {
+    console.warn('[KenaX BD] deleteNewsletterSubscriber error:', err);
+  }
+
+  try {
+    const raw = localStorage.getItem(NEWSLETTER_CACHE_KEY);
+    if (raw) {
+      const list: NewsletterSubscriber[] = JSON.parse(raw);
+      const updated = list.filter((s) => s.id !== subscriberId);
+      safeSetLocalStorage(NEWSLETTER_CACHE_KEY, JSON.stringify(updated));
+    }
+  } catch {}
+  return true;
+}
+
+export async function getNewsletterSubscribersFromDB(): Promise<NewsletterSubscriber[]> {
+  try {
+    const colRef = collection(db, 'newsletter_subscribers');
+    const snap = await getDocs(colRef);
+    if (!snap.empty) {
+      const items = snap.docs.map((d) => ({ ...d.data(), id: d.id } as NewsletterSubscriber));
+      items.sort((a, b) => new Date(b.subscribedAt || 0).getTime() - new Date(a.subscribedAt || 0).getTime());
+      safeSetLocalStorage(NEWSLETTER_CACHE_KEY, JSON.stringify(items));
+      return items;
+    }
+  } catch (err) {
+    console.warn('[KenaX BD] getNewsletterSubscribersFromDB error, fallback to cache:', err);
+  }
+
+  try {
+    const raw = localStorage.getItem(NEWSLETTER_CACHE_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch {}
+  return [];
+}
+
+export function subscribeToNewsletterSubscribers(callback: (subs: NewsletterSubscriber[]) => void): Unsubscribe {
+  try {
+    const colRef = collection(db, 'newsletter_subscribers');
+    return onSnapshot(
+      colRef,
+      (snap) => {
+        const items = snap.docs.map((d) => ({ ...d.data(), id: d.id } as NewsletterSubscriber));
+        items.sort((a, b) => new Date(b.subscribedAt || 0).getTime() - new Date(a.subscribedAt || 0).getTime());
+        safeSetLocalStorage(NEWSLETTER_CACHE_KEY, JSON.stringify(items));
+        callback(items);
+      },
+      (err) => {
+        console.warn('[KenaX BD] subscribeToNewsletterSubscribers snapshot error:', err);
+        getNewsletterSubscribersFromDB().then(callback);
+      }
+    );
+  } catch (err) {
+    console.warn('[KenaX BD] subscribeToNewsletterSubscribers setup error:', err);
+    getNewsletterSubscribersFromDB().then(callback);
+    return () => {};
+  }
+}
+
 
 
 

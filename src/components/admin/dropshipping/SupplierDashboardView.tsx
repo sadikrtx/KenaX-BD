@@ -98,83 +98,83 @@ export const SupplierDashboardView: React.FC<SupplierDashboardViewProps> = ({
       {/* Top Financial KPI Metrics */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {/* Cost Price */}
-        <div className="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-xs hover:border-slate-300 transition-all">
+        <div className="bg-white dark:bg-slate-900 rounded-2xl p-5 border border-slate-200/80 dark:border-slate-800 shadow-xs hover:border-slate-300 dark:hover:border-slate-700 transition-all">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+            <span className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
               Total Cost Price
             </span>
-            <div className="w-9 h-9 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center">
+            <div className="w-9 h-9 rounded-xl bg-amber-50 dark:bg-amber-950/80 text-amber-600 dark:text-amber-400 flex items-center justify-center">
               <DollarSign className="w-4 h-4" />
             </div>
           </div>
           <div className="mt-3">
-            <div className="text-2xl font-black text-slate-900 tracking-tight">
+            <div className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">
               ৳{analytics.totalCost.toLocaleString('en-BD')}
             </div>
-            <p className="text-[11px] text-slate-400 mt-1 flex items-center gap-1">
+            <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1 flex items-center gap-1">
               <span>Wholesale purchase & sourcing costs</span>
             </p>
           </div>
         </div>
 
         {/* Final Selling Price */}
-        <div className="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-xs hover:border-slate-300 transition-all">
+        <div className="bg-white dark:bg-slate-900 rounded-2xl p-5 border border-slate-200/80 dark:border-slate-800 shadow-xs hover:border-slate-300 dark:hover:border-slate-700 transition-all">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+            <span className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
               Final Selling Price
             </span>
-            <div className="w-9 h-9 rounded-xl bg-sky-50 text-sky-600 flex items-center justify-center">
+            <div className="w-9 h-9 rounded-xl bg-sky-50 dark:bg-sky-950/80 text-sky-600 dark:text-sky-400 flex items-center justify-center">
               <TrendingUp className="w-4 h-4" />
             </div>
           </div>
           <div className="mt-3">
-            <div className="text-2xl font-black text-slate-900 tracking-tight">
+            <div className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">
               ৳{analytics.totalRevenue.toLocaleString('en-BD')}
             </div>
-            <p className="text-[11px] text-slate-400 mt-1">
+            <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1">
               Customer retail order sales value
             </p>
           </div>
         </div>
 
         {/* Net Profit */}
-        <div className="bg-white rounded-2xl p-5 border border-emerald-200/80 shadow-xs bg-linear-to-br from-white to-emerald-50/20 hover:border-emerald-300 transition-all">
+        <div className="bg-white dark:bg-slate-900 rounded-2xl p-5 border border-emerald-200/80 dark:border-emerald-800/80 shadow-xs bg-linear-to-br from-white to-emerald-50/20 dark:from-slate-900 dark:to-emerald-950/30 hover:border-emerald-300 dark:hover:border-emerald-700 transition-all">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-emerald-800 uppercase tracking-wider">
+            <span className="text-xs font-bold text-emerald-800 dark:text-emerald-300 uppercase tracking-wider">
               Our Net Profit
             </span>
-            <div className="w-9 h-9 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
+            <div className="w-9 h-9 rounded-xl bg-emerald-50 dark:bg-emerald-950/80 text-emerald-600 dark:text-emerald-400 flex items-center justify-center">
               <ArrowUpRight className="w-4 h-4" />
             </div>
           </div>
           <div className="mt-3">
-            <div className="text-2xl font-black text-emerald-700 tracking-tight flex items-baseline gap-2">
+            <div className="text-2xl font-black text-emerald-700 dark:text-emerald-300 tracking-tight flex items-baseline gap-2">
               <span>+৳{analytics.totalProfit.toLocaleString('en-BD')}</span>
-              <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
+              <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
                 +{analytics.overallMargin}%
               </span>
             </div>
-            <p className="text-[11px] text-emerald-700/80 mt-1">
+            <p className="text-[11px] text-emerald-700/80 dark:text-emerald-400/80 mt-1">
               Total earnings after deducting wholesale costs
             </p>
           </div>
         </div>
 
         {/* Total Sourced Units Sold */}
-        <div className="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-xs hover:border-slate-300 transition-all">
+        <div className="bg-white dark:bg-slate-900 rounded-2xl p-5 border border-slate-200/80 dark:border-slate-800 shadow-xs hover:border-slate-300 dark:hover:border-slate-700 transition-all">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+            <span className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
               Units Sourced & Sold
             </span>
-            <div className="w-9 h-9 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center">
+            <div className="w-9 h-9 rounded-xl bg-indigo-50 dark:bg-indigo-950/80 text-indigo-600 dark:text-indigo-400 flex items-center justify-center">
               <Package className="w-4 h-4" />
             </div>
           </div>
           <div className="mt-3">
-            <div className="text-2xl font-black text-slate-900 tracking-tight">
-              {analytics.totalUnitsSold.toLocaleString()} <span className="text-sm font-semibold text-slate-500">pcs</span>
+            <div className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">
+              {analytics.totalUnitsSold.toLocaleString()} <span className="text-sm font-semibold text-slate-500 dark:text-slate-400">pcs</span>
             </div>
-            <p className="text-[11px] text-slate-400 mt-1">
+            <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1">
               Across {analytics.totalOrdersCount} customer orders
             </p>
           </div>
@@ -182,28 +182,28 @@ export const SupplierDashboardView: React.FC<SupplierDashboardViewProps> = ({
       </div>
 
       {/* Filter and Search Bar */}
-      <div className="bg-white rounded-2xl p-4 border border-slate-200/80 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-3">
+      <div className="bg-white dark:bg-slate-900 rounded-2xl p-4 border border-slate-200/80 dark:border-slate-800 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-3">
         {/* Search */}
         <div className="relative flex-1 min-w-[240px]">
-          <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+          <Search className="w-4 h-4 text-slate-400 dark:text-slate-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
           <input
             type="text"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             placeholder="Search by supplier, source, address, phone, or product name..."
-            className="w-full pl-9 pr-4 py-2 text-xs rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-slate-50/50"
+            className="w-full pl-9 pr-4 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-slate-50/50 dark:bg-slate-800 text-slate-900 dark:text-white"
           />
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
           {/* Source Type Filter */}
-          <div className="flex items-center p-0.5 rounded-xl bg-slate-100 border border-slate-200">
+          <div className="flex items-center p-0.5 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
             <button
               onClick={() => setSourceTypeFilter('all')}
               className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-colors cursor-pointer ${
                 sourceTypeFilter === 'all'
-                  ? 'bg-white text-slate-900 shadow-2xs'
-                  : 'text-slate-600 hover:text-slate-900'
+                  ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-2xs'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
               }`}
             >
               All Sources
@@ -212,8 +212,8 @@ export const SupplierDashboardView: React.FC<SupplierDashboardViewProps> = ({
               onClick={() => setSourceTypeFilter('dropshipping')}
               className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-colors cursor-pointer ${
                 sourceTypeFilter === 'dropshipping'
-                  ? 'bg-white text-indigo-700 shadow-2xs'
-                  : 'text-slate-600 hover:text-slate-900'
+                  ? 'bg-white dark:bg-slate-700 text-indigo-700 dark:text-indigo-300 shadow-2xs'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
               }`}
             >
               Dropshipping
@@ -223,7 +223,7 @@ export const SupplierDashboardView: React.FC<SupplierDashboardViewProps> = ({
               className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-colors cursor-pointer flex items-center gap-1.5 ${
                 sourceTypeFilter === 'own'
                   ? 'bg-emerald-600 text-white shadow-2xs'
-                  : 'text-slate-600 hover:text-slate-900'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
               }`}
             >
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
@@ -232,13 +232,13 @@ export const SupplierDashboardView: React.FC<SupplierDashboardViewProps> = ({
           </div>
 
           {/* Order Status Filter */}
-          <div className="flex items-center p-0.5 rounded-xl bg-slate-100 border border-slate-200">
+          <div className="flex items-center p-0.5 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
             <button
               onClick={() => setOrderStatusFilter('all')}
               className={`px-2.5 py-1.5 text-xs font-bold rounded-lg transition-colors cursor-pointer ${
                 orderStatusFilter === 'all'
-                  ? 'bg-white text-slate-900 shadow-2xs'
-                  : 'text-slate-600 hover:text-slate-900'
+                  ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-2xs'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
               }`}
             >
               All Orders
@@ -247,8 +247,8 @@ export const SupplierDashboardView: React.FC<SupplierDashboardViewProps> = ({
               onClick={() => setOrderStatusFilter('delivered')}
               className={`px-2.5 py-1.5 text-xs font-bold rounded-lg transition-colors cursor-pointer ${
                 orderStatusFilter === 'delivered'
-                  ? 'bg-white text-emerald-700 shadow-2xs'
-                  : 'text-slate-600 hover:text-slate-900'
+                  ? 'bg-white dark:bg-slate-700 text-emerald-700 dark:text-emerald-300 shadow-2xs'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
               }`}
             >
               Delivered
@@ -257,8 +257,8 @@ export const SupplierDashboardView: React.FC<SupplierDashboardViewProps> = ({
               onClick={() => setOrderStatusFilter('active')}
               className={`px-2.5 py-1.5 text-xs font-bold rounded-lg transition-colors cursor-pointer ${
                 orderStatusFilter === 'active'
-                  ? 'bg-white text-indigo-700 shadow-2xs'
-                  : 'text-slate-600 hover:text-slate-900'
+                  ? 'bg-white dark:bg-slate-700 text-indigo-700 dark:text-indigo-300 shadow-2xs'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
               }`}
             >
               Active
@@ -271,10 +271,10 @@ export const SupplierDashboardView: React.FC<SupplierDashboardViewProps> = ({
       <div className="space-y-3">
         <div className="flex items-center justify-between">
           <div>
-            <h3 className="text-sm font-black text-slate-900">
+            <h3 className="text-sm font-black text-slate-900 dark:text-white">
               Supplier & Inventory Source Cards (Click to inspect breakdown)
             </h3>
-            <p className="text-xs text-slate-500">
+            <p className="text-xs text-slate-500 dark:text-slate-400">
               Showing {filteredSuppliers.length} active inventory sources (Shopbase dropship & On Stock in-house)
             </p>
           </div>
@@ -294,8 +294,8 @@ export const SupplierDashboardView: React.FC<SupplierDashboardViewProps> = ({
                 onClick={() => onSelectSupplierForDetail(item.supplier.id)}
                 className={`group rounded-2xl p-5 border transition-all duration-200 cursor-pointer shadow-xs hover:shadow-md hover:-translate-y-0.5 ${
                   isOwn
-                    ? 'bg-linear-to-b from-white to-emerald-50/20 border-emerald-200 hover:border-emerald-400'
-                    : 'bg-white border-slate-200/80 hover:border-indigo-300'
+                    ? 'bg-linear-to-b from-white to-emerald-50/20 dark:from-slate-900 dark:to-emerald-950/20 border-emerald-200 dark:border-emerald-800/80 hover:border-emerald-400 dark:hover:border-emerald-600'
+                    : 'bg-white dark:bg-slate-900 border-slate-200/80 dark:border-slate-800 hover:border-indigo-300 dark:hover:border-indigo-700'
                 }`}
               >
                 {/* Header */}
@@ -312,22 +312,22 @@ export const SupplierDashboardView: React.FC<SupplierDashboardViewProps> = ({
                     </div>
                     <div>
                       <div className="flex items-center gap-1.5 flex-wrap">
-                        <h4 className="text-sm font-black text-slate-900 group-hover:text-indigo-600 transition-colors">
+                        <h4 className="text-sm font-black text-slate-900 dark:text-white group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">
                           {item.supplier.name}
                         </h4>
                         {/* On Stock Badge or Dropship Badge */}
                         {isOwn ? (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-black tracking-wide uppercase">
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 text-[10px] font-black tracking-wide uppercase">
                             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
                             On Stock
                           </span>
                         ) : (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 text-[10px] font-bold">
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-indigo-50 dark:bg-indigo-950/80 text-indigo-700 dark:text-indigo-300 border border-indigo-100 dark:border-indigo-800 text-[10px] font-bold">
                             Dropshipping
                           </span>
                         )}
                       </div>
-                      <p className="text-[11px] text-slate-400 mt-0.5 font-medium">
+                      <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-0.5 font-medium">
                         {item.unitsSold} pcs sold • {item.ordersCount} orders
                       </p>
                     </div>
@@ -336,8 +336,8 @@ export const SupplierDashboardView: React.FC<SupplierDashboardViewProps> = ({
                   <span
                     className={`px-2 py-1 rounded-lg text-xs font-black shrink-0 ${
                       isOwn
-                        ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
-                        : 'bg-indigo-50 text-indigo-700 border border-indigo-100'
+                        ? 'bg-emerald-50 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800'
+                        : 'bg-indigo-50 dark:bg-indigo-950/80 text-indigo-700 dark:text-indigo-300 border border-indigo-100 dark:border-indigo-800'
                     }`}
                   >
                     +{item.profitMargin}% Margin
@@ -346,49 +346,49 @@ export const SupplierDashboardView: React.FC<SupplierDashboardViewProps> = ({
 
                 {/* Sourcing details teaser for On Stock */}
                 {isOwn && item.sourcingLocations && item.sourcingLocations.length > 0 && (
-                  <div className="mt-3 p-2.5 rounded-xl bg-emerald-50/70 border border-emerald-100 text-[11px] text-emerald-950 flex items-start gap-2">
-                    <MapPin className="w-3.5 h-3.5 text-emerald-600 shrink-0 mt-0.5" />
+                  <div className="mt-3 p-2.5 rounded-xl bg-emerald-50/70 dark:bg-emerald-950/40 border border-emerald-100 dark:border-emerald-800/80 text-[11px] text-emerald-950 dark:text-emerald-200 flex items-start gap-2">
+                    <MapPin className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
                     <div className="truncate">
                       <span className="font-bold">Primary Sourcing: </span>
                       <span className="truncate">{item.sourcingLocations[0].address}</span>
                       {item.sourcingLocations[0].phone !== 'N/A' && (
-                        <span className="text-emerald-700 ml-1 font-mono">({item.sourcingLocations[0].phone})</span>
+                        <span className="text-emerald-700 dark:text-emerald-300 ml-1 font-mono">({item.sourcingLocations[0].phone})</span>
                       )}
                     </div>
                   </div>
                 )}
 
                 {/* Financial Summary Grid */}
-                <div className="grid grid-cols-3 gap-2 mt-4 pt-3 border-t border-slate-100">
-                  <div className="p-2 rounded-xl bg-slate-50 border border-slate-100">
-                    <div className="text-[10px] font-bold text-slate-400 uppercase">Cost Price</div>
-                    <div className="text-xs font-black text-slate-800 mt-0.5">
+                <div className="grid grid-cols-3 gap-2 mt-4 pt-3 border-t border-slate-100 dark:border-slate-800">
+                  <div className="p-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-700">
+                    <div className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase">Cost Price</div>
+                    <div className="text-xs font-black text-slate-800 dark:text-slate-200 mt-0.5">
                       ৳{item.totalCost.toLocaleString('en-BD')}
                     </div>
                   </div>
 
-                  <div className="p-2 rounded-xl bg-slate-50 border border-slate-100">
-                    <div className="text-[10px] font-bold text-slate-400 uppercase">Selling Price</div>
-                    <div className="text-xs font-black text-slate-800 mt-0.5">
+                  <div className="p-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-700">
+                    <div className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase">Selling Price</div>
+                    <div className="text-xs font-black text-slate-800 dark:text-slate-200 mt-0.5">
                       ৳{item.totalRevenue.toLocaleString('en-BD')}
                     </div>
                   </div>
 
                   <div
                     className={`p-2 rounded-xl border ${
-                      isOwn ? 'bg-emerald-50/80 border-emerald-200' : 'bg-indigo-50/60 border-indigo-100'
+                      isOwn ? 'bg-emerald-50/80 dark:bg-emerald-950/80 border-emerald-200 dark:border-emerald-800' : 'bg-indigo-50/60 dark:bg-indigo-950/80 border-indigo-100 dark:border-indigo-800'
                     }`}
                   >
                     <div
                       className={`text-[10px] font-bold uppercase ${
-                        isOwn ? 'text-emerald-800' : 'text-indigo-800'
+                        isOwn ? 'text-emerald-800 dark:text-emerald-300' : 'text-indigo-800 dark:text-indigo-300'
                       }`}
                     >
                       Our Net Profit
                     </div>
                     <div
                       className={`text-xs font-black mt-0.5 ${
-                        isOwn ? 'text-emerald-800' : 'text-indigo-900'
+                        isOwn ? 'text-emerald-800 dark:text-emerald-200' : 'text-indigo-900 dark:text-indigo-200'
                       }`}
                     >
                       +৳{item.totalProfit.toLocaleString('en-BD')}
@@ -398,22 +398,22 @@ export const SupplierDashboardView: React.FC<SupplierDashboardViewProps> = ({
 
                 {/* Visual Ratio Bar */}
                 <div className="mt-3.5">
-                  <div className="w-full h-1.5 rounded-full bg-slate-100 overflow-hidden flex">
+                  <div className="w-full h-1.5 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden flex">
                     <div style={{ width: `${costRatio}%` }} className="bg-amber-400" title={`Cost: ${costRatio}%`} />
                     <div style={{ width: `${profitRatio}%` }} className="bg-emerald-500" title={`Profit: ${profitRatio}%`} />
                   </div>
-                  <div className="flex items-center justify-between text-[10px] text-slate-500 mt-1 font-medium">
-                    <span className="text-amber-700 font-semibold">Cost: {costRatio}%</span>
-                    <span className="text-emerald-700 font-semibold">Net Profit: {profitRatio}%</span>
+                  <div className="flex items-center justify-between text-[10px] text-slate-500 dark:text-slate-400 mt-1 font-medium">
+                    <span className="text-amber-700 dark:text-amber-400 font-semibold">Cost: {costRatio}%</span>
+                    <span className="text-emerald-700 dark:text-emerald-400 font-semibold">Net Profit: {profitRatio}%</span>
                   </div>
                 </div>
 
                 {/* Card CTA */}
-                <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-xs font-bold text-indigo-600 group-hover:text-indigo-700">
+                <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs font-bold text-indigo-600 dark:text-indigo-400 group-hover:text-indigo-700 dark:group-hover:text-indigo-300">
                   <span className="flex items-center gap-1">
                     <span>{isOwn ? 'View In-House Stock & Sourcing' : 'View Sold Products & Analytics'}</span>
                   </span>
-                  <span className="text-[11px] text-slate-400 font-medium group-hover:text-slate-600 flex items-center gap-1">
+                  <span className="text-[11px] text-slate-400 dark:text-slate-500 font-medium group-hover:text-slate-600 dark:group-hover:text-slate-300 flex items-center gap-1">
                     {item.products.length} products
                     <ChevronRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
                   </span>
@@ -425,45 +425,45 @@ export const SupplierDashboardView: React.FC<SupplierDashboardViewProps> = ({
       </div>
 
       {/* Consolidated Table of All Sourced and Sold Products */}
-      <div className="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-xs space-y-4">
+      <div className="bg-white dark:bg-slate-900 rounded-2xl p-5 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
-            <h3 className="text-base font-black text-slate-900">
+            <h3 className="text-base font-black text-slate-900 dark:text-white">
               Consolidated Sourced & Sold Products (Cost vs. Selling Breakdown)
             </h3>
-            <p className="text-xs text-slate-500">
+            <p className="text-xs text-slate-500 dark:text-slate-400">
               Wholesale cost, final retail selling price, per-unit markup, and cumulative net profit
             </p>
           </div>
-          <span className="text-xs font-bold px-3 py-1 rounded-xl bg-slate-100 text-slate-700 w-fit">
+          <span className="text-xs font-bold px-3 py-1 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 w-fit">
             {filteredAllProducts.length} Products Analyzed
           </span>
         </div>
 
         {filteredAllProducts.length === 0 ? (
-          <div className="bg-slate-50 rounded-xl p-8 text-center border border-dashed border-slate-200">
-            <Boxes className="w-8 h-8 text-slate-400 mx-auto mb-2" />
-            <h4 className="text-xs font-bold text-slate-700">No products match your filter</h4>
-            <p className="text-[11px] text-slate-400 mt-1">Try clearing your search query or switching source filters</p>
+          <div className="bg-slate-50 dark:bg-slate-800/60 rounded-xl p-8 text-center border border-dashed border-slate-200 dark:border-slate-700">
+            <Boxes className="w-8 h-8 text-slate-400 dark:text-slate-500 mx-auto mb-2" />
+            <h4 className="text-xs font-bold text-slate-700 dark:text-slate-300">No products match your filter</h4>
+            <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1">Try clearing your search query or switching source filters</p>
           </div>
         ) : (
-          <div className="overflow-x-auto rounded-xl border border-slate-200">
+          <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-800">
             <table className="w-full text-left border-collapse text-xs">
               <thead>
-                <tr className="bg-slate-50/90 border-b border-slate-200 text-slate-500 font-bold uppercase tracking-wider text-[10px]">
+                <tr className="bg-slate-50/90 dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider text-[10px]">
                   <th className="py-3 px-4">Product Details</th>
                   <th className="py-3 px-3">Sourcing Type / Vendor</th>
                   <th className="py-3 px-3 text-right">Cost Price</th>
                   <th className="py-3 px-3 text-right">Selling Price</th>
-                  <th className="py-3 px-3 text-right text-emerald-700">Unit Profit</th>
+                  <th className="py-3 px-3 text-right text-emerald-700 dark:text-emerald-400">Unit Profit</th>
                   <th className="py-3 px-3 text-center">Units Sold</th>
                   <th className="py-3 px-3 text-right">Total Cost</th>
                   <th className="py-3 px-3 text-right">Total Sales</th>
-                  <th className="py-3 px-3 text-right text-emerald-700 font-black">Net Profit</th>
+                  <th className="py-3 px-3 text-right text-emerald-700 dark:text-emerald-400 font-black">Net Profit</th>
                   <th className="py-3 px-4 text-center">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100">
+              <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                 {filteredAllProducts.map((entry) => {
                   const isOwn = entry.isOwnStock;
                   const marginPct =
@@ -472,7 +472,7 @@ export const SupplierDashboardView: React.FC<SupplierDashboardViewProps> = ({
                       : 0;
 
                   return (
-                    <tr key={`${entry.supplier.id}-${entry.product.id}`} className="hover:bg-slate-50/60 transition-colors">
+                    <tr key={`${entry.supplier.id}-${entry.product.id}`} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/50 transition-colors">
                       {/* Product */}
                       <td className="py-3 px-4">
                         <div className="flex items-center gap-2.5 min-w-[200px]">
@@ -483,16 +483,16 @@ export const SupplierDashboardView: React.FC<SupplierDashboardViewProps> = ({
                                 : '/placeholder.png'
                             }
                             alt={entry.product.name}
-                            className="w-10 h-10 rounded-lg object-cover border border-slate-200 shrink-0 bg-slate-100"
+                            className="w-10 h-10 rounded-lg object-cover border border-slate-200 dark:border-slate-700 shrink-0 bg-slate-100 dark:bg-slate-800"
                             onError={(e) => {
                               (e.target as HTMLElement).setAttribute('src', '/placeholder.png');
                             }}
                           />
                           <div className="truncate">
-                            <div className="font-bold text-slate-900 truncate" title={entry.product.name}>
+                            <div className="font-bold text-slate-900 dark:text-white truncate" title={entry.product.name}>
                               {entry.product.name}
                             </div>
-                            <div className="text-[10px] text-slate-400 font-mono mt-0.5">
+                            <div className="text-[10px] text-slate-400 dark:text-slate-500 font-mono mt-0.5">
                               SKU: {entry.product.sku || 'N/A'}
                             </div>
                           </div>
@@ -503,18 +503,18 @@ export const SupplierDashboardView: React.FC<SupplierDashboardViewProps> = ({
                       <td className="py-3 px-3 whitespace-nowrap">
                         {isOwn ? (
                           <div className="space-y-1">
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-black uppercase">
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 text-[10px] font-black uppercase">
                               <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
                               On Stock
                             </span>
                             {entry.sourcingAddress && (
-                              <div className="text-[10px] text-slate-600 flex items-center gap-1 truncate max-w-[180px]" title={entry.sourcingAddress}>
+                              <div className="text-[10px] text-slate-600 dark:text-slate-400 flex items-center gap-1 truncate max-w-[180px]" title={entry.sourcingAddress}>
                                 <MapPin className="w-2.5 h-2.5 text-slate-400 shrink-0" />
                                 <span className="truncate">{entry.sourcingAddress}</span>
                               </div>
                             )}
                             {entry.sourcingPhone && (
-                              <div className="text-[10px] text-indigo-700 font-mono flex items-center gap-1">
+                              <div className="text-[10px] text-indigo-700 dark:text-indigo-400 font-mono flex items-center gap-1">
                                 <Phone className="w-2.5 h-2.5 shrink-0" />
                                 <a href={`tel:${entry.sourcingPhone}`} className="hover:underline">
                                   {entry.sourcingPhone}
@@ -524,7 +524,7 @@ export const SupplierDashboardView: React.FC<SupplierDashboardViewProps> = ({
                           </div>
                         ) : (
                           <div className="space-y-1">
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 text-[10px] font-bold">
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-indigo-50 dark:bg-indigo-950/80 text-indigo-700 dark:text-indigo-300 border border-indigo-100 dark:border-indigo-800 text-[10px] font-bold">
                               {entry.supplier.name}
                             </span>
                             {entry.product.supplierUrl && (
@@ -533,7 +533,7 @@ export const SupplierDashboardView: React.FC<SupplierDashboardViewProps> = ({
                                   href={entry.product.supplierUrl}
                                   target="_blank"
                                   rel="noopener noreferrer"
-                                  className="text-indigo-600 hover:underline inline-flex items-center gap-0.5"
+                                  className="text-indigo-600 dark:text-indigo-400 hover:underline inline-flex items-center gap-0.5"
                                 >
                                   <span>Source Link</span>
                                   <ExternalLink className="w-2.5 h-2.5" />
@@ -545,41 +545,41 @@ export const SupplierDashboardView: React.FC<SupplierDashboardViewProps> = ({
                       </td>
 
                       {/* Cost Price */}
-                      <td className="py-3 px-3 text-right font-medium text-slate-600 whitespace-nowrap">
+                      <td className="py-3 px-3 text-right font-medium text-slate-600 dark:text-slate-300 whitespace-nowrap">
                         ৳{entry.costPrice.toLocaleString('en-BD')}
                       </td>
 
                       {/* Final Selling */}
-                      <td className="py-3 px-3 text-right font-black text-slate-900 whitespace-nowrap">
+                      <td className="py-3 px-3 text-right font-black text-slate-900 dark:text-white whitespace-nowrap">
                         ৳{entry.sellingPrice.toLocaleString('en-BD')}
                       </td>
 
                       {/* Profit Per Unit */}
-                      <td className="py-3 px-3 text-right font-black text-emerald-700 whitespace-nowrap">
+                      <td className="py-3 px-3 text-right font-black text-emerald-700 dark:text-emerald-400 whitespace-nowrap">
                         +৳{entry.profitPerUnit.toLocaleString('en-BD')}
                       </td>
 
                       {/* Units Sold */}
                       <td className="py-3 px-3 text-center whitespace-nowrap">
-                        <span className="px-2 py-0.5 rounded-full bg-slate-100 font-bold text-slate-800 text-[11px]">
+                        <span className="px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 font-bold text-slate-800 dark:text-slate-200 text-[11px]">
                           {entry.unitsSold} pcs
                         </span>
                       </td>
 
                       {/* Total Cost */}
-                      <td className="py-3 px-3 text-right font-semibold text-slate-700 whitespace-nowrap">
+                      <td className="py-3 px-3 text-right font-semibold text-slate-700 dark:text-slate-300 whitespace-nowrap">
                         ৳{entry.totalCost.toLocaleString('en-BD')}
                       </td>
 
                       {/* Total Sales */}
-                      <td className="py-3 px-3 text-right font-black text-slate-900 whitespace-nowrap">
+                      <td className="py-3 px-3 text-right font-black text-slate-900 dark:text-white whitespace-nowrap">
                         ৳{entry.totalRevenue.toLocaleString('en-BD')}
                       </td>
 
                       {/* Net Profit */}
-                      <td className="py-3 px-3 text-right font-black text-emerald-700 whitespace-nowrap">
+                      <td className="py-3 px-3 text-right font-black text-emerald-700 dark:text-emerald-400 whitespace-nowrap">
                         <div>+৳{entry.totalProfit.toLocaleString('en-BD')}</div>
-                        <div className="text-[10px] text-emerald-600 font-semibold">{marginPct}% margin</div>
+                        <div className="text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold">{marginPct}% margin</div>
                       </td>
 
                       {/* Actions */}
@@ -587,7 +587,7 @@ export const SupplierDashboardView: React.FC<SupplierDashboardViewProps> = ({
                         <div className="flex items-center justify-center gap-1.5">
                           <button
                             onClick={() => onSelectSupplierForDetail(entry.supplier.id)}
-                            className="px-2.5 py-1 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-[11px] font-bold transition-colors cursor-pointer"
+                            className="px-2.5 py-1 rounded-lg bg-indigo-50 dark:bg-indigo-950/80 hover:bg-indigo-100 dark:hover:bg-indigo-900 text-indigo-700 dark:text-indigo-300 text-[11px] font-bold transition-colors cursor-pointer"
                             title="View source statistics"
                           >
                             {isOwn ? 'On Stock Details' : 'Supplier Details'}
@@ -595,7 +595,7 @@ export const SupplierDashboardView: React.FC<SupplierDashboardViewProps> = ({
                           {onEditProduct && (
                             <button
                               onClick={() => onEditProduct(entry.product)}
-                              className="px-2 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-[11px] font-medium transition-colors cursor-pointer"
+                              className="px-2 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-[11px] font-medium transition-colors cursor-pointer"
                             >
                               Edit
                             </button>

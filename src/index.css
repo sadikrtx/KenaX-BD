@@ -1,15 +1,366 @@
 @import "tailwindcss";
 
+@theme {
+  --color-slate-850: #131d31;
+  --color-slate-750: #1e293b;
+}
+
+@custom-variant dark (&:where(.dark, .dark *, [data-theme="dark"], [data-theme="dark"] *));
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
 html, body {
   -webkit-tap-highlight-color: transparent;
   touch-action: manipulation;
+  font-family: 'Hind Siliguri', 'Plus Jakarta Sans', system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overscroll-behavior-y: none;
+  transition: background-color 200ms ease, color 200ms ease;
 }
 
-/* Rendering containment for offscreen product cards and ultra-smooth mobile scrolling */
+body {
+  background-color: #f8fafc;
+  color: #0f172a;
+  min-height: 100vh;
+}
+
+#root {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Light Mode Selection */
+::selection {
+  background-color: #0284c7;
+  color: #ffffff;
+}
+
+/* Eye-Comfort Dark Mode Luxury Palette */
+html.dark, html[data-theme="dark"], body.dark, body[data-theme="dark"] {
+  color-scheme: dark !important;
+  background-color: #080c14 !important;
+}
+
+html.dark body, html[data-theme="dark"] body, body.dark, body[data-theme="dark"] {
+  background-color: #080c14 !important;
+  color: #f8fafc !important;
+}
+
+html.dark #root, html[data-theme="dark"] #root {
+  background-color: #080c14 !important;
+}
+
+html.dark ::selection, html[data-theme="dark"] ::selection {
+  background-color: #0284c7;
+  color: #ffffff;
+}
+
+/* Force crystal-clear high contrast for all headings and titles in night mode */
+html.dark h1,
+html.dark h2,
+html.dark h3,
+html.dark h4,
+html.dark h5,
+html.dark h6 {
+  color: #ffffff !important;
+}
+
+/* Ensure any black/dark text without dark: utility automatically shines bright in night mode */
+html.dark .text-slate-900:not([class*="dark:text-"]):not([class*="dark:bg-"]):not(button.bg-amber-400):not(button.bg-yellow-400),
+html.dark .text-slate-800:not([class*="dark:text-"]):not([class*="dark:bg-"]):not(button.bg-amber-400),
+html.dark .text-gray-900:not([class*="dark:text-"]):not([class*="dark:bg-"]),
+html.dark .text-black:not([class*="dark:text-"]):not([class*="dark:bg-"]) {
+  color: #ffffff !important;
+}
+
+html.dark .text-slate-700:not([class*="dark:text-"]) {
+  color: #e2e8f0;
+}
+
+html.dark .text-slate-600:not([class*="dark:text-"]) {
+  color: #cbd5e1;
+}
+
+html.dark .text-slate-500:not([class*="dark:text-"]) {
+  color: #94a3b8;
+}
+
+/* Ensure white and slate backgrounds adapt to rich luxury midnight slate in dark mode if missing dark:bg */
+html.dark .bg-white:not([class*="dark:bg-"]) {
+  background-color: #0f172a;
+}
+
+html.dark .bg-slate-50:not([class*="dark:bg-"]),
+html.dark .bg-gray-50:not([class*="dark:bg-"]) {
+  background-color: #0b1120;
+}
+
+html.dark .bg-slate-100:not([class*="dark:bg-"]),
+html.dark .bg-gray-100:not([class*="dark:bg-"]) {
+  background-color: #0b1120;
+}
+
+html.dark .bg-slate-200:not([class*="dark:bg-"]),
+html.dark .bg-gray-200:not([class*="dark:bg-"]) {
+  background-color: #1e293b;
+}
+
+/* Ensure light border lines seamlessly adapt to dark mode slate borders */
+html.dark .border-slate-100:not([class*="dark:border-"]),
+html.dark .border-gray-100:not([class*="dark:border-"]),
+html.dark .border-slate-200:not([class*="dark:border-"]),
+html.dark .border-gray-200:not([class*="dark:border-"]) {
+  border-color: #1e293b;
+}
+
+html.dark .border-slate-300:not([class*="dark:border-"]),
+html.dark .border-gray-300:not([class*="dark:border-"]) {
+  border-color: #334155;
+}
+
+html.dark .divide-slate-100 > :not([hidden]) ~ :not([hidden]),
+html.dark .divide-slate-200 > :not([hidden]) ~ :not([hidden]),
+html.dark .divide-gray-100 > :not([hidden]) ~ :not([hidden]),
+html.dark .divide-gray-200 > :not([hidden]) ~ :not([hidden]) {
+  border-color: #1e293b;
+}
+
+/* Form inputs, textareas, and selects in dark mode */
+html.dark input:not([class*="dark:bg-"]):not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+html.dark textarea:not([class*="dark:bg-"]),
+html.dark select:not([class*="dark:bg-"]) {
+  background-color: #0f172a;
+  color: #f8fafc;
+  border-color: #334155;
+}
+
+html.dark input::placeholder,
+html.dark textarea::placeholder {
+  color: #64748b;
+}
+
+/* Soft colored status pills and cards in dark mode */
+html.dark .bg-emerald-50:not([class*="dark:bg-"]) {
+  background-color: rgba(6, 78, 59, 0.25);
+}
+html.dark .bg-amber-50:not([class*="dark:bg-"]) {
+  background-color: rgba(120, 53, 15, 0.25);
+}
+html.dark .bg-sky-50:not([class*="dark:bg-"]) {
+  background-color: rgba(12, 74, 110, 0.25);
+}
+html.dark .bg-rose-50:not([class*="dark:bg-"]) {
+  background-color: rgba(136, 19, 55, 0.25);
+}
+html.dark .bg-purple-50:not([class*="dark:bg-"]) {
+  background-color: rgba(88, 28, 135, 0.25);
+}
+html.dark .bg-indigo-50:not([class*="dark:bg-"]) {
+  background-color: rgba(49, 46, 129, 0.25);
+}
+html.dark .bg-teal-50:not([class*="dark:bg-"]) {
+  background-color: rgba(19, 78, 74, 0.25);
+}
+
+/* Light gradient cards adaptation */
+html.dark [class*="from-emerald-50"],
+html.dark [class*="from-amber-50"],
+html.dark [class*="from-sky-50"],
+html.dark [class*="from-rose-50"],
+html.dark [class*="from-purple-50"],
+html.dark [class*="from-teal-50"],
+html.dark [class*="from-indigo-50"],
+html.dark [class*="from-slate-50"] {
+  background-image: none !important;
+  background-color: #0f172a !important;
+  border-color: #1e293b !important;
+}
+
+/* High contrast text overrides for badges & highlights in dark mode */
+html.dark .text-emerald-950, html.dark .text-emerald-900, html.dark .text-emerald-800 {
+  color: #6ee7b7 !important;
+}
+html.dark .text-amber-950, html.dark .text-amber-900, html.dark .text-amber-800 {
+  color: #fcd34d !important;
+}
+html.dark .text-teal-950, html.dark .text-teal-900, html.dark .text-teal-800 {
+  color: #5eead4 !important;
+}
+html.dark .text-sky-950, html.dark .text-sky-900, html.dark .text-sky-800 {
+  color: #7dd3fc !important;
+}
+html.dark .text-rose-950, html.dark .text-rose-900, html.dark .text-rose-800 {
+  color: #fda4af !important;
+}
+html.dark .text-purple-950, html.dark .text-purple-900, html.dark .text-purple-800 {
+  color: #d8b4fe !important;
+}
+html.dark .text-indigo-950, html.dark .text-indigo-900, html.dark .text-indigo-800 {
+  color: #a5b4fc !important;
+}
+
+/* Tables, headers, and rows in dark mode */
+html.dark table {
+  border-color: #1e293b !important;
+}
+html.dark table thead {
+  background-color: #0b1120 !important;
+}
+html.dark table thead th {
+  background-color: #0b1120 !important;
+  color: #94a3b8 !important;
+  border-color: #1e293b !important;
+  font-weight: 700;
+}
+html.dark table tbody {
+  background-color: #0f172a;
+}
+html.dark table tbody tr {
+  border-color: #1e293b !important;
+  background-color: #0f172a;
+}
+html.dark table tbody tr:hover {
+  background-color: rgba(30, 41, 59, 0.5) !important;
+}
+html.dark table tbody td {
+  border-color: #1e293b !important;
+  color: #f1f5f9;
+}
+
+/* Admin Portal Specific High-Contrast Semantic UI Rules */
+.admin-portal-root label {
+  color: #cbd5e1;
+}
+html.dark .admin-portal-root label {
+  color: #e2e8f0 !important;
+}
+
+/* Admin Button States (Secondary, Outline, Neutral) */
+html.dark .admin-portal-root button.bg-white:not([class*="dark:bg-"]),
+html.dark .admin-portal-root button.bg-slate-50:not([class*="dark:bg-"]),
+html.dark .admin-portal-root button.bg-slate-100:not([class*="dark:bg-"]) {
+  background-color: #1e293b !important;
+  color: #f1f5f9 !important;
+  border-color: #334155 !important;
+}
+
+html.dark .admin-portal-root button.bg-white:hover:not([class*="dark:bg-"]),
+html.dark .admin-portal-root button.bg-slate-50:hover:not([class*="dark:bg-"]),
+html.dark .admin-portal-root button.bg-slate-100:hover:not([class*="dark:bg-"]) {
+  background-color: #334155 !important;
+  color: #ffffff !important;
+}
+
+/* Hover state overrides for light list items & sub-menus in Admin */
+html.dark .admin-portal-root .hover\:bg-slate-50:hover,
+html.dark .admin-portal-root .hover\:bg-slate-100:hover,
+html.dark .admin-portal-root .hover\:bg-gray-50:hover,
+html.dark .admin-portal-root .hover\:bg-gray-100:hover {
+  background-color: #1e293b !important;
+}
+
+/* Custom Eye-Comfort Dark Mode Scrollbar */
+html.dark ::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+html.dark ::-webkit-scrollbar-track {
+  background: #080c14;
+}
+html.dark ::-webkit-scrollbar-thumb {
+  background: #1e293b;
+  border-radius: 9999px;
+  border: 2px solid #080c14;
+}
+html.dark ::-webkit-scrollbar-thumb:hover {
+  background: #334155;
+}
+
+/* Hide horizontal bottom scrollbars completely in Admin Portal & Tables while preserving smooth left/right movement */
+.admin-portal-root .overflow-x-auto,
+.admin-portal-root table,
+.admin-portal-root [class*="overflow-x-"],
+.no-scrollbar,
+.scrollbar-none {
+  -ms-overflow-style: none !important;
+  scrollbar-width: none !important;
+}
+
+.admin-portal-root .overflow-x-auto::-webkit-scrollbar,
+.admin-portal-root table::-webkit-scrollbar,
+.admin-portal-root [class*="overflow-x-"]::-webkit-scrollbar,
+.no-scrollbar::-webkit-scrollbar,
+.scrollbar-none::-webkit-scrollbar {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+}
+
+html.dark .admin-portal-root .overflow-x-auto::-webkit-scrollbar,
+html.dark .admin-portal-root [class*="overflow-x-"]::-webkit-scrollbar {
+  display: none !important;
+  height: 0 !important;
+  width: 0 !important;
+}
+
+/* Lossless image rendering and crisp sharpness */
+img {
+  image-rendering: -webkit-optimize-contrast;
+  image-rendering: auto;
+  -webkit-backface-visibility: hidden;
+  backface-visibility: hidden;
+}
+
+/* Enhanced font styling for Bengali headings and titles */
+.font-bangla {
+  font-family: 'Hind Siliguri', 'Plus Jakarta Sans', sans-serif;
+  letter-spacing: 0.01em;
+  line-height: 1.45;
+}
+
+/* Ultra-smooth mobile scrolling & content containment for 60fps performance */
 .product-card-contain {
-  contain: layout style;
+  contain: layout style paint;
   content-visibility: auto;
-  contain-intrinsic-size: 280px 380px;
+  contain-intrinsic-size: 240px 360px;
+  transform: translateZ(0);
+}
+
+/* Native momentum scrolling for horizontal carousels */
+.scrollbar-none {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+
+/* Hide horizontal scrollbars across all admin dashboard tables & card containers */
+.admin-portal-root .overflow-x-auto,
+.admin-portal-root [class*="overflow-x-"] {
+  -ms-overflow-style: none !important;
+  scrollbar-width: none !important;
+}
+.admin-portal-root .overflow-x-auto::-webkit-scrollbar,
+.admin-portal-root [class*="overflow-x-"]::-webkit-scrollbar {
+  display: none !important;
+  height: 0px !important;
+  width: 0px !important;
+}
+
+/* Dark mode glowing card effect */
+.dark .dark-glow-card {
+  box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(30, 41, 59, 0.8);
+}
+
+.dark .dark-glow-card:hover {
+  box-shadow: 0 8px 25px -2px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(56, 189, 248, 0.3);
 }
 
 @keyframes shine-sweep {
@@ -37,4 +388,105 @@ html, body {
 .animate-dark-glow {
   animation: dark-pulse-glow 2.8s infinite ease-in-out;
 }
+
+/* Disable or lighten continuous background CPU repaints on low-power mobile devices */
+@media (max-width: 768px) {
+  .animate-shine {
+    animation: none !important;
+  }
+  .animate-dark-glow {
+    animation: none !important;
+  }
+}
+
+/* Smart Dark Mode Super Crisp Heading & Category Readability */
+html.dark .font-heading-contrast {
+  color: #ffffff !important;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+}
+
+html.dark .category-badge-glow {
+  box-shadow: 0 0 12px -2px rgba(56, 189, 248, 0.25);
+}
+
+/* High-Contrast Inputs & Form Controls in Dark Mode */
+html.dark input:not([type="checkbox"]):not([type="radio"]):not([type="color"]),
+html.dark select,
+html.dark textarea {
+  color: #ffffff !important;
+}
+
+html.dark input:not([type="checkbox"]):not([type="radio"]):not([type="color"])::placeholder,
+html.dark textarea::placeholder {
+  color: #94a3b8 !important;
+}
+
+html.dark input:focus,
+html.dark select:focus,
+html.dark textarea:focus {
+  border-color: #38bdf8 !important;
+  box-shadow: 0 0 16px -1px rgba(56, 189, 248, 0.3) !important;
+}
+
+/* Subtle Night Mode Ambient Top Radiance */
+html.dark body::before {
+  content: '';
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 280px;
+  background: radial-gradient(50% 100% at 50% 0%, rgba(14, 165, 233, 0.08) 0%, transparent 100%);
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* Scrollbar-free smooth touch experience */
+.no-scrollbar::-webkit-scrollbar,
+.scrollbar-none::-webkit-scrollbar,
+.overflow-x-auto::-webkit-scrollbar,
+.overflow-x-scroll::-webkit-scrollbar {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+}
+.no-scrollbar,
+.scrollbar-none,
+.overflow-x-auto,
+.overflow-x-scroll {
+  -ms-overflow-style: none !important;
+  scrollbar-width: none !important;
+}
+
+/* Hide all scrollbars on mobile screens for a clean app-like experience */
+@media (max-width: 768px) {
+  ::-webkit-scrollbar {
+    display: none !important;
+    width: 0 !important;
+    height: 0 !important;
+  }
+  * {
+    -ms-overflow-style: none !important;
+    scrollbar-width: none !important;
+  }
+}
+
+/* Reseller Portal Global Clean UI & Invisible Scrollbars */
+.reseller-portal-root,
+.reseller-portal-root * {
+  scrollbar-width: none !important;
+  -ms-overflow-style: none !important;
+}
+
+.reseller-portal-root ::-webkit-scrollbar,
+.reseller-portal-root .overflow-x-auto::-webkit-scrollbar,
+.reseller-portal-root .overflow-y-auto::-webkit-scrollbar,
+.reseller-portal-root table::-webkit-scrollbar {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+}
+
+
+
 

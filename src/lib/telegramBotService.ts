@@ -8,8 +8,8 @@ import {
   TelegramTemplate,
   TelegramEventType,
   TelegramLog,
-} from '../types';
-import { db } from './firebase';
+} from '../types/index.ts';
+import { db } from './firebase.ts';
 import { doc, getDoc, setDoc, onSnapshot, collection, addDoc, getDocs, query, orderBy, limit } from 'firebase/firestore';
 
 export const DEFAULT_TELEGRAM_TEMPLATES: Record<TelegramEventType, TelegramTemplate> = {
@@ -222,6 +222,32 @@ Thank you for choosing <b>{{siteName}}</b>!`,
     ],
   },
 
+  customer_order_delivered: {
+    id: 'customer_order_delivered',
+    title: 'Customer Order Delivered & Review Request',
+    banglaTitle: 'কাস্টমার অর্ডার ডেলিভারড এবং ওয়েবসাইট রিভিউ রিকোয়েস্ট',
+    recipientType: 'customer',
+    enabled: true,
+    message: `🎉 <b>Order Delivered Successfully!</b> — <code>#{{orderId}}</code>
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+Dear <b>{{customerName}}</b>,
+Your order <code>#{{orderId}}</code> from <b>{{siteName}}</b> has been successfully delivered! 📦
+
+⭐ <b>How was your experience?</b>
+We would love to hear your feedback! Please leave an authentic product review on our website:
+👉 <b>Website Review Link:</b> <a href="https://kenaxbd.ai.studio">https://kenaxbd.ai.studio</a>
+
+📞 <b>Support Helpline:</b> {{helpline}}
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+Thank you for shopping with <b>{{siteName}}</b>!`,
+    variables: [
+      '{{orderId}}',
+      '{{customerName}}',
+      '{{siteName}}',
+      '{{helpline}}',
+    ],
+  },
+
   channel_new_product: {
     id: 'channel_new_product',
     title: 'New Product Broadcast (Public Channel)',
@@ -396,6 +422,49 @@ A new discount campaign or coupon code was created!
       '{{channelBroadcastStatus}}',
     ],
   },
+
+  admin_fake_order_alert: {
+    id: 'admin_fake_order_alert',
+    title: 'Staff Fake Order Action Alert',
+    banglaTitle: 'স্টাফ কর্তৃক ফেক অর্ডার চিহ্নিত অ্যালার্ট (সুপার অ্যাডমিন ও অ্যাডমিন)',
+    recipientType: 'super_admin',
+    enabled: true,
+    message: `🚨 <b>[FAKE ORDER ALERT - STAFF ACTION]</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+⚠️ <b>স্টাফ কর্তৃক একটি অর্ডারকে 'ফেক অর্ডার' হিসেবে চিহ্নিত করা হয়েছে:</b>
+
+👨‍💼 <b>স্টাফের বিবরণ:</b>
+• <b>নাম:</b> <b>{{staffName}}</b>
+• <b>পদবী:</b> <code>{{staffRole}}</code>
+• <b>স্টাফ আইডি:</b> {{staffId}}
+
+🆔 <b>অর্ডার আইডি:</b> <code>#{{orderId}}</code>
+📦 <b>আইটেমসমূহ:</b>
+{{itemsList}}
+
+💰 <b>মোট টাকা:</b> <b>৳{{totalAmount}}</b> ({{paymentMethod}})
+👤 <b>কাস্টমার:</b> {{customerName}}
+📱 <b>মোবাইল:</b> <code>{{customerMobile}}</code>
+📍 <b>ঠিকানা:</b> {{fullAddress}}
+🕒 <b>অ্যাকশন সময়:</b> {{actionTime}}
+📝 <b>স্টাফের নোট/কারণ:</b> <i>{{note}}</i>
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+🔒 <b>রিয়েল করার অনুমতি:</b> <i>শুধুমাত্র সুপার অ্যাডমিন এই অর্ডারটি আনফেক (রিয়েল) করতে পারবেন।</i>`,
+    variables: [
+      '{{staffName}}',
+      '{{staffRole}}',
+      '{{staffId}}',
+      '{{orderId}}',
+      '{{itemsList}}',
+      '{{totalAmount}}',
+      '{{paymentMethod}}',
+      '{{customerName}}',
+      '{{customerMobile}}',
+      '{{fullAddress}}',
+      '{{actionTime}}',
+      '{{note}}',
+    ],
+  },
 };
 
 export const DEFAULT_TELEGRAM_BOT_SETTINGS: TelegramBotSettings = {
@@ -419,6 +488,12 @@ export const DEFAULT_TELEGRAM_BOT_SETTINGS: TelegramBotSettings = {
   notifySuperAdminOnProductCreated: true,
   notifySuperAdminOnDiscountCreated: true,
   notifySuperAdminOnCouponCreated: true,
+  telegramMiniAppEnabled: true,
+  telegramMiniAppButtonTitle: '🛍️ Open KenaX Store',
+  telegramMiniAppAutoFill: true,
+  telegramMiniAppHaptics: true,
+  telegramMiniAppThemeSync: true,
+  telegramMiniAppTrackOrderButton: true,
   customerNotifyStatuses: {
     confirmed: true,
     processing: true,
@@ -461,62 +536,121 @@ export function getTelegramSettingsSync(): TelegramBotSettings {
 }
 
 /**
- * Get Telegram settings from Firestore or fallback to localStorage
+ * Get Telegram settings from Server API and Firestore, or fallback to localStorage
  */
 export async function getTelegramSettingsFromDB(): Promise<TelegramBotSettings> {
   const localSettings = getTelegramSettingsSync();
+  let serverSettings: Partial<TelegramBotSettings> | null = null;
+  let firestoreSettings: Partial<TelegramBotSettings> | null = null;
+
+  // 1. Fetch from Express Server API with 3s timeout
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 3000);
+    const res = await fetch('/api/telegram/settings', { signal: controller.signal });
+    clearTimeout(timeoutId);
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.success && data.settings) {
+        serverSettings = data.settings;
+      }
+    }
+  } catch (e) {
+    // Non-blocking fallback
+  }
+
+  // 2. Fetch from Firestore with 3.5s timeout
   try {
     if (db) {
-      const snap = await getDoc(doc(db, 'system_settings', SETTINGS_DOC_ID));
-      if (snap.exists()) {
-        const data = snap.data() as Partial<TelegramBotSettings>;
-        const merged: TelegramBotSettings = {
-          ...DEFAULT_TELEGRAM_BOT_SETTINGS,
-          ...localSettings,
-          ...data,
-          customerNotifyStatuses: {
-            ...DEFAULT_TELEGRAM_BOT_SETTINGS.customerNotifyStatuses,
-            ...(localSettings.customerNotifyStatuses || {}),
-            ...(data.customerNotifyStatuses || {}),
-          },
-          templates: {
-            ...DEFAULT_TELEGRAM_TEMPLATES,
-            ...(localSettings.templates || {}),
-            ...(data.templates || {}),
-          },
-        };
-        try {
-          localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(merged));
-        } catch {}
-        return merged;
-      }
+      const fetchFirestore = async () => {
+        const snap = await getDoc(doc(db, 'system_settings', SETTINGS_DOC_ID));
+        if (snap.exists()) {
+          return snap.data() as Partial<TelegramBotSettings>;
+        }
+        return null;
+      };
+
+      firestoreSettings = await Promise.race([
+        fetchFirestore(),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 3500)),
+      ]);
     }
   } catch (err) {
     console.warn('[Telegram Settings DB Read Fallback]:', err);
   }
 
-  return localSettings;
+  const merged: TelegramBotSettings = {
+    ...DEFAULT_TELEGRAM_BOT_SETTINGS,
+    ...localSettings,
+    ...(firestoreSettings || {}),
+    ...(serverSettings || {}),
+    customerNotifyStatuses: {
+      ...DEFAULT_TELEGRAM_BOT_SETTINGS.customerNotifyStatuses,
+      ...(localSettings.customerNotifyStatuses || {}),
+      ...(firestoreSettings?.customerNotifyStatuses || {}),
+      ...(serverSettings?.customerNotifyStatuses || {}),
+    },
+    templates: {
+      ...DEFAULT_TELEGRAM_TEMPLATES,
+      ...(localSettings.templates || {}),
+      ...(firestoreSettings?.templates || {}),
+      ...(serverSettings?.templates || {}),
+    },
+  };
+
+  try {
+    localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(merged));
+  } catch {}
+
+  return merged;
 }
 
 /**
- * Save Telegram settings to Firestore and localStorage
+ * Save Telegram settings to Server API, Firestore, and localStorage
+ * Guaranteed to resolve promptly without hanging
  */
 export async function saveTelegramSettingsToDB(settings: TelegramBotSettings): Promise<boolean> {
+  // 1. Immediate LocalStorage Write
   try {
     localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(settings));
   } catch {}
 
-  try {
-    if (db) {
-      await setDoc(doc(db, 'system_settings', SETTINGS_DOC_ID), {
-        ...settings,
-        updatedAt: new Date().toISOString(),
-      });
+  const payload = {
+    ...settings,
+    updatedAt: new Date().toISOString(),
+  };
+
+  // 2. Server API Write (synchronous disk persistence)
+  const serverSavePromise = fetch('/api/telegram/settings', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ settings: payload }),
+  }).catch((err) => {
+    console.warn('[Telegram Settings Server POST Notice]:', err);
+    return null;
+  });
+
+  // 3. Firestore Write with 3.5s safety timeout
+  const firestoreSavePromise = (async () => {
+    if (!db) return true;
+    try {
+      await setDoc(doc(db, 'system_settings', SETTINGS_DOC_ID), payload, { merge: true });
       return true;
+    } catch (err) {
+      console.warn('[Telegram Settings Firestore Write Warning]:', err);
+      return false;
     }
-  } catch (err) {
-    console.warn('[Telegram Settings DB Write Warning]:', err);
-  }
+  })();
+
+  const firestoreWithTimeout = Promise.race([
+    firestoreSavePromise,
+    new Promise<boolean>((resolve) => setTimeout(() => resolve(true), 3500)),
+  ]);
+
+  // Wait for both writes to settle promptly
+  try {
+    await Promise.allSettled([serverSavePromise, firestoreWithTimeout]);
+  } catch {}
 
   return true;
 }
@@ -559,7 +693,7 @@ export function subscribeToTelegramSettings(callback: (settings: TelegramBotSett
 }
 
 /**
- * Test Telegram bot connection using getMe endpoint
+ * Test Telegram bot connection using Server proxy or direct getMe endpoint
  */
 export async function testTelegramBotConnection(token: string): Promise<{
   success: boolean;
@@ -576,6 +710,32 @@ export async function testTelegramBotConnection(token: string): Promise<{
     return { success: false, error: 'Bot token cannot be empty.' };
   }
 
+  // 1. Try server-side endpoint first (immune to client-side CORS / adblock / DNS blocks)
+  try {
+    const sRes = await fetch('/api/telegram/test-bot', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: cleanToken }),
+    });
+    if (sRes.ok) {
+      const sData = await sRes.json();
+      if (sData && (sData.success || sData.botInfo)) {
+        return {
+          success: true,
+          botInfo: sData.botInfo,
+        };
+      } else if (sData && sData.error) {
+        return {
+          success: false,
+          error: sData.error,
+        };
+      }
+    }
+  } catch (serverErr) {
+    // Fallback to direct client fetch
+  }
+
+  // 2. Direct client fetch fallback
   try {
     const res = await fetch(`https://api.telegram.org/bot${cleanToken}/getMe`, {
       method: 'GET',
@@ -753,7 +913,14 @@ export async function saveTelegramLogToDB(log: Omit<TelegramLog, 'id'>): Promise
     localStorage.setItem(LOCAL_LOGS_KEY, JSON.stringify(updated));
   } catch {}
 
-  // 2. Firestore
+  // 2. Server API
+  fetch('/api/telegram/logs', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ log: fullLog }),
+  }).catch(() => {});
+
+  // 3. Firestore
   try {
     if (db) {
       await addDoc(collection(db, 'telegram_logs'), fullLog);
@@ -767,6 +934,18 @@ export async function saveTelegramLogToDB(log: Omit<TelegramLog, 'id'>): Promise
  * Retrieve Telegram logs
  */
 export async function getTelegramLogsFromDB(): Promise<TelegramLog[]> {
+  // 1. Server API
+  try {
+    const sRes = await fetch('/api/telegram/logs');
+    if (sRes.ok) {
+      const sData = await sRes.json();
+      if (sData && sData.success && Array.isArray(sData.logs) && sData.logs.length > 0) {
+        return sData.logs;
+      }
+    }
+  } catch {}
+
+  // 2. Firestore
   try {
     if (db) {
       const q = query(collection(db, 'telegram_logs'), orderBy('timestamp', 'desc'), limit(50));
@@ -779,6 +958,7 @@ export async function getTelegramLogsFromDB(): Promise<TelegramLog[]> {
     console.warn('[Telegram Logs DB Query Warning]:', err);
   }
 
+  // 3. LocalStorage fallback
   try {
     const local = localStorage.getItem(LOCAL_LOGS_KEY);
     if (local) {
@@ -1042,7 +1222,7 @@ export async function triggerTelegramOrderStatusChange(params: {
   order: Order;
   prevStatus: string;
   newStatus: string;
-  staffUser: StaffUser | null;
+  staffUser?: StaffUser | { id?: string; name?: string; role?: any; email?: string } | null;
   courierName?: string;
   trackingNumber?: string;
   customSettings?: TelegramBotSettings;
@@ -1083,9 +1263,9 @@ export async function triggerTelegramOrderStatusChange(params: {
     };
 
     // A) Send Super Admin Notification WITH STAFF INFORMATION
-    if (settings.notifySuperAdminOnStaffActivity && settings.superAdminChatId) {
-      const saTemplate = settings.templates.super_admin_staff_activity;
-      if (saTemplate?.enabled) {
+    if (settings.notifySuperAdminOnStaffActivity !== false && settings.superAdminChatId) {
+      const saTemplate = settings.templates?.super_admin_staff_activity || DEFAULT_TELEGRAM_TEMPLATES.super_admin_staff_activity;
+      if (saTemplate && saTemplate.enabled !== false) {
         const staffVars: Record<string, string> = {
           ...baseVars,
           '{{staffName}}': staffUser?.name || 'System / Admin',
@@ -1121,27 +1301,38 @@ export async function triggerTelegramOrderStatusChange(params: {
     // B) Send Customer Notification WITHOUT STAFF INFORMATION
     const statusKey = newStatus.toLowerCase() as keyof typeof settings.customerNotifyStatuses;
     const isStatusAllowed = settings.customerNotifyStatuses[statusKey] ?? true;
+    const customerChatId = order.telegramChatId || (order as any).customerTelegramChatId;
 
-    if (settings.notifyCustomerOnStatusUpdate && isStatusAllowed && order.telegramChatId) {
-      const custTemplate = settings.templates.customer_order_status_update;
+    if (settings.notifyCustomerOnStatusUpdate && isStatusAllowed && customerChatId) {
+      const isDelivered =
+        newStatus.toLowerCase() === 'delivered' ||
+        newStatus.toLowerCase() === 'delivered successfully' ||
+        newStatus.toLowerCase() === 'completed';
+
+      const custTemplate = isDelivered
+        ? settings.templates.customer_order_delivered || DEFAULT_TELEGRAM_TEMPLATES.customer_order_delivered
+        : settings.templates.customer_order_status_update || DEFAULT_TELEGRAM_TEMPLATES.customer_order_status_update;
+
       if (custTemplate?.enabled) {
         const custText = formatTelegramMessage(custTemplate.message, baseVars);
         const result = await sendTelegramMessage({
           botToken: settings.botToken,
-          chatId: order.telegramChatId,
+          chatId: customerChatId,
           text: custText,
         });
 
         await saveTelegramLogToDB({
           timestamp: new Date().toISOString(),
-          eventType: 'customer_order_status_update',
-          recipientChatId: order.telegramChatId,
+          eventType: isDelivered ? 'customer_order_delivered' : 'customer_order_status_update',
+          recipientChatId: customerChatId,
           recipientType: 'customer',
           recipientName: order.customerName,
           orderId: order.id,
           status: result.success ? 'sent' : 'failed',
           errorMessage: result.error,
-          messagePreview: `[Customer Status Update] #${order.id} ➔ ${newStatus}`,
+          messagePreview: isDelivered
+            ? `[Customer Delivered Review Request] #${order.id}`
+            : `[Customer Status Update] #${order.id} ➔ ${newStatus}`,
         });
       }
     }
@@ -1535,4 +1726,172 @@ export async function triggerTelegramCouponWorkflow(params: {
     console.error('[Telegram Coupon Workflow Error]:', err);
   }
 }
+
+/**
+ * 6. Trigger Reseller Dropship Order Workflow:
+ *    - Sends attractive notification to Admin & Super Admin with Reseller Store, Student Name, Customer info & Net Margin.
+ */
+export async function triggerTelegramResellerOrderWorkflow(params: {
+  order: Order;
+  resellerStoreName?: string;
+  resellerStudentName?: string;
+  resellerPhone?: string;
+  resellerProfit?: number;
+  customSettings?: TelegramBotSettings;
+}): Promise<void> {
+  const { order, resellerStoreName, resellerStudentName, resellerPhone, resellerProfit, customSettings } = params;
+
+  try {
+    const settings = customSettings || (await getTelegramSettingsFromDB());
+    if (!settings.enabled || !settings.botToken) return;
+
+    const store = resellerStoreName || (order as any).resellerStoreName || 'Reseller Partner Store';
+    const student = resellerStudentName || (order as any).resellerStudentName || (order as any).resellerName || 'Verified Reseller';
+    const phone = resellerPhone || (order as any).resellerPhone || (order as any).advancePaymentSender || 'N/A';
+    const profit = resellerProfit !== undefined ? resellerProfit : (Number((order as any).resellerProfit) || 0);
+
+    const itemsSummary = (order.items || [])
+      .map(
+        (it, idx) =>
+          `  ${idx + 1}. <b>${it.productName || it.name || 'Product'}</b> x${it.quantity} — ৳${(it.price * it.quantity).toLocaleString()}`
+      )
+      .join('\n');
+
+    const msg = `🚀 <b>[NEW RESELLER DROPSHIP ORDER]</b> — <code>#${order.id}</code>
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+🏷️ <b>Reseller & Student Information:</b>
+• <b>Store / Page:</b> 🏪 <b>${store}</b>
+• <b>Student / Reseller:</b> 🎓 <b>${student}</b>
+• <b>Phone:</b> <code>${phone}</code>
+• <b>Reseller ID:</b> <code>#${(order as any).resellerId || 'reseller'}</code>
+• <b>Expected Profit:</b> <b>৳${profit.toLocaleString()}</b>
+
+👤 <b>Customer Delivery Information:</b>
+• <b>Name:</b> ${order.customerName || 'Customer'}
+• <b>Mobile:</b> <code>${order.customerMobile || order.deliveryMobile || 'N/A'}</code>
+• <b>District:</b> ${order.district || 'Bangladesh'}
+• <b>Full Address:</b> ${order.fullAddress || 'N/A'}
+
+📦 <b>Ordered Products:</b>
+${itemsSummary}
+
+💰 <b>Payment & Settlement:</b>
+• <b>Total Customer COD:</b> <b>৳${(order.totalAmount || 0).toLocaleString()}</b>
+• <b>Advance Paid:</b> ৳${((order as any).advancePaymentAmount || order.paidAmount || 0).toLocaleString()}
+• <b>Due on Delivery:</b> <b>৳${((order as any).remainingCodAmount || order.totalAmount || 0).toLocaleString()}</b>
+• <b>Reseller Net Margin:</b> <b>+৳${profit.toLocaleString()}</b>
+
+⚡ <b>Order Status:</b> ⏳ <b>PENDING CONFIRMATION (RESELLER HUB)</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+👉 <i>Please review & confirm in Admin Reseller Orders Panel!</i>`;
+
+    const targets = new Set<string>();
+    if (settings.superAdminChatId) targets.add(settings.superAdminChatId.trim());
+    (settings.adminChatIds || []).forEach((c) => c && targets.add(c.trim()));
+    (settings.moderatorChatIds || []).forEach((c) => c && targets.add(c.trim()));
+
+    for (const chatId of targets) {
+      if (!chatId) continue;
+      const result = await sendTelegramMessage({
+        botToken: settings.botToken,
+        chatId,
+        text: msg,
+      });
+
+      await saveTelegramLogToDB({
+        timestamp: new Date().toISOString(),
+        eventType: 'admin_new_order',
+        recipientChatId: chatId,
+        recipientType: chatId === settings.superAdminChatId ? 'super_admin' : 'admin',
+        recipientName: 'Admin / Moderator',
+        orderId: order.id,
+        status: result.success ? 'sent' : 'failed',
+        errorMessage: result.error,
+        messagePreview: `[Reseller Order #${order.id}] ${store} (${student}) - ৳${order.totalAmount}`,
+      });
+    }
+  } catch (err) {
+    console.error('[Telegram Reseller Order Workflow Error]:', err);
+  }
+}
+
+/**
+ * Trigger Fake Order Alert to Super Admin & Admins when a staff member marks an order as Fake
+ */
+export async function triggerTelegramFakeOrderAlert(params: {
+  order: Order;
+  staffName?: string;
+  staffRole?: string;
+  staffId?: string;
+  staffEmail?: string;
+  note?: string;
+  customSettings?: TelegramBotSettings;
+}): Promise<void> {
+  const { order, staffName, staffRole, staffId, staffEmail, note, customSettings } = params;
+
+  try {
+    const settings = customSettings || (await getTelegramSettingsFromDB());
+    if (!settings.enabled || !settings.botToken) return;
+
+    const itemsSummary = (order.items || [])
+      .map(
+        (it, idx) =>
+          `  ${idx + 1}. <b>${it.productName || it.name || 'Product'}</b> x${it.quantity} — ৳${(it.price * it.quantity).toLocaleString()}`
+      )
+      .join('\n');
+
+    const template =
+      settings.templates?.admin_fake_order_alert || DEFAULT_TELEGRAM_TEMPLATES.admin_fake_order_alert;
+    if (!template || template.enabled === false) return;
+
+    const vars: Record<string, string> = {
+      '{{staffName}}': staffName || 'Staff Member',
+      '{{staffRole}}': (staffRole || 'Staff').toUpperCase(),
+      '{{staffId}}': staffId || 'N/A',
+      '{{staffEmail}}': staffEmail || 'N/A',
+      '{{orderId}}': order.id,
+      '{{itemsList}}': itemsSummary || 'Standard Order Items',
+      '{{totalAmount}}': (order.totalAmount || 0).toLocaleString(),
+      '{{paymentMethod}}': order.paymentMethod || 'Cash on Delivery',
+      '{{customerName}}': order.customerName || 'Customer',
+      '{{customerMobile}}': order.customerMobile || order.deliveryMobile || 'N/A',
+      '{{fullAddress}}': order.fullAddress || 'N/A',
+      '{{actionTime}}': new Date().toLocaleString('en-US', {
+        dateStyle: 'medium',
+        timeStyle: 'short',
+      }),
+      '{{note}}': note || 'Marked as Fake Order by Staff',
+    };
+
+    const text = formatTelegramMessage(template.message, vars);
+
+    const targets = new Set<string>();
+    if (settings.superAdminChatId) targets.add(settings.superAdminChatId.trim());
+    (settings.adminChatIds || []).forEach((c) => c && targets.add(c.trim()));
+
+    for (const chatId of targets) {
+      if (!chatId) continue;
+      const result = await sendTelegramMessage({
+        botToken: settings.botToken,
+        chatId,
+        text,
+      });
+
+      await saveTelegramLogToDB({
+        timestamp: new Date().toISOString(),
+        eventType: 'super_admin_staff_activity',
+        recipientChatId: chatId,
+        recipientType: chatId === settings.superAdminChatId ? 'super_admin' : 'admin',
+        recipientName: 'Super Admin / Admin',
+        orderId: order.id,
+        status: result.success ? 'sent' : 'failed',
+        errorMessage: result.error,
+        messagePreview: `[Fake Order Alert #${order.id}] Marked by ${staffName || 'Staff'}`,
+      });
+    }
+  } catch (err) {
+    console.error('[Telegram Fake Order Alert Workflow Error]:', err);
+  }
+}
+
 

@@ -66,10 +66,10 @@ interface AdminOverviewProps {
 }
 
 export const AdminOverview: React.FC<AdminOverviewProps> = ({
-  orders,
-  products,
-  customers,
-  activityLogs,
+  orders = [],
+  products = [],
+  customers = [],
+  activityLogs = [],
   expenses = [],
   otherProfits = [],
   onAddExpense,
@@ -160,7 +160,7 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
 
   // Helper function to calculate total original product cost for an order
   const getOrderOriginalCost = (order: Order): number => {
-    if (!order.items || order.items.length === 0) return 0;
+    if (!order?.items || !Array.isArray(order.items) || order.items.length === 0) return 0;
     return order.items.reduce((sum, item) => {
       const unitCost = getItemOriginalCost(item);
       return sum + unitCost * (item.quantity || 1);
@@ -872,7 +872,7 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
       ctx.fillStyle = '#94a3b8';
       ctx.font = '13px system-ui, -apple-system, sans-serif';
       ctx.fillText(
-        `Generated On: ${new Date().toLocaleString('en-US', { dateStyle: 'full', timeStyle: 'short' })} | Period: ${getFinTimeframeLabel(finTimeframe)} | Signatory: Sadik`,
+        `Generated On: ${new Date()?.toLocaleString('en-US', { dateStyle: 'full', timeStyle: 'short' })} | Period: ${getFinTimeframeLabel(finTimeframe)} | Signatory: Sadik`,
         65,
         175
       );
@@ -910,10 +910,10 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
       ctx.fillText('MONEY RECEIVED (DELIVERED ORDERS CASH)', 65, startY + 36);
       ctx.fillStyle = '#0f172a';
       ctx.font = 'bold 32px system-ui, -apple-system, sans-serif';
-      ctx.fillText(`৳${totalMoneyReceived.toLocaleString('en-BD')}`, 65, startY + 76);
+      ctx.fillText(`৳${totalMoneyReceived?.toLocaleString('en-BD')}`, 65, startY + 76);
       ctx.fillStyle = '#64748b';
       ctx.font = '12px system-ui, -apple-system, sans-serif';
-      ctx.fillText(`${deliveredOrders.length} Delivered Orders • Today: ৳${todayMoneyReceived.toLocaleString('en-BD')}`, 65, startY + 98);
+      ctx.fillText(`${deliveredOrders.length} Delivered Orders • Today: ৳${todayMoneyReceived?.toLocaleString('en-BD')}`, 65, startY + 98);
 
       // Card 2: Delivered Product Costs
       drawRoundRect(ctx, 620, startY, 540, 115, 16, '#ffffff', '#cbd5e1');
@@ -922,10 +922,10 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
       ctx.fillText('PRODUCT COSTS (SUPPLIER / WHOLESALE SOURCING)', 645, startY + 36);
       ctx.fillStyle = '#0f172a';
       ctx.font = 'bold 32px system-ui, -apple-system, sans-serif';
-      ctx.fillText(`৳${totalDeliveredCost.toLocaleString('en-BD')}`, 645, startY + 76);
+      ctx.fillText(`৳${totalDeliveredCost?.toLocaleString('en-BD')}`, 645, startY + 76);
       ctx.fillStyle = '#64748b';
       ctx.font = '12px system-ui, -apple-system, sans-serif';
-      ctx.fillText(`Sourcing Cost of Delivered Goods • Today: ৳${todayDeliveredCost.toLocaleString('en-BD')}`, 645, startY + 98);
+      ctx.fillText(`Sourcing Cost of Delivered Goods • Today: ৳${todayDeliveredCost?.toLocaleString('en-BD')}`, 645, startY + 98);
 
       startY += 130;
 
@@ -937,10 +937,10 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
       ctx.fillText('PRODUCT PROFIT (GROSS PRODUCT MARGIN)', 65, startY + 36);
       ctx.fillStyle = '#0284c7';
       ctx.font = 'bold 32px system-ui, -apple-system, sans-serif';
-      ctx.fillText(`৳${totalProductProfit.toLocaleString('en-BD')}`, 65, startY + 76);
+      ctx.fillText(`৳${totalProductProfit?.toLocaleString('en-BD')}`, 65, startY + 76);
       ctx.fillStyle = '#64748b';
       ctx.font = '12px system-ui, -apple-system, sans-serif';
-      ctx.fillText(`Margin: ${productProfitMarginPercent}% • Sales: ৳${totalDeliveredProductSales.toLocaleString('en-BD')}`, 65, startY + 98);
+      ctx.fillText(`Margin: ${productProfitMarginPercent}% • Sales: ৳${totalDeliveredProductSales?.toLocaleString('en-BD')}`, 65, startY + 98);
 
       // Card 4: Total Delivery & Operational Expenses
       drawRoundRect(ctx, 620, startY, 540, 115, 16, '#ffffff', '#cbd5e1');
@@ -949,10 +949,10 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
       ctx.fillText('TOTAL DELIVERY & OPERATIONAL EXPENSES', 645, startY + 36);
       ctx.fillStyle = '#e11d48';
       ctx.font = 'bold 32px system-ui, -apple-system, sans-serif';
-      ctx.fillText(`৳${totalAllExpenses.toLocaleString('en-BD')}`, 645, startY + 76);
+      ctx.fillText(`৳${totalAllExpenses?.toLocaleString('en-BD')}`, 645, startY + 76);
       ctx.fillStyle = '#64748b';
       ctx.font = '12px system-ui, -apple-system, sans-serif';
-      ctx.fillText(`Delivery: ৳${totalDeliveryExpenses.toLocaleString('en-BD')} | Others: ৳${totalOtherExpenses.toLocaleString('en-BD')}`, 645, startY + 98);
+      ctx.fillText(`Delivery: ৳${totalDeliveryExpenses?.toLocaleString('en-BD')} | Others: ৳${totalOtherExpenses?.toLocaleString('en-BD')}`, 645, startY + 98);
 
       startY += 130;
 
@@ -964,10 +964,10 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
       ctx.fillText('ADVANCE DELIVERY (VERIFIED CHARGES COLLECTED)', 65, startY + 36);
       ctx.fillStyle = '#4f46e5';
       ctx.font = 'bold 32px system-ui, -apple-system, sans-serif';
-      ctx.fillText(`৳${totalVerifiedDeliveryAdvance.toLocaleString('en-BD')}`, 65, startY + 76);
+      ctx.fillText(`৳${totalVerifiedDeliveryAdvance?.toLocaleString('en-BD')}`, 65, startY + 76);
       ctx.fillStyle = '#64748b';
       ctx.font = '12px system-ui, -apple-system, sans-serif';
-      ctx.fillText(`${verifiedAdvanceOrders.length} Approved • Pending: ৳${totalPendingDeliveryAdvance.toLocaleString('en-BD')}`, 65, startY + 98);
+      ctx.fillText(`${verifiedAdvanceOrders.length} Approved • Pending: ৳${totalPendingDeliveryAdvance?.toLocaleString('en-BD')}`, 65, startY + 98);
 
       // Card 6: Others Profit (Extra Business Income)
       drawRoundRect(ctx, 620, startY, 540, 115, 16, '#ffffff', '#cbd5e1');
@@ -976,10 +976,10 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
       ctx.fillText('OTHERS PROFIT (EXTRA NON-ORDER REVENUE)', 645, startY + 36);
       ctx.fillStyle = '#7c3aed';
       ctx.font = 'bold 32px system-ui, -apple-system, sans-serif';
-      ctx.fillText(`৳${totalOtherProfits.toLocaleString('en-BD')}`, 645, startY + 76);
+      ctx.fillText(`৳${totalOtherProfits?.toLocaleString('en-BD')}`, 645, startY + 76);
       ctx.fillStyle = '#64748b';
       ctx.font = '12px system-ui, -apple-system, sans-serif';
-      ctx.fillText(`${finFilteredOtherProfits.length} Extra Profit Entries • Today Added: ৳${todayOtherProfits.toLocaleString('en-BD')}`, 645, startY + 98);
+      ctx.fillText(`${finFilteredOtherProfits.length} Extra Profit Entries • Today Added: ৳${todayOtherProfits?.toLocaleString('en-BD')}`, 645, startY + 98);
 
       startY += 130;
 
@@ -991,10 +991,10 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
       ctx.fillText('★ REAL NET PROFIT (WITH OTHERS PROFIT ADDED) ★', 65, startY + 36);
       ctx.fillStyle = '#166534';
       ctx.font = 'bold 38px system-ui, -apple-system, sans-serif';
-      ctx.fillText(`৳${totalNetRevenue.toLocaleString('en-BD')}`, 65, startY + 80);
+      ctx.fillText(`৳${totalNetRevenue?.toLocaleString('en-BD')}`, 65, startY + 80);
       ctx.fillStyle = '#15803d';
       ctx.font = 'bold 13px system-ui, -apple-system, sans-serif';
-      ctx.fillText(`Formula: Received (৳${totalMoneyReceived.toLocaleString('en-BD')}) + Other Profit (৳${totalOtherProfits.toLocaleString('en-BD')}) - Costs - Expenses`, 65, startY + 110);
+      ctx.fillText(`Formula: Received (৳${totalMoneyReceived?.toLocaleString('en-BD')}) + Other Profit (৳${totalOtherProfits?.toLocaleString('en-BD')}) - Costs - Expenses`, 65, startY + 110);
 
       // Card 8: Pipeline Forecast
       drawRoundRect(ctx, 620, startY, 540, 130, 18, '#ffffff', '#cbd5e1');
@@ -1003,10 +1003,10 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
       ctx.fillText('PIPELINE FORECAST (IN-TRANSIT & PROCESSING)', 645, startY + 36);
       ctx.fillStyle = '#0284c7';
       ctx.font = 'bold 38px system-ui, -apple-system, sans-serif';
-      ctx.fillText(`৳${upcomingTotalAmount.toLocaleString('en-BD')}`, 645, startY + 80);
+      ctx.fillText(`৳${upcomingTotalAmount?.toLocaleString('en-BD')}`, 645, startY + 80);
       ctx.fillStyle = '#64748b';
       ctx.font = '13px system-ui, -apple-system, sans-serif';
-      ctx.fillText(`${upcomingOrders.length} In-Transit Orders • Est. Profit: ৳${upcomingExpectedProfit.toLocaleString('en-BD')}`, 645, startY + 110);
+      ctx.fillText(`${upcomingOrders.length} In-Transit Orders • Est. Profit: ৳${upcomingExpectedProfit?.toLocaleString('en-BD')}`, 645, startY + 110);
 
       // 2. PERIOD SNAPSHOT & ORDER FULFILLMENT BREAKDOWN
       startY += 170;
@@ -1024,13 +1024,13 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
 
       ctx.fillStyle = '#334155';
       ctx.font = '14px system-ui, -apple-system, sans-serif';
-      ctx.fillText(`• Money Received: ৳${totalMoneyReceived.toLocaleString('en-BD')}`, 65, startY + 72);
-      ctx.fillText(`• Product Sourcing Costs: ৳${totalDeliveredCost.toLocaleString('en-BD')}`, 65, startY + 102);
-      ctx.fillText(`• Total Operating Expenses: ৳${totalAllExpenses.toLocaleString('en-BD')}`, 65, startY + 132);
-      ctx.fillText(`• Others Profit Added: +৳${totalOtherProfits.toLocaleString('en-BD')}`, 65, startY + 162);
+      ctx.fillText(`• Money Received: ৳${totalMoneyReceived?.toLocaleString('en-BD')}`, 65, startY + 72);
+      ctx.fillText(`• Product Sourcing Costs: ৳${totalDeliveredCost?.toLocaleString('en-BD')}`, 65, startY + 102);
+      ctx.fillText(`• Total Operating Expenses: ৳${totalAllExpenses?.toLocaleString('en-BD')}`, 65, startY + 132);
+      ctx.fillText(`• Others Profit Added: +৳${totalOtherProfits?.toLocaleString('en-BD')}`, 65, startY + 162);
       ctx.fillStyle = '#15803d';
       ctx.font = 'bold 15px system-ui, -apple-system, sans-serif';
-      ctx.fillText(`★ Real Net Profit: ৳${totalNetRevenue.toLocaleString('en-BD')}`, 65, startY + 188);
+      ctx.fillText(`★ Real Net Profit: ৳${totalNetRevenue?.toLocaleString('en-BD')}`, 65, startY + 188);
 
       // Right Box: Order Volume Pipeline
       drawRoundRect(ctx, 620, startY, 540, 200, 18, '#ffffff', '#cbd5e1');
@@ -1042,11 +1042,11 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
       ctx.font = '14px system-ui, -apple-system, sans-serif';
       ctx.fillText(`• Filtered Orders: ${finFilteredOrders.length} orders in period`, 645, startY + 72);
       ctx.fillText(`• Successfully Delivered: ${deliveredOrders.length} orders (100% Cash Realized)`, 645, startY + 102);
-      ctx.fillText(`• Progressing Pipeline: ${upcomingOrders.length} orders (৳${upcomingTotalAmount.toLocaleString('en-BD')})`, 645, startY + 132);
-      ctx.fillText(`• Advance Delivery Collected: ৳${totalVerifiedDeliveryAdvance.toLocaleString('en-BD')}`, 645, startY + 162);
+      ctx.fillText(`• Progressing Pipeline: ${upcomingOrders.length} orders (৳${upcomingTotalAmount?.toLocaleString('en-BD')})`, 645, startY + 132);
+      ctx.fillText(`• Advance Delivery Collected: ৳${totalVerifiedDeliveryAdvance?.toLocaleString('en-BD')}`, 645, startY + 162);
       ctx.fillStyle = '#d97706';
       ctx.font = 'bold 14px system-ui, -apple-system, sans-serif';
-      ctx.fillText(`• Gross Product Profit: ৳${totalProductProfit.toLocaleString('en-BD')} (${productProfitMarginPercent}%)`, 645, startY + 188);
+      ctx.fillText(`• Gross Product Profit: ৳${totalProductProfit?.toLocaleString('en-BD')} (${productProfitMarginPercent}%)`, 645, startY + 188);
 
       // 3. OFFICIAL AUTHORIZATION & CERTIFICATION SECTION (With Seal & Sadik Signature)
       startY += 235;
@@ -1173,7 +1173,7 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
 
             <div className="p-3.5 rounded-xl bg-white/10 backdrop-blur-md border border-white/10">
               <span className="text-[11px] font-medium text-sky-200 uppercase tracking-wider block">Total Revenue</span>
-              <p className="text-2xl font-black text-sky-300 mt-1">৳{myApprovedRevenue.toLocaleString()}</p>
+              <p className="text-2xl font-black text-sky-300 mt-1">৳{myApprovedRevenue?.toLocaleString()}</p>
               <span className="text-[10px] text-sky-300">From Approved Orders</span>
             </div>
 
@@ -1194,11 +1194,11 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
 
       {/* 1. Core Financial Performance Cards with Realized Profit, Delivered Revenue, Supplier Cost & Delivery Expenses */}
       <div className="space-y-4">
-        <div className="space-y-2.5 pb-3 border-b border-slate-200/80">
+        <div className="space-y-2.5 pb-3 border-b border-slate-200/80 dark:border-slate-800">
           {/* Title & Active Timeframe Tag - Kept strictly on a single line on Desktop */}
           <div className="flex items-center gap-2 sm:gap-2.5 flex-wrap md:flex-nowrap">
-            <h2 className="text-sm sm:text-base md:text-lg font-black text-slate-900 flex items-center gap-1.5 whitespace-normal md:whitespace-nowrap shrink-0">
-              <Banknote className="w-4 h-4 sm:w-5 sm:h-5 text-emerald-600 shrink-0" />
+            <h2 className="text-sm sm:text-base md:text-lg font-black text-slate-900 dark:text-white flex items-center gap-1.5 whitespace-normal md:whitespace-nowrap shrink-0">
+              <Banknote className="w-4 h-4 sm:w-5 sm:h-5 text-emerald-600 dark:text-emerald-400 shrink-0" />
               <span>Financial Performance &amp; Revenue Overview</span>
             </h2>
           </div>
@@ -1207,7 +1207,7 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-2.5 pt-0.5">
             {/* Timeframe Filter Pills (All Days, Today, 7 Days, 30 Days, 1 Year) */}
             <div className="w-full lg:w-auto overflow-x-auto scrollbar-none py-0.5">
-              <div className="inline-flex items-center p-1 bg-slate-100/90 rounded-xl border border-slate-200/80 shadow-2xs whitespace-nowrap min-w-max">
+              <div className="inline-flex items-center p-1 bg-slate-100/90 dark:bg-slate-800/90 rounded-xl border border-slate-200/80 dark:border-slate-700 shadow-2xs whitespace-nowrap min-w-max">
                 {(
                   [
                     { id: 'all', label: 'All Days', shortLabel: 'All Days' },
@@ -1223,8 +1223,8 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
                     onClick={() => setFinTimeframe(tf.id)}
                     className={`px-3 py-1.5 rounded-lg text-xs font-black transition-all cursor-pointer whitespace-nowrap shrink-0 ${
                       finTimeframe === tf.id
-                        ? 'bg-slate-900 text-white shadow-xs'
-                        : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
+                        ? 'bg-slate-900 dark:bg-sky-600 text-white shadow-xs'
+                        : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-200/60 dark:hover:bg-slate-700'
                     }`}
                   >
                     <span className="hidden sm:inline">{tf.label}</span>
@@ -1280,143 +1280,143 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
         {/* Core Financial Performance & Revenue Cards (9 Responsive Grid Cards) */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 lg:gap-4.5">
           {/* 1. Money Received */}
-          <div className="p-4 sm:p-5 rounded-2xl bg-linear-to-br from-emerald-50/80 via-white to-emerald-50/30 border border-emerald-200 shadow-2xs hover:border-emerald-400 hover:shadow-xs transition-all flex flex-col justify-between">
+          <div className="p-4 sm:p-5 rounded-2xl bg-linear-to-br from-emerald-50/80 via-white to-emerald-50/30 dark:from-emerald-950/40 dark:via-slate-900 dark:to-emerald-950/20 border border-emerald-200 dark:border-emerald-800/60 shadow-2xs hover:border-emerald-400 dark:hover:border-emerald-600 hover:shadow-xs transition-all flex flex-col justify-between">
             <div>
-              <div className="flex items-center justify-between gap-2 pb-2.5 border-b border-emerald-100/80">
+              <div className="flex items-center justify-between gap-2 pb-2.5 border-b border-emerald-100/80 dark:border-emerald-900/50">
                 <div className="flex items-center gap-2 min-w-0">
-                  <div className="w-6 h-6 rounded-lg bg-emerald-100 flex items-center justify-center shrink-0 shadow-2xs">
-                    <Wallet className="w-3.5 h-3.5 text-emerald-700" />
+                  <div className="w-6 h-6 rounded-lg bg-emerald-100 dark:bg-emerald-900/60 flex items-center justify-center shrink-0 shadow-2xs">
+                    <Wallet className="w-3.5 h-3.5 text-emerald-700 dark:text-emerald-300" />
                   </div>
-                  <span className="text-xs font-extrabold uppercase tracking-wide text-emerald-950 whitespace-nowrap">
+                  <span className="text-xs font-extrabold uppercase tracking-wide text-emerald-950 dark:text-emerald-200 whitespace-nowrap">
                     Money Received
                   </span>
                 </div>
-                <span className="px-2.5 py-0.5 rounded-full text-[11px] font-black bg-emerald-100/90 text-emerald-800 whitespace-nowrap shrink-0 border border-emerald-200">
+                <span className="px-2.5 py-0.5 rounded-full text-[11px] font-black bg-emerald-100/90 dark:bg-emerald-900/60 text-emerald-800 dark:text-emerald-300 whitespace-nowrap shrink-0 border border-emerald-200 dark:border-emerald-700">
                   {deliveredOrders.length} Delivered
                 </span>
               </div>
               <div className="mt-3.5">
-                <h3 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight">
-                  ৳{totalMoneyReceived.toLocaleString('en-BD')}
+                <h3 className="text-2xl sm:text-3xl font-black text-slate-900 dark:text-white tracking-tight">
+                  ৳{totalMoneyReceived?.toLocaleString('en-BD')}
                 </h3>
-                <p className="text-xs text-emerald-700 font-bold mt-1.5 flex items-center gap-1">
+                <p className="text-xs text-emerald-700 dark:text-emerald-400 font-bold mt-1.5 flex items-center gap-1">
                   <ArrowUpRight className="w-3.5 h-3.5 shrink-0" />
                   <span>
                     {finTimeframe === 'today'
-                      ? `All Today Delivered: ৳${totalMoneyReceived.toLocaleString('en-BD')}`
-                      : `Today Collected: ৳${todayMoneyReceived.toLocaleString('en-BD')}`}
+                      ? `All Today Delivered: ৳${totalMoneyReceived?.toLocaleString('en-BD')}`
+                      : `Today Collected: ৳${todayMoneyReceived?.toLocaleString('en-BD')}`}
                   </span>
                 </p>
               </div>
             </div>
-            <div className="mt-4 pt-2.5 border-t border-emerald-100/80 flex items-center justify-between text-xs text-slate-600">
-              <span className="text-slate-500 font-medium">Delivered Customer Cash</span>
-              <span className="font-bold text-emerald-700">Cash In Hand</span>
+            <div className="mt-4 pt-2.5 border-t border-emerald-100/80 dark:border-emerald-900/50 flex items-center justify-between text-xs text-slate-600 dark:text-slate-400">
+              <span className="text-slate-500 dark:text-slate-400 font-medium">Delivered Customer Cash</span>
+              <span className="font-bold text-emerald-700 dark:text-emerald-400">Cash In Hand</span>
             </div>
           </div>
 
           {/* 2. Product Costs */}
-          <div className="p-4 sm:p-5 rounded-2xl bg-linear-to-br from-amber-50/80 via-white to-amber-50/30 border border-amber-200 shadow-2xs hover:border-amber-400 hover:shadow-xs transition-all flex flex-col justify-between">
+          <div className="p-4 sm:p-5 rounded-2xl bg-linear-to-br from-amber-50/80 via-white to-amber-50/30 dark:from-amber-950/40 dark:via-slate-900 dark:to-amber-950/20 border border-amber-200 dark:border-amber-800/60 shadow-2xs hover:border-amber-400 dark:hover:border-amber-600 hover:shadow-xs transition-all flex flex-col justify-between">
             <div>
-              <div className="flex items-center justify-between gap-2 pb-2.5 border-b border-amber-100/80">
+              <div className="flex items-center justify-between gap-2 pb-2.5 border-b border-amber-100/80 dark:border-amber-900/50">
                 <div className="flex items-center gap-2 min-w-0">
-                  <div className="w-6 h-6 rounded-lg bg-amber-100 flex items-center justify-center shrink-0 shadow-2xs">
-                    <Receipt className="w-3.5 h-3.5 text-amber-700" />
+                  <div className="w-6 h-6 rounded-lg bg-amber-100 dark:bg-amber-900/60 flex items-center justify-center shrink-0 shadow-2xs">
+                    <Receipt className="w-3.5 h-3.5 text-amber-700 dark:text-amber-300" />
                   </div>
-                  <span className="text-xs font-extrabold uppercase tracking-wide text-amber-950 whitespace-nowrap">
+                  <span className="text-xs font-extrabold uppercase tracking-wide text-amber-950 dark:text-amber-200 whitespace-nowrap">
                     Product Costs
                   </span>
                 </div>
-                <span className="px-2.5 py-0.5 rounded-full text-[11px] font-black bg-amber-100/90 text-amber-800 whitespace-nowrap shrink-0 border border-amber-200">
+                <span className="px-2.5 py-0.5 rounded-full text-[11px] font-black bg-amber-100/90 dark:bg-amber-900/60 text-amber-800 dark:text-amber-300 whitespace-nowrap shrink-0 border border-amber-200 dark:border-amber-700">
                   Supplier Sourcing
                 </span>
               </div>
               <div className="mt-3.5">
-                <h3 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight">
-                  ৳{totalDeliveredCost.toLocaleString('en-BD')}
+                <h3 className="text-2xl sm:text-3xl font-black text-slate-900 dark:text-white tracking-tight">
+                  ৳{totalDeliveredCost?.toLocaleString('en-BD')}
                 </h3>
-                <p className="text-xs text-amber-700 font-bold mt-1.5 flex items-center gap-1">
+                <p className="text-xs text-amber-700 dark:text-amber-400 font-bold mt-1.5 flex items-center gap-1">
                   <span>
                     {finTimeframe === 'today'
-                      ? `Today Sourcing Cost: ৳${totalDeliveredCost.toLocaleString('en-BD')}`
-                      : `Today Purchase Cost: ৳${todayDeliveredCost.toLocaleString('en-BD')}`}
+                      ? `Today Sourcing Cost: ৳${totalDeliveredCost?.toLocaleString('en-BD')}`
+                      : `Today Purchase Cost: ৳${todayDeliveredCost?.toLocaleString('en-BD')}`}
                   </span>
                 </p>
               </div>
             </div>
-            <div className="mt-4 pt-2.5 border-t border-amber-100/80 flex items-center justify-between text-xs text-slate-600">
-              <span className="text-slate-500 font-medium">Delivered Item Sourcing</span>
-              <span className="font-bold text-amber-700">Supplier Base</span>
+            <div className="mt-4 pt-2.5 border-t border-amber-100/80 dark:border-amber-900/50 flex items-center justify-between text-xs text-slate-600 dark:text-slate-400">
+              <span className="text-slate-500 dark:text-slate-400 font-medium">Delivered Item Sourcing</span>
+              <span className="font-bold text-amber-700 dark:text-amber-400">Supplier Base</span>
             </div>
           </div>
 
           {/* 3. Product Profit */}
-          <div className="p-4 sm:p-5 rounded-2xl bg-linear-to-br from-teal-50/80 via-white to-teal-50/30 border border-teal-200 shadow-2xs hover:border-teal-400 hover:shadow-xs transition-all flex flex-col justify-between">
+          <div className="p-4 sm:p-5 rounded-2xl bg-linear-to-br from-teal-50/80 via-white to-teal-50/30 dark:from-teal-950/40 dark:via-slate-900 dark:to-teal-950/20 border border-teal-200 dark:border-teal-800/60 shadow-2xs hover:border-teal-400 dark:hover:border-teal-600 hover:shadow-xs transition-all flex flex-col justify-between">
             <div>
-              <div className="flex items-center justify-between gap-2 pb-2.5 border-b border-teal-100/80">
+              <div className="flex items-center justify-between gap-2 pb-2.5 border-b border-teal-100/80 dark:border-teal-900/50">
                 <div className="flex items-center gap-2 min-w-0">
-                  <div className="w-6 h-6 rounded-lg bg-teal-100 flex items-center justify-center shrink-0 shadow-2xs">
-                    <DollarSign className="w-3.5 h-3.5 text-teal-700" />
+                  <div className="w-6 h-6 rounded-lg bg-teal-100 dark:bg-teal-900/60 flex items-center justify-center shrink-0 shadow-2xs">
+                    <DollarSign className="w-3.5 h-3.5 text-teal-700 dark:text-teal-300" />
                   </div>
-                  <span className="text-xs font-extrabold uppercase tracking-wide text-teal-950 whitespace-nowrap">
+                  <span className="text-xs font-extrabold uppercase tracking-wide text-teal-950 dark:text-teal-200 whitespace-nowrap">
                     Product Profit
                   </span>
                 </div>
-                <span className="px-2.5 py-0.5 rounded-full text-[11px] font-black bg-teal-100/90 text-teal-800 whitespace-nowrap shrink-0 border border-teal-200">
+                <span className="px-2.5 py-0.5 rounded-full text-[11px] font-black bg-teal-100/90 dark:bg-teal-900/60 text-teal-800 dark:text-teal-300 whitespace-nowrap shrink-0 border border-teal-200 dark:border-teal-700">
                   Gross {productProfitMarginPercent}%
                 </span>
               </div>
               <div className="mt-3.5">
-                <h3 className="text-2xl sm:text-3xl font-black text-teal-700 tracking-tight">
-                  ৳{totalProductProfit.toLocaleString('en-BD')}
+                <h3 className="text-2xl sm:text-3xl font-black text-teal-600 dark:text-teal-400 tracking-tight">
+                  ৳{totalProductProfit?.toLocaleString('en-BD')}
                 </h3>
-                <p className="text-xs text-teal-700 font-bold mt-1.5 flex items-center gap-1">
-                  <Sparkles className="w-3.5 h-3.5 shrink-0 text-teal-600" />
+                <p className="text-xs text-teal-700 dark:text-teal-400 font-bold mt-1.5 flex items-center gap-1">
+                  <Sparkles className="w-3.5 h-3.5 shrink-0 text-teal-600 dark:text-teal-400" />
                   <span>
                     {finTimeframe === 'today'
-                      ? `Today Gross: ৳${totalProductProfit.toLocaleString('en-BD')}`
-                      : `Today Gross: ৳${todayProductProfit.toLocaleString('en-BD')}`}
+                      ? `Today Gross: ৳${totalProductProfit?.toLocaleString('en-BD')}`
+                      : `Today Gross: ৳${todayProductProfit?.toLocaleString('en-BD')}`}
                   </span>
                 </p>
               </div>
             </div>
-            <div className="mt-4 pt-2.5 border-t border-teal-100/80 flex items-center justify-between text-xs text-slate-600">
-              <span className="text-slate-500 font-medium">Product Markup Margin</span>
-              <span className="font-bold text-teal-700">Gross Profit</span>
+            <div className="mt-4 pt-2.5 border-t border-teal-100/80 dark:border-teal-900/50 flex items-center justify-between text-xs text-slate-600 dark:text-slate-400">
+              <span className="text-slate-500 dark:text-slate-400 font-medium">Product Markup Margin</span>
+              <span className="font-bold text-teal-700 dark:text-teal-400">Gross Profit</span>
             </div>
           </div>
 
           {/* 4. Total Expenses (Operational + Delivery + Packaging) */}
-          <div className="p-4 sm:p-5 rounded-2xl bg-linear-to-br from-rose-50/90 via-white to-rose-50/40 border border-rose-200/90 shadow-2xs hover:border-rose-400 hover:shadow-xs transition-all flex flex-col justify-between">
+          <div className="p-4 sm:p-5 rounded-2xl bg-linear-to-br from-rose-50/90 via-white to-rose-50/40 dark:from-rose-950/40 dark:via-slate-900 dark:to-rose-950/20 border border-rose-200/90 dark:border-rose-800/60 shadow-2xs hover:border-rose-400 dark:hover:border-rose-600 hover:shadow-xs transition-all flex flex-col justify-between">
             <div>
-              <div className="flex items-center justify-between gap-2 pb-2.5 border-b border-rose-100/80">
+              <div className="flex items-center justify-between gap-2 pb-2.5 border-b border-rose-100/80 dark:border-rose-900/50">
                 <div className="flex items-center gap-2 min-w-0">
                   <div className="w-6 h-6 rounded-lg bg-rose-600 text-white flex items-center justify-center shrink-0 shadow-2xs">
                     <TrendingDown className="w-3.5 h-3.5" />
                   </div>
-                  <span className="text-xs font-black uppercase tracking-wide text-rose-950 whitespace-nowrap">
+                  <span className="text-xs font-black uppercase tracking-wide text-rose-950 dark:text-rose-200 whitespace-nowrap">
                     Total Expenses
                   </span>
                 </div>
-                <span className="px-2.5 py-0.5 rounded-full text-[11px] font-black bg-rose-100 text-rose-800 whitespace-nowrap shrink-0 border border-rose-200">
+                <span className="px-2.5 py-0.5 rounded-full text-[11px] font-black bg-rose-100 dark:bg-rose-900/60 text-rose-800 dark:text-rose-300 whitespace-nowrap shrink-0 border border-rose-200 dark:border-rose-700">
                   {finFilteredExpenses.length} Records
                 </span>
               </div>
               <div className="mt-3.5">
-                <h3 className="text-2xl sm:text-3xl font-black text-rose-700 tracking-tight">
-                  ৳{totalAllExpenses.toLocaleString('en-BD')}
+                <h3 className="text-2xl sm:text-3xl font-black text-rose-600 dark:text-rose-400 tracking-tight">
+                  ৳{totalAllExpenses?.toLocaleString('en-BD')}
                 </h3>
-                <p className="text-xs text-rose-600 font-bold mt-1.5 flex items-center gap-1">
-                  <span>Delivery: ৳{totalDeliveryExpenses.toLocaleString('en-BD')} • Others: ৳{totalOtherExpenses.toLocaleString('en-BD')}</span>
+                <p className="text-xs text-rose-600 dark:text-rose-400 font-bold mt-1.5 flex items-center gap-1">
+                  <span>Delivery: ৳{totalDeliveryExpenses?.toLocaleString('en-BD')} • Others: ৳{totalOtherExpenses?.toLocaleString('en-BD')}</span>
                 </p>
               </div>
             </div>
-            <div className="mt-4 pt-2.5 border-t border-rose-100/80 flex items-center justify-between text-xs text-slate-600">
-              <span className="text-slate-500 font-medium">All Business Expenses</span>
+            <div className="mt-4 pt-2.5 border-t border-rose-100/80 dark:border-rose-900/50 flex items-center justify-between text-xs text-slate-600 dark:text-slate-400">
+              <span className="text-slate-500 dark:text-slate-400 font-medium">All Business Expenses</span>
               <button
                 type="button"
                 onClick={() => onSelectTab('costs')}
-                className="font-bold text-rose-700 hover:text-rose-900 flex items-center gap-0.5 whitespace-nowrap cursor-pointer"
+                className="font-bold text-rose-700 dark:text-rose-400 hover:text-rose-900 dark:hover:text-rose-300 flex items-center gap-0.5 whitespace-nowrap cursor-pointer"
               >
                 <span>Manage Costs</span>
                 <ChevronRight className="w-3.5 h-3.5" />
@@ -1425,36 +1425,36 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
           </div>
 
           {/* 5. Delivery Costs */}
-          <div className="p-4 sm:p-5 rounded-2xl bg-linear-to-br from-orange-50/80 via-white to-orange-50/30 border border-orange-200 shadow-2xs hover:border-orange-400 hover:shadow-xs transition-all flex flex-col justify-between">
+          <div className="p-4 sm:p-5 rounded-2xl bg-linear-to-br from-orange-50/80 via-white to-orange-50/30 dark:from-orange-950/40 dark:via-slate-900 dark:to-orange-950/20 border border-orange-200 dark:border-orange-800/60 shadow-2xs hover:border-orange-400 dark:hover:border-orange-600 hover:shadow-xs transition-all flex flex-col justify-between">
             <div>
-              <div className="flex items-center justify-between gap-2 pb-2.5 border-b border-orange-100/80">
+              <div className="flex items-center justify-between gap-2 pb-2.5 border-b border-orange-100/80 dark:border-orange-900/50">
                 <div className="flex items-center gap-2 min-w-0">
-                  <div className="w-6 h-6 rounded-lg bg-orange-100 flex items-center justify-center shrink-0 shadow-2xs">
-                    <Truck className="w-3.5 h-3.5 text-orange-700" />
+                  <div className="w-6 h-6 rounded-lg bg-orange-100 dark:bg-orange-900/60 flex items-center justify-center shrink-0 shadow-2xs">
+                    <Truck className="w-3.5 h-3.5 text-orange-700 dark:text-orange-300" />
                   </div>
-                  <span className="text-xs font-extrabold uppercase tracking-wide text-orange-950 whitespace-nowrap">
+                  <span className="text-xs font-extrabold uppercase tracking-wide text-orange-950 dark:text-orange-200 whitespace-nowrap">
                     Delivery Costs
                   </span>
                 </div>
-                <span className="px-2.5 py-0.5 rounded-full text-[11px] font-black bg-orange-100/90 text-orange-800 whitespace-nowrap shrink-0 border border-orange-200">
+                <span className="px-2.5 py-0.5 rounded-full text-[11px] font-black bg-orange-100/90 dark:bg-orange-900/60 text-orange-800 dark:text-orange-300 whitespace-nowrap shrink-0 border border-orange-200 dark:border-orange-700">
                   {freeDeliveryDeliveredCount > 0 ? `${freeDeliveryDeliveredCount} Free Del` : 'Courier Spent'}
                 </span>
               </div>
               <div className="mt-3.5">
-                <h3 className="text-2xl sm:text-3xl font-black text-orange-700 tracking-tight">
-                  ৳{totalDeliveryExpenses.toLocaleString('en-BD')}
+                <h3 className="text-2xl sm:text-3xl font-black text-orange-600 dark:text-orange-400 tracking-tight">
+                  ৳{totalDeliveryExpenses?.toLocaleString('en-BD')}
                 </h3>
-                <p className="text-xs text-orange-600 font-bold mt-1.5 flex items-center gap-1">
-                  <span>Collected from Customers: ৳{totalDeliveredDeliveryChargesCollected.toLocaleString('en-BD')}</span>
+                <p className="text-xs text-orange-600 dark:text-orange-400 font-bold mt-1.5 flex items-center gap-1">
+                  <span>Collected from Customers: ৳{totalDeliveredDeliveryChargesCollected?.toLocaleString('en-BD')}</span>
                 </p>
               </div>
             </div>
-            <div className="mt-4 pt-2.5 border-t border-orange-100/80 flex items-center justify-between text-xs text-slate-600">
-              <span className="text-slate-500 font-medium">Courier &amp; Packaging</span>
+            <div className="mt-4 pt-2.5 border-t border-orange-100/80 dark:border-orange-900/50 flex items-center justify-between text-xs text-slate-600 dark:text-slate-400">
+              <span className="text-slate-500 dark:text-slate-400 font-medium">Courier &amp; Packaging</span>
               <button
                 type="button"
                 onClick={() => onSelectTab('costs')}
-                className="font-bold text-orange-700 hover:text-orange-900 flex items-center gap-0.5 whitespace-nowrap cursor-pointer"
+                className="font-bold text-orange-700 dark:text-orange-400 hover:text-orange-900 dark:hover:text-orange-300 flex items-center gap-0.5 whitespace-nowrap cursor-pointer"
               >
                 <span>Details</span>
                 <ChevronRight className="w-3.5 h-3.5" />
@@ -1463,41 +1463,41 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
           </div>
 
           {/* 6. Other Profit */}
-          <div className="p-4 sm:p-5 rounded-2xl bg-linear-to-br from-violet-50/80 via-white to-violet-50/30 border border-violet-200 shadow-2xs hover:border-violet-400 hover:shadow-xs transition-all flex flex-col justify-between">
+          <div className="p-4 sm:p-5 rounded-2xl bg-linear-to-br from-violet-50/80 via-white to-violet-50/30 dark:from-violet-950/40 dark:via-slate-900 dark:to-violet-950/20 border border-violet-200 dark:border-violet-800/60 shadow-2xs hover:border-violet-400 dark:hover:border-violet-600 hover:shadow-xs transition-all flex flex-col justify-between">
             <div>
-              <div className="flex items-center justify-between gap-2 pb-2.5 border-b border-violet-100/80">
+              <div className="flex items-center justify-between gap-2 pb-2.5 border-b border-violet-100/80 dark:border-violet-900/50">
                 <div className="flex items-center gap-2 min-w-0">
-                  <div className="w-6 h-6 rounded-lg bg-violet-100 flex items-center justify-center shrink-0 shadow-2xs">
-                    <Coins className="w-3.5 h-3.5 text-violet-700" />
+                  <div className="w-6 h-6 rounded-lg bg-violet-100 dark:bg-violet-900/60 flex items-center justify-center shrink-0 shadow-2xs">
+                    <Coins className="w-3.5 h-3.5 text-violet-700 dark:text-violet-300" />
                   </div>
-                  <span className="text-xs font-extrabold uppercase tracking-wide text-violet-950 whitespace-nowrap">
+                  <span className="text-xs font-extrabold uppercase tracking-wide text-violet-950 dark:text-violet-200 whitespace-nowrap">
                     Other Profit
                   </span>
                 </div>
-                <span className="px-2.5 py-0.5 rounded-full text-[11px] font-black bg-violet-100/90 text-violet-800 whitespace-nowrap shrink-0 border border-violet-200">
+                <span className="px-2.5 py-0.5 rounded-full text-[11px] font-black bg-violet-100/90 dark:bg-violet-900/60 text-violet-800 dark:text-violet-300 whitespace-nowrap shrink-0 border border-violet-200 dark:border-violet-700">
                   {finFilteredOtherProfits.length} Records
                 </span>
               </div>
               <div className="mt-3.5">
-                <h3 className="text-2xl sm:text-3xl font-black text-violet-900 tracking-tight">
-                  ৳{totalOtherProfits.toLocaleString('en-BD')}
+                <h3 className="text-2xl sm:text-3xl font-black text-violet-600 dark:text-violet-400 tracking-tight">
+                  ৳{totalOtherProfits?.toLocaleString('en-BD')}
                 </h3>
-                <p className="text-xs text-violet-700 font-bold mt-1.5 flex items-center gap-1">
-                  <Sparkles className="w-3.5 h-3.5 shrink-0 text-violet-600" />
+                <p className="text-xs text-violet-700 dark:text-violet-400 font-bold mt-1.5 flex items-center gap-1">
+                  <Sparkles className="w-3.5 h-3.5 shrink-0 text-violet-600 dark:text-violet-400" />
                   <span>
                     {finTimeframe === 'today'
-                      ? `Today Added: ৳${totalOtherProfits.toLocaleString('en-BD')}`
-                      : `Today Added: ৳${todayOtherProfits.toLocaleString('en-BD')}`}
+                      ? `Today Added: ৳${totalOtherProfits?.toLocaleString('en-BD')}`
+                      : `Today Added: ৳${todayOtherProfits?.toLocaleString('en-BD')}`}
                   </span>
                 </p>
               </div>
             </div>
-            <div className="mt-4 pt-2.5 border-t border-violet-100/80 flex items-center justify-between text-xs text-slate-600">
-              <span className="text-slate-500 font-medium">Extra Non-Order Profit</span>
+            <div className="mt-4 pt-2.5 border-t border-violet-100/80 dark:border-violet-900/50 flex items-center justify-between text-xs text-slate-600 dark:text-slate-400">
+              <span className="text-slate-500 dark:text-slate-400 font-medium">Extra Non-Order Profit</span>
               <button
                 type="button"
                 onClick={() => onSelectTab('costs')}
-                className="font-bold text-violet-700 hover:text-violet-900 flex items-center gap-0.5 whitespace-nowrap cursor-pointer"
+                className="font-bold text-violet-700 dark:text-violet-400 hover:text-violet-900 dark:hover:text-violet-300 flex items-center gap-0.5 whitespace-nowrap cursor-pointer"
               >
                 <span>Manage</span>
                 <ChevronRight className="w-3.5 h-3.5" />
@@ -1506,40 +1506,40 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
           </div>
 
           {/* 7. Advance Delivery (Admin Approved Delivery Charges Revenue) */}
-          <div className="p-4 sm:p-5 rounded-2xl bg-linear-to-br from-indigo-50/80 via-white to-indigo-50/30 border border-indigo-200 shadow-2xs hover:border-indigo-400 hover:shadow-xs transition-all flex flex-col justify-between">
+          <div className="p-4 sm:p-5 rounded-2xl bg-linear-to-br from-indigo-50/80 via-white to-indigo-50/30 dark:from-indigo-950/40 dark:via-slate-900 dark:to-indigo-950/20 border border-indigo-200 dark:border-indigo-800/60 shadow-2xs hover:border-indigo-400 dark:hover:border-indigo-600 hover:shadow-xs transition-all flex flex-col justify-between">
             <div>
-              <div className="flex items-center justify-between gap-2 pb-2.5 border-b border-indigo-100/80">
+              <div className="flex items-center justify-between gap-2 pb-2.5 border-b border-indigo-100/80 dark:border-indigo-900/50">
                 <div className="flex items-center gap-2 min-w-0">
-                  <div className="w-6 h-6 rounded-lg bg-indigo-100 flex items-center justify-center shrink-0 shadow-2xs">
-                    <ShieldCheck className="w-3.5 h-3.5 text-indigo-700" />
+                  <div className="w-6 h-6 rounded-lg bg-indigo-100 dark:bg-indigo-900/60 flex items-center justify-center shrink-0 shadow-2xs">
+                    <ShieldCheck className="w-3.5 h-3.5 text-indigo-700 dark:text-indigo-300" />
                   </div>
-                  <span className="text-xs font-extrabold uppercase tracking-wide text-indigo-950 whitespace-nowrap">
+                  <span className="text-xs font-extrabold uppercase tracking-wide text-indigo-950 dark:text-indigo-200 whitespace-nowrap">
                     Advance Payment
                   </span>
                 </div>
-                <span className="px-2.5 py-0.5 rounded-full text-[11px] font-black bg-indigo-100/90 text-indigo-800 whitespace-nowrap shrink-0 border border-indigo-200">
+                <span className="px-2.5 py-0.5 rounded-full text-[11px] font-black bg-indigo-100/90 dark:bg-indigo-900/60 text-indigo-800 dark:text-indigo-300 whitespace-nowrap shrink-0 border border-indigo-200 dark:border-indigo-700">
                   {verifiedAdvanceOrders.length} Approved
                 </span>
               </div>
               <div className="mt-3.5">
-                <h3 className="text-2xl sm:text-3xl font-black text-indigo-900 tracking-tight">
-                  ৳{totalVerifiedDeliveryAdvance.toLocaleString('en-BD')}
+                <h3 className="text-2xl sm:text-3xl font-black text-indigo-600 dark:text-indigo-400 tracking-tight">
+                  ৳{totalVerifiedDeliveryAdvance?.toLocaleString('en-BD')}
                 </h3>
-                <p className="text-xs text-indigo-700 font-bold mt-1.5 flex items-center gap-1">
+                <p className="text-xs text-indigo-700 dark:text-indigo-400 font-bold mt-1.5 flex items-center gap-1">
                   <ArrowUpRight className="w-3.5 h-3.5 shrink-0" />
                   <span>
                     {finTimeframe === 'today'
-                      ? `Today Verified: ৳${totalVerifiedDeliveryAdvance.toLocaleString('en-BD')}`
-                      : `Today Approved: ৳${todayVerifiedDeliveryAdvance.toLocaleString('en-BD')}`}
+                      ? `Today Verified: ৳${totalVerifiedDeliveryAdvance?.toLocaleString('en-BD')}`
+                      : `Today Approved: ৳${todayVerifiedDeliveryAdvance?.toLocaleString('en-BD')}`}
                   </span>
                 </p>
               </div>
             </div>
-            <div className="mt-4 pt-2.5 border-t border-indigo-100/80 flex items-center justify-between text-xs text-slate-600">
-              <span className="text-slate-500 font-medium">
+            <div className="mt-4 pt-2.5 border-t border-indigo-100/80 dark:border-indigo-900/50 flex items-center justify-between text-xs text-slate-600 dark:text-slate-400">
+              <span className="text-slate-500 dark:text-slate-400 font-medium">
                 {pendingAdvanceOrders.length > 0 ? (
-                  <span className="text-amber-600 font-bold">
-                    {pendingAdvanceOrders.length} Pending (৳{totalPendingDeliveryAdvance.toLocaleString('en-BD')})
+                  <span className="text-amber-600 dark:text-amber-400 font-bold">
+                    {pendingAdvanceOrders.length} Pending (৳{totalPendingDeliveryAdvance?.toLocaleString('en-BD')})
                   </span>
                 ) : (
                   'Approved Delivery Advance'
@@ -1548,7 +1548,7 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
               <button
                 type="button"
                 onClick={() => onSelectTab('delivery-advance')}
-                className="font-bold text-indigo-700 hover:text-indigo-900 flex items-center gap-0.5 whitespace-nowrap cursor-pointer"
+                className="font-bold text-indigo-700 dark:text-indigo-400 hover:text-indigo-900 dark:hover:text-indigo-300 flex items-center gap-0.5 whitespace-nowrap cursor-pointer"
               >
                 <span>View All</span>
                 <ChevronRight className="w-3.5 h-3.5" />
@@ -1557,75 +1557,75 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
           </div>
 
           {/* 8. Real Net Profit (Highlighted Main Realized Profit Card with Others Profit added) */}
-          <div className="p-4 sm:p-5 rounded-2xl bg-linear-to-br from-emerald-500/10 via-sky-500/5 to-white border-2 border-emerald-500/50 shadow-xs hover:border-emerald-500 hover:shadow-md transition-all flex flex-col justify-between ring-2 ring-emerald-500/20">
+          <div className="p-4 sm:p-5 rounded-2xl bg-linear-to-br from-emerald-500/10 via-sky-500/5 to-white dark:from-emerald-950/50 dark:via-slate-900 dark:to-slate-900 border-2 border-emerald-500/50 dark:border-emerald-500/60 shadow-xs hover:border-emerald-500 hover:shadow-md transition-all flex flex-col justify-between ring-2 ring-emerald-500/20 dark:ring-emerald-500/30">
             <div>
-              <div className="flex items-center justify-between gap-2 pb-2.5 border-b border-emerald-100">
+              <div className="flex items-center justify-between gap-2 pb-2.5 border-b border-emerald-100 dark:border-emerald-900/50">
                 <div className="flex items-center gap-2 min-w-0">
                   <div className="w-6 h-6 rounded-lg bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-2xs">
                     <TrendingUp className="w-3.5 h-3.5" />
                   </div>
-                  <span className="text-xs font-black uppercase tracking-wide text-emerald-950 whitespace-nowrap">
+                  <span className="text-xs font-black uppercase tracking-wide text-emerald-950 dark:text-emerald-200 whitespace-nowrap">
                     Real Net Profit
                   </span>
                 </div>
-                <span className="px-2.5 py-0.5 rounded-full text-[11px] font-black bg-emerald-100 text-emerald-900 whitespace-nowrap shrink-0 border border-emerald-300">
+                <span className="px-2.5 py-0.5 rounded-full text-[11px] font-black bg-emerald-100 dark:bg-emerald-900/80 text-emerald-900 dark:text-emerald-200 whitespace-nowrap shrink-0 border border-emerald-300 dark:border-emerald-700">
                   Margin {netProfitMarginPercent}%
                 </span>
               </div>
               <div className="mt-3.5">
-                <h3 className="text-2xl sm:text-3xl font-black text-emerald-900 tracking-tight">
-                  ৳{totalNetRevenue.toLocaleString('en-BD')}
+                <h3 className="text-2xl sm:text-3xl font-black text-emerald-700 dark:text-emerald-400 tracking-tight">
+                  ৳{totalNetRevenue?.toLocaleString('en-BD')}
                 </h3>
-                <p className="text-xs text-emerald-700 font-bold mt-1.5 flex items-center gap-1">
-                  <Sparkles className="w-3.5 h-3.5 shrink-0 text-emerald-600" />
+                <p className="text-xs text-emerald-700 dark:text-emerald-400 font-bold mt-1.5 flex items-center gap-1">
+                  <Sparkles className="w-3.5 h-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
                   <span>
                     {finTimeframe === 'today'
-                      ? `Today Net: ৳${totalNetRevenue.toLocaleString('en-BD')}`
-                      : `Today Net: ৳${todayNetRevenue.toLocaleString('en-BD')}`}
+                      ? `Today Net: ৳${totalNetRevenue?.toLocaleString('en-BD')}`
+                      : `Today Net: ৳${todayNetRevenue?.toLocaleString('en-BD')}`}
                   </span>
                 </p>
               </div>
             </div>
-            <div className="mt-4 pt-2.5 border-t border-emerald-100/90 flex items-center justify-between text-xs">
-              <span className="text-slate-600 font-medium">
-                Includes Others Profit: <strong className="text-emerald-700 font-bold">+৳{totalOtherProfits.toLocaleString('en-BD')}</strong>
+            <div className="mt-4 pt-2.5 border-t border-emerald-100/90 dark:border-emerald-900/50 flex items-center justify-between text-xs">
+              <span className="text-slate-600 dark:text-slate-300 font-medium">
+                Includes Others Profit: <strong className="text-emerald-700 dark:text-emerald-400 font-bold">+৳{totalOtherProfits?.toLocaleString('en-BD')}</strong>
               </span>
-              <span className="font-black text-emerald-800 bg-emerald-100/80 px-2 py-0.5 rounded-md">Realized</span>
+              <span className="font-black text-emerald-800 dark:text-emerald-300 bg-emerald-100/80 dark:bg-emerald-900/60 px-2 py-0.5 rounded-md">Realized</span>
             </div>
           </div>
 
           {/* 9. Pipeline Forecast */}
-          <div className="p-4 sm:p-5 rounded-2xl bg-linear-to-br from-purple-50/80 via-white to-purple-50/30 border border-purple-200 shadow-2xs hover:border-purple-400 hover:shadow-xs transition-all flex flex-col justify-between">
+          <div className="p-4 sm:p-5 rounded-2xl bg-linear-to-br from-purple-50/80 via-white to-purple-50/30 dark:from-purple-950/40 dark:via-slate-900 dark:to-purple-950/20 border border-purple-200 dark:border-purple-800/60 shadow-2xs hover:border-purple-400 dark:hover:border-purple-600 hover:shadow-xs transition-all flex flex-col justify-between">
             <div>
-              <div className="flex items-center justify-between gap-2 pb-2.5 border-b border-purple-100/80">
+              <div className="flex items-center justify-between gap-2 pb-2.5 border-b border-purple-100/80 dark:border-purple-900/50">
                 <div className="flex items-center gap-2 min-w-0">
-                  <div className="w-6 h-6 rounded-lg bg-purple-100 flex items-center justify-center shrink-0 shadow-2xs">
-                    <Clock className="w-3.5 h-3.5 text-purple-700" />
+                  <div className="w-6 h-6 rounded-lg bg-purple-100 dark:bg-purple-900/60 flex items-center justify-center shrink-0 shadow-2xs">
+                    <Clock className="w-3.5 h-3.5 text-purple-700 dark:text-purple-300" />
                   </div>
-                  <span className="text-xs font-extrabold uppercase tracking-wide text-purple-950 whitespace-nowrap">
+                  <span className="text-xs font-extrabold uppercase tracking-wide text-purple-950 dark:text-purple-200 whitespace-nowrap">
                     Pipeline Forecast
                   </span>
                 </div>
-                <span className="px-2.5 py-0.5 rounded-full text-[11px] font-black bg-purple-100/90 text-purple-800 whitespace-nowrap shrink-0 border border-purple-200">
+                <span className="px-2.5 py-0.5 rounded-full text-[11px] font-black bg-purple-100/90 dark:bg-purple-900/60 text-purple-800 dark:text-purple-300 whitespace-nowrap shrink-0 border border-purple-200 dark:border-purple-700">
                   {upcomingOrders.length} In Progress
                 </span>
               </div>
               <div className="mt-3.5">
-                <h3 className="text-2xl sm:text-3xl font-black text-purple-900 tracking-tight">
-                  ৳{upcomingTotalAmount.toLocaleString('en-BD')}
+                <h3 className="text-2xl sm:text-3xl font-black text-purple-700 dark:text-purple-400 tracking-tight">
+                  ৳{upcomingTotalAmount?.toLocaleString('en-BD')}
                 </h3>
-                <p className="text-xs text-purple-700 font-bold mt-1.5 flex items-center gap-1">
+                <p className="text-xs text-purple-700 dark:text-purple-400 font-bold mt-1.5 flex items-center gap-1">
                   <ArrowUpRight className="w-3.5 h-3.5 shrink-0" />
-                  <span>Expected Margin: ৳{upcomingExpectedProfit.toLocaleString('en-BD')}</span>
+                  <span>Expected Margin: ৳{upcomingExpectedProfit?.toLocaleString('en-BD')}</span>
                 </p>
               </div>
             </div>
-            <div className="mt-4 pt-2.5 border-t border-purple-100/80 flex items-center justify-between text-xs">
-              <span className="text-slate-500 font-medium">On Order Delivery</span>
+            <div className="mt-4 pt-2.5 border-t border-purple-100/80 dark:border-purple-900/50 flex items-center justify-between text-xs text-slate-600 dark:text-slate-400">
+              <span className="text-slate-500 dark:text-slate-400 font-medium">On Order Delivery</span>
               <button
                 type="button"
                 onClick={() => onSelectTab('orders')}
-                className="font-bold text-purple-700 hover:text-purple-900 flex items-center gap-0.5 cursor-pointer whitespace-nowrap"
+                className="font-bold text-purple-700 dark:text-purple-400 hover:text-purple-900 dark:hover:text-purple-300 flex items-center gap-0.5 cursor-pointer whitespace-nowrap"
               >
                 <span>Orders</span>
                 <ChevronRight className="w-3.5 h-3.5" />
@@ -1647,7 +1647,7 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
                 </h3>
               </div>
               <p className="text-xs sm:text-sm text-slate-300 mt-1">
-                Currently <strong className="text-sky-300">{upcomingOrders.length} customer orders</strong> are progressing through verification, packing, and courier transit with an estimated revenue of <strong className="text-emerald-300">৳{upcomingTotalAmount.toLocaleString('en-BD')}</strong>.
+                Currently <strong className="text-sky-300">{upcomingOrders.length} customer orders</strong> are progressing through verification, packing, and courier transit with an estimated revenue of <strong className="text-emerald-300">৳{upcomingTotalAmount?.toLocaleString('en-BD')}</strong>.
               </p>
             </div>
 
@@ -1677,7 +1677,7 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
                   {upcomingPendingOrders.length}
                 </span>
               </div>
-              <p className="text-xl font-black text-white mt-2">৳{upcomingPendingAmount.toLocaleString('en-BD')}</p>
+              <p className="text-xl font-black text-white mt-2">৳{upcomingPendingAmount?.toLocaleString('en-BD')}</p>
               <p className="text-[10px] text-slate-300 mt-1">Awaiting verification phone call</p>
             </div>
 
@@ -1695,7 +1695,7 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
                   {upcomingProcessingOrders.length}
                 </span>
               </div>
-              <p className="text-xl font-black text-white mt-2">৳{upcomingProcessingAmount.toLocaleString('en-BD')}</p>
+              <p className="text-xl font-black text-white mt-2">৳{upcomingProcessingAmount?.toLocaleString('en-BD')}</p>
               <p className="text-[10px] text-slate-300 mt-1">Packing &amp; courier handover</p>
             </div>
 
@@ -1713,7 +1713,7 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
                   {upcomingShippedOrders.length}
                 </span>
               </div>
-              <p className="text-xl font-black text-white mt-2">৳{upcomingShippedAmount.toLocaleString('en-BD')}</p>
+              <p className="text-xl font-black text-white mt-2">৳{upcomingShippedAmount?.toLocaleString('en-BD')}</p>
               <p className="text-[10px] text-slate-300 mt-1">Courier parcel on way to customer</p>
             </div>
 
@@ -1731,8 +1731,8 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
                   {deliveredOrders.length} Completed
                 </span>
               </div>
-              <p className="text-xl font-black text-emerald-300 mt-2">৳{totalMoneyReceived.toLocaleString('en-BD')}</p>
-              <p className="text-[10px] text-emerald-200 mt-1">Real profit ৳{totalNetRevenue.toLocaleString('en-BD')} realized</p>
+              <p className="text-xl font-black text-emerald-300 mt-2">৳{totalMoneyReceived?.toLocaleString('en-BD')}</p>
+              <p className="text-[10px] text-emerald-200 mt-1">Real profit ৳{totalNetRevenue?.toLocaleString('en-BD')} realized</p>
             </div>
           </div>
         </div>
@@ -1740,48 +1740,48 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
         {/* 3. Secondary Store Operations Summary */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-4">
           {/* Total Orders */}
-          <div className="p-3.5 sm:p-4 rounded-xl sm:rounded-2xl bg-white border border-slate-200 shadow-2xs flex flex-col justify-between hover:border-slate-300 transition-colors">
+          <div className="p-3.5 sm:p-4 rounded-xl sm:rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xs flex flex-col justify-between hover:border-slate-300 dark:hover:border-slate-700 transition-colors">
             <div className="flex items-center justify-between gap-1">
-              <span className="text-[10px] sm:text-xs font-semibold text-slate-500 uppercase tracking-wider truncate">Total Orders</span>
-              <div className="w-7 h-7 rounded-lg bg-slate-100 text-slate-700 flex items-center justify-center shrink-0">
+              <span className="text-[10px] sm:text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider truncate">Total Orders</span>
+              <div className="w-7 h-7 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 flex items-center justify-center shrink-0">
                 <ShoppingCart className="w-3.5 h-3.5" />
               </div>
             </div>
             <div className="mt-2">
-              <h4 className="text-lg sm:text-xl font-black text-slate-900">{totalOrdersCount}</h4>
-              <p className="text-[10px] sm:text-xs text-slate-500 mt-0.5 truncate">
-                Today: <strong className="text-slate-800">{todayOrders.length} new orders</strong>
+              <h4 className="text-lg sm:text-xl font-black text-slate-900 dark:text-white">{totalOrdersCount}</h4>
+              <p className="text-[10px] sm:text-xs text-slate-500 dark:text-slate-400 mt-0.5 truncate">
+                Today: <strong className="text-slate-800 dark:text-slate-200">{todayOrders.length} new orders</strong>
               </p>
             </div>
           </div>
 
           {/* Total Customers */}
-          <div className="p-3.5 sm:p-4 rounded-xl sm:rounded-2xl bg-white border border-slate-200 shadow-2xs flex flex-col justify-between hover:border-slate-300 transition-colors">
+          <div className="p-3.5 sm:p-4 rounded-xl sm:rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xs flex flex-col justify-between hover:border-slate-300 dark:hover:border-slate-700 transition-colors">
             <div className="flex items-center justify-between gap-1">
-              <span className="text-[10px] sm:text-xs font-semibold text-slate-500 uppercase tracking-wider truncate">Total Customers</span>
-              <div className="w-7 h-7 rounded-lg bg-slate-100 text-slate-700 flex items-center justify-center shrink-0">
+              <span className="text-[10px] sm:text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider truncate">Total Customers</span>
+              <div className="w-7 h-7 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 flex items-center justify-center shrink-0">
                 <Users className="w-3.5 h-3.5" />
               </div>
             </div>
             <div className="mt-2">
-              <h4 className="text-lg sm:text-xl font-black text-slate-900">{customers.length}</h4>
-              <p className="text-[10px] sm:text-xs text-emerald-600 font-semibold mt-0.5 truncate">
+              <h4 className="text-lg sm:text-xl font-black text-slate-900 dark:text-white">{customers.length}</h4>
+              <p className="text-[10px] sm:text-xs text-emerald-600 dark:text-emerald-400 font-semibold mt-0.5 truncate">
                 Registered database accounts
               </p>
             </div>
           </div>
 
           {/* Avg Order Value */}
-          <div className="p-3.5 sm:p-4 rounded-xl sm:rounded-2xl bg-white border border-slate-200 shadow-2xs flex flex-col justify-between hover:border-slate-300 transition-colors">
+          <div className="p-3.5 sm:p-4 rounded-xl sm:rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xs flex flex-col justify-between hover:border-slate-300 dark:hover:border-slate-700 transition-colors">
             <div className="flex items-center justify-between gap-1">
-              <span className="text-[10px] sm:text-xs font-semibold text-slate-500 uppercase tracking-wider truncate">Avg Order Value</span>
-              <div className="w-7 h-7 rounded-lg bg-slate-100 text-slate-700 flex items-center justify-center shrink-0">
+              <span className="text-[10px] sm:text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider truncate">Avg Order Value</span>
+              <div className="w-7 h-7 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 flex items-center justify-center shrink-0">
                 <TrendingUp className="w-3.5 h-3.5" />
               </div>
             </div>
             <div className="mt-2">
-              <h4 className="text-lg sm:text-xl font-black text-slate-900">৳{averageOrderValue.toLocaleString('en-BD')}</h4>
-              <p className="text-[10px] sm:text-xs text-slate-500 mt-0.5 truncate">
+              <h4 className="text-lg sm:text-xl font-black text-slate-900 dark:text-white">৳{averageOrderValue?.toLocaleString('en-BD')}</h4>
+              <p className="text-[10px] sm:text-xs text-slate-500 dark:text-slate-400 mt-0.5 truncate">
                 Average per delivered order
               </p>
             </div>
@@ -1790,17 +1790,17 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
           {/* Low Stock Alert */}
           <div
             onClick={() => onSelectTab('inventory')}
-            className="p-3.5 sm:p-4 rounded-xl sm:rounded-2xl bg-white border border-slate-200 shadow-2xs flex flex-col justify-between hover:border-rose-300 cursor-pointer transition-colors"
+            className="p-3.5 sm:p-4 rounded-xl sm:rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xs flex flex-col justify-between hover:border-rose-300 dark:hover:border-rose-700 cursor-pointer transition-colors"
           >
             <div className="flex items-center justify-between gap-1">
-              <span className="text-[10px] sm:text-xs font-semibold text-slate-500 uppercase tracking-wider truncate">Low Stock SKUs</span>
-              <div className="w-7 h-7 rounded-lg bg-rose-50 text-rose-600 flex items-center justify-center shrink-0">
+              <span className="text-[10px] sm:text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider truncate">Low Stock SKUs</span>
+              <div className="w-7 h-7 rounded-lg bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 flex items-center justify-center shrink-0">
                 <AlertTriangle className="w-3.5 h-3.5" />
               </div>
             </div>
             <div className="mt-2">
-              <h4 className="text-lg sm:text-xl font-black text-rose-700">{lowStockProducts.length} items</h4>
-              <p className="text-[10px] sm:text-xs text-rose-600 font-semibold mt-0.5 truncate">
+              <h4 className="text-lg sm:text-xl font-black text-rose-600 dark:text-rose-400">{lowStockProducts.length} items</h4>
+              <p className="text-[10px] sm:text-xs text-rose-600 dark:text-rose-400 font-semibold mt-0.5 truncate">
                 Stock below 10 units
               </p>
             </div>
@@ -1813,69 +1813,69 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
         <button
           type="button"
           onClick={() => onSelectTab('orders')}
-          className="p-3 sm:p-4 rounded-xl bg-amber-50/70 border border-amber-200 text-left hover:bg-amber-100/70 transition-colors cursor-pointer"
+          className="p-3 sm:p-4 rounded-xl bg-amber-50/70 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 text-left hover:bg-amber-100/70 dark:hover:bg-amber-900/40 transition-colors cursor-pointer"
         >
           <div className="flex items-center justify-between">
-            <span className="text-[11px] sm:text-xs font-bold text-amber-900">Pending Orders</span>
-            <Clock className="w-4 h-4 text-amber-600" />
+            <span className="text-[11px] sm:text-xs font-bold text-amber-900 dark:text-amber-200">Pending Orders</span>
+            <Clock className="w-4 h-4 text-amber-600 dark:text-amber-400" />
           </div>
-          <p className="text-lg sm:text-xl font-extrabold text-amber-950 mt-1">{pendingOrders.length}</p>
-          <p className="text-[10px] sm:text-[11px] text-amber-700 mt-0.5">Needs phone verification</p>
+          <p className="text-lg sm:text-xl font-extrabold text-amber-950 dark:text-white mt-1">{pendingOrders.length}</p>
+          <p className="text-[10px] sm:text-[11px] text-amber-700 dark:text-amber-400 mt-0.5">Needs phone verification</p>
         </button>
 
         <button
           type="button"
           onClick={() => onSelectTab('orders')}
-          className="p-3 sm:p-4 rounded-xl bg-sky-50/70 border border-sky-200 text-left hover:bg-sky-100/70 transition-colors cursor-pointer"
+          className="p-3 sm:p-4 rounded-xl bg-sky-50/70 dark:bg-sky-950/40 border border-sky-200 dark:border-sky-800/60 text-left hover:bg-sky-100/70 dark:hover:bg-sky-900/40 transition-colors cursor-pointer"
         >
           <div className="flex items-center justify-between">
-            <span className="text-[11px] sm:text-xs font-bold text-sky-900">Processing &amp; Shipped</span>
-            <Package className="w-4 h-4 text-sky-600" />
+            <span className="text-[11px] sm:text-xs font-bold text-sky-900 dark:text-sky-200">Processing &amp; Shipped</span>
+            <Package className="w-4 h-4 text-sky-600 dark:text-sky-400" />
           </div>
-          <p className="text-lg sm:text-xl font-extrabold text-sky-950 mt-1">{processingOrders.length}</p>
-          <p className="text-[10px] sm:text-[11px] text-sky-700 mt-0.5">In packing &amp; transit</p>
+          <p className="text-lg sm:text-xl font-extrabold text-sky-950 dark:text-white mt-1">{processingOrders.length}</p>
+          <p className="text-[10px] sm:text-[11px] text-sky-700 dark:text-sky-400 mt-0.5">In packing &amp; transit</p>
         </button>
 
         <button
           type="button"
           onClick={() => onSelectTab('orders')}
-          className="p-3 sm:p-4 rounded-xl bg-emerald-50/70 border border-emerald-200 text-left hover:bg-emerald-100/70 transition-colors cursor-pointer"
+          className="p-3 sm:p-4 rounded-xl bg-emerald-50/70 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/60 text-left hover:bg-emerald-100/70 dark:hover:bg-emerald-900/40 transition-colors cursor-pointer"
         >
           <div className="flex items-center justify-between">
-            <span className="text-[11px] sm:text-xs font-bold text-emerald-900">Delivered</span>
-            <CheckCircle className="w-4 h-4 text-emerald-600" />
+            <span className="text-[11px] sm:text-xs font-bold text-emerald-900 dark:text-emerald-200">Delivered</span>
+            <CheckCircle className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
           </div>
-          <p className="text-lg sm:text-xl font-extrabold text-emerald-950 mt-1">{deliveredOrders.length}</p>
-          <p className="text-[10px] sm:text-[11px] text-emerald-700 mt-0.5">Successfully collected</p>
+          <p className="text-lg sm:text-xl font-extrabold text-emerald-950 dark:text-white mt-1">{deliveredOrders.length}</p>
+          <p className="text-[10px] sm:text-[11px] text-emerald-700 dark:text-emerald-400 mt-0.5">Successfully collected</p>
         </button>
 
         <button
           type="button"
           onClick={() => onSelectTab('inventory')}
-          className="p-3 sm:p-4 rounded-xl bg-rose-50/70 border border-rose-200 text-left hover:bg-rose-100/70 transition-colors cursor-pointer"
+          className="p-3 sm:p-4 rounded-xl bg-rose-50/70 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800/60 text-left hover:bg-rose-100/70 dark:hover:bg-rose-900/40 transition-colors cursor-pointer"
         >
           <div className="flex items-center justify-between">
-            <span className="text-[11px] sm:text-xs font-bold text-rose-900">Low Stock SKUs</span>
-            <AlertTriangle className="w-4 h-4 text-rose-600" />
+            <span className="text-[11px] sm:text-xs font-bold text-rose-900 dark:text-rose-200">Low Stock SKUs</span>
+            <AlertTriangle className="w-4 h-4 text-rose-600 dark:text-rose-400" />
           </div>
-          <p className="text-lg sm:text-xl font-extrabold text-rose-950 mt-1">{lowStockProducts.length}</p>
-          <p className="text-[10px] sm:text-[11px] text-rose-700 mt-0.5">Restock required</p>
+          <p className="text-lg sm:text-xl font-extrabold text-rose-950 dark:text-white mt-1">{lowStockProducts.length}</p>
+          <p className="text-[10px] sm:text-[11px] text-rose-700 dark:text-rose-400 mt-0.5">Restock required</p>
         </button>
       </div>
 
       {/* 5. Sales Analytics & Visual Trends */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Sales Chart Section */}
-        <div className="lg:col-span-2 p-4 sm:p-6 rounded-2xl bg-white border border-slate-200 shadow-2xs">
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pb-4 border-b border-slate-100">
+        <div className="lg:col-span-2 p-4 sm:p-6 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xs">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pb-4 border-b border-slate-100 dark:border-slate-800">
             <div>
-              <h2 className="text-sm sm:text-base font-bold text-slate-900">Sales &amp; Revenue Analytics</h2>
-              <p className="text-xs text-slate-500">Real-time Bangladesh order trends and turnover</p>
+              <h2 className="text-sm sm:text-base font-bold text-slate-900 dark:text-white">Sales &amp; Revenue Analytics</h2>
+              <p className="text-xs text-slate-500 dark:text-slate-400">Real-time Bangladesh order trends and turnover</p>
             </div>
 
             {/* Period Filters - Scrollable Single Row on Mobile */}
             <div className="w-full sm:w-auto overflow-x-auto scrollbar-none py-0.5">
-              <div className="inline-flex items-center gap-1 bg-slate-100 p-1 rounded-xl text-xs font-semibold whitespace-nowrap min-w-max border border-slate-200/60">
+              <div className="inline-flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl text-xs font-semibold whitespace-nowrap min-w-max border border-slate-200/60 dark:border-slate-700">
                 {(
                   [
                     { id: 'today', label: 'Today', shortLabel: 'Today' },
@@ -1891,7 +1891,9 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
                     type="button"
                     onClick={() => setAnalyticsPeriod(p.id)}
                     className={`px-2.5 py-1 rounded-lg transition-colors cursor-pointer whitespace-nowrap text-[11px] sm:text-xs shrink-0 ${
-                      analyticsPeriod === p.id ? 'bg-white text-slate-900 shadow-2xs font-bold' : 'text-slate-600 hover:text-slate-900'
+                      analyticsPeriod === p.id
+                        ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-2xs font-bold'
+                        : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                     }`}
                   >
                     <span className="hidden sm:inline">{p.label}</span>
@@ -1911,19 +1913,19 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
                   <div key={i} className="flex-1 flex flex-col items-center gap-2 group relative">
                     {/* Hover Tooltip */}
                     <div className="absolute -top-10 z-10 bg-slate-900 text-white text-[10px] font-bold px-2 py-1 rounded-md opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap shadow-md">
-                      {d.fullLabel}: ৳{d.revenue.toLocaleString()} ({d.orders} orders)
+                      {d.fullLabel}: ৳{d.revenue?.toLocaleString()} ({d.orders} orders)
                     </div>
 
-                    <div className="text-[9px] sm:text-[10px] font-bold text-slate-600 opacity-80 group-hover:opacity-100 transition-opacity">
+                    <div className="text-[9px] sm:text-[10px] font-bold text-slate-600 dark:text-slate-300 opacity-80 group-hover:opacity-100 transition-opacity">
                       {d.revenue >= 1000 ? `৳${(d.revenue / 1000).toFixed(1)}k` : `৳${d.revenue}`}
                     </div>
-                    <div className="w-full max-w-[48px] bg-slate-100 rounded-t-xl overflow-hidden h-36 sm:h-40 flex items-end">
+                    <div className="w-full max-w-[48px] bg-slate-100 dark:bg-slate-800 rounded-t-xl overflow-hidden h-36 sm:h-40 flex items-end">
                       <div
                         style={{ height: `${heightPercent}%` }}
                         className="w-full bg-linear-to-t from-sky-600 to-sky-400 rounded-t-xl transition-all duration-500 group-hover:from-sky-500 group-hover:to-sky-300"
                       />
                     </div>
-                    <span className="text-[10px] sm:text-xs font-semibold text-slate-600 truncate max-w-full" title={d.fullLabel}>
+                    <span className="text-[10px] sm:text-xs font-semibold text-slate-600 dark:text-slate-400 truncate max-w-full" title={d.fullLabel}>
                       {d.label}
                     </span>
                   </div>
@@ -1933,33 +1935,33 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
           </div>
 
           {/* Bottom Chart Stats */}
-          <div className="mt-6 pt-4 border-t border-slate-100 grid grid-cols-3 text-center text-xs gap-1">
+          <div className="mt-6 pt-4 border-t border-slate-100 dark:border-slate-800 grid grid-cols-3 text-center text-xs gap-1">
             <div>
-              <p className="text-slate-500 text-[11px] sm:text-xs">Period Sales</p>
-              <p className="font-bold text-slate-900 text-xs sm:text-sm mt-0.5">৳{periodRevenue.toLocaleString()}</p>
+              <p className="text-slate-500 dark:text-slate-400 text-[11px] sm:text-xs">Period Sales</p>
+              <p className="font-bold text-slate-900 dark:text-white text-xs sm:text-sm mt-0.5">৳{periodRevenue?.toLocaleString()}</p>
             </div>
             <div>
-              <p className="text-slate-500 text-[11px] sm:text-xs">Orders Count</p>
-              <p className="font-bold text-slate-900 text-xs sm:text-sm mt-0.5">{periodOrdersCount} orders</p>
+              <p className="text-slate-500 dark:text-slate-400 text-[11px] sm:text-xs">Orders Count</p>
+              <p className="font-bold text-slate-900 dark:text-white text-xs sm:text-sm mt-0.5">{periodOrdersCount} orders</p>
             </div>
             <div>
-              <p className="text-slate-500 text-[11px] sm:text-xs">Period AOV</p>
-              <p className="font-bold text-sky-600 text-xs sm:text-sm mt-0.5">
-                ৳{periodOrdersCount > 0 ? Math.round(periodRevenue / periodOrdersCount).toLocaleString() : 0}
+              <p className="text-slate-500 dark:text-slate-400 text-[11px] sm:text-xs">Period AOV</p>
+              <p className="font-bold text-sky-600 dark:text-sky-400 text-xs sm:text-sm mt-0.5">
+                ৳{periodOrdersCount > 0 ? Math.round(periodRevenue / periodOrdersCount)?.toLocaleString() : 0}
               </p>
             </div>
           </div>
         </div>
 
         {/* Top Categories & Quick Stats */}
-        <div className="p-5 sm:p-6 rounded-2xl bg-white border border-slate-200 shadow-2xs flex flex-col justify-between">
+        <div className="p-5 sm:p-6 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xs flex flex-col justify-between">
           <div>
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-              <h2 className="text-sm sm:text-base font-bold text-slate-900">Top Categories</h2>
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+              <h2 className="text-sm sm:text-base font-bold text-slate-900 dark:text-white">Top Categories</h2>
               <button
                 type="button"
                 onClick={() => onSelectTab('categories')}
-                className="text-xs font-semibold text-sky-600 hover:text-sky-700 flex items-center gap-1 cursor-pointer"
+                className="text-xs font-semibold text-sky-600 dark:text-sky-400 hover:text-sky-700 dark:hover:text-sky-300 flex items-center gap-1 cursor-pointer"
               >
                 <span>View All</span>
                 <ChevronRight className="w-3.5 h-3.5" />
@@ -1973,10 +1975,10 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
                 return (
                   <div key={idx} className="space-y-1">
                     <div className="flex justify-between text-xs font-medium">
-                      <span className="text-slate-800 font-semibold">{catName}</span>
-                      <span className="text-slate-500">{count} products ({percentage}%)</span>
+                      <span className="text-slate-800 dark:text-slate-200 font-semibold">{catName}</span>
+                      <span className="text-slate-500 dark:text-slate-400">{count} products ({percentage}%)</span>
                     </div>
-                    <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+                    <div className="h-2 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
                       <div
                         style={{ width: `${percentage}%` }}
                         className={`h-full rounded-full ${
@@ -1990,13 +1992,13 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
             </div>
           </div>
 
-          <div className="mt-6 p-4 rounded-xl bg-slate-50 border border-slate-200/80">
-            <div className="flex items-center gap-2 text-xs font-bold text-slate-800 mb-1">
-              <Sparkles className="w-4 h-4 text-sky-600" />
+          <div className="mt-6 p-4 rounded-xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200/80 dark:border-slate-700">
+            <div className="flex items-center gap-2 text-xs font-bold text-slate-800 dark:text-slate-200 mb-1">
+              <Sparkles className="w-4 h-4 text-sky-600 dark:text-sky-400" />
               <span>Payment Preferences in BD</span>
             </div>
-            <p className="text-xs text-slate-600">
-              bKash &amp; Nagad account for <strong className="text-slate-800">58%</strong> of completed prepaid orders; Cash on Delivery accounts for <strong className="text-slate-800">42%</strong>.
+            <p className="text-xs text-slate-600 dark:text-slate-300">
+              bKash &amp; Nagad account for <strong className="text-slate-800 dark:text-white">58%</strong> of completed prepaid orders; Cash on Delivery accounts for <strong className="text-slate-800 dark:text-white">42%</strong>.
             </p>
           </div>
         </div>
@@ -2005,16 +2007,16 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
       {/* 6. Recent Orders Table & Best Sellers */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Recent Orders (2 Columns) */}
-        <div className="lg:col-span-2 p-5 sm:p-6 rounded-2xl bg-white border border-slate-200 shadow-2xs">
-          <div className="flex items-center justify-between pb-4 border-b border-slate-100">
+        <div className="lg:col-span-2 p-5 sm:p-6 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xs">
+          <div className="flex items-center justify-between pb-4 border-b border-slate-100 dark:border-slate-800">
             <div>
-              <h2 className="text-sm sm:text-base font-bold text-slate-900">Recent Customer Orders</h2>
-              <p className="text-xs text-slate-500">Live order stream across Bangladesh</p>
+              <h2 className="text-sm sm:text-base font-bold text-slate-900 dark:text-white">Recent Customer Orders</h2>
+              <p className="text-xs text-slate-500 dark:text-slate-400">Live order stream across Bangladesh</p>
             </div>
             <button
               type="button"
               onClick={() => onSelectTab('orders')}
-              className="text-xs font-semibold text-sky-600 hover:text-sky-700 flex items-center gap-1 cursor-pointer"
+              className="text-xs font-semibold text-sky-600 dark:text-sky-400 hover:text-sky-700 dark:hover:text-sky-300 flex items-center gap-1 cursor-pointer"
             >
               <span>Manage All Orders</span>
               <ChevronRight className="w-3.5 h-3.5" />
@@ -2024,7 +2026,7 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
           <div className="mt-4 overflow-x-auto">
             <table className="w-full text-left text-xs">
               <thead>
-                <tr className="border-b border-slate-200 text-slate-500 uppercase text-[10px] tracking-wider">
+                <tr className="border-b border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 uppercase text-[10px] tracking-wider">
                   <th className="py-2.5 px-2">Order ID</th>
                   <th className="py-2.5 px-2">Customer</th>
                   <th className="py-2.5 px-2">Items</th>
@@ -2034,22 +2036,22 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
                   <th className="py-2.5 px-2 text-right">Action</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100">
+              <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                 {sortedRecentOrders.slice(0, 6).map((order) => (
-                  <tr key={order.id} className="hover:bg-slate-50/80 transition-colors">
-                    <td className="py-3 px-2 font-mono font-bold text-sky-700">#{order.id}</td>
+                  <tr key={order.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/50 transition-colors">
+                    <td className="py-3 px-2 font-mono font-bold text-sky-600 dark:text-sky-400">#{order.id}</td>
                     <td className="py-3 px-2">
-                      <p className="font-semibold text-slate-900">{order.customerName}</p>
-                      <p className="text-[11px] text-slate-400">{order.customerMobile}</p>
+                      <p className="font-semibold text-slate-900 dark:text-slate-100">{order.customerName}</p>
+                      <p className="text-[11px] text-slate-400 dark:text-slate-500">{order.customerMobile}</p>
                     </td>
-                    <td className="py-3 px-2 text-slate-600">
-                      {order.items.reduce((sum, item) => sum + item.quantity, 0)} items
+                    <td className="py-3 px-2 text-slate-600 dark:text-slate-300">
+                      {order?.items?.reduce((sum, item) => sum + (item.quantity || 1), 0) || 0} items
                     </td>
-                    <td className="py-3 px-2 font-bold text-slate-900">
-                      ৳{order.totalAmount.toLocaleString()}
+                    <td className="py-3 px-2 font-bold text-slate-900 dark:text-white">
+                      ৳{order.totalAmount?.toLocaleString()}
                     </td>
                     <td className="py-3 px-2">
-                      <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-100 text-slate-700">
+                      <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
                         {order.paymentMethod}
                       </span>
                     </td>
@@ -2057,12 +2059,12 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
                       <span
                         className={`inline-block px-2 py-0.5 text-[10px] font-bold rounded-full ${
                           order.orderStatus === 'Delivered'
-                            ? 'bg-emerald-100 text-emerald-800'
+                            ? 'bg-emerald-100 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300'
                             : order.orderStatus === 'Cancelled'
-                            ? 'bg-red-100 text-red-800'
+                            ? 'bg-red-100 dark:bg-red-950/80 text-red-800 dark:text-red-300'
                             : order.orderStatus === 'Pending' || order.orderStatus === 'Payment Verification'
-                            ? 'bg-amber-100 text-amber-800'
-                            : 'bg-sky-100 text-sky-800'
+                            ? 'bg-amber-100 dark:bg-amber-950/80 text-amber-800 dark:text-amber-300'
+                            : 'bg-sky-100 dark:bg-sky-950/80 text-sky-800 dark:text-sky-300'
                         }`}
                       >
                         {order.orderStatus}
@@ -2073,7 +2075,7 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
                         <button
                           type="button"
                           onClick={() => onViewOrder(order)}
-                          className="p-1.5 rounded-lg text-slate-600 hover:text-sky-600 hover:bg-sky-50 transition-colors cursor-pointer"
+                          className="p-1.5 rounded-lg text-slate-600 dark:text-slate-300 hover:text-sky-600 dark:hover:text-sky-400 hover:bg-sky-50 dark:hover:bg-slate-800 transition-colors cursor-pointer"
                           title="View Details"
                         >
                           <Eye className="w-4 h-4" />
@@ -2081,7 +2083,7 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
                         <button
                           type="button"
                           onClick={() => onPrintInvoice(order)}
-                          className="p-1.5 rounded-lg text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-colors cursor-pointer"
+                          className="p-1.5 rounded-lg text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
                           title="Print Invoice"
                         >
                           <Printer className="w-4 h-4" />
@@ -2096,16 +2098,16 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
         </div>
 
         {/* Best Selling Products (1 Column) */}
-        <div className="p-5 sm:p-6 rounded-2xl bg-white border border-slate-200 shadow-2xs">
-          <div className="flex items-center justify-between pb-4 border-b border-slate-100">
+        <div className="p-5 sm:p-6 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xs">
+          <div className="flex items-center justify-between pb-4 border-b border-slate-100 dark:border-slate-800">
             <div>
-              <h2 className="text-sm sm:text-base font-bold text-slate-900">Best Sellers</h2>
-              <p className="text-xs text-slate-500">Top revenue generating items</p>
+              <h2 className="text-sm sm:text-base font-bold text-slate-900 dark:text-white">Best Sellers</h2>
+              <p className="text-xs text-slate-500 dark:text-slate-400">Top revenue generating items</p>
             </div>
             <button
               type="button"
               onClick={() => onSelectTab('products')}
-              className="text-xs font-semibold text-sky-600 hover:text-sky-700 flex items-center gap-1 cursor-pointer"
+              className="text-xs font-semibold text-sky-600 dark:text-sky-400 hover:text-sky-700 dark:hover:text-sky-300 flex items-center gap-1 cursor-pointer"
             >
               <span>Catalog</span>
               <ChevronRight className="w-3.5 h-3.5" />
@@ -2114,21 +2116,21 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
 
           <div className="mt-4 space-y-3.5">
             {topProductsDisplay.map((item, idx) => (
-              <div key={idx} className="flex items-center gap-3 p-2 rounded-xl hover:bg-slate-50 transition-colors">
+              <div key={idx} className="flex items-center gap-3 p-2 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-800/60 transition-colors">
                 <img
                   src={getOptimizedImageUrl(item.product.images?.[0] || 'https://images.unsplash.com/photo-1546868871-7041f2a55e12?w=100', 100)}
                   alt={item.product.name}
                   referrerPolicy="no-referrer"
                   onError={(e) => handleImageError(e, item.product.images?.[0])}
-                  className="w-12 h-12 rounded-xl object-cover bg-slate-100 shrink-0"
+                  className="w-12 h-12 rounded-xl object-cover bg-slate-100 dark:bg-slate-800 shrink-0"
                 />
                 <div className="flex-1 min-w-0">
-                  <h4 className="text-xs font-bold text-slate-800 truncate">{item.product.name}</h4>
-                  <p className="text-[11px] text-slate-400 truncate">{item.product.category}</p>
-                  <p className="text-xs font-extrabold text-sky-700 mt-0.5">৳{item.product.price.toLocaleString()}</p>
+                  <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200 truncate">{item.product.name}</h4>
+                  <p className="text-[11px] text-slate-400 dark:text-slate-500 truncate">{item.product.category}</p>
+                  <p className="text-xs font-extrabold text-sky-700 dark:text-sky-400 mt-0.5">৳{item.product.price?.toLocaleString()}</p>
                 </div>
                 <div className="text-right shrink-0">
-                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-sky-50 text-sky-700">
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-sky-50 dark:bg-sky-950/80 text-sky-700 dark:text-sky-300">
                     {item.quantity} sold
                   </span>
                 </div>
@@ -2138,15 +2140,15 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
 
           {/* Low stock alert badge block */}
           {lowStockProducts.length > 0 && (
-            <div className="mt-6 p-3.5 rounded-xl bg-rose-50 border border-rose-200 flex items-center justify-between">
+            <div className="mt-6 p-3.5 rounded-xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800 flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
-                <span className="text-xs font-bold text-rose-900">{lowStockProducts.length} items low on stock</span>
+                <AlertTriangle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0" />
+                <span className="text-xs font-bold text-rose-900 dark:text-rose-200">{lowStockProducts.length} items low on stock</span>
               </div>
               <button
                 type="button"
                 onClick={() => onSelectTab('inventory')}
-                className="text-xs font-bold text-rose-700 hover:text-rose-900 cursor-pointer underline"
+                className="text-xs font-bold text-rose-700 dark:text-rose-400 hover:text-rose-900 dark:hover:text-rose-300 cursor-pointer underline"
               >
                 Reorder
               </button>
@@ -2371,7 +2373,7 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
                   <div className="flex items-center gap-5">
                     <div className="text-right">
                       <span className="text-xs text-emerald-400 font-bold block uppercase tracking-wide">Real Net Profit</span>
-                      <span className="text-2xl font-black text-emerald-300">৳{totalNetRevenue.toLocaleString('en-BD')}</span>
+                      <span className="text-2xl font-black text-emerald-300">৳{totalNetRevenue?.toLocaleString('en-BD')}</span>
                     </div>
                     <div className="flex items-center">
                       <KenaXLogo size="lg" theme="dark" className="h-14 sm:h-16 w-auto object-contain" />
@@ -2383,49 +2385,49 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                   <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200">
                     <span className="text-[11px] font-bold text-slate-500 uppercase block">Money Received</span>
-                    <p className="text-lg font-black text-emerald-700 mt-0.5">৳{totalMoneyReceived.toLocaleString('en-BD')}</p>
+                    <p className="text-lg font-black text-emerald-700 mt-0.5">৳{totalMoneyReceived?.toLocaleString('en-BD')}</p>
                     <span className="text-[10px] text-slate-400">{deliveredOrders.length} Delivered Orders</span>
                   </div>
                   <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200">
                     <span className="text-[11px] font-bold text-slate-500 uppercase block">Product Costs</span>
-                    <p className="text-lg font-black text-amber-700 mt-0.5">৳{totalDeliveredCost.toLocaleString('en-BD')}</p>
+                    <p className="text-lg font-black text-amber-700 mt-0.5">৳{totalDeliveredCost?.toLocaleString('en-BD')}</p>
                     <span className="text-[10px] text-slate-400">Wholesale Sourcing</span>
                   </div>
                   <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200">
                     <span className="text-[11px] font-bold text-slate-500 uppercase block">Product Profit</span>
-                    <p className="text-lg font-black text-sky-700 mt-0.5">৳{totalProductProfit.toLocaleString('en-BD')}</p>
+                    <p className="text-lg font-black text-sky-700 mt-0.5">৳{totalProductProfit?.toLocaleString('en-BD')}</p>
                     <span className="text-[10px] text-slate-400">Gross Margin {productProfitMarginPercent}%</span>
                   </div>
                   <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200">
                     <span className="text-[11px] font-bold text-slate-500 uppercase block">Total Expenses</span>
-                    <p className="text-lg font-black text-rose-700 mt-0.5">৳{totalAllExpenses.toLocaleString('en-BD')}</p>
-                    <span className="text-[10px] text-slate-400">Delivery: ৳{totalDeliveryExpenses.toLocaleString('en-BD')} • Others: ৳{totalOtherExpenses.toLocaleString('en-BD')}</span>
+                    <p className="text-lg font-black text-rose-700 mt-0.5">৳{totalAllExpenses?.toLocaleString('en-BD')}</p>
+                    <span className="text-[10px] text-slate-400">Delivery: ৳{totalDeliveryExpenses?.toLocaleString('en-BD')} • Others: ৳{totalOtherExpenses?.toLocaleString('en-BD')}</span>
                   </div>
                   <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200">
                     <span className="text-[11px] font-bold text-slate-500 uppercase block">Delivery Costs</span>
-                    <p className="text-lg font-black text-orange-700 mt-0.5">৳{totalDeliveryExpenses.toLocaleString('en-BD')}</p>
-                    <span className="text-[10px] text-slate-400">Collected: ৳{totalDeliveredDeliveryChargesCollected.toLocaleString('en-BD')}</span>
+                    <p className="text-lg font-black text-orange-700 mt-0.5">৳{totalDeliveryExpenses?.toLocaleString('en-BD')}</p>
+                    <span className="text-[10px] text-slate-400">Collected: ৳{totalDeliveredDeliveryChargesCollected?.toLocaleString('en-BD')}</span>
                   </div>
                   <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200">
                     <span className="text-[11px] font-bold text-slate-500 uppercase block">Other Profit</span>
-                    <p className="text-lg font-black text-violet-700 mt-0.5">+৳{totalOtherProfits.toLocaleString('en-BD')}</p>
+                    <p className="text-lg font-black text-violet-700 mt-0.5">+৳{totalOtherProfits?.toLocaleString('en-BD')}</p>
                     <span className="text-[10px] text-slate-400">{finFilteredOtherProfits.length} Records</span>
                   </div>
                   <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200">
                     <span className="text-[11px] font-bold text-slate-500 uppercase block">Advance Payment</span>
-                    <p className="text-lg font-black text-indigo-700 mt-0.5">৳{totalVerifiedDeliveryAdvance.toLocaleString('en-BD')}</p>
+                    <p className="text-lg font-black text-indigo-700 mt-0.5">৳{totalVerifiedDeliveryAdvance?.toLocaleString('en-BD')}</p>
                     <span className="text-[10px] text-slate-400">{verifiedAdvanceOrders.length} Verified</span>
                   </div>
                   <div className="p-3.5 rounded-xl bg-emerald-50 border-2 border-emerald-300">
                     <span className="text-[11px] font-black text-emerald-800 uppercase block">★ Real Net Profit</span>
-                    <p className="text-xl font-black text-emerald-900 mt-0.5">৳{totalNetRevenue.toLocaleString('en-BD')}</p>
+                    <p className="text-xl font-black text-emerald-900 mt-0.5">৳{totalNetRevenue?.toLocaleString('en-BD')}</p>
                     <span className="text-[10px] text-emerald-700 font-bold block truncate">
                       Formula: Cash + Other Profit - Costs - Expenses
                     </span>
                   </div>
                   <div className="p-3.5 rounded-xl bg-purple-50/60 border border-purple-200">
                     <span className="text-[11px] font-bold text-purple-900 uppercase block">Pipeline Forecast</span>
-                    <p className="text-lg font-black text-purple-900 mt-0.5">৳{upcomingTotalAmount.toLocaleString('en-BD')}</p>
+                    <p className="text-lg font-black text-purple-900 mt-0.5">৳{upcomingTotalAmount?.toLocaleString('en-BD')}</p>
                     <span className="text-[10px] text-purple-700">{upcomingOrders.length} In Progress Orders</span>
                   </div>
                 </div>

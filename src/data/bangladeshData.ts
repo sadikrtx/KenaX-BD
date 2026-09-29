@@ -284,3 +284,97 @@ export const COMMON_AREAS_BY_THANA: Record<string, string[]> = {
   Mohammadpur: ['Town Hall', 'Japan Garden City', 'Ring Road', 'Salimullah Road', 'Noorjahan Road', 'Tajmahal Road', 'Shekhertek', 'Basila', 'Adabor'],
   Agrabad: ['Badamtali More', 'CDA R/A', 'Commercial Area', 'Chowmuhani', 'Muhuri Para'],
 };
+
+export const BANGLADESH_DIVISION_NAMES_BN: Record<string, string> = {
+  Dhaka: 'ঢাকা বিভাগ',
+  Chattogram: 'চট্টগ্রাম বিভাগ',
+  Rajshahi: 'রাজশাহী বিভাগ',
+  Khulna: 'খুলনা বিভাগ',
+  Barishal: 'বরিশাল বিভাগ',
+  Sylhet: 'সিলেট বিভাগ',
+  Rangpur: 'রংপুর বিভাগ',
+  Mymensingh: 'ময়মনসিংহ বিভাগ',
+};
+
+export const BANGLADESH_DISTRICT_NAMES_BN: Record<string, string> = {
+  // Dhaka
+  Dhaka: 'ঢাকা',
+  Gazipur: 'গাজীপুর',
+  Narayanganj: 'নারায়ণগঞ্জ',
+  Tangail: 'টাঙ্গাইল',
+  Narsingdi: 'নরসিংদী',
+  Manikganj: 'মানিকগঞ্জ',
+  Munshiganj: 'মুন্সীগঞ্জ',
+  Faridpur: 'ফরিদপুর',
+  Kishoreganj: 'কিশোরগঞ্জ',
+  Gopalganj: 'গোপালগঞ্জ',
+  Madaripur: 'মাদারীপুর',
+  Rajbari: 'রাজবাড়ী',
+  Shariatpur: 'শরীয়তপুর',
+
+  // Chattogram
+  Chattogram: 'চট্টগ্রাম',
+  "Cox's Bazar": 'কক্সবাজার',
+  Cumilla: 'কুমিল্লা',
+  Feni: 'ফেনী',
+  Brahmanbaria: 'ব্রাহ্মণবাড়িয়া',
+  Noakhali: 'নোয়াখালী',
+  Chandpur: 'চাঁদপুর',
+  Lakshmipur: 'লক্ষ্মীপুর',
+  Khagrachhari: 'খাগড়াছড়ি',
+  Rangamati: 'রাঙ্গামাটি',
+  Bandarban: 'বান্দরবান',
+
+  // Rajshahi
+  Rajshahi: 'রাজশাহী',
+  Bogura: 'বগুড়া',
+  Pabna: 'পাবনা',
+  Sirajganj: 'সিরাজগঞ্জ',
+  Naogaon: 'নওগাঁ',
+  Natore: 'নাটোর',
+  Chapai_Nawabganj: 'চাঁপাইনবাবগঞ্জ',
+  Joypurhat: 'জয়পুরহাট',
+
+  // Khulna
+  Khulna: 'খুলনা',
+  Jashore: 'যশোর',
+  Satkhira: 'সাতক্ষীরা',
+  Kushtia: 'কুষ্টিয়া',
+  Jhenaidah: 'ঝিনাইদহ',
+  Bagerhat: 'বাগেরহাট',
+  Chuadanga: 'চুয়াডাঙ্গা',
+  Magura: 'মাগুরা',
+  Meherpur: 'মেহেরপুর',
+  Narail: 'নড়াইল',
+
+  // Barishal
+  Barishal: 'বরিশাল',
+  Patuakhali: 'পটুয়াখালী',
+  Bhola: 'ভোলা',
+  Pirojpur: 'পিরোজপুর',
+  Barguna: 'বরগুনা',
+  Jhalokathi: 'ঝালকাঠি',
+
+  // Sylhet
+  Sylhet: 'সিলেট',
+  Moulvibazar: 'মৌলভীবাজার',
+  Habiganj: 'হবিগঞ্জ',
+  Sunamganj: 'সুনামগঞ্জ',
+
+  // Rangpur
+  Rangpur: 'রংপুর',
+  Dinajpur: 'দিনাজপুর',
+  Kurigram: 'কুড়িগ্রাম',
+  Gaibandha: 'গাইবান্ধা',
+  Nilphamari: 'নীলফামারী',
+  Lalmonirhat: 'লালমনিরহাট',
+  Thakurgaon: 'ঠাকুরগাঁও',
+  Panchagarh: 'পঞ্চগড়',
+
+  // Mymensingh
+  Mymensingh: 'ময়মনসিংহ',
+  Jamalpur: 'জামালপুর',
+  Netrokona: 'নেত্রকোণা',
+  Sherpur: 'শেরপুর',
+};
+

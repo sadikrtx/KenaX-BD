@@ -21,7 +21,7 @@ import { sortProductsByPagePriority } from '../utils/productPriorityUtils';
 import { getTagSlides } from '../utils/tagBannerDefaults';
 import { TagBannerEditorModal } from './admin/TagBannerEditorModal';
 import { resolveOriginalImageMedia, getSynchronouslyResolvedMedia } from '../lib/firebase';
-import { getOptimizedImageUrl } from '../utils/imageOptimizer';
+import { getOptimizedImageUrl, handleImageError } from '../utils/imageOptimizer';
 
 interface TagProductsViewProps {
   tag: string;
@@ -219,10 +219,13 @@ export const TagProductsView: React.FC<TagProductsViewProps> = ({
   const handleSaveBanner = async (tagKey: string, updatedSlides: TagCollectionSlide[]) => {
     if (onUpdateSettings) {
       const currentBanners = siteSettings?.tagCollectionBanners || {};
+      const cleanKey = tagKey.trim().toLowerCase();
+      const originalKey = cleanTag.trim();
       await onUpdateSettings({
         tagCollectionBanners: {
           ...currentBanners,
-          [tagKey]: updatedSlides,
+          [cleanKey]: updatedSlides,
+          [originalKey]: updatedSlides,
         },
       });
     }
@@ -295,7 +298,11 @@ export const TagProductsView: React.FC<TagProductsViewProps> = ({
                 ? 'min-h-[280px]'
                 : activeSlide.mobileHeight === 'extra_tall'
                 ? 'min-h-[360px]'
-                : 'min-h-[220px]'
+                : activeSlide.mobileHeight === 'hd_16_9'
+                ? 'w-full aspect-[16/9]'
+                : activeSlide.mobileHeight === 'custom' && activeSlide.mobileCustomHeight
+                ? ''
+                : 'w-full aspect-[16/9] sm:aspect-auto min-h-[180px] sm:min-h-[220px]'
             } ${
               (resolvedBgImage || resolvedMobileBgImage)
                 ? 'bg-slate-950'
@@ -307,6 +314,9 @@ export const TagProductsView: React.FC<TagProductsViewProps> = ({
               /* Custom pixel heights if configured */
               ...(activeSlide.desktopHeight === 'custom' && activeSlide.desktopCustomHeight
                 ? { minHeight: `${activeSlide.desktopCustomHeight}px` }
+                : {}),
+              ...(activeSlide.mobileHeight === 'custom' && activeSlide.mobileCustomHeight
+                ? { minHeight: `${activeSlide.mobileCustomHeight}px` }
                 : {}),
             }}
           >
@@ -323,6 +333,8 @@ export const TagProductsView: React.FC<TagProductsViewProps> = ({
                   loading="eager"
                   decoding="async"
                   fetchPriority="high"
+                  referrerPolicy="no-referrer"
+                  onError={(e) => handleImageError(e, (resolvedBgImage && resolvedBgImage.trim() !== '') ? resolvedBgImage : resolvedMobileBgImage)}
                 />
               </picture>
             )}
@@ -489,17 +501,17 @@ export const TagProductsView: React.FC<TagProductsViewProps> = ({
 
       {/* 2. Tagged Products Grid */}
       <div className="max-w-[1536px] mx-auto px-3 sm:px-6 lg:px-8 space-y-4">
-        <div className="flex items-center justify-between border-b border-slate-200 pb-3">
+        <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-3">
           <div className="flex items-center gap-2">
-            <Flame className="w-5 h-5 text-rose-600" />
-            <h2 className="text-lg sm:text-xl font-black text-slate-900">
+            <Flame className="w-5 h-5 text-rose-600 dark:text-rose-400" />
+            <h2 className="text-lg sm:text-xl font-black text-slate-900 dark:text-white">
               {cleanTag} Products ({taggedProducts.length})
             </h2>
           </div>
           <button
             type="button"
             onClick={() => onNavigate('shop')}
-            className="text-xs font-bold text-sky-600 hover:text-sky-800 hover:underline flex items-center gap-1 cursor-pointer"
+            className="text-xs font-bold text-sky-600 dark:text-sky-400 hover:text-sky-800 dark:hover:text-sky-300 hover:underline flex items-center gap-1 cursor-pointer"
           >
             <span>View All Shop Items</span>
             <ArrowRight className="w-3.5 h-3.5" />
@@ -507,12 +519,12 @@ export const TagProductsView: React.FC<TagProductsViewProps> = ({
         </div>
 
         {taggedProducts.length === 0 ? (
-          <div className="bg-white rounded-3xl border border-slate-200 p-10 text-center max-w-md mx-auto my-6 space-y-3">
-            <div className="w-12 h-12 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center mx-auto">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-10 text-center max-w-md mx-auto my-6 space-y-3">
+            <div className="w-12 h-12 rounded-2xl bg-amber-50 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 flex items-center justify-center mx-auto">
               <Package className="w-6 h-6" />
             </div>
-            <h3 className="text-sm font-bold text-slate-900">No Products Currently Tagged</h3>
-            <p className="text-xs text-slate-500">
+            <h3 className="text-sm font-bold text-slate-900 dark:text-white">No Products Currently Tagged</h3>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
               There are no items currently marked with the tag "{cleanTag}". You can assign this tag to any product from the Admin Dashboard or explore our full product catalog below!
             </p>
             <button
@@ -544,14 +556,14 @@ export const TagProductsView: React.FC<TagProductsViewProps> = ({
 
       {/* 3. Similar & Other Popular Products Section */}
       {remainingProducts.length > 0 && (
-        <div className="max-w-[1536px] mx-auto px-3 sm:px-6 lg:px-8 pt-8 border-t-2 border-slate-200/80 space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-slate-100/70 p-4 rounded-2xl border border-slate-200">
+        <div className="max-w-[1536px] mx-auto px-3 sm:px-6 lg:px-8 pt-8 border-t-2 border-slate-200/80 dark:border-slate-800 space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-slate-100/70 dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800">
             <div>
-              <h2 className="text-lg sm:text-xl font-black text-slate-900 flex items-center gap-2">
-                <Grid className="w-5 h-5 text-sky-600" />
+              <h2 className="text-lg sm:text-xl font-black text-slate-900 dark:text-white flex items-center gap-2">
+                <Grid className="w-5 h-5 text-sky-600 dark:text-sky-400" />
                 <span>Explore Similar & Other Popular Products</span>
               </h2>
-              <p className="text-xs text-slate-500 mt-0.5">
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
                 Discover more top-rated gadgets, smartphones, and trending deals from our catalog
               </p>
             </div>
@@ -559,7 +571,7 @@ export const TagProductsView: React.FC<TagProductsViewProps> = ({
             <button
               type="button"
               onClick={() => onNavigate('shop')}
-              className="px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs transition-colors shadow-xs cursor-pointer self-start sm:self-auto"
+              className="px-4 py-2 rounded-xl bg-slate-900 dark:bg-slate-800 hover:bg-slate-800 dark:hover:bg-slate-700 text-white font-bold text-xs transition-colors shadow-xs cursor-pointer self-start sm:self-auto border dark:border-slate-700"
             >
               Explore Full Shop ({allProducts.length})
             </button>
@@ -587,7 +599,7 @@ export const TagProductsView: React.FC<TagProductsViewProps> = ({
               <button
                 type="button"
                 onClick={() => onNavigate('shop')}
-                className="inline-flex items-center gap-2 px-6 py-2.5 rounded-xl bg-white border border-slate-300 text-slate-800 hover:bg-sky-50 hover:text-sky-700 hover:border-sky-300 font-bold text-xs transition-colors shadow-2xs cursor-pointer"
+                className="inline-flex items-center gap-2 px-6 py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-800 dark:text-slate-200 hover:bg-sky-50 dark:hover:bg-slate-800 hover:text-sky-700 dark:hover:text-sky-400 hover:border-sky-300 font-bold text-xs transition-colors shadow-2xs cursor-pointer"
               >
                 <span>View More Products ({remainingProducts.length - 18} remaining)</span>
                 <ArrowRight className="w-4 h-4" />

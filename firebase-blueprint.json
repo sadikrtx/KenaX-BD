@@ -193,12 +193,42 @@
         "summary": { "type": "string" }
       },
       "required": ["id", "receivedAt", "type"]
+    },
+    "NewsletterSubscriber": {
+      "title": "NewsletterSubscriber",
+      "description": "Customer newsletter and promotional email subscribers",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "email": { "type": "string" },
+        "subscribedAt": { "type": "string" },
+        "source": { "type": "string" },
+        "status": { "type": "string" }
+      },
+      "required": ["id", "email", "subscribedAt", "status"]
+    },
+    "RolePermissionMatrix": {
+      "title": "RolePermissionMatrix",
+      "description": "Dynamic mapping of UI modules and dashboard tabs to role access for Sellers and Resellers",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "sellerAllowedTabs": { "type": "array" },
+        "resellerAllowedTabs": { "type": "array" },
+        "updatedAt": { "type": "string" },
+        "updatedBy": { "type": "string" }
+      },
+      "required": ["id", "sellerAllowedTabs", "resellerAllowedTabs", "updatedAt"]
     }
   },
   "firestore": {
     "/products/{productId}": {
       "schema": "Product",
       "description": "Products catalog"
+    },
+    "/newsletter_subscribers/{subscriberId}": {
+      "schema": "NewsletterSubscriber",
+      "description": "Customer newsletter and promotional email subscribers"
     },
     "/suppliers/{supplierId}": {
       "schema": "Supplier",
@@ -229,8 +259,8 @@
       "description": "Delivery, courier, logistics, and operational expenses"
     },
     "/system_settings/{settingId}": {
-      "schema": "EntityDefinition",
-      "description": "WhatsApp and SMS integration settings"
+      "schema": "RolePermissionMatrix",
+      "description": "WhatsApp, SMS, and dynamic role permission matrix settings"
     },
     "/sms_logs/{logId}": {
       "schema": "EntityDefinition",

@@ -1,4 +1,4 @@
-import { PromoBannerItem, PromoGridPlacementSettings, PromoGridSettings } from '../types';
+import { PromoBannerItem, PromoGridPlacementSettings, PromoGridSettings } from '../types/index.ts';
 
 export const DEFAULT_PROMO_GRID_PLACEMENTS: PromoGridPlacementSettings = {
   // Homepage

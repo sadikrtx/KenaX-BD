@@ -4,159 +4,287 @@ import { eq } from 'drizzle-orm';
 import { Product } from '../types/index.ts';
 import fs from 'fs';
 import path from 'path';
-import { INITIAL_PRODUCTS, DEMO_PRODUCT_IDS } from '../data/initialProducts.ts';
+import { INITIAL_PRODUCTS, PRODUCTION_PRODUCTS, isDemoProductId } from '../data/initialProducts.ts';
 
 const SERVER_STORE_DIR = path.join(process.cwd(), 'data');
-const SERVER_STORE_FILE = path.join(SERVER_STORE_DIR, 'server_products.json');
-const SERVER_DELETED_FILE = path.join(SERVER_STORE_DIR, 'deleted_products.json');
 
-export function getDeletedProductIdsFromStore(): string[] {
+function getProductsFilePath(isEnvPreview?: boolean): string {
+  return path.join(SERVER_STORE_DIR, isEnvPreview ? 'preview_server_products.json' : 'server_products.json');
+}
+
+function getDeletedProductsFilePath(isEnvPreview?: boolean): string {
+  return path.join(SERVER_STORE_DIR, isEnvPreview ? 'preview_deleted_products.json' : 'deleted_products.json');
+}
+
+export function getDeletedProductIdsFromStore(_isEnvPreview?: boolean): string[] {
   try {
-    const list: string[] = [];
-    if (fs.existsSync(SERVER_DELETED_FILE)) {
-      const content = fs.readFileSync(SERVER_DELETED_FILE, 'utf-8');
-      const parsed = JSON.parse(content);
-      if (Array.isArray(parsed)) {
-        parsed.forEach((id) => {
-          if (id && !list.includes(id)) list.push(id);
-        });
+    const set = new Set<string>();
+    const files = [
+      getDeletedProductsFilePath(false),
+      getDeletedProductsFilePath(true),
+    ];
+    for (const delFile of files) {
+      if (fs.existsSync(delFile)) {
+        const content = fs.readFileSync(delFile, 'utf-8');
+        const parsed = JSON.parse(content);
+        if (Array.isArray(parsed)) {
+          parsed.forEach((id) => {
+            if (id && typeof id === 'string') set.add(id);
+          });
+        }
       }
     }
-    return list;
+    return Array.from(set);
   } catch {}
   return [];
 }
 
-export function recordDeletedProductIdInStore(id: string) {
+export function recordDeletedProductIdInStore(id: string, _isEnvPreview?: boolean) {
+  if (!id) return;
   try {
-    const existing = getDeletedProductIdsFromStore();
-    if (!existing.includes(id)) {
-      existing.push(id);
-      fs.writeFileSync(SERVER_DELETED_FILE, JSON.stringify(existing, null, 2), 'utf-8');
+    const files = [
+      getDeletedProductsFilePath(false),
+      getDeletedProductsFilePath(true),
+    ];
+    for (const delFile of files) {
+      let list: string[] = [];
+      if (fs.existsSync(delFile)) {
+        try {
+          const content = fs.readFileSync(delFile, 'utf-8');
+          const parsed = JSON.parse(content);
+          if (Array.isArray(parsed)) list = parsed;
+        } catch {}
+      }
+      if (!list.includes(id)) {
+        list.push(id);
+        fs.writeFileSync(delFile, JSON.stringify(list, null, 2), 'utf-8');
+      }
     }
   } catch {}
 }
 
-function ensureStoreFile(): Product[] {
+export function removeDeletedProductIdFromStore(id: string, _isEnvPreview?: boolean) {
+  if (!id) return;
   try {
-    if (!fs.existsSync(SERVER_STORE_DIR)) {
-      fs.mkdirSync(SERVER_STORE_DIR, { recursive: true });
-    }
-    const deletedSet = new Set(getDeletedProductIdsFromStore());
-    if (!fs.existsSync(SERVER_STORE_FILE)) {
-      const initialFiltered = INITIAL_PRODUCTS.filter(p => !deletedSet.has(p.id));
-      fs.writeFileSync(SERVER_STORE_FILE, JSON.stringify(initialFiltered, null, 2), 'utf-8');
-      return initialFiltered;
-    }
-    const content = fs.readFileSync(SERVER_STORE_FILE, 'utf-8');
-    const parsed = JSON.parse(content);
-    if (Array.isArray(parsed)) {
-      const filtered = parsed.filter(p => p && p.id && !deletedSet.has(p.id));
-      if (filtered.length !== parsed.length) {
-        fs.writeFileSync(SERVER_STORE_FILE, JSON.stringify(filtered, null, 2), 'utf-8');
+    const files = [
+      getDeletedProductsFilePath(false),
+      getDeletedProductsFilePath(true),
+    ];
+    for (const delFile of files) {
+      if (fs.existsSync(delFile)) {
+        try {
+          const content = fs.readFileSync(delFile, 'utf-8');
+          const parsed = JSON.parse(content);
+          if (Array.isArray(parsed)) {
+            const filtered = parsed.filter((item) => item !== id);
+            if (filtered.length !== parsed.length) {
+              fs.writeFileSync(delFile, JSON.stringify(filtered, null, 2), 'utf-8');
+            }
+          }
+        } catch {}
       }
-      return filtered;
     }
-  } catch (err) {
-    console.warn('[Server Store] Error reading server_products.json:', err);
-  }
-  const deletedSet = new Set(getDeletedProductIdsFromStore());
-  return INITIAL_PRODUCTS.filter(p => !deletedSet.has(p.id));
+  } catch {}
 }
 
-function saveToStoreFile(productsList: Product[]) {
+function sanitizeProduct(p: Product): Product {
+  const rawImages = Array.isArray(p.images) ? p.images : (p.image ? [p.image] : []);
+  const cleanImages: string[] = [];
+
+  rawImages.forEach((img) => {
+    if (!img || typeof img !== 'string') return;
+    const lower = img.toLowerCase();
+    const isVideo = lower.includes('youtube.com') || lower.includes('youtu.be') || lower.includes('tiktok.com') || lower.includes('.mp4') || lower.includes('.webm') || lower.includes('.m3u8');
+    if (!isVideo) {
+      cleanImages.push(img);
+    }
+  });
+
+  const mainImage = cleanImages[0] || p.image || '';
+  const cleanVideoUrl = p.videoUrl && typeof p.videoUrl === 'string' && p.videoUrl.trim() !== '' ? p.videoUrl.trim() : undefined;
+
+  const result: Product = {
+    ...p,
+    image: mainImage,
+    images: cleanImages.length > 0 ? cleanImages : (p.images && p.images.length > 0 ? p.images : (mainImage ? [mainImage] : [])),
+  };
+  if (cleanVideoUrl) {
+    result.videoUrl = cleanVideoUrl;
+  } else {
+    delete result.videoUrl;
+  }
+  return result;
+}
+
+function ensureStoreFile(isEnvPreview?: boolean): Product[] {
   try {
     if (!fs.existsSync(SERVER_STORE_DIR)) {
       fs.mkdirSync(SERVER_STORE_DIR, { recursive: true });
     }
-    fs.writeFileSync(SERVER_STORE_FILE, JSON.stringify(productsList, null, 2), 'utf-8');
+    const targetFile = getProductsFilePath(isEnvPreview);
+    const deletedSet = new Set(getDeletedProductIdsFromStore(isEnvPreview));
+    const prodMap = new Map<string, Product>();
+
+    if (fs.existsSync(targetFile)) {
+      try {
+        const content = fs.readFileSync(targetFile, 'utf-8');
+        const parsed = JSON.parse(content);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          parsed.forEach((p) => {
+            if (p && p.id && !deletedSet.has(p.id)) {
+              if (!isEnvPreview && isDemoProductId(p.id)) {
+                return; // Strictly exclude demo products from production store
+              }
+              prodMap.set(p.id, sanitizeProduct(p));
+            }
+          });
+        }
+      } catch (err) {
+        console.warn(`[Server Store] Error reading ${targetFile}:`, err);
+      }
+    }
+
+    if (prodMap.size === 0) {
+      // Seed with appropriate baseline for environment
+      const baseline = INITIAL_PRODUCTS;
+      baseline.filter(p => !deletedSet.has(p.id) && (isEnvPreview || !isDemoProductId(p.id))).forEach(p => {
+        prodMap.set(p.id, sanitizeProduct(p));
+      });
+      const seeded = Array.from(prodMap.values());
+      try {
+        fs.writeFileSync(targetFile, JSON.stringify(seeded, null, 2), 'utf-8');
+      } catch {}
+      return seeded;
+    }
+
+    return Array.from(prodMap.values());
   } catch (err) {
-    console.error('[Server Store] Error writing server_products.json:', err);
+    console.warn('[Server Store] Error in ensureStoreFile:', err);
+  }
+  const deletedSet = new Set(getDeletedProductIdsFromStore(isEnvPreview));
+  const fallback = INITIAL_PRODUCTS;
+  return fallback.filter(p => !deletedSet.has(p.id) && (isEnvPreview || !isDemoProductId(p.id))).map(sanitizeProduct);
+}
+
+function saveToStoreFile(productsList: Product[], isEnvPreview?: boolean) {
+  try {
+    if (!fs.existsSync(SERVER_STORE_DIR)) {
+      fs.mkdirSync(SERVER_STORE_DIR, { recursive: true });
+    }
+    const sanitized = productsList.map(sanitizeProduct);
+    const dataStr = JSON.stringify(sanitized, null, 2);
+    const targetFile = getProductsFilePath(isEnvPreview);
+    fs.writeFileSync(targetFile, dataStr, 'utf-8');
+  } catch (err) {
+    console.error('[Server Store] Error writing products file:', err);
   }
 }
 
-export async function getAllProductsFromSQL(): Promise<Product[]> {
+export async function getAllProductsFromSQL(isEnvPreview?: boolean): Promise<Product[]> {
   let sqlProducts: Product[] = [];
-  try {
-    const rows = await db.select().from(products);
-    if (rows && rows.length > 0) {
-      sqlProducts = rows.map((row) => {
-        if (row.payload && typeof row.payload === 'object') {
-          return row.payload as Product;
-        }
-        return {
-          id: row.id,
-          name: row.name,
-          banglaName: row.banglaName || undefined,
-          category: row.category,
-          subcategory: row.subcategory || undefined,
-          brand: row.brand || 'KenaX BD',
-          price: row.price,
-          originalPrice: row.originalPrice,
-          costPrice: row.costPrice || undefined,
-          discountPercent: row.discountPercent || undefined,
-          stock: row.stock ?? 100,
-          sku: row.sku,
-          images: (row.images as string[]) || [],
-          videoUrl: row.videoUrl || undefined,
-          description: row.description || '',
-          specifications: (row.specifications as Record<string, string>) || {},
-          productType: (row.productType as any) || 'own',
-          supplierName: row.supplierName || undefined,
-          supplierUrl: row.supplierUrl || undefined,
-          supplierSku: row.supplierSku || undefined,
-          rating: Number(row.rating || 4.8),
-          reviewsCount: row.reviewsCount || 10,
-          isBestSeller: row.isBestSeller || false,
-          isNew: row.isNew || false,
-          isHot: row.isHot || false,
-          isTrending: row.isTrending || false,
-          isFeatured: row.isFeatured || false,
-          saleBadge: (row.saleBadge as any) || undefined,
-          discountType: (row.discountType as any) || undefined,
-          discountValue: row.discountValue || undefined,
-          tags: (row.tags as string[]) || [],
-          variations: (row.variations as any[]) || [],
-          colors: (row.colors as any[]) || [],
-          sizes: (row.sizes as string[]) || [],
-          variants: (row.variants as any[]) || [],
-          createdAt: row.createdAt ? new Date(row.createdAt).toISOString() : undefined,
-          updatedAt: row.updatedAt ? new Date(row.updatedAt).toISOString() : undefined,
-        } as Product;
-      });
+  if (!isEnvPreview) {
+    try {
+      const rows = await db.select().from(products);
+      if (rows && rows.length > 0) {
+        sqlProducts = rows.map((row) => {
+          if (row.payload && typeof row.payload === 'object') {
+            return row.payload as Product;
+          }
+          return {
+            id: row.id,
+            name: row.name,
+            banglaName: row.banglaName || undefined,
+            category: row.category,
+            subcategory: row.subcategory || undefined,
+            brand: row.brand || 'KenaX BD',
+            price: row.price,
+            originalPrice: row.originalPrice,
+            costPrice: row.costPrice || undefined,
+            discountPercent: row.discountPercent || undefined,
+            stock: row.stock ?? 100,
+            sku: row.sku,
+            images: (row.images as string[]) || [],
+            videoUrl: row.videoUrl || undefined,
+            description: row.description || '',
+            specifications: (row.specifications as Record<string, string>) || {},
+            productType: (row.productType as any) || 'own',
+            supplierName: row.supplierName || undefined,
+            supplierUrl: row.supplierUrl || undefined,
+            supplierSku: row.supplierSku || undefined,
+            rating: Number(row.rating || 4.8),
+            reviewsCount: row.reviewsCount || 10,
+            isBestSeller: row.isBestSeller || false,
+            isNew: row.isNew || false,
+            isHot: row.isHot || false,
+            isTrending: row.isTrending || false,
+            isFeatured: row.isFeatured || false,
+            saleBadge: (row.saleBadge as any) || undefined,
+            discountType: (row.discountType as any) || undefined,
+            discountValue: row.discountValue || undefined,
+            tags: (row.tags as string[]) || [],
+            variations: (row.variations as any[]) || [],
+            colors: (row.colors as any[]) || [],
+            sizes: (row.sizes as string[]) || [],
+            variants: (row.variants as any[]) || [],
+            createdAt: row.createdAt ? new Date(row.createdAt).toISOString() : undefined,
+            updatedAt: row.updatedAt ? new Date(row.updatedAt).toISOString() : undefined,
+          } as Product;
+        });
+      }
+    } catch (error) {
+      // SQL unconfigured or errored, rely on serverStore
     }
-  } catch (error) {
-    // SQL unconfigured or errored, rely on serverStore
   }
 
-  const fileProducts = ensureStoreFile();
+  const fileProducts = ensureStoreFile(isEnvPreview);
 
-  if (sqlProducts.length > 0) {
+  if (!isEnvPreview && sqlProducts.length > 0) {
     const map = new Map<string, Product>();
-    fileProducts.forEach((p) => map.set(p.id, p));
-    sqlProducts.forEach((p) => map.set(p.id, p));
+    fileProducts.filter(p => !isDemoProductId(p.id)).forEach((p) => map.set(p.id, p));
+    sqlProducts.filter(p => !isDemoProductId(p.id)).forEach((p) => map.set(p.id, p));
     return Array.from(map.values());
+  }
+
+  if (!isEnvPreview) {
+    return fileProducts.filter(p => !isDemoProductId(p.id));
   }
 
   return fileProducts;
 }
 
-export async function saveProductToSQL(product: Product): Promise<Product> {
+export async function saveProductToSQL(product: Product, isEnvPreview?: boolean, isManualAdminAction = false): Promise<Product> {
+  // If production environment, reject demo products from being saved
+  if (!isEnvPreview && isDemoProductId(product.id)) {
+    console.warn(`[Server Store] Rejected saving demo product ${product.id} to production store.`);
+    return product;
+  }
+
+  // If this product was deleted, NEVER resurrect it unless it is an explicit manual admin action
+  const deletedIds = getDeletedProductIdsFromStore();
+  if (deletedIds.includes(product.id)) {
+    if (isManualAdminAction) {
+      removeDeletedProductIdFromStore(product.id, isEnvPreview);
+    } else {
+      return product;
+    }
+  }
+
   // 1. Save to central server file store (persists full quality image base64/URLs & cross-device sync)
   try {
-    const current = ensureStoreFile();
+    const current = ensureStoreFile(isEnvPreview);
     const idx = current.findIndex((p) => p.id === product.id);
     if (idx >= 0) {
       current[idx] = product;
     } else {
       current.unshift(product);
     }
-    saveToStoreFile(current);
+    saveToStoreFile(current, isEnvPreview);
   } catch (e) {
-    console.error('Error saving to server_products.json file store:', e);
+    console.error('Error saving to server products file store:', e);
   }
 
-  // 2. Try saving to PostgreSQL if DB is connected
+  // 2. Try saving to PostgreSQL if DB is connected (production only)
+  if (!isEnvPreview) {
   try {
     const cleanPayload = JSON.parse(JSON.stringify(product));
 
@@ -213,18 +341,41 @@ export async function saveProductToSQL(product: Product): Promise<Product> {
   } catch (error) {
     // Non-blocking SQL save
   }
+  }
 
   return product;
 }
 
-export async function deleteProductFromSQL(productId: string): Promise<boolean> {
+export async function deleteProductFromSQL(productId: string, _isEnvPreview?: boolean): Promise<boolean> {
+  if (!productId) return true;
+
+  // 1. Record deletion tombstone in both environments
   recordDeletedProductIdInStore(productId);
+
+  // 2. Remove from both server JSON stores (production and preview)
   try {
-    const current = ensureStoreFile();
-    const filtered = current.filter((p) => p.id !== productId);
-    saveToStoreFile(filtered);
+    const prodFile = getProductsFilePath(false);
+    if (fs.existsSync(prodFile)) {
+      const current = JSON.parse(fs.readFileSync(prodFile, 'utf-8'));
+      if (Array.isArray(current)) {
+        const filtered = current.filter((p) => p && p.id !== productId);
+        fs.writeFileSync(prodFile, JSON.stringify(filtered, null, 2), 'utf-8');
+      }
+    }
   } catch (e) {}
 
+  try {
+    const prevFile = getProductsFilePath(true);
+    if (fs.existsSync(prevFile)) {
+      const current = JSON.parse(fs.readFileSync(prevFile, 'utf-8'));
+      if (Array.isArray(current)) {
+        const filtered = current.filter((p) => p && p.id !== productId);
+        fs.writeFileSync(prevFile, JSON.stringify(filtered, null, 2), 'utf-8');
+      }
+    }
+  } catch (e) {}
+
+  // 3. Permanent hard delete from PostgreSQL database
   try {
     await db.delete(products).where(eq(products.id, productId));
   } catch (error) {}

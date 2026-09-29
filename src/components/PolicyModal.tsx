@@ -17,12 +17,12 @@ import {
   DEFAULT_FAQS,
 } from '../data/defaultPolicies';
 
-export type PolicyTab = 'privacy' | 'terms' | 'refund' | 'faq';
+export type PolicyTab = 'return' | 'exchange' | 'privacy' | 'terms' | 'refund' | 'faq' | string;
 
 interface PolicyModalProps {
   isOpen: boolean;
   onClose: () => void;
-  initialTab?: PolicyTab;
+  initialTab?: string;
   privacyPolicyText?: string;
   termsOfServiceText?: string;
   refundPolicyText?: string;

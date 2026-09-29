@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   User,
   Package,
@@ -26,8 +26,15 @@ import {
   ArrowRight,
 } from 'lucide-react';
 import { Order, DeliveryAddress, Product, CustomerRecord, OrderItem } from '../types';
-import { normalizePhoneNumber, fetchCustomerOrdersFromDB } from '../lib/firebase';
+import { normalizePhoneNumber, fetchCustomerOrdersFromDB, getOrdersFromDB, subscribeToOrders } from '../lib/firebase';
 import { BANGLADESH_LOCATIONS } from '../data/bangladeshData';
+import { CartItemImage } from './CartItemImage';
+import { getOptimizedImageUrl, handleImageError } from '../utils/imageOptimizer';
+import {
+  cleanBDPhoneNumber,
+  isValidBDMobileNumber,
+  getBDPhoneValidationError,
+} from '../utils/phoneUtils';
 
 interface CustomerDashboardProps {
   orders: Order[];
@@ -173,12 +180,18 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
     e.preventDefault();
     if (!fullAddress.trim()) return;
 
+    const cleanPhone = cleanBDPhoneNumber(recipientPhone) || cleanBDPhoneNumber(currentCustomer?.mobile || '');
+    if (cleanPhone && !isValidBDMobileNumber(cleanPhone)) {
+      alert(getBDPhoneValidationError(cleanPhone) || 'Please enter a valid 11-digit mobile number starting with 013 to 019.');
+      return;
+    }
+
     if (editingAddressId) {
       const updatedAddr: DeliveryAddress = {
         id: editingAddressId,
         label: addrLabel,
         recipientName: recipientName.trim() || currentCustomer?.name || 'Customer',
-        recipientPhone: recipientPhone.trim() || currentCustomer?.mobile || '',
+        recipientPhone: cleanPhone,
         division,
         district,
         upazila,
@@ -195,7 +208,7 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
         id: 'addr-' + Date.now(),
         label: addrLabel,
         recipientName: recipientName.trim() || currentCustomer?.name || 'Customer',
-        recipientPhone: recipientPhone.trim() || currentCustomer?.mobile || '',
+        recipientPhone: cleanPhone,
         division,
         district,
         upazila,
@@ -231,12 +244,52 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
   // 1. Order IDs tracked locally on this device/browser session
   const [localOrderIds, setLocalOrderIds] = useState<string[]>(() => {
     try {
-      const raw = localStorage.getItem('kenax_my_orders');
+      const raw = localStorage.getItem('kenax_my_orders') || localStorage.getItem('preview_kenax_my_orders');
       return raw ? JSON.parse(raw) : [];
     } catch {
       return [];
     }
   });
+
+  const [dbSyncedOrders, setDbSyncedOrders] = useState<Order[]>([]);
+
+  // Real-time background synchronization for orders from Firestore & central DB
+  useEffect(() => {
+    let isMounted = true;
+    const syncOrders = async () => {
+      try {
+        const fresh = await getOrdersFromDB();
+        if (isMounted && fresh && fresh.length > 0) {
+          setDbSyncedOrders(fresh);
+        }
+      } catch (e) {}
+    };
+
+    syncOrders();
+
+    const handleOrderPlacedOrStorage = () => {
+      try {
+        const raw = localStorage.getItem('kenax_my_orders') || localStorage.getItem('preview_kenax_my_orders');
+        if (raw) setLocalOrderIds(JSON.parse(raw));
+      } catch {}
+      syncOrders();
+    };
+
+    window.addEventListener('kenax_order_placed', handleOrderPlacedOrStorage);
+    window.addEventListener('storage', handleOrderPlacedOrStorage);
+    const unsub = subscribeToOrders((live) => {
+      if (isMounted && live && live.length > 0) {
+        setDbSyncedOrders(live);
+      }
+    });
+
+    return () => {
+      isMounted = false;
+      window.removeEventListener('kenax_order_placed', handleOrderPlacedOrStorage);
+      window.removeEventListener('storage', handleOrderPlacedOrStorage);
+      if (unsub) unsub();
+    };
+  }, []);
 
   // Track online/offline status
   const [isOnline, setIsOnline] = useState<boolean>(
@@ -254,42 +307,57 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
     };
   }, []);
 
+  // Pool all orders from props and live Firestore sync
+  const allOrdersPool = useMemo(() => {
+    const map = new Map<string, Order>();
+    (orders || []).forEach((o) => { if (o && o.id) map.set(o.id, o); });
+    (dbSyncedOrders || []).forEach((o) => { if (o && o.id) map.set(o.id, o); });
+    return Array.from(map.values());
+  }, [orders, dbSyncedOrders]);
+
   // Filter orders strictly for the logged-in customer or orders placed from this browser
-  const customerOrders = (orders || []).filter((o) => {
-    if (!o) return false;
-    const isDeviceOrder = localOrderIds.includes(o.id);
+  const customerOrders = useMemo(() => {
+    return allOrdersPool.filter((o) => {
+      if (!o) return false;
+      const isDeviceOrder = localOrderIds.includes(o.id) || localOrderIds.some((id) => id.toUpperCase() === (o.id || '').toUpperCase());
 
-    if (currentCustomer) {
-      const emailMatch =
-        o.customerEmail &&
-        currentCustomer.email &&
-        o.customerEmail.trim().toLowerCase() === currentCustomer.email.trim().toLowerCase();
-
-      const cPhone = normalizePhoneNumber(currentCustomer.mobile);
-      const oPhone = normalizePhoneNumber(o.customerMobile || (o as any).customerPhone);
-      const dPhone = normalizePhoneNumber(o.deliveryMobile);
-      const phoneMatch =
-        cPhone && (
-          oPhone === cPhone ||
-          dPhone === cPhone ||
-          (cPhone.length >= 10 && (oPhone.endsWith(cPhone.slice(-10)) || dPhone.endsWith(cPhone.slice(-10))))
+      if (currentCustomer) {
+        const emailMatch = Boolean(
+          o.customerEmail &&
+          currentCustomer.email &&
+          o.customerEmail.trim().toLowerCase() === currentCustomer.email.trim().toLowerCase()
         );
 
-      const idMatch =
-        (o.customerId && currentCustomer.id && o.customerId === currentCustomer.id) ||
-        (currentCustomer.orderIds && currentCustomer.orderIds.includes(o.id));
+        const cPhone = normalizePhoneNumber(currentCustomer.mobile);
+        const oPhone = normalizePhoneNumber(o.customerMobile || (o as any).customerPhone || (o as any).phone || (o as any).mobile);
+        const dPhone = normalizePhoneNumber(o.deliveryMobile);
+        const phoneMatch = Boolean(
+          cPhone && (
+            oPhone === cPhone ||
+            dPhone === cPhone ||
+            (cPhone.length >= 10 && (oPhone.endsWith(cPhone.slice(-10)) || dPhone.endsWith(cPhone.slice(-10)))) ||
+            (oPhone.length >= 10 && cPhone.endsWith(oPhone.slice(-10))) ||
+            (dPhone.length >= 10 && cPhone.endsWith(dPhone.slice(-10)))
+          )
+        );
 
-      return Boolean(emailMatch || phoneMatch || idMatch);
-    }
+        const idMatch = Boolean(
+          (o.customerId && currentCustomer.id && (o.customerId === currentCustomer.id || o.customerId === `cust-${currentCustomer.id}`)) ||
+          (currentCustomer.orderIds && currentCustomer.orderIds.includes(o.id))
+        );
 
-    // Unregistered / visitor on this browser: show all orders placed from this device
-    return isDeviceOrder;
-  });
+        return Boolean(emailMatch || phoneMatch || idMatch || isDeviceOrder);
+      }
+
+      // Unregistered / visitor on this browser: show all orders placed from this device
+      return isDeviceOrder;
+    }).sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+  }, [allOrdersPool, localOrderIds, currentCustomer]);
 
   // Metrics calculations for this specific customer
   const totalOrdersCount = customerOrders.length;
   const totalSpentBDT = customerOrders.reduce((sum, o) => sum + (o?.totalAmount || 0), 0);
-  const deliveredOrdersCount = customerOrders.filter((o) => o?.orderStatus === 'Delivered').length;
+  const deliveredOrdersCount = customerOrders.filter((o) => o?.orderStatus === 'Delivered' || o?.orderStatus === 'Completed').length;
   const activeShipmentsCount = customerOrders.filter(
     (o) => o?.orderStatus === 'Processing' || o?.orderStatus === 'Shipped' || o?.orderStatus === 'Pending' || o?.orderStatus === 'Confirmed'
   ).length;
@@ -311,7 +379,7 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
     <div className="w-full max-w-[1536px] mx-auto px-4 sm:px-6 lg:px-8 xl:px-10 py-6 sm:py-8">
       {/* 1. EXPANDED PROFILE & METRICS BANNER */}
       {currentCustomer ? (
-        <div className="bg-white rounded-3xl border border-slate-200 p-6 sm:p-8 shadow-xs mb-8">
+        <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-6 sm:p-8 shadow-xs mb-8">
           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
             {/* User Info Profile */}
             <div className="flex items-center gap-4 sm:gap-5">
@@ -320,22 +388,22 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
               </div>
               <div>
                 <div className="flex flex-wrap items-center gap-2.5">
-                  <h1 className="text-xl sm:text-2xl lg:text-3xl font-black text-slate-900 tracking-tight">
+                  <h1 className="text-xl sm:text-2xl lg:text-3xl font-black text-slate-900 dark:text-slate-100 tracking-tight">
                     {currentCustomer.name}
                   </h1>
                   {deliveredOrdersCount > 0 && (
-                    <span className="px-3 py-1 rounded-full bg-emerald-50 text-emerald-700 text-xs font-bold border border-emerald-200 flex items-center gap-1.5 shadow-2xs">
+                    <span className="px-3 py-1 rounded-full bg-emerald-50 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300 text-xs font-bold border border-emerald-200 dark:border-emerald-800 flex items-center gap-1.5 shadow-2xs">
                       <CheckCircle className="w-3.5 h-3.5" /> Verified Customer
                     </span>
                   )}
                 </div>
-                <div className="flex flex-wrap items-center gap-3 sm:gap-4 text-xs sm:text-sm text-slate-500 mt-1.5">
+                <div className="flex flex-wrap items-center gap-3 sm:gap-4 text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-1.5">
                   <span className="flex items-center gap-1.5">
                     <Mail className="w-4 h-4 text-slate-400" /> {currentCustomer.email}
                   </span>
                   {currentCustomer.mobile && (
                     <>
-                      <span className="hidden sm:inline text-slate-300">•</span>
+                      <span className="hidden sm:inline text-slate-300 dark:text-slate-600">•</span>
                       <span className="flex items-center gap-1.5">
                         <Phone className="w-4 h-4 text-slate-400" /> {currentCustomer.mobile}
                       </span>
@@ -347,38 +415,38 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
 
             {/* Key Metrics Quick Stats Tiles */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4 shrink-0">
-              <div className="bg-slate-50 border border-slate-100 rounded-2xl p-3.5 sm:p-4 text-center min-w-[110px]">
-                <span className="text-[11px] font-semibold text-slate-500 block uppercase tracking-wider">
+              <div className="bg-slate-50 dark:bg-slate-800/80 border border-slate-100 dark:border-slate-800 rounded-2xl p-3.5 sm:p-4 text-center min-w-[110px]">
+                <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 block uppercase tracking-wider">
                   Total Orders
                 </span>
-                <span className="text-lg sm:text-2xl font-black text-slate-900 mt-0.5 block">
+                <span className="text-lg sm:text-2xl font-black text-slate-900 dark:text-slate-100 mt-0.5 block">
                   {totalOrdersCount}
                 </span>
               </div>
 
-              <div className="bg-sky-50/70 border border-sky-100 rounded-2xl p-3.5 sm:p-4 text-center min-w-[110px]">
-                <span className="text-[11px] font-semibold text-sky-700 block uppercase tracking-wider">
+              <div className="bg-sky-50/70 dark:bg-sky-950/40 border border-sky-100 dark:border-sky-900/50 rounded-2xl p-3.5 sm:p-4 text-center min-w-[110px]">
+                <span className="text-[11px] font-semibold text-sky-700 dark:text-sky-300 block uppercase tracking-wider">
                   Total Spent
                 </span>
-                <span className="text-lg sm:text-2xl font-black text-sky-950 mt-0.5 block">
+                <span className="text-lg sm:text-2xl font-black text-sky-950 dark:text-sky-200 mt-0.5 block">
                   ৳{totalSpentBDT.toLocaleString('en-BD')}
                 </span>
               </div>
 
-              <div className="bg-emerald-50/70 border border-emerald-100 rounded-2xl p-3.5 sm:p-4 text-center min-w-[110px]">
-                <span className="text-[11px] font-semibold text-emerald-700 block uppercase tracking-wider">
+              <div className="bg-emerald-50/70 dark:bg-emerald-950/40 border border-emerald-100 dark:border-emerald-900/50 rounded-2xl p-3.5 sm:p-4 text-center min-w-[110px]">
+                <span className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-300 block uppercase tracking-wider">
                   Delivered
                 </span>
-                <span className="text-lg sm:text-2xl font-black text-emerald-950 mt-0.5 block">
+                <span className="text-lg sm:text-2xl font-black text-emerald-950 dark:text-emerald-200 mt-0.5 block">
                   {deliveredOrdersCount}
                 </span>
               </div>
 
-              <div className="bg-amber-50/70 border border-amber-100 rounded-2xl p-3.5 sm:p-4 text-center min-w-[110px]">
-                <span className="text-[11px] font-semibold text-amber-700 block uppercase tracking-wider">
+              <div className="bg-amber-50/70 dark:bg-amber-950/40 border border-amber-100 dark:border-amber-900/50 rounded-2xl p-3.5 sm:p-4 text-center min-w-[110px]">
+                <span className="text-[11px] font-semibold text-amber-700 dark:text-amber-300 block uppercase tracking-wider">
                   In Transit
                 </span>
-                <span className="text-lg sm:text-2xl font-black text-amber-950 mt-0.5 block">
+                <span className="text-lg sm:text-2xl font-black text-amber-950 dark:text-amber-200 mt-0.5 block">
                   {activeShipmentsCount}
                 </span>
               </div>
@@ -387,17 +455,17 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
         </div>
       ) : (
         /* Visitor / Device Mode Banner */
-        <div className="bg-white rounded-3xl border border-slate-200 p-6 sm:p-8 shadow-xs mb-8">
+        <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-6 sm:p-8 shadow-xs mb-8">
           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
             <div className="flex items-center gap-4">
-              <div className="w-14 h-14 rounded-2xl bg-sky-50 border border-sky-100 text-sky-600 flex items-center justify-center font-bold text-xl shrink-0">
+              <div className="w-14 h-14 rounded-2xl bg-sky-50 dark:bg-sky-950/80 border border-sky-100 dark:border-sky-800 text-sky-600 dark:text-sky-400 flex items-center justify-center font-bold text-xl shrink-0">
                 <User className="w-7 h-7" />
               </div>
               <div>
-                <h2 className="text-lg sm:text-xl font-black text-slate-900">
+                <h2 className="text-lg sm:text-xl font-black text-slate-900 dark:text-slate-100">
                   Your Dashboard
                 </h2>
-                <p className="text-xs text-slate-500 mt-0.5">
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
                   {customerOrders.length > 0
                     ? `Showing ${customerOrders.length} order${customerOrders.length > 1 ? 's' : ''} preserved on this device. Sign in or register to sync across all devices.`
                     : 'Your orders, cart items, delivery addresses, and wishlist are saved automatically on this device.'}
@@ -408,21 +476,21 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
             {customerOrders.length > 0 ? (
               <div className="flex flex-wrap items-center gap-3">
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 shrink-0">
-                  <div className="bg-slate-50 border border-slate-100 rounded-xl p-2.5 sm:p-3 text-center min-w-[85px]">
-                    <span className="text-[10px] font-semibold text-slate-500 block uppercase">Orders</span>
-                    <span className="text-base sm:text-lg font-black text-slate-900">{totalOrdersCount}</span>
+                  <div className="bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-700 rounded-xl p-2.5 sm:p-3 text-center min-w-[85px]">
+                    <span className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 block uppercase">Orders</span>
+                    <span className="text-base sm:text-lg font-black text-slate-900 dark:text-slate-100">{totalOrdersCount}</span>
                   </div>
-                  <div className="bg-sky-50/70 border border-sky-100 rounded-xl p-2.5 sm:p-3 text-center min-w-[85px]">
-                    <span className="text-[10px] font-semibold text-sky-700 block uppercase">Spent</span>
-                    <span className="text-base sm:text-lg font-black text-sky-950">৳{totalSpentBDT.toLocaleString('en-BD')}</span>
+                  <div className="bg-sky-50/70 dark:bg-sky-950/50 border border-sky-100 dark:border-sky-900/50 rounded-xl p-2.5 sm:p-3 text-center min-w-[85px]">
+                    <span className="text-[10px] font-semibold text-sky-700 dark:text-sky-300 block uppercase">Spent</span>
+                    <span className="text-base sm:text-lg font-black text-sky-950 dark:text-sky-200">৳{totalSpentBDT.toLocaleString('en-BD')}</span>
                   </div>
-                  <div className="bg-emerald-50/70 border border-emerald-100 rounded-xl p-2.5 sm:p-3 text-center min-w-[85px]">
-                    <span className="text-[10px] font-semibold text-emerald-700 block uppercase">Delivered</span>
-                    <span className="text-base sm:text-lg font-black text-emerald-950">{deliveredOrdersCount}</span>
+                  <div className="bg-emerald-50/70 dark:bg-emerald-950/50 border border-emerald-100 dark:border-emerald-900/50 rounded-xl p-2.5 sm:p-3 text-center min-w-[85px]">
+                    <span className="text-[10px] font-semibold text-emerald-700 dark:text-emerald-300 block uppercase">Delivered</span>
+                    <span className="text-base sm:text-lg font-black text-emerald-950 dark:text-emerald-200">{deliveredOrdersCount}</span>
                   </div>
-                  <div className="bg-amber-50/70 border border-amber-100 rounded-xl p-2.5 sm:p-3 text-center min-w-[85px]">
-                    <span className="text-[10px] font-semibold text-amber-700 block uppercase">In Transit</span>
-                    <span className="text-base sm:text-lg font-black text-amber-950">{activeShipmentsCount}</span>
+                  <div className="bg-amber-50/70 dark:bg-amber-950/50 border border-amber-100 dark:border-amber-900/50 rounded-xl p-2.5 sm:p-3 text-center min-w-[85px]">
+                    <span className="text-[10px] font-semibold text-amber-700 dark:text-amber-300 block uppercase">In Transit</span>
+                    <span className="text-base sm:text-lg font-black text-amber-950 dark:text-amber-200">{activeShipmentsCount}</span>
                   </div>
                 </div>
                 <button
@@ -549,8 +617,11 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
           ) : (
             customerOrders.map((order) => {
               const orderItems = order?.items || [];
-              const isDelivered = order.orderStatus === 'Delivered';
+              const isDelivered = order.orderStatus === 'Delivered' || order.orderStatus === 'Completed';
+              const isReturned = order.orderStatus === 'Returned';
               const isShipped = order.orderStatus === 'Shipped';
+              const isPaid = order.paymentStatus === 'Paid' || isDelivered;
+              const displayStatus = order.orderStatus === 'Completed' ? 'Delivered' : order.orderStatus === 'Returned' ? 'Delivery Returned' : order.orderStatus;
 
               return (
                 <div
@@ -567,12 +638,14 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                         className={`text-xs font-bold px-3 py-1 rounded-full border ${
                           isDelivered
                             ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                            : isReturned
+                            ? 'bg-rose-50 text-rose-800 border-rose-200'
                             : isShipped
                             ? 'bg-blue-50 text-blue-800 border-blue-200'
                             : 'bg-amber-50 text-amber-800 border-amber-200'
                         }`}
                       >
-                        {order.orderStatus}
+                        {displayStatus}
                       </span>
                       <span className="text-xs text-slate-400 flex items-center gap-1">
                         <Clock className="w-3.5 h-3.5" />
@@ -587,6 +660,17 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                     <div className="flex items-center gap-2">
                       <span className="text-xs font-semibold px-2.5 py-1 rounded-lg bg-slate-100 text-slate-700">
                         Payment: {order.paymentMethod || 'Cash on Delivery'}
+                      </span>
+                      <span
+                        className={`text-xs font-bold px-2.5 py-1 rounded-lg border ${
+                          isReturned
+                            ? 'bg-rose-50 text-rose-800 border-rose-200'
+                            : isPaid
+                            ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                            : 'bg-amber-50 text-amber-800 border-amber-200'
+                        }`}
+                      >
+                        {isReturned ? 'Delivery Returned (Unpaid)' : isPaid ? 'Paid' : 'Unpaid'}
                       </span>
                     </div>
                   </div>
@@ -617,10 +701,10 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
 
                           return (
                             <div key={idx} className="flex items-center gap-3 py-2.5">
-                              <img
-                                src={pImg}
-                                alt={pName}
-                                className="w-12 h-12 object-contain rounded-xl bg-slate-50 border border-slate-100 p-1 shrink-0"
+                              <CartItemImage
+                                item={item as OrderItem}
+                                product={matchingProd}
+                                sizeClassName="w-12 h-12 rounded-xl shrink-0"
                               />
                               <div className="flex-1 min-w-0">
                                 <p className="text-xs font-bold text-slate-800 truncate">{pName}</p>
@@ -669,8 +753,16 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                       <span className="text-xl sm:text-2xl font-black text-slate-900">
                         ৳{order.totalAmount.toLocaleString('en-BD')}
                       </span>
-                      <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">
-                        COD Verified
+                      <span
+                        className={`text-[10px] font-bold px-2 py-0.5 rounded ${
+                          isReturned
+                            ? 'bg-rose-100 text-rose-800'
+                            : isPaid
+                            ? 'bg-emerald-100 text-emerald-800'
+                            : 'bg-amber-100 text-amber-800'
+                        }`}
+                      >
+                        {isReturned ? 'Delivery Returned' : isPaid ? 'Paid' : 'COD Pending'}
                       </span>
                     </div>
 
@@ -760,10 +852,10 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                       className="bg-white rounded-3xl border border-slate-200 p-4 sm:p-5 shadow-xs hover:border-slate-300 transition-all flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4"
                     >
                       <div className="flex items-center gap-4 min-w-0">
-                        <img
-                          src={cartImg}
-                          alt={item.productName}
-                          className="w-16 h-16 sm:w-20 sm:h-20 object-contain rounded-2xl bg-slate-50 border border-slate-100 p-1.5 shrink-0"
+                        <CartItemImage
+                          item={item}
+                          product={matchingProd}
+                          sizeClassName="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl shrink-0"
                         />
                         <div className="min-w-0">
                           <h4 className="text-sm sm:text-base font-bold text-slate-900 line-clamp-1">
@@ -1100,13 +1192,15 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                   </div>
 
                   <div>
-                    <label className="font-bold text-slate-700 block mb-1">Recipient Phone</label>
+                    <label className="font-bold text-slate-700 block mb-1">Recipient Phone (11-Digit) *</label>
                     <input
                       type="tel"
+                      inputMode="numeric"
+                      maxLength={11}
                       value={recipientPhone}
-                      onChange={(e) => setRecipientPhone(e.target.value)}
-                      placeholder="e.g. 01711223344"
-                      className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-sky-500 text-xs"
+                      onChange={(e) => setRecipientPhone(cleanBDPhoneNumber(e.target.value))}
+                      placeholder="017XXXXXXXX"
+                      className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 font-mono focus:outline-hidden focus:ring-2 focus:ring-sky-500 text-xs"
                       required
                     />
                   </div>
@@ -1262,13 +1356,11 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                       }`}
                     >
                       <img
-                        src={
-                          (p.images?.[0] && p.images[0].trim() !== '')
-                            ? p.images[0]
-                            : 'https://images.unsplash.com/photo-1598327105666-5b89351aff97?w=500'
-                        }
+                        src={getOptimizedImageUrl(p.images?.[0] || 'https://images.unsplash.com/photo-1598327105666-5b89351aff97?w=500', 600)}
                         alt={p.name}
-                        className="w-full h-full object-contain group-hover:scale-105 transition-transform duration-300"
+                        referrerPolicy="no-referrer"
+                        onError={(e) => handleImageError(e, p.images?.[0])}
+                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                       />
                       {onToggleWishlist && (
                         <button

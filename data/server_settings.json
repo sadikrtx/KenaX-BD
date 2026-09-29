@@ -1,0 +1,57 @@
+{
+  "id": "site-settings-main",
+  "siteName": "KenaX BD",
+  "tagline": "Smart Shopping, Better Living",
+  "bengaliTagline": "Your Need, Our Promise.",
+  "phone": "+880 1700-123456",
+  "email": "support@kenaxbd.com",
+  "address": "Level 4, House 12, Road 27, Dhanmondi, Dhaka 1209, Bangladesh",
+  "insideDhakaDeliveryCharge": 60,
+  "outsideDhakaDeliveryCharge": 120,
+  "insideDhakaDeliveryFee": 60,
+  "outsideDhakaDeliveryFee": 120,
+  "deliveryInsideDhaka": 60,
+  "deliveryOutsideDhaka": 120,
+  "freeDeliveryThreshold": 5000,
+  "bkashNumber": "01719143897",
+  "bkashType": "Personal",
+  "nagadNumber": "01887713212",
+  "nagadType": "Merchant",
+  "rocketNumber": "01912-345678-9",
+  "enableCod": true,
+  "enableFullPayment": true,
+  "enableDeliveryOnlyPayment": true,
+  "paymentGateways": [
+    {
+      "id": "bkash",
+      "name": "bKash",
+      "accountNumber": "01719143897",
+      "accountType": "Personal",
+      "txType": "Send Money",
+      "instructions": "Send Money from your bKash App or dial *247#. Enter your bKash mobile number and Transaction ID (TrxID) below.",
+      "isEnabled": true,
+      "assignedTo": "all"
+    },
+    {
+      "id": "nagad",
+      "name": "Nagad",
+      "accountNumber": "01887713212",
+      "accountType": "Merchant",
+      "txType": "Payment",
+      "instructions": "Make Payment or Send Money from your Nagad App or dial *167#. Enter your mobile number and Transaction ID (TrxID) below.",
+      "isEnabled": true,
+      "assignedTo": "all"
+    },
+    {
+      "id": "rocket",
+      "name": "Rocket",
+      "accountNumber": "01912-345678-9",
+      "accountType": "Personal",
+      "txType": "Send Money",
+      "instructions": "Send Money from your Rocket App or dial *322#. Enter your Rocket account number and Transaction ID (TrxID) below.",
+      "isEnabled": true,
+      "assignedTo": "all"
+    }
+  ],
+  "paymentInstructionsNotice": "Please verify all transaction details and send correct amount to avoid order delays."
+}

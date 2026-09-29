@@ -11,6 +11,11 @@ import {
   ChevronUp,
 } from 'lucide-react';
 import { SiteSettings } from '../types';
+import {
+  cleanBDPhoneNumber,
+  isValidBDMobileNumber,
+  getBDPhoneValidationError,
+} from '../utils/phoneUtils';
 
 interface FAQItem {
   question: string;
@@ -78,9 +83,19 @@ export const ContactView: React.FC<ContactViewProps> = ({ siteSettings }) => {
   const hours = siteSettings?.supportHours !== undefined ? siteSettings.supportHours : '9:00 AM – 10:00 PM (Everyday including weekends)';
   const deliveryText = siteSettings?.nationwideDeliveryText !== undefined ? siteSettings.nationwideDeliveryText : '24-48 Hours inside Dhaka Metro | 3-5 Days across all 64 Districts.';
 
+  const [phoneError, setPhoneError] = useState('');
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    setPhoneError('');
     if (!name || !phone || !message) return;
+
+    const cleaned = cleanBDPhoneNumber(phone);
+    if (!isValidBDMobileNumber(cleaned)) {
+      setPhoneError(getBDPhoneValidationError(cleaned) || 'Please enter a valid 11-digit mobile number starting with 013 to 019.');
+      return;
+    }
+
     setIsSent(true);
     setTimeout(() => {
       setName('');
@@ -88,6 +103,7 @@ export const ContactView: React.FC<ContactViewProps> = ({ siteSettings }) => {
       setEmail('');
       setSubject('');
       setMessage('');
+      setPhoneError('');
     }, 400);
   };
 
@@ -211,16 +227,22 @@ export const ContactView: React.FC<ContactViewProps> = ({ siteSettings }) => {
 
                 <div>
                   <label className="font-bold text-slate-700 block mb-1">
-                    Mobile Number <span className="text-rose-500">*</span>
+                    Mobile Number (11-Digit) <span className="text-rose-500">*</span>
                   </label>
                   <input
                     type="tel"
+                    inputMode="numeric"
+                    maxLength={11}
                     value={phone}
-                    onChange={(e) => setPhone(e.target.value)}
+                    onChange={(e) => {
+                      setPhone(cleanBDPhoneNumber(e.target.value));
+                      if (phoneError) setPhoneError('');
+                    }}
                     placeholder="017XXXXXXXX"
-                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 focus:ring-2 focus:ring-sky-500"
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 font-mono focus:ring-2 focus:ring-sky-500"
                     required
                   />
+                  {phoneError && <p className="text-[11px] text-rose-500 mt-1">{phoneError}</p>}
                 </div>
               </div>
 

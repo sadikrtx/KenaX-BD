@@ -334,22 +334,22 @@ export const AdminPromoGridManager: React.FC<AdminPromoGridManagerProps> = ({
       )}
 
       {/* 1. Header & Master Controls Card */}
-      <div className="p-4 sm:p-6 rounded-2xl bg-white border border-slate-200 shadow-2xs space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-200">
+      <div className="p-4 sm:p-6 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xs space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-200 dark:border-slate-800">
           <div>
             <div className="flex items-center gap-2">
               <span className="w-2.5 h-2.5 rounded-full bg-sky-500 animate-pulse" />
-              <h3 className="font-black text-sm sm:text-base text-slate-900">
+              <h3 className="font-black text-sm sm:text-base text-slate-900 dark:text-white">
                 Homepage 3-Card Promo Grid Banners
               </h3>
               {lastSavedTime && (
-                <span className="px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-bold flex items-center gap-1">
-                  <CheckCircle className="w-3 h-3 text-emerald-600" />
+                <span className="px-2 py-0.5 rounded-md bg-emerald-50 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 text-[10px] font-bold flex items-center gap-1">
+                  <CheckCircle className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
                   Synced
                 </span>
               )}
             </div>
-            <p className="text-xs text-slate-500 mt-0.5">
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
               Customize the 3 promotional banners appearing under "Shop by Category" and "Fashion & Clothing".
             </p>
           </div>
@@ -378,7 +378,7 @@ export const AdminPromoGridManager: React.FC<AdminPromoGridManagerProps> = ({
             <button
               type="button"
               onClick={handleResetToDefault}
-              className="px-3 py-2 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-100 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
+              className="px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
             >
               <RotateCcw className="w-3.5 h-3.5" />
               <span>Reset Defaults</span>
@@ -397,9 +397,9 @@ export const AdminPromoGridManager: React.FC<AdminPromoGridManagerProps> = ({
 
         {/* Master Confirmation Banner if just saved */}
         {activeToast && (
-          <div className="p-3.5 rounded-xl bg-emerald-50 text-emerald-900 border border-emerald-200 text-xs font-bold flex items-center justify-between gap-2 shadow-2xs">
+          <div className="p-3.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/80 text-emerald-900 dark:text-emerald-200 border border-emerald-200 dark:border-emerald-800 text-xs font-bold flex items-center justify-between gap-2 shadow-2xs">
             <div className="flex items-center gap-2">
-              <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" />
+              <CheckCircle className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
               <span>{activeToast}</span>
             </div>
             <button
@@ -408,7 +408,7 @@ export const AdminPromoGridManager: React.FC<AdminPromoGridManagerProps> = ({
                 setLocalSaveToast(null);
                 if (onDismissToast) onDismissToast();
               }}
-              className="text-emerald-700 hover:text-emerald-900 text-xs underline cursor-pointer"
+              className="text-emerald-700 dark:text-emerald-300 hover:text-emerald-900 dark:hover:text-white text-xs underline cursor-pointer"
             >
               Dismiss
             </button>
@@ -418,14 +418,14 @@ export const AdminPromoGridManager: React.FC<AdminPromoGridManagerProps> = ({
         {/* Master Switches & Global Quick Toggles */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           {/* Master Enable/Disable */}
-          <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200/80 flex items-center justify-between">
+          <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200/80 dark:border-slate-700 flex items-center justify-between">
             <div className="flex items-center gap-2.5">
-              <div className={`p-2 rounded-lg ${isMasterEnabled ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-500'}`}>
+              <div className={`p-2 rounded-lg ${isMasterEnabled ? 'bg-emerald-100 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300' : 'bg-slate-200 dark:bg-slate-700 text-slate-500 dark:text-slate-400'}`}>
                 {isMasterEnabled ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
               </div>
               <div>
-                <p className="text-xs font-black text-slate-900">Entire Section Active</p>
-                <p className="text-[10px] text-slate-500">Master visibility for all 3 cards</p>
+                <p className="text-xs font-black text-slate-900 dark:text-white">Entire Section Active</p>
+                <p className="text-[10px] text-slate-500 dark:text-slate-400">Master visibility for all 3 cards</p>
               </div>
             </div>
             <label className="relative inline-flex items-center cursor-pointer">
@@ -435,19 +435,19 @@ export const AdminPromoGridManager: React.FC<AdminPromoGridManagerProps> = ({
                 onChange={(e) => setPromoGridSettings((prev) => ({ ...prev, enabled: e.target.checked }))}
                 className="sr-only peer"
               />
-              <div className="w-9 h-5 bg-slate-300 peer-focus:outline-hidden rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-600"></div>
+              <div className="w-9 h-5 bg-slate-300 dark:bg-slate-700 peer-focus:outline-hidden rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-600"></div>
             </label>
           </div>
 
           {/* Master Desktop Toggle */}
-          <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200/80 flex items-center justify-between">
+          <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200/80 dark:border-slate-700 flex items-center justify-between">
             <div className="flex items-center gap-2.5">
-              <div className={`p-2 rounded-lg ${isMasterDesktop ? 'bg-sky-100 text-sky-700' : 'bg-slate-200 text-slate-500'}`}>
+              <div className={`p-2 rounded-lg ${isMasterDesktop ? 'bg-sky-100 dark:bg-sky-950/80 text-sky-700 dark:text-sky-300' : 'bg-slate-200 dark:bg-slate-700 text-slate-500 dark:text-slate-400'}`}>
                 <Laptop className="w-4 h-4" />
               </div>
               <div>
-                <p className="text-xs font-black text-slate-900">Show on Desktop</p>
-                <p className="text-[10px] text-slate-500">PC / Laptop / Tablet devices</p>
+                <p className="text-xs font-black text-slate-900 dark:text-white">Show on Desktop</p>
+                <p className="text-[10px] text-slate-500 dark:text-slate-400">PC / Laptop / Tablet devices</p>
               </div>
             </div>
             <label className="relative inline-flex items-center cursor-pointer">
@@ -457,19 +457,19 @@ export const AdminPromoGridManager: React.FC<AdminPromoGridManagerProps> = ({
                 onChange={(e) => setPromoGridSettings((prev) => ({ ...prev, showOnDesktop: e.target.checked }))}
                 className="sr-only peer"
               />
-              <div className="w-9 h-5 bg-slate-300 peer-focus:outline-hidden rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-sky-600"></div>
+              <div className="w-9 h-5 bg-slate-300 dark:bg-slate-700 peer-focus:outline-hidden rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-sky-600"></div>
             </label>
           </div>
 
           {/* Master Mobile Toggle */}
-          <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200/80 flex items-center justify-between">
+          <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200/80 dark:border-slate-700 flex items-center justify-between">
             <div className="flex items-center gap-2.5">
-              <div className={`p-2 rounded-lg ${isMasterMobile ? 'bg-purple-100 text-purple-700' : 'bg-slate-200 text-slate-500'}`}>
+              <div className={`p-2 rounded-lg ${isMasterMobile ? 'bg-purple-100 dark:bg-purple-950/80 text-purple-700 dark:text-purple-300' : 'bg-slate-200 dark:bg-slate-700 text-slate-500 dark:text-slate-400'}`}>
                 <Smartphone className="w-4 h-4" />
               </div>
               <div>
-                <p className="text-xs font-black text-slate-900">Show on Mobile</p>
-                <p className="text-[10px] text-slate-500">Smartphones and mobile web</p>
+                <p className="text-xs font-black text-slate-900 dark:text-white">Show on Mobile</p>
+                <p className="text-[10px] text-slate-500 dark:text-slate-400">Smartphones and mobile web</p>
               </div>
             </div>
             <label className="relative inline-flex items-center cursor-pointer">
@@ -479,29 +479,29 @@ export const AdminPromoGridManager: React.FC<AdminPromoGridManagerProps> = ({
                 onChange={(e) => setPromoGridSettings((prev) => ({ ...prev, showOnMobile: e.target.checked }))}
                 className="sr-only peer"
               />
-              <div className="w-9 h-5 bg-slate-300 peer-focus:outline-hidden rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-purple-600"></div>
+              <div className="w-9 h-5 bg-slate-300 dark:bg-slate-700 peer-focus:outline-hidden rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-purple-600"></div>
             </label>
           </div>
         </div>
 
         {/* 1-Click Quick Batch Action Toolbar */}
-        <div className="p-3 rounded-xl bg-slate-100/80 border border-slate-200 flex flex-wrap items-center justify-between gap-2 text-xs">
-          <span className="font-bold text-slate-700 flex items-center gap-1.5">
-            <Sliders className="w-3.5 h-3.5 text-sky-600" />
+        <div className="p-3 rounded-xl bg-slate-100/80 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex flex-wrap items-center justify-between gap-2 text-xs">
+          <span className="font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+            <Sliders className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400" />
             <span>1-Click Bulk Control:</span>
           </span>
           <div className="flex flex-wrap items-center gap-1.5">
             <button
               type="button"
               onClick={() => handleToggleAllEnabled(true)}
-              className="px-2.5 py-1 rounded-lg bg-emerald-100 hover:bg-emerald-200 text-emerald-800 font-black text-[11px] transition-colors cursor-pointer"
+              className="px-2.5 py-1 rounded-lg bg-emerald-100 dark:bg-emerald-950/80 hover:bg-emerald-200 dark:hover:bg-emerald-900 text-emerald-800 dark:text-emerald-300 font-black text-[11px] transition-colors cursor-pointer"
             >
               ✅ Activate All 3 Cards
             </button>
             <button
               type="button"
               onClick={() => handleToggleAllEnabled(false)}
-              className="px-2.5 py-1 rounded-lg bg-rose-100 hover:bg-rose-200 text-rose-800 font-black text-[11px] transition-colors cursor-pointer"
+              className="px-2.5 py-1 rounded-lg bg-rose-100 dark:bg-rose-950/80 hover:bg-rose-200 dark:hover:bg-rose-900 text-rose-800 dark:text-rose-300 font-black text-[11px] transition-colors cursor-pointer"
             >
               🚫 Deactivate All 3 Cards
             </button>
@@ -511,7 +511,7 @@ export const AdminPromoGridManager: React.FC<AdminPromoGridManagerProps> = ({
                 handleToggleAllDesktop(true);
                 handleToggleAllMobile(false);
               }}
-              className="px-2.5 py-1 rounded-lg bg-sky-100 hover:bg-sky-200 text-sky-800 font-bold text-[11px] transition-colors cursor-pointer"
+              className="px-2.5 py-1 rounded-lg bg-sky-100 dark:bg-sky-950/80 hover:bg-sky-200 dark:hover:bg-sky-900 text-sky-800 dark:text-sky-300 font-bold text-[11px] transition-colors cursor-pointer"
             >
               💻 Desktop Only
             </button>
@@ -521,7 +521,7 @@ export const AdminPromoGridManager: React.FC<AdminPromoGridManagerProps> = ({
                 handleToggleAllDesktop(false);
                 handleToggleAllMobile(true);
               }}
-              className="px-2.5 py-1 rounded-lg bg-purple-100 hover:bg-purple-200 text-purple-800 font-bold text-[11px] transition-colors cursor-pointer"
+              className="px-2.5 py-1 rounded-lg bg-purple-100 dark:bg-purple-950/80 hover:bg-purple-200 dark:hover:bg-purple-900 text-purple-800 dark:text-purple-300 font-bold text-[11px] transition-colors cursor-pointer"
             >
               📱 Mobile Only
             </button>
@@ -530,17 +530,17 @@ export const AdminPromoGridManager: React.FC<AdminPromoGridManagerProps> = ({
       </div>
 
       {/* 2. Main Manager Tab Switcher: Cards Design vs Placements & Locations */}
-      <div className="flex items-center gap-2 p-1.5 rounded-2xl bg-slate-100 border border-slate-200">
+      <div className="flex items-center gap-2 p-1.5 rounded-2xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
         <button
           type="button"
           onClick={() => setManagerMainTab('cards')}
           className={`flex-1 py-2.5 px-4 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-2 cursor-pointer ${
             managerMainTab === 'cards'
-              ? 'bg-white text-sky-700 shadow-sm ring-1 ring-slate-200/80'
-              : 'text-slate-600 hover:text-slate-900 hover:bg-white/50'
+              ? 'bg-white dark:bg-slate-700 text-sky-700 dark:text-sky-300 shadow-sm ring-1 ring-slate-200/80 dark:ring-slate-600'
+              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-white/50 dark:hover:bg-slate-700/50'
           }`}
         >
-          <Palette className="w-4 h-4 text-sky-600" />
+          <Palette className="w-4 h-4 text-sky-600 dark:text-sky-400" />
           <span>1. Cards Content & Design ({banners.length})</span>
         </button>
 
@@ -549,13 +549,13 @@ export const AdminPromoGridManager: React.FC<AdminPromoGridManagerProps> = ({
           onClick={() => setManagerMainTab('placements')}
           className={`flex-1 py-2.5 px-4 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-2 cursor-pointer ${
             managerMainTab === 'placements'
-              ? 'bg-white text-sky-700 shadow-sm ring-1 ring-slate-200/80'
-              : 'text-slate-600 hover:text-slate-900 hover:bg-white/50'
+              ? 'bg-white dark:bg-slate-700 text-sky-700 dark:text-sky-300 shadow-sm ring-1 ring-slate-200/80 dark:ring-slate-600'
+              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-white/50 dark:hover:bg-slate-700/50'
           }`}
         >
           <MapPin className="w-4 h-4 text-amber-500" />
           <span>2. 📍 Page Placements & Display Positions</span>
-          <span className="text-[10px] px-2 py-0.5 rounded-full bg-sky-100 text-sky-800 font-bold hidden sm:inline">
+          <span className="text-[10px] px-2 py-0.5 rounded-full bg-sky-100 dark:bg-sky-950 text-sky-800 dark:text-sky-300 font-bold hidden sm:inline">
             Homepage, Shop, Category, Flash Sale
           </span>
         </button>
@@ -1478,17 +1478,17 @@ export const AdminPromoGridManager: React.FC<AdminPromoGridManagerProps> = ({
       {/* 2. Detailed Placement Cards */}
       <div className="space-y-4">
         {/* CARD 1: HOMEPAGE PLACEMENT */}
-        <div className="p-4 sm:p-5 rounded-2xl bg-white border border-slate-200 shadow-2xs space-y-4">
-          <div className="flex items-center justify-between gap-3 pb-3 border-b border-slate-100">
+        <div className="p-4 sm:p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xs space-y-4">
+          <div className="flex items-center justify-between gap-3 pb-3 border-b border-slate-100 dark:border-slate-800">
             <div className="flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-xl bg-sky-100 text-sky-700 flex items-center justify-center font-bold">
+              <div className="w-8 h-8 rounded-xl bg-sky-100 dark:bg-sky-950 text-sky-700 dark:text-sky-300 flex items-center justify-center font-bold">
                 🏠
               </div>
               <div>
-                <h4 className="text-xs sm:text-sm font-black text-slate-900">
+                <h4 className="text-xs sm:text-sm font-black text-slate-900 dark:text-white">
                   1. Homepage Display (হোমপেজ লোকেশন)
                 </h4>
-                <p className="text-[11px] text-slate-500">
+                <p className="text-[11px] text-slate-500 dark:text-slate-400">
                   Choose whether and where the 3-card promo grid appears on the main homepage
                 </p>
               </div>
@@ -1501,13 +1501,13 @@ export const AdminPromoGridManager: React.FC<AdminPromoGridManagerProps> = ({
                 onChange={(e) => updatePlacements({ showOnHomepage: e.target.checked })}
                 className="sr-only peer"
               />
-              <div className="w-9 h-5 bg-slate-300 peer-focus:outline-hidden rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-600"></div>
+              <div className="w-9 h-5 bg-slate-300 dark:bg-slate-700 peer-focus:outline-hidden rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-600"></div>
             </label>
           </div>
 
           {placements.showOnHomepage !== false && (
             <div className="space-y-2">
-              <label className="block text-xs font-black text-slate-800">
+              <label className="block text-xs font-black text-slate-800 dark:text-slate-200">
                 Exact Position on Homepage (হোমপেজের ঠিক কোন পজিশনে শো করবে):
               </label>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
@@ -1535,17 +1535,17 @@ export const AdminPromoGridManager: React.FC<AdminPromoGridManagerProps> = ({
                       onClick={() => updatePlacements({ homepagePosition: pos.id as any })}
                       className={`p-3 rounded-xl border-2 cursor-pointer transition-all ${
                         isSelected
-                          ? 'border-sky-600 bg-sky-50/70 text-sky-950 shadow-xs'
-                          : 'border-slate-200 bg-white hover:border-slate-300 text-slate-700'
+                          ? 'border-sky-600 bg-sky-50/70 dark:bg-sky-950/80 text-sky-950 dark:text-sky-200 shadow-xs'
+                          : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-800/80 hover:border-slate-300 dark:hover:border-slate-700 text-slate-700 dark:text-slate-300'
                       }`}
                     >
                       <div className="flex items-center justify-between">
                         <span className="text-xs font-black">{pos.title}</span>
-                        <span className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center ${isSelected ? 'border-sky-600 bg-sky-600 text-white' : 'border-slate-300'}`}>
+                        <span className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center ${isSelected ? 'border-sky-600 bg-sky-600 text-white' : 'border-slate-300 dark:border-slate-600'}`}>
                           {isSelected && <Check className="w-2.5 h-2.5" />}
                         </span>
                       </div>
-                      <p className="text-[10px] text-slate-500 mt-1">{pos.subtitle}</p>
+                      <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-1">{pos.subtitle}</p>
                     </div>
                   );
                 })}
@@ -1555,17 +1555,17 @@ export const AdminPromoGridManager: React.FC<AdminPromoGridManagerProps> = ({
         </div>
 
         {/* CARD 2: SHOP / ALL PRODUCTS PAGE */}
-        <div className="p-4 sm:p-5 rounded-2xl bg-white border border-slate-200 shadow-2xs space-y-4">
-          <div className="flex items-center justify-between gap-3 pb-3 border-b border-slate-100">
+        <div className="p-4 sm:p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xs space-y-4">
+          <div className="flex items-center justify-between gap-3 pb-3 border-b border-slate-100 dark:border-slate-800">
             <div className="flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-xl bg-purple-100 text-purple-700 flex items-center justify-center font-bold">
+              <div className="w-8 h-8 rounded-xl bg-purple-100 dark:bg-purple-950 text-purple-700 dark:text-purple-300 flex items-center justify-center font-bold">
                 🛍️
               </div>
               <div>
-                <h4 className="text-xs sm:text-sm font-black text-slate-900">
+                <h4 className="text-xs sm:text-sm font-black text-slate-900 dark:text-white">
                   2. Shop / All Products Page (শপ পেইজ লোকেশন)
                 </h4>
-                <p className="text-[11px] text-slate-500">
+                <p className="text-[11px] text-slate-500 dark:text-slate-400">
                   Display promotional grid cards inside the main Shop browsing page
                 </p>
               </div>
@@ -1578,13 +1578,13 @@ export const AdminPromoGridManager: React.FC<AdminPromoGridManagerProps> = ({
                 onChange={(e) => updatePlacements({ showOnShopPage: e.target.checked })}
                 className="sr-only peer"
               />
-              <div className="w-9 h-5 bg-slate-300 peer-focus:outline-hidden rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-600"></div>
+              <div className="w-9 h-5 bg-slate-300 dark:bg-slate-700 peer-focus:outline-hidden rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-600"></div>
             </label>
           </div>
 
           {placements.showOnShopPage && (
             <div className="space-y-2">
-              <label className="block text-xs font-black text-slate-800">
+              <label className="block text-xs font-black text-slate-800 dark:text-slate-200">
                 Exact Position on Shop Page (শপ পেইজের ঠিক কোন স্থানে শো করবে):
               </label>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
@@ -1617,17 +1617,17 @@ export const AdminPromoGridManager: React.FC<AdminPromoGridManagerProps> = ({
                       onClick={() => updatePlacements({ shopPosition: pos.id as any })}
                       className={`p-3 rounded-xl border-2 cursor-pointer transition-all ${
                         isSelected
-                          ? 'border-purple-600 bg-purple-50/70 text-purple-950 shadow-xs'
-                          : 'border-slate-200 bg-white hover:border-slate-300 text-slate-700'
+                          ? 'border-purple-600 bg-purple-50/70 dark:bg-purple-950/80 text-purple-950 dark:text-purple-200 shadow-xs'
+                          : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-800/80 hover:border-slate-300 dark:hover:border-slate-700 text-slate-700 dark:text-slate-300'
                       }`}
                     >
                       <div className="flex items-center justify-between">
                         <span className="text-xs font-black">{pos.title}</span>
-                        <span className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center ${isSelected ? 'border-purple-600 bg-purple-600 text-white' : 'border-slate-300'}`}>
+                        <span className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center ${isSelected ? 'border-purple-600 bg-purple-600 text-white' : 'border-slate-300 dark:border-slate-600'}`}>
                           {isSelected && <Check className="w-2.5 h-2.5" />}
                         </span>
                       </div>
-                      <p className="text-[10px] text-slate-500 mt-1">{pos.subtitle}</p>
+                      <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-1">{pos.subtitle}</p>
                     </div>
                   );
                 })}
@@ -1637,17 +1637,17 @@ export const AdminPromoGridManager: React.FC<AdminPromoGridManagerProps> = ({
         </div>
 
         {/* CARD 3: SPECIFIC & ALL CATEGORY PAGES (ELECTRONICS, FASHION, ETC.) */}
-        <div className="p-4 sm:p-5 rounded-2xl bg-white border border-slate-200 shadow-2xs space-y-4">
-          <div className="flex items-center justify-between gap-3 pb-3 border-b border-slate-100">
+        <div className="p-4 sm:p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xs space-y-4">
+          <div className="flex items-center justify-between gap-3 pb-3 border-b border-slate-100 dark:border-slate-800">
             <div className="flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-xl bg-blue-100 text-blue-700 flex items-center justify-center font-bold">
+              <div className="w-8 h-8 rounded-xl bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300 flex items-center justify-center font-bold">
                 📱
               </div>
               <div>
-                <h4 className="text-xs sm:text-sm font-black text-slate-900">
+                <h4 className="text-xs sm:text-sm font-black text-slate-900 dark:text-white">
                   3. Category Pages (নির্দিষ্ট ক্যাটাগরি পেইজ যেমন: Electronics & Gadgets, Fashion, ইত্যাদি)
                 </h4>
-                <p className="text-[11px] text-slate-500">
+                <p className="text-[11px] text-slate-500 dark:text-slate-400">
                   Target all category pages or select specific categories where this Promo Grid appears
                 </p>
               </div>
@@ -1660,15 +1660,15 @@ export const AdminPromoGridManager: React.FC<AdminPromoGridManagerProps> = ({
                 onChange={(e) => updatePlacements({ showOnCategoryPages: e.target.checked })}
                 className="sr-only peer"
               />
-              <div className="w-9 h-5 bg-slate-300 peer-focus:outline-hidden rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-600"></div>
+              <div className="w-9 h-5 bg-slate-300 dark:bg-slate-700 peer-focus:outline-hidden rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-600"></div>
             </label>
           </div>
 
           {placements.showOnCategoryPages && (
             <div className="space-y-4">
               {/* Mode: All vs Specific Categories */}
-              <div className="p-3 rounded-xl bg-slate-50 border border-slate-200/80 space-y-2">
-                <label className="block text-xs font-black text-slate-800">
+              <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200/80 dark:border-slate-700 space-y-2">
+                <label className="block text-xs font-black text-slate-800 dark:text-slate-200">
                   Category Targeting Scope (কোন কোন ক্যাটাগরিতে শো করবে):
                 </label>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -1676,8 +1676,8 @@ export const AdminPromoGridManager: React.FC<AdminPromoGridManagerProps> = ({
                     onClick={() => updatePlacements({ categoryFilterMode: 'all' })}
                     className={`p-3 rounded-xl border flex items-center gap-2.5 cursor-pointer transition-all ${
                       placements.categoryFilterMode !== 'specific'
-                        ? 'bg-blue-50/80 border-blue-400 text-blue-950 font-bold'
-                        : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100'
+                        ? 'bg-blue-50/80 dark:bg-blue-950/80 border-blue-400 dark:border-blue-700 text-blue-950 dark:text-blue-200 font-bold'
+                        : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700'
                     }`}
                   >
                     <input
@@ -1689,7 +1689,7 @@ export const AdminPromoGridManager: React.FC<AdminPromoGridManagerProps> = ({
                     />
                     <div>
                       <span className="text-xs font-black block">🌐 All Category Pages</span>
-                      <span className="text-[10px] text-slate-500 block">
+                      <span className="text-[10px] text-slate-500 dark:text-slate-400 block">
                         Automatically display across all product category views
                       </span>
                     </div>
@@ -1699,8 +1699,8 @@ export const AdminPromoGridManager: React.FC<AdminPromoGridManagerProps> = ({
                     onClick={() => updatePlacements({ categoryFilterMode: 'specific' })}
                     className={`p-3 rounded-xl border flex items-center gap-2.5 cursor-pointer transition-all ${
                       placements.categoryFilterMode === 'specific'
-                        ? 'bg-blue-50/80 border-blue-400 text-blue-950 font-bold'
-                        : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100'
+                        ? 'bg-blue-50/80 dark:bg-blue-950/80 border-blue-400 dark:border-blue-700 text-blue-950 dark:text-blue-200 font-bold'
+                        : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700'
                     }`}
                   >
                     <input
@@ -1712,7 +1712,7 @@ export const AdminPromoGridManager: React.FC<AdminPromoGridManagerProps> = ({
                     />
                     <div>
                       <span className="text-xs font-black block">🎯 Selected Categories Only</span>
-                      <span className="text-[10px] text-slate-500 block">
+                      <span className="text-[10px] text-slate-500 dark:text-slate-400 block">
                         Pick specific categories (e.g. only Electronics & Gadgets)
                       </span>
                     </div>

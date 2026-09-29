@@ -171,14 +171,22 @@ export const HeroBanner: React.FC<HeroBannerProps> = ({
     }
   }, [slides.length, activeSlide]);
 
-  const hasContent = !!(
-    (currentSlide?.badge && currentSlide.badge.trim().length > 0) ||
+  const hasBadges = currentSlide?.badges !== undefined
+    ? currentSlide.badges.some((b) => b.text && b.text.trim().length > 0)
+    : !!(currentSlide?.badge && currentSlide.badge.trim().length > 0);
+
+  const hasValidButtons = currentSlide?.buttons !== undefined
+    ? currentSlide.buttons.some((b) => b.text && b.text.trim().length > 0)
+    : !!(currentSlide?.buttonText && currentSlide.buttonText.trim().length > 0);
+
+  const hasTextContent = !!(
     (currentSlide?.title && currentSlide.title.trim().length > 0) ||
     (currentSlide?.subtitle && currentSlide.subtitle.trim().length > 0) ||
     (currentSlide?.description && currentSlide.description.trim().length > 0) ||
-    (currentSlide?.bengali && currentSlide.bengali.trim().length > 0) ||
-    (currentSlide?.buttons && currentSlide.buttons.length > 0)
+    (currentSlide?.bengali && currentSlide.bengali.trim().length > 0)
   );
+
+  const hasContent = hasBadges || hasTextContent || hasValidButtons;
 
   // Sound logic: Sound plays ONLY ONCE on the first view. Subsequent loops are muted.
   const [soundPlayedSlideIds, setSoundPlayedSlideIds] = useState<string[]>([]);
@@ -444,6 +452,8 @@ export const HeroBanner: React.FC<HeroBannerProps> = ({
                       src={displayImg}
                       alt={currentSlide.title || 'Hero Slide'}
                       referrerPolicy="no-referrer"
+                      decoding="async"
+                      fetchPriority={activeSlide === 0 ? 'high' : 'auto'}
                       onError={(e) => handleImageError(e, rawDisplayImg)}
                       className="w-full h-full object-cover object-center transform scale-100 group-hover:scale-105 transition-transform duration-1000"
                     />
@@ -523,11 +533,11 @@ export const HeroBanner: React.FC<HeroBannerProps> = ({
 
               {/* CTA Buttons (Per-Slide Customizable) */}
               {currentSlide?.buttons !== undefined ? (
-                currentSlide.buttons.length > 0 && (
+                currentSlide.buttons.filter((b) => b.text && b.text.trim().length > 0).length > 0 && (
                   <div className={`pt-4 flex flex-wrap items-center gap-3 ${
                     align === 'center' ? 'justify-center' : align === 'right' ? 'justify-end' : 'justify-start'
                   }`}>
-                    {currentSlide.buttons.map((btn, bIdx) => {
+                    {currentSlide.buttons.filter((b) => b.text && b.text.trim().length > 0).map((btn, bIdx) => {
                       const isFirst = bIdx === 0;
                       let styleClasses = 'inline-flex items-center gap-2 px-6 py-3 rounded-xl font-black text-sm tracking-wide transition-all transform active:scale-95 shadow-lg cursor-pointer ';
                       
@@ -564,25 +574,19 @@ export const HeroBanner: React.FC<HeroBannerProps> = ({
                   </div>
                 )
               ) : (
-                <div className={`pt-4 flex items-center gap-4 ${
-                  align === 'center' ? 'justify-center' : align === 'right' ? 'justify-end' : 'justify-start'
-                }`}>
-                  <button
-                    onClick={() => onNavigate('shop')}
-                    className="inline-flex items-center gap-2.5 px-8 py-3.5 rounded-xl bg-sky-500 hover:bg-sky-400 text-slate-950 font-black text-sm sm:text-base tracking-wide transition-all transform active:scale-95 shadow-xl shadow-sky-500/30 cursor-pointer"
-                  >
-                    <span>{slides[activeSlide]?.buttonText || 'Shop Now'}</span>
-                    <ArrowRight className="w-5 h-5" />
-                  </button>
-
-                  <button
-                    onClick={() => onNavigate('shop')}
-                    className="hidden sm:inline-flex items-center gap-2 px-5 py-3.5 rounded-xl bg-white/10 hover:bg-white/20 text-white font-bold text-sm tracking-wide transition-all backdrop-blur-md border border-white/20 cursor-pointer"
-                  >
-                    <Zap className="w-4 h-4 text-amber-400" />
-                    <span>Explore Deals</span>
-                  </button>
-                </div>
+                slides[activeSlide]?.buttonText && slides[activeSlide].buttonText.trim().length > 0 ? (
+                  <div className={`pt-4 flex items-center gap-4 ${
+                    align === 'center' ? 'justify-center' : align === 'right' ? 'justify-end' : 'justify-start'
+                  }`}>
+                    <button
+                      onClick={() => onNavigate('shop')}
+                      className="inline-flex items-center gap-2.5 px-8 py-3.5 rounded-xl bg-sky-500 hover:bg-sky-400 text-slate-950 font-black text-sm sm:text-base tracking-wide transition-all transform active:scale-95 shadow-xl shadow-sky-500/30 cursor-pointer"
+                    >
+                      <span>{slides[activeSlide].buttonText}</span>
+                      <ArrowRight className="w-5 h-5" />
+                    </button>
+                  </div>
+                ) : null
               )}
             </div>
           )}
@@ -679,15 +683,15 @@ export const HeroBanner: React.FC<HeroBannerProps> = ({
 
             {/* Quick Guarantees & Courier Badges */}
             {activeFeatures.length > 0 && (
-              <div className="bg-white rounded-3xl border border-slate-200 p-5 shadow-xs flex flex-col justify-between gap-3">
+              <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-5 shadow-xs flex flex-col justify-between gap-3">
                 {activeFeatures.map((feat) => (
-                  <div key={feat.id} className="flex items-center gap-3.5 p-2.5 rounded-2xl bg-slate-50 hover:bg-sky-50 transition-colors">
-                    <div className="w-10 h-10 rounded-xl bg-sky-100 flex items-center justify-center text-sky-600 shrink-0">
+                  <div key={feat.id} className="flex items-center gap-3.5 p-2.5 rounded-2xl bg-slate-50 dark:bg-slate-800/60 hover:bg-sky-50 dark:hover:bg-slate-800 transition-colors">
+                    <div className="w-10 h-10 rounded-xl bg-sky-100 dark:bg-sky-950/80 flex items-center justify-center text-sky-600 dark:text-sky-400 shrink-0">
                       {renderBadgeIcon(feat.icon)}
                     </div>
                     <div className="min-w-0">
-                      <h4 className="text-xs font-bold text-slate-900">{feat.text}</h4>
-                      {feat.subtitle && <p className="text-[11px] text-slate-500">{feat.subtitle}</p>}
+                      <h4 className="text-xs font-bold text-slate-900 dark:text-slate-100">{feat.text}</h4>
+                      {feat.subtitle && <p className="text-[11px] text-slate-500 dark:text-slate-400">{feat.subtitle}</p>}
                     </div>
                   </div>
                 ))}
