@@ -2591,7 +2591,7 @@ DELIVERY & PRICING:
           }
 
           // 2. Upload file via multipart upload to Google Drive
-          const cleanName = `review-${Date.now()}-${filename.replace(/[^a-zA-Z0-9.-]/g, "_")}`;
+          const cleanName = filename ? filename.replace(/[/\\?%*:|"<>]/g, ' ').trim() : `review-${Date.now()}.jpg`;
           const metadata = {
             name: cleanName,
             parents: cachedDriveReviewFolderId ? [cachedDriveReviewFolderId] : undefined,

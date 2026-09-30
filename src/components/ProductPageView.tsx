@@ -646,7 +646,12 @@ export const ProductPageView: React.FC<ProductPageViewProps> = ({
     setReviewMediaUploadMsg(null);
 
     try {
-      const res = await uploadCustomerReviewPhoto(file, (p) => setReviewMediaUploadProgress(p));
+      const activeCustomerName = (newReviewName.trim() || currentCustomer?.name || 'Customer').trim();
+      const res = await uploadCustomerReviewPhoto(file, {
+        productTitle: product?.name || 'Product',
+        customerName: activeCustomerName,
+        onProgress: (p) => setReviewMediaUploadProgress(p),
+      });
       if (res && res.url) {
         setNewReviewPhotos((prev) => [...prev, res.url]);
         setPhotoInputUrl(res.url); // Automatically fill the photo URL input box with the Google Drive link!

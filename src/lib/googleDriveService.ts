@@ -677,19 +677,56 @@ export const uploadFileToGoogleDrive = async (
  */
 export const uploadCustomerReviewPhoto = async (
   file: File,
-  onProgress?: (percent: number) => void
-): Promise<{ url: string; fileId?: string; isGoogleDrive: boolean }> => {
+  optionsOrProgress?:
+    | {
+        productTitle?: string;
+        customerName?: string;
+        onProgress?: (percent: number) => void;
+      }
+    | ((percent: number) => void)
+): Promise<{ url: string; fileId?: string; isGoogleDrive: boolean; name?: string }> => {
+  let onProgress: ((percent: number) => void) | undefined;
+  let productTitle = '';
+  let customerName = '';
+
+  if (typeof optionsOrProgress === 'function') {
+    onProgress = optionsOrProgress;
+  } else if (optionsOrProgress && typeof optionsOrProgress === 'object') {
+    onProgress = optionsOrProgress.onProgress;
+    productTitle = optionsOrProgress.productTitle || '';
+    customerName = optionsOrProgress.customerName || '';
+  }
+
+  // Format custom filename as: "[Product Title] - [Customer Name].[ext]"
+  const ext = file.name.includes('.')
+    ? file.name.split('.').pop() || 'jpg'
+    : (file.type ? file.type.split('/')[1] : 'jpg') || 'jpg';
+
+  let customFilename = file.name;
+  const pTitleClean = productTitle.replace(/[/\\?%*:|"<>]/g, ' ').trim();
+  const cNameClean = customerName.replace(/[/\\?%*:|"<>]/g, ' ').trim();
+
+  if (pTitleClean && cNameClean) {
+    customFilename = `${pTitleClean} - ${cNameClean}.${ext}`;
+  } else if (pTitleClean) {
+    customFilename = `${pTitleClean}.${ext}`;
+  } else if (cNameClean) {
+    customFilename = `${cNameClean} - Review.${ext}`;
+  }
+
   if (onProgress) onProgress(20);
 
   // 1. Check if client has active Google Drive token
   const clientToken = await getGoogleAccessToken();
   if (clientToken) {
     try {
-      const driveRes = await uploadFileToGoogleDrive(file, clientToken, onProgress);
+      const formattedFile = new File([file], customFilename, { type: file.type || 'image/jpeg' });
+      const driveRes = await uploadFileToGoogleDrive(formattedFile, clientToken, onProgress);
       return {
         url: driveRes.url,
         fileId: driveRes.fileId,
         isGoogleDrive: true,
+        name: customFilename,
       };
     } catch (clientErr) {
       console.warn('[Client Drive Upload Error, falling back to Server Relay]:', clientErr);
@@ -738,7 +775,9 @@ export const uploadCustomerReviewPhoto = async (
         headers: { 'Content-Type': 'text/plain;charset=utf-8' },
         body: JSON.stringify({
           action: 'uploadReviewPhoto',
-          filename: file.name,
+          filename: customFilename,
+          productTitle: pTitleClean,
+          customerName: cNameClean,
           mimeType: file.type || 'image/jpeg',
           base64Data,
         }),
@@ -752,6 +791,7 @@ export const uploadCustomerReviewPhoto = async (
             url: data.url,
             fileId: data.fileId,
             isGoogleDrive: true,
+            name: customFilename,
           };
         }
       }
@@ -777,7 +817,9 @@ export const uploadCustomerReviewPhoto = async (
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            filename: file.name,
+            filename: customFilename,
+            productTitle: pTitleClean,
+            customerName: cNameClean,
             mimeType: file.type || 'image/jpeg',
             base64Data,
           }),
@@ -792,7 +834,9 @@ export const uploadCustomerReviewPhoto = async (
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              filename: file.name,
+              filename: customFilename,
+              productTitle: pTitleClean,
+              customerName: cNameClean,
               mimeType: file.type || 'image/jpeg',
               base64Data,
             }),
@@ -812,6 +856,7 @@ export const uploadCustomerReviewPhoto = async (
             url: data.url,
             fileId: data.fileId,
             isGoogleDrive: Boolean(data.inDrive),
+            name: customFilename,
           };
         }
       }
