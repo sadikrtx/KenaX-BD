@@ -21,6 +21,7 @@ provider.setCustomParameters({
 
 let isSigningIn = false;
 let cachedAccessToken: string | null = null;
+let cachedPermanentKey: string | null = null;
 let cachedUser: any = null;
 let cachedFolderId: string | null = null;
 
@@ -28,30 +29,32 @@ let cachedFolderId: string | null = null;
 if (typeof window !== 'undefined') {
   try {
     const localToken = localStorage.getItem('kenax_google_drive_token');
+    const localPermKey = localStorage.getItem('kenax_google_drive_permanent_key');
     const localUser = localStorage.getItem('kenax_google_drive_user');
     const localFolderId = localStorage.getItem('kenax_google_drive_folder_id');
     if (localToken) cachedAccessToken = localToken;
+    if (localPermKey) cachedPermanentKey = localPermKey;
     if (localUser) cachedUser = JSON.parse(localUser);
     if (localFolderId) cachedFolderId = localFolderId;
   } catch {}
 }
 
 // Background sync from Server and Firestore on load
-export const hydrateGoogleDriveState = async (): Promise<{ token: string | null; user: any }> => {
+export const hydrateGoogleDriveState = async (): Promise<{ token: string | null; user: any; permanentKey: string | null }> => {
   // 1. Try local memory
-  if (cachedAccessToken && cachedUser) {
-    return { token: cachedAccessToken, user: cachedUser };
+  if ((cachedPermanentKey || cachedAccessToken) && cachedUser) {
+    return { token: cachedPermanentKey || cachedAccessToken, user: cachedUser, permanentKey: cachedPermanentKey };
   }
 
   // 2. Try LocalStorage
   if (typeof window !== 'undefined') {
     try {
       const localToken = localStorage.getItem('kenax_google_drive_token');
+      const localPermKey = localStorage.getItem('kenax_google_drive_permanent_key');
       const localUser = localStorage.getItem('kenax_google_drive_user');
-      if (localToken) {
-        cachedAccessToken = localToken;
-        if (localUser) cachedUser = JSON.parse(localUser);
-      }
+      if (localPermKey) cachedPermanentKey = localPermKey;
+      if (localToken) cachedAccessToken = localToken;
+      if (localUser) cachedUser = JSON.parse(localUser);
     } catch {}
   }
 
@@ -60,18 +63,20 @@ export const hydrateGoogleDriveState = async (): Promise<{ token: string | null;
     const res = await fetch('/api/drive/token');
     if (res.ok) {
       const data = await res.json();
-      if (data.token) {
-        cachedAccessToken = data.token;
+      if (data.token || data.permanentKey) {
+        if (data.permanentKey) cachedPermanentKey = data.permanentKey;
+        if (data.token) cachedAccessToken = data.token;
         cachedUser = data.user || cachedUser;
         if (data.folderId) cachedFolderId = data.folderId;
         if (typeof window !== 'undefined') {
           try {
-            localStorage.setItem('kenax_google_drive_token', data.token);
+            if (data.token) localStorage.setItem('kenax_google_drive_token', data.token);
+            if (data.permanentKey) localStorage.setItem('kenax_google_drive_permanent_key', data.permanentKey);
             if (data.user) localStorage.setItem('kenax_google_drive_user', JSON.stringify(data.user));
             if (data.folderId) localStorage.setItem('kenax_google_drive_folder_id', data.folderId);
           } catch {}
         }
-        return { token: cachedAccessToken, user: cachedUser };
+        return { token: cachedPermanentKey || cachedAccessToken, user: cachedUser, permanentKey: cachedPermanentKey };
       }
     }
   } catch {}
@@ -81,22 +86,71 @@ export const hydrateGoogleDriveState = async (): Promise<{ token: string | null;
     const snap = await getDoc(doc(db, 'settings', 'google_drive'));
     if (snap.exists()) {
       const data = snap.data();
-      if (data?.token) {
-        cachedAccessToken = data.token;
-        cachedUser = data.user || cachedUser;
-        if (data.folderId) cachedFolderId = data.folderId;
-        if (typeof window !== 'undefined') {
-          try {
-            localStorage.setItem('kenax_google_drive_token', data.token);
-            if (data.user) localStorage.setItem('kenax_google_drive_user', JSON.stringify(data.user));
-            if (data.folderId) localStorage.setItem('kenax_google_drive_folder_id', data.folderId);
-          } catch {}
-        }
+      if (data?.permanentKey) cachedPermanentKey = data.permanentKey;
+      if (data?.token) cachedAccessToken = data.token;
+      cachedUser = data.user || cachedUser;
+      if (data.folderId) cachedFolderId = data.folderId;
+      if (typeof window !== 'undefined') {
+        try {
+          if (data.permanentKey) localStorage.setItem('kenax_google_drive_permanent_key', data.permanentKey);
+          if (data.token) localStorage.setItem('kenax_google_drive_token', data.token);
+          if (data.user) localStorage.setItem('kenax_google_drive_user', JSON.stringify(data.user));
+          if (data.folderId) localStorage.setItem('kenax_google_drive_folder_id', data.folderId);
+        } catch {}
       }
     }
   } catch {}
 
-  return { token: cachedAccessToken, user: cachedUser };
+  return { token: cachedPermanentKey || cachedAccessToken, user: cachedUser, permanentKey: cachedPermanentKey };
+};
+
+// Save Permanent Google Drive App Key (never expires, persists across reloads and offline/online transitions)
+export const saveGoogleDrivePermanentKey = async (
+  key: string,
+  userEmail: string = 'sadikrtx3060@gmail.com'
+): Promise<boolean> => {
+  const cleanKey = key.trim();
+  cachedPermanentKey = cleanKey;
+  if (!cachedUser) {
+    cachedUser = { email: userEmail, displayName: 'KenaX Admin (Permanent Key)' };
+  }
+
+  if (typeof window !== 'undefined') {
+    try {
+      localStorage.setItem('kenax_google_drive_permanent_key', cleanKey);
+      localStorage.setItem('kenax_google_drive_user', JSON.stringify(cachedUser));
+    } catch {}
+  }
+
+  // Sync with Server
+  fetch('/api/drive/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      token: cleanKey,
+      permanentKey: cleanKey,
+      userEmail,
+      userName: 'KenaX Admin (Permanent Key)',
+    }),
+  }).catch(() => {});
+
+  // Persist to Firestore
+  try {
+    await setDoc(
+      doc(db, 'settings', 'google_drive'),
+      {
+        permanentKey: cleanKey,
+        token: cleanKey,
+        user: cachedUser,
+        updatedAt: new Date().toISOString(),
+      },
+      { merge: true }
+    );
+    return true;
+  } catch (err) {
+    console.warn('[Google Drive] Firestore permanent key save notice:', err);
+    return true;
+  }
 };
 
 // Auto hydrate immediately
@@ -131,9 +185,10 @@ export const initGoogleDriveAuth = (
 export const getGoogleUser = (): User | null => cachedUser;
 
 export const getGoogleAccessToken = async (): Promise<string | null> => {
+  if (cachedPermanentKey) return cachedPermanentKey;
   if (cachedAccessToken) return cachedAccessToken;
   const hydrated = await hydrateGoogleDriveState();
-  return hydrated.token;
+  return hydrated.permanentKey || hydrated.token;
 };
 
 // Sign in with Google to get Drive access token
@@ -261,32 +316,49 @@ export function getDriveStandardViewUrl(fileId: string): string {
  */
 export function getDriveDirectImageUrl(urlOrId: string): string {
   if (!urlOrId) return '';
-  const fileId = extractDriveFileId(urlOrId);
+  const trimmed = urlOrId.trim();
+  const fileId = extractDriveFileId(trimmed);
   if (fileId) {
     return `https://lh3.googleusercontent.com/d/${fileId}`;
   }
-  return urlOrId;
+  return trimmed;
 }
 
 /**
- * Standard Google Drive share URL
+ * Standard permanent Google Drive image CDN URL for reviews and products
  */
 export function getDrivePermanentUrl(fileId: string): string {
-  return `https://drive.google.com/file/d/${fileId}/view?usp=drivesdk`;
+  return `https://lh3.googleusercontent.com/d/${fileId}`;
 }
 
 /**
  * Automatically resolves any user-pasted Google Drive link or image URL
- * into standard Google Drive share link format.
+ * into high-speed Google Drive image CDN format so it loads instantly without breaking.
  */
 export function resolveGoogleDriveUrl(inputUrl: string): string {
   if (!inputUrl) return '';
   const trimmed = inputUrl.trim();
   const fileId = extractDriveFileId(trimmed);
   if (fileId) {
-    return getDriveStandardViewUrl(fileId);
+    return `https://lh3.googleusercontent.com/d/${fileId}`;
   }
   return trimmed;
+}
+
+/**
+ * Image error handler fallback:
+ * If lh3 CDN has a temporary block, try the direct Google Drive uc export view stream
+ */
+export function handleImageErrorFallback(e: any, originalUrl?: string) {
+  const target = e.currentTarget || e.target;
+  if (!target) return;
+  const fileId = extractDriveFileId(originalUrl || target.src);
+  if (fileId && !target.src.includes('uc?export=view')) {
+    target.src = `https://drive.google.com/uc?export=view&id=${fileId}`;
+    return;
+  }
+  target.onerror = null;
+  target.src = 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=400';
 }
 
 // Ensure "Customer Reviews" folder exists in Google Drive
@@ -537,19 +609,46 @@ export const uploadCustomerReviewPhoto = async (
 
     if (onProgress) onProgress(50);
 
-    const res = await fetch('/api/drive/customer-review-upload', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        filename: file.name,
-        mimeType: file.type || 'image/jpeg',
-        base64Data,
-      }),
-    });
+    const CLOUD_RUN_API_BASE = 'https://ais-pre-nziktgpe56nlsqktopppvl-693170375322.asia-southeast1.run.app';
+    const isNetlifyOrExternal = typeof window !== 'undefined' && (
+      window.location.hostname.includes('netlify.app') ||
+      (!window.location.hostname.includes('localhost') && !window.location.hostname.includes('run.app'))
+    );
+
+    let res: Response | null = null;
+    try {
+      res = await fetch('/api/drive/customer-review-upload', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          filename: file.name,
+          mimeType: file.type || 'image/jpeg',
+          base64Data,
+        }),
+      });
+    } catch (e) {
+      console.warn('[Local Server Drive Relay Notice]:', e);
+    }
+
+    if ((!res || !res.ok) && (isNetlifyOrExternal || !res)) {
+      try {
+        res = await fetch(`${CLOUD_RUN_API_BASE}/api/drive/customer-review-upload`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            filename: file.name,
+            mimeType: file.type || 'image/jpeg',
+            base64Data,
+          }),
+        });
+      } catch (cloudErr) {
+        console.warn('[Cloud Run Drive Relay Notice]:', cloudErr);
+      }
+    }
 
     if (onProgress) onProgress(85);
 
-    if (res.ok) {
+    if (res && res.ok) {
       const data = await res.json();
       if (data.url) {
         if (onProgress) onProgress(100);

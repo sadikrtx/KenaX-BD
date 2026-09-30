@@ -133,6 +133,17 @@ async function startServer() {
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
   app.use(express.static(path.join(process.cwd(), "public")));
 
+  // Enable CORS for Netlify, custom domains, and cross-origin client requests
+  app.use((req, res, next) => {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, PATCH, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With, x-app-env, Accept");
+    if (req.method === "OPTIONS") {
+      return res.status(200).end();
+    }
+    next();
+  });
+
   function checkIsEnvPreview(req: express.Request): boolean {
     const envHeader = req.headers['x-app-env'];
     if (envHeader === 'preview') return true;

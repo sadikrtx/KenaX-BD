@@ -47,7 +47,7 @@ import {
   subscribeToReviews,
 } from '../lib/firebase';
 import { Review } from '../types';
-import { uploadCustomerReviewPhoto, resolveGoogleDriveUrl, getDriveDirectImageUrl } from '../lib/googleDriveService';
+import { uploadCustomerReviewPhoto, resolveGoogleDriveUrl, getDriveDirectImageUrl, handleImageErrorFallback } from '../lib/googleDriveService';
 import { ProductVideoPlayer } from './ProductVideoPlayer';
 import { getProductStockStatus, getStockStatusInfo } from '../utils/stockUtils';
 import { HighlightIcon } from './HighlightIcon';
@@ -1893,7 +1893,12 @@ export const ProductPageView: React.FC<ProductPageViewProps> = ({
                                       <span className="text-[9px] font-bold">Video</span>
                                     </div>
                                   ) : (
-                                    <img src={getDriveDirectImageUrl(pUrl)} alt="Review upload" className="w-full h-full object-cover" />
+                                    <img
+                                      src={getDriveDirectImageUrl(pUrl)}
+                                      alt="Review upload"
+                                      className="w-full h-full object-cover"
+                                      onError={(e) => handleImageErrorFallback(e, pUrl)}
+                                    />
                                   )}
                                   <button
                                     type="button"
@@ -1980,7 +1985,12 @@ export const ProductPageView: React.FC<ProductPageViewProps> = ({
                                   className="w-16 h-16 sm:w-20 sm:h-20 rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden bg-slate-100 dark:bg-slate-800 hover:opacity-90 transition-opacity block shadow-2xs"
                                   title="Click to view full photo"
                                 >
-                                  <img src={getDriveDirectImageUrl(pImg)} alt="Review attachment" className="w-full h-full object-cover" />
+                                  <img
+                                    src={getDriveDirectImageUrl(pImg)}
+                                    alt="Review attachment"
+                                    className="w-full h-full object-cover"
+                                    onError={(e) => handleImageErrorFallback(e, pImg)}
+                                  />
                                 </a>
                               );
                             })}

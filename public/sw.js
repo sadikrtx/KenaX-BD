@@ -1,4 +1,4 @@
-const CACHE_NAME = 'kenax-bd-v2';
+const CACHE_NAME = 'kenax-bd-v3';
 const STATIC_ASSETS = [
   '/favicon.ico',
   '/favicon-192.png',
@@ -32,8 +32,19 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
 
-  // 1. Never cache API requests or non-GET requests
-  if (event.request.method !== 'GET' || url.pathname.startsWith('/api/')) {
+  // 1. Never cache API requests, non-GET, dev files, node_modules, or Vite bundles
+  if (
+    event.request.method !== 'GET' ||
+    url.pathname.startsWith('/api/') ||
+    url.pathname.includes('/node_modules/') ||
+    url.pathname.startsWith('/src/') ||
+    url.pathname.startsWith('/@') ||
+    url.search.includes('v=') ||
+    url.pathname.endsWith('.ts') ||
+    url.pathname.endsWith('.tsx') ||
+    url.hostname === 'localhost' ||
+    url.hostname.includes('run.app')
+  ) {
     return;
   }
 

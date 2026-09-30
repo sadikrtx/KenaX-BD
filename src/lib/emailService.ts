@@ -1647,35 +1647,64 @@ export async function dispatchEmail(options: DispatchOptions): Promise<{ success
   let errorMsg: string | undefined = undefined;
 
   const superAdminEmail = (settings.superAdminEmail || 'sadikrtx3060@gmail.com').trim();
+  const CLOUD_RUN_API_BASE = 'https://ais-pre-nziktgpe56nlsqktopppvl-693170375322.asia-southeast1.run.app';
+  const isNetlifyOrExternal = typeof window !== 'undefined' && (
+    window.location.hostname.includes('netlify.app') ||
+    (!window.location.hostname.includes('localhost') && !window.location.hostname.includes('run.app'))
+  );
+
+  const emailPayload = {
+    to: options.to,
+    superAdminEmail,
+    subject,
+    html,
+    text,
+    type: options.type,
+    senderName: settings.senderName,
+    senderEmail: settings.senderEmail,
+    smtpHost: settings.smtpHost,
+    smtpPort: settings.smtpPort,
+    smtpUser: settings.smtpUser,
+    smtpPass: settings.smtpPass,
+  };
 
   try {
-    const res = await fetch('/api/email/send', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        to: options.to,
-        superAdminEmail,
-        subject,
-        html,
-        text,
-        type: options.type,
-        senderName: settings.senderName,
-        senderEmail: settings.senderEmail,
-        smtpHost: settings.smtpHost,
-        smtpPort: settings.smtpPort,
-        smtpUser: settings.smtpUser,
-        smtpPass: settings.smtpPass,
-      }),
-    });
+    let res: Response | null = null;
+    // 1. Try direct or relative /api/email/send
+    try {
+      res = await fetch('/api/email/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(emailPayload),
+      });
+    } catch (localErr) {
+      console.warn('[EmailService] Relative API dispatch failed, trying Cloud Run endpoint:', localErr);
+    }
 
-    const result = await res.json();
-    if (result && result.status) {
-      status = result.status;
-    } else if (res.ok) {
-      status = 'Sent';
+    // 2. If running on Netlify or relative failed (404/network error), forward directly to Cloud Run backend
+    if ((!res || !res.ok) && (isNetlifyOrExternal || !res)) {
+      try {
+        res = await fetch(`${CLOUD_RUN_API_BASE}/api/email/send`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(emailPayload),
+        });
+      } catch (cloudErr: any) {
+        console.warn('[EmailService] Cloud Run direct API dispatch failed:', cloudErr?.message);
+      }
+    }
+
+    if (res && res.ok) {
+      const result = await res.json().catch(() => ({}));
+      if (result && result.status) {
+        status = result.status;
+      } else {
+        status = 'Sent';
+      }
     } else {
       status = 'Simulated';
-      errorMsg = result.error || 'Server dispatch fallback';
+      const errorJson = res ? await res.json().catch(() => ({})) : {};
+      errorMsg = errorJson.error || 'Server dispatch fallback';
     }
   } catch (err: any) {
     console.warn('[EmailService] Server dispatch returned:', err?.message || err);

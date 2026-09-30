@@ -27,6 +27,7 @@ import {
   Folder,
   Layers,
   Link2,
+  Key,
 } from 'lucide-react';
 import { Review, UserRole, StaffUser, Product } from '../../types';
 import {
@@ -38,6 +39,9 @@ import {
   resolveGoogleDriveUrl,
   extractDriveFileId,
   getDrivePermanentUrl,
+  getDriveDirectImageUrl,
+  handleImageErrorFallback,
+  saveGoogleDrivePermanentKey,
   listReviewFolderFiles,
 } from '../../lib/googleDriveService';
 import type { User } from 'firebase/auth';
@@ -62,6 +66,8 @@ export const AdminReviews: React.FC<AdminReviewsProps> = ({
   onDeleteReview,
   onUpdateReview,
   onAddDemoReview,
+  currentRole,
+  currentStaff,
 }) => {
   const [statusFilter, setStatusFilter] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
@@ -109,6 +115,38 @@ export const AdminReviews: React.FC<AdminReviewsProps> = ({
   // URL Converter & Live Link Resolver State
   const [converterInput, setConverterInput] = useState('');
   const [resolvedConverterUrl, setResolvedConverterUrl] = useState('');
+
+  // Permanent Key (Google App Password / API Key style) state
+  const [permanentKeyInput, setPermanentKeyInput] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('kenax_google_drive_permanent_key') || '';
+    }
+    return '';
+  });
+  const [isSavingPermanentKey, setIsSavingPermanentKey] = useState(false);
+  const [showPermanentKeyInput, setShowPermanentKeyInput] = useState(false);
+
+  const handleSavePermanentKey = async () => {
+    if (!permanentKeyInput.trim()) return;
+    setIsSavingPermanentKey(true);
+    try {
+      await saveGoogleDrivePermanentKey(permanentKeyInput.trim(), currentStaff?.email || 'sadikrtx3060@gmail.com');
+      setGoogleToken(permanentKeyInput.trim());
+      setDriveStatusMsg({
+        type: 'success',
+        text: '✅ গুগল ড্রাইভ পার্মানেন্ট কি সফলভাবে সংরক্ষিত হয়েছে! অফলাইন-অনলাইন যাই হোক না কেন এটি ক্লাউড ও ডিভাইসে স্থায়ীভাবে কানেক্টেড থাকবে।',
+      });
+      fetchDriveFolderFiles(permanentKeyInput.trim());
+      setShowPermanentKeyInput(false);
+    } catch (err: any) {
+      setDriveStatusMsg({
+        type: 'error',
+        text: `পার্মানেন্ট কি সংরক্ষণে সমস্যা: ${err?.message || 'Error'}`,
+      });
+    } finally {
+      setIsSavingPermanentKey(false);
+    }
+  };
 
   // Auto-resolve Google Drive Link when pasted into converter
   useEffect(() => {
@@ -453,6 +491,16 @@ export const AdminReviews: React.FC<AdminReviewsProps> = ({
 
             <button
               type="button"
+              onClick={() => setShowPermanentKeyInput((prev) => !prev)}
+              className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer"
+              title="Google App Password / Permanent API Key"
+            >
+              <Key className="w-4 h-4" />
+              <span>{permanentKeyInput ? '🔑 স্থায়ী কি কনফিগার করা' : '🔑 অ্যাপ পাসওয়ার্ড / স্থায়ী কি'}</span>
+            </button>
+
+            <button
+              type="button"
               onClick={() => handleConnectGoogleDrive(true)}
               disabled={isConnectingDrive}
               className="px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer disabled:opacity-50"
@@ -462,7 +510,7 @@ export const AdminReviews: React.FC<AdminReviewsProps> = ({
               ) : (
                 <Cloud className="w-4 h-4" />
               )}
-              <span>{googleUser ? 'ড্রাইভ পরিবর্তন / রিলোড' : 'Google Drive কানেক্ট করুন'}</span>
+              <span>{googleUser ? 'ড্রাইভ রিলোড / পরিবর্তন' : 'Google Drive সাইন-ইন'}</span>
             </button>
 
             <button
@@ -483,6 +531,54 @@ export const AdminReviews: React.FC<AdminReviewsProps> = ({
             />
           </div>
         </div>
+
+        {/* Permanent App Key / API Key Configuration Drawer */}
+        {showPermanentKeyInput && (
+          <div className="p-4 rounded-2xl bg-amber-50/90 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 space-y-3 animate-in fade-in duration-200">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Key className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+                <h4 className="text-xs font-bold text-amber-900 dark:text-amber-200">
+                  গুগল ড্রাইভ পার্মানেন্ট কানেকশন (গুগল অ্যাপ পাসওয়ার্ড / এপিআই কি সিস্টেম)
+                </h4>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowPermanentKeyInput(false)}
+                className="text-amber-700 hover:text-amber-900 dark:text-amber-400 text-xs font-bold px-1.5 py-0.5 cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <p className="text-[11px] text-amber-800 dark:text-amber-300/90 leading-relaxed">
+              গুগল অ্যাপ পাসওয়ার্ডের মতোই একবার আপনার Google Drive API Key, OAuth Refresh Token বা Permanent Token এখানে দিয়ে সেভ করলে ব্রাউজার রিফ্রেশ দিলে কিংবা অফলাইন থেকে অনলাইনে আসলেও ড্রাইভ আর বারবার ডিসকানেক্ট হবে না। এটি ক্লাউড ও ডিভাইসে স্থায়ীভাবে সেভ থাকবে।
+            </p>
+
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+              <input
+                type="password"
+                value={permanentKeyInput}
+                onChange={(e) => setPermanentKeyInput(e.target.value)}
+                placeholder="Paste Google Drive Permanent Token / API Key / Service Key here..."
+                className="flex-1 px-3.5 py-2 rounded-xl border border-amber-300 dark:border-amber-700 bg-white dark:bg-slate-900 text-xs text-slate-900 dark:text-white font-mono focus:border-amber-500 focus:outline-hidden"
+              />
+              <button
+                type="button"
+                onClick={handleSavePermanentKey}
+                disabled={isSavingPermanentKey || !permanentKeyInput.trim()}
+                className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs cursor-pointer disabled:opacity-50"
+              >
+                {isSavingPermanentKey ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Save className="w-3.5 h-3.5" />
+                )}
+                <span>স্থায়ীভাবে সেভ করুন</span>
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Drive Status Alert */}
         {driveStatusMsg && (
@@ -563,13 +659,10 @@ export const AdminReviews: React.FC<AdminReviewsProps> = ({
               <div className="flex items-center gap-3 min-w-0">
                 <div className="w-12 h-12 rounded-xl overflow-hidden bg-white dark:bg-slate-800 border border-purple-300 shrink-0 shadow-2xs">
                   <img
-                    src={resolvedConverterUrl}
+                    src={getDriveDirectImageUrl(resolvedConverterUrl)}
                     alt="Resolved preview"
                     className="w-full h-full object-cover"
-                    onError={(e) => {
-                      // fallback
-                      (e.target as HTMLElement).style.display = 'none';
-                    }}
+                    onError={(e) => handleImageErrorFallback(e, resolvedConverterUrl)}
                   />
                 </div>
                 <div className="min-w-0">
@@ -639,10 +732,11 @@ export const AdminReviews: React.FC<AdminReviewsProps> = ({
                   className="group relative rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 aspect-square shadow-2xs hover:border-purple-400 transition-all"
                 >
                   <img
-                    src={file.url}
+                    src={getDriveDirectImageUrl(file.url)}
                     alt={file.name}
                     className="w-full h-full object-cover group-hover:scale-105 transition-transform"
                     loading="lazy"
+                    onError={(e) => handleImageErrorFallback(e, file.url)}
                   />
                   <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-between p-1.5 text-white">
                     <span className="text-[9px] font-bold truncate">{file.name}</span>
@@ -977,7 +1071,12 @@ export const AdminReviews: React.FC<AdminReviewsProps> = ({
                                 <span className="text-[9px] font-bold mt-0.5">Video</span>
                               </div>
                             ) : (
-                              <img src={url} alt="Review attachment" className="w-full h-full object-cover" />
+                              <img
+                                src={getDriveDirectImageUrl(url)}
+                                alt="Review attachment"
+                                className="w-full h-full object-cover"
+                                onError={(e) => handleImageErrorFallback(e, url)}
+                              />
                             )}
                             <button
                               type="button"
@@ -1137,7 +1236,12 @@ export const AdminReviews: React.FC<AdminReviewsProps> = ({
                       <div className="flex flex-wrap gap-2 mb-2">
                         {editPhotos.map((photoUrl, pIdx) => (
                           <div key={pIdx} className="relative group w-14 h-14 rounded-xl overflow-hidden border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900">
-                            <img src={photoUrl} alt="Review attachment" className="w-full h-full object-cover" />
+                            <img
+                              src={getDriveDirectImageUrl(photoUrl)}
+                              alt="Review attachment"
+                              className="w-full h-full object-cover"
+                              onError={(e) => handleImageErrorFallback(e, photoUrl)}
+                            />
                             <button
                               type="button"
                               onClick={() => handleRemovePhoto(pIdx)}
@@ -1222,7 +1326,12 @@ export const AdminReviews: React.FC<AdminReviewsProps> = ({
                             className="w-16 h-16 rounded-2xl overflow-hidden border border-slate-200 shadow-2xs hover:scale-105 transition-transform block"
                             title="Click to view full photo"
                           >
-                            <img src={photo} alt={`Review photo ${pIdx + 1}`} className="w-full h-full object-cover" />
+                            <img
+                              src={getDriveDirectImageUrl(photo)}
+                              alt={`Review photo ${pIdx + 1}`}
+                              className="w-full h-full object-cover"
+                              onError={(e) => handleImageErrorFallback(e, photo)}
+                            />
                           </a>
                         ))}
                       </div>

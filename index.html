@@ -127,11 +127,24 @@
     <link rel="manifest" href="/manifest.json" />
     <script>
       if ('serviceWorker' in navigator) {
-        window.addEventListener('load', () => {
-          navigator.serviceWorker.register('/sw.js')
-            .then((reg) => console.log('Service Worker registered', reg))
-            .catch((err) => console.log('Service Worker registration failed', err));
-        });
+        if (window.location.hostname === 'localhost' || window.location.hostname.includes('run.app') || window.location.hostname.includes('ais-dev-')) {
+          navigator.serviceWorker.getRegistrations().then(function(registrations) {
+            for (var i = 0; i < registrations.length; i++) {
+              registrations[i].unregister();
+            }
+          });
+          if ('caches' in window) {
+            caches.keys().then(function(keys) {
+              keys.forEach(function(key) { caches.delete(key); });
+            });
+          }
+        } else {
+          window.addEventListener('load', function() {
+            navigator.serviceWorker.register('/sw.js')
+              .then(function(reg) { console.log('Service Worker registered', reg); })
+              .catch(function(err) { console.log('Service Worker registration failed', err); });
+          });
+        }
       }
     </script>
 
