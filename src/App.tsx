@@ -29,23 +29,47 @@ const PartnerLoginPage = React.lazy(() =>
   import('./components/partner/PartnerLoginPage').then((m) => ({ default: m.PartnerLoginPage }))
 );
 
-// High-Performance Core Views & Modals: Direct imports ensure rock-solid React hook dispatcher stability
+// Secondary Views & Modals: Lazy-loaded on demand for maximum initial load performance
+const CustomerDashboard = React.lazy(() =>
+  import('./components/CustomerDashboard').then((m) => ({ default: m.CustomerDashboard }))
+);
+const TrackOrderView = React.lazy(() =>
+  import('./components/TrackOrderView').then((m) => ({ default: m.TrackOrderView }))
+);
+const AboutView = React.lazy(() =>
+  import('./components/AboutView').then((m) => ({ default: m.AboutView }))
+);
+const ContactView = React.lazy(() =>
+  import('./components/ContactView').then((m) => ({ default: m.ContactView }))
+);
+const PolicyView = React.lazy(() =>
+  import('./components/PolicyView').then((m) => ({ default: m.PolicyView }))
+);
+const PolicyModal = React.lazy(() =>
+  import('./components/PolicyModal').then((m) => ({ default: m.PolicyModal }))
+);
+const ProductLandingPageView = React.lazy(() =>
+  import('./components/ProductLandingPageView').then((m) => ({ default: m.ProductLandingPageView }))
+);
+const TagProductsView = React.lazy(() =>
+  import('./components/TagProductsView').then((m) => ({ default: m.TagProductsView }))
+);
+const AIAssistantModal = React.lazy(() =>
+  import('./components/AIAssistantModal').then((m) => ({ default: m.AIAssistantModal }))
+);
+const CustomerAuthModal = React.lazy(() =>
+  import('./components/CustomerAuthModal').then((m) => ({ default: m.CustomerAuthModal }))
+);
+const AdminLoginModal = React.lazy(() =>
+  import('./components/admin/AdminLoginModal').then((m) => ({ default: m.AdminLoginModal }))
+);
+
+// High-Performance Core Views: Direct imports for instant initial UI paint
 import { CustomerFloatingChat } from './components/CustomerFloatingChat';
 import { CheckoutModal } from './components/CheckoutModal';
 import { CheckoutPageView } from './components/CheckoutPageView';
 import { OrderSuccessModal } from './components/OrderSuccessModal';
 import { ErrorBoundary } from './components/ErrorBoundary';
-import { CustomerDashboard } from './components/CustomerDashboard';
-import { TrackOrderView } from './components/TrackOrderView';
-import { AboutView } from './components/AboutView';
-import { ContactView } from './components/ContactView';
-import { PolicyView } from './components/PolicyView';
-import { PolicyModal } from './components/PolicyModal';
-import { ProductLandingPageView } from './components/ProductLandingPageView';
-import { TagProductsView } from './components/TagProductsView';
-import { AIAssistantModal } from './components/AIAssistantModal';
-import { CustomerAuthModal } from './components/CustomerAuthModal';
-import { AdminLoginModal } from './components/admin/AdminLoginModal';
 import { safeSetLocalStorage } from './lib/storage';
 import { getEnvStorageKey } from './utils/envHelper';
 import { sanitizeCart } from './utils/cartUtils';
@@ -1539,10 +1563,12 @@ export default function App() {
     let unsubscribeCartActivities: (() => void) | null = null;
 
     async function initDB() {
-      // Seed if not done yet
+      // Background seed without blocking initial storefront paint
       const seeded = localStorage.getItem('kenax_seeded_flag');
       if (!seeded) {
-        await seedAllDataToFirestore();
+        setTimeout(() => {
+          seedAllDataToFirestore().catch(() => {});
+        }, 1200);
       }
 
       // Fetch products from Firestore & local cache

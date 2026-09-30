@@ -59,16 +59,6 @@ export default defineConfig(() => {
             if (id.includes('node_modules/motion') || id.includes('node_modules/framer-motion')) {
               return 'vendor-motion';
             }
-            if (id.includes('src/components/admin/')) {
-              return 'chunk-admin';
-            }
-            if (
-              id.includes('src/components/seller/') ||
-              id.includes('src/components/reseller/') ||
-              id.includes('src/components/partner/')
-            ) {
-              return 'chunk-portals';
-            }
           },
         },
       },

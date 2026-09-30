@@ -4123,17 +4123,65 @@ export function subscribeToReviews(
   }
 }
 
+async function compressImageToSafeSize(dataUri: string): Promise<string> {
+  if (!dataUri || !dataUri.startsWith('data:image')) return dataUri;
+  if (typeof window === 'undefined' || typeof document === 'undefined') return dataUri;
+  return new Promise((resolve) => {
+    try {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => {
+        try {
+          const maxDim = 800;
+          let width = img.width || 800;
+          let height = img.height || 600;
+          if (width > maxDim || height > maxDim) {
+            if (width > height) {
+              height = Math.round((height * maxDim) / width);
+              width = maxDim;
+            } else {
+              width = Math.round((width * maxDim) / height);
+              height = maxDim;
+            }
+          }
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            ctx.drawImage(img, 0, 0, width, height);
+            const compressed = canvas.toDataURL('image/jpeg', 0.7);
+            resolve(compressed);
+          } else {
+            resolve(dataUri);
+          }
+        } catch {
+          resolve(dataUri);
+        }
+      };
+      img.onerror = () => resolve(dataUri);
+      img.src = dataUri;
+    } catch {
+      resolve(dataUri);
+    }
+  });
+}
+
 export async function saveReviewToDB(review: Review): Promise<void> {
-  // Compress any overly large base64 image strings so Firestore 1MB document limit is never exceeded
   const safeReview = { ...review };
   if (Array.isArray(safeReview.photos)) {
-    safeReview.photos = safeReview.photos.map((p) => {
-      if (typeof p === 'string' && p.startsWith('data:image') && p.length > 500000) {
-        // Truncate overly long data URIs or keep first chunk to protect Firestore
-        return p.slice(0, 300000);
+    const processedPhotos: string[] = [];
+    for (const p of safeReview.photos) {
+      if (typeof p === 'string' && p.trim()) {
+        if (p.startsWith('data:image')) {
+          const comp = await compressImageToSafeSize(p);
+          processedPhotos.push(comp);
+        } else {
+          processedPhotos.push(p.trim());
+        }
       }
-      return p;
-    });
+    }
+    safeReview.photos = processedPhotos;
   }
 
   const cleaned = cleanFirestoreData(safeReview);

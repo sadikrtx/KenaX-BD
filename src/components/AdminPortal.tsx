@@ -1,48 +1,50 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense } from 'react';
 import {
   AdminSidebar,
   AdminTab,
 } from './admin/AdminSidebar';
 import { AdminHeader } from './admin/AdminHeader';
-import { AdminOverview } from './admin/AdminOverview';
-import { AdminOrders } from './admin/AdminOrders';
-import { AdminProducts } from './admin/AdminProducts';
-import { AdminLandingPages } from './admin/AdminLandingPages';
-import { AdminCategories } from './admin/AdminCategories';
-import { AdminInventory } from './admin/AdminInventory';
-import { AdminCustomers } from './admin/AdminCustomers';
-import { AdminDelivery } from './admin/AdminDelivery';
-import { AdminCourierFraudChecker } from './admin/AdminCourierFraudChecker';
-import { AdminPayments } from './admin/AdminPayments';
-import { AdminDeliveryAdvance } from './admin/AdminDeliveryAdvance';
-import { AdminCoupons } from './admin/AdminCoupons';
-import { AdminReviews } from './admin/AdminReviews';
-import { AdminStaff } from './admin/AdminStaff';
-import { AdminActivityLogs } from './admin/AdminActivityLogs';
-import { AdminReports } from './admin/AdminReports';
-import { AdminCosts } from './admin/AdminCosts';
-import { AdminPerformanceOverview } from './admin/AdminPerformanceOverview';
-import { AdminMyDashboard } from './admin/AdminMyDashboard';
-import { AdminSettings } from './admin/AdminSettings';
-import { AdminPaymentGateways } from './admin/AdminPaymentGateways';
-import { AdminCartActivities } from './admin/AdminCartActivities';
-import { AdminWishlistActivities } from './admin/AdminWishlistActivities';
-import { AdminGmailAlerts } from './admin/AdminGmailAlerts';
-import { AdminSEOSettings } from './admin/AdminSEOSettings';
-import { AdminPoliciesSettings } from './admin/AdminPoliciesSettings';
-import { AdminGoogleSheets } from './admin/AdminGoogleSheets';
-import { AdminSMSGateway } from './admin/AdminSMSGateway';
-import { AdminWhatsAppAutomation } from './admin/AdminWhatsAppAutomation';
-import { AdminTelegramBot } from './admin/AdminTelegramBot';
-import { AdminChatBot } from './admin/AdminChatBot';
-import { AdminDropshipping } from './admin/AdminDropshipping';
-import { AdminAdvertiser } from './admin/AdminAdvertiser';
-import { AdminPartners } from './admin/AdminPartners';
-import { AdminSellerManagement } from './admin/AdminSellerManagement';
-import { AdminResellerManagement } from './admin/AdminResellerManagement';
-import { PermissionMatrix } from './admin/PermissionMatrix';
-import { InvoiceModal } from './admin/InvoiceModal';
-import { AdminLoginModal } from './admin/AdminLoginModal';
+
+// Lazy-loaded Admin Sub-Modules (Zero overhead until opened)
+const AdminOverview = React.lazy(() => import('./admin/AdminOverview').then(m => ({ default: m.AdminOverview })));
+const AdminOrders = React.lazy(() => import('./admin/AdminOrders').then(m => ({ default: m.AdminOrders })));
+const AdminProducts = React.lazy(() => import('./admin/AdminProducts').then(m => ({ default: m.AdminProducts })));
+const AdminLandingPages = React.lazy(() => import('./admin/AdminLandingPages').then(m => ({ default: m.AdminLandingPages })));
+const AdminCategories = React.lazy(() => import('./admin/AdminCategories').then(m => ({ default: m.AdminCategories })));
+const AdminInventory = React.lazy(() => import('./admin/AdminInventory').then(m => ({ default: m.AdminInventory })));
+const AdminCustomers = React.lazy(() => import('./admin/AdminCustomers').then(m => ({ default: m.AdminCustomers })));
+const AdminDelivery = React.lazy(() => import('./admin/AdminDelivery').then(m => ({ default: m.AdminDelivery })));
+const AdminCourierFraudChecker = React.lazy(() => import('./admin/AdminCourierFraudChecker').then(m => ({ default: m.AdminCourierFraudChecker })));
+const AdminPayments = React.lazy(() => import('./admin/AdminPayments').then(m => ({ default: m.AdminPayments })));
+const AdminDeliveryAdvance = React.lazy(() => import('./admin/AdminDeliveryAdvance').then(m => ({ default: m.AdminDeliveryAdvance })));
+const AdminCoupons = React.lazy(() => import('./admin/AdminCoupons').then(m => ({ default: m.AdminCoupons })));
+const AdminReviews = React.lazy(() => import('./admin/AdminReviews').then(m => ({ default: m.AdminReviews })));
+const AdminStaff = React.lazy(() => import('./admin/AdminStaff').then(m => ({ default: m.AdminStaff })));
+const AdminActivityLogs = React.lazy(() => import('./admin/AdminActivityLogs').then(m => ({ default: m.AdminActivityLogs })));
+const AdminReports = React.lazy(() => import('./admin/AdminReports').then(m => ({ default: m.AdminReports })));
+const AdminCosts = React.lazy(() => import('./admin/AdminCosts').then(m => ({ default: m.AdminCosts })));
+const AdminPerformanceOverview = React.lazy(() => import('./admin/AdminPerformanceOverview').then(m => ({ default: m.AdminPerformanceOverview })));
+const AdminMyDashboard = React.lazy(() => import('./admin/AdminMyDashboard').then(m => ({ default: m.AdminMyDashboard })));
+const AdminSettings = React.lazy(() => import('./admin/AdminSettings').then(m => ({ default: m.AdminSettings })));
+const AdminPaymentGateways = React.lazy(() => import('./admin/AdminPaymentGateways').then(m => ({ default: m.AdminPaymentGateways })));
+const AdminCartActivities = React.lazy(() => import('./admin/AdminCartActivities').then(m => ({ default: m.AdminCartActivities })));
+const AdminWishlistActivities = React.lazy(() => import('./admin/AdminWishlistActivities').then(m => ({ default: m.AdminWishlistActivities })));
+const AdminGmailAlerts = React.lazy(() => import('./admin/AdminGmailAlerts').then(m => ({ default: m.AdminGmailAlerts })));
+const AdminSEOSettings = React.lazy(() => import('./admin/AdminSEOSettings').then(m => ({ default: m.AdminSEOSettings })));
+const AdminPoliciesSettings = React.lazy(() => import('./admin/AdminPoliciesSettings').then(m => ({ default: m.AdminPoliciesSettings })));
+const AdminGoogleSheets = React.lazy(() => import('./admin/AdminGoogleSheets').then(m => ({ default: m.AdminGoogleSheets })));
+const AdminSMSGateway = React.lazy(() => import('./admin/AdminSMSGateway').then(m => ({ default: m.AdminSMSGateway })));
+const AdminWhatsAppAutomation = React.lazy(() => import('./admin/AdminWhatsAppAutomation').then(m => ({ default: m.AdminWhatsAppAutomation })));
+const AdminTelegramBot = React.lazy(() => import('./admin/AdminTelegramBot').then(m => ({ default: m.AdminTelegramBot })));
+const AdminChatBot = React.lazy(() => import('./admin/AdminChatBot').then(m => ({ default: m.AdminChatBot })));
+const AdminDropshipping = React.lazy(() => import('./admin/AdminDropshipping').then(m => ({ default: m.AdminDropshipping })));
+const AdminAdvertiser = React.lazy(() => import('./admin/AdminAdvertiser').then(m => ({ default: m.AdminAdvertiser })));
+const AdminPartners = React.lazy(() => import('./admin/AdminPartners').then(m => ({ default: m.AdminPartners })));
+const AdminSellerManagement = React.lazy(() => import('./admin/AdminSellerManagement').then(m => ({ default: m.AdminSellerManagement })));
+const AdminResellerManagement = React.lazy(() => import('./admin/AdminResellerManagement').then(m => ({ default: m.AdminResellerManagement })));
+const PermissionMatrix = React.lazy(() => import('./admin/PermissionMatrix').then(m => ({ default: m.PermissionMatrix })));
+const InvoiceModal = React.lazy(() => import('./admin/InvoiceModal').then(m => ({ default: m.InvoiceModal })));
+const AdminLoginModal = React.lazy(() => import('./admin/AdminLoginModal').then(m => ({ default: m.AdminLoginModal })));
 import {
   triggerOrderStatusChangeWorkflow,
   triggerSuperAdminAuditAlert,
@@ -1697,7 +1699,15 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
 
         {/* Tab Body */}
         <main className="flex-1 p-2 sm:p-4 lg:p-5 w-full max-w-[99%] 2xl:max-w-[1720px] mx-auto">
-          {currentTab === 'overview' && (
+          <Suspense
+            fallback={
+              <div className="flex flex-col items-center justify-center py-24 text-slate-400 text-xs">
+                <div className="w-8 h-8 border-3 border-purple-600 border-t-transparent rounded-full animate-spin mb-3" />
+                <span className="font-bold">মডিউল লোড হচ্ছে...</span>
+              </div>
+            }
+          >
+            {currentTab === 'overview' && (
             <AdminOverview
               orders={orders}
               products={products}
@@ -2263,6 +2273,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
               initialSubTab={initialSettingsSubTab}
             />
           )}
+          </Suspense>
         </main>
       </div>
 

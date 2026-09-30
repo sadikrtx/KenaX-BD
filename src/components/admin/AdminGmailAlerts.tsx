@@ -120,7 +120,7 @@ export const AdminGmailAlerts: React.FC<AdminGmailAlertsProps> = ({
 
       const loadedSettings = await getActiveGmailSettings();
       if (!loadedSettings.webhookUrl) {
-        loadedSettings.webhookUrl = 'https://script.google.com/macros/s/AKfycbw_UtesYomtnwD4Y7FrIlUW4RvhLvAj428-xJz3nuz4fdk_O0gIfBZVQN_JeDWuvJxduw/exec';
+        loadedSettings.webhookUrl = 'https://script.google.com/macros/s/AKfycbz-561X29AU3IfkMxvjh__Wi6F9U0NteYNFIg7B2RpD8V5pbAvNoSVFP2Nu35NdP5HjXA/exec';
       }
       setSettings(loadedSettings);
 

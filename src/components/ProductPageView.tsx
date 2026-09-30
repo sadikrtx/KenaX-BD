@@ -303,7 +303,8 @@ export const ProductPageView: React.FC<ProductPageViewProps> = ({
     setShowVideo(false);
     setQuantity(1);
     setAddedFeedback(false);
-    setReviewSubmitted(false);
+    const hasReviewedThisSession = typeof window !== 'undefined' && product?.id && sessionStorage.getItem('kenax_reviewed_' + product.id) === 'true';
+    setReviewSubmitted(Boolean(hasReviewedThisSession));
     setIsPaused(false);
 
     // Do NOT auto-select variations - customer must explicitly pick one
@@ -705,18 +706,24 @@ export const ProductPageView: React.FC<ProductPageViewProps> = ({
     // 2. Instantly update local reviews list (Optimistic UI)
     setDbReviewsList((prev) => [newReviewRecord, ...prev.filter((r) => r.id !== newReviewId)]);
 
-    // 3. Save to Cloud Firestore permanently
-    try {
-      await saveReviewToDB(newReviewRecord);
-    } catch (err) {
-      console.warn('[Review Save DB Error]:', err);
-    }
-
+    // 3. Instantly clear form inputs and show Thank You card!
     setNewReviewComment('');
     setNewReviewPhotos([]);
     setPhotoInputUrl('');
     setReviewSubmitted(true);
     setReviewMediaUploadMsg(null);
+    if (typeof window !== 'undefined' && product?.id) {
+      try {
+        sessionStorage.setItem('kenax_reviewed_' + product.id, 'true');
+      } catch {}
+    }
+
+    // 4. Save to Cloud Firestore & Google Drive permanently in background
+    try {
+      await saveReviewToDB(newReviewRecord);
+    } catch (err) {
+      console.warn('[Review Save DB Error]:', err);
+    }
   };
 
   // Calculate dynamically ranked Similar Products (matching subcategory, category, brand, and relevance)
@@ -1709,6 +1716,11 @@ export const ProductPageView: React.FC<ProductPageViewProps> = ({
                           type="button"
                           onClick={() => {
                             setReviewSubmitted(false);
+                            if (typeof window !== 'undefined' && product?.id) {
+                              try {
+                                sessionStorage.removeItem('kenax_reviewed_' + product.id);
+                              } catch {}
+                            }
                             setNewReviewComment('');
                             setNewReviewPhotos([]);
                             setPhotoInputUrl('');

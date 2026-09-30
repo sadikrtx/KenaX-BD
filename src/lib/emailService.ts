@@ -24,7 +24,7 @@ export const DEFAULT_GMAIL_SETTINGS: GmailAlertSettings = {
   smtpPort: 465,
   smtpUser: 'sadikrtx3060@gmail.com',
   smtpPass: '',
-  webhookUrl: 'https://script.google.com/macros/s/AKfycbw_UtesYomtnwD4Y7FrIlUW4RvhLvAj428-xJz3nuz4fdk_O0gIfBZVQN_JeDWuvJxduw/exec',
+  webhookUrl: 'https://script.google.com/macros/s/AKfycbz-561X29AU3IfkMxvjh__Wi6F9U0NteYNFIg7B2RpD8V5pbAvNoSVFP2Nu35NdP5HjXA/exec',
   notifyOnUserRegister: true,
   notifyOnAddToCart: true,
   notifyOnWishlist: true,

@@ -445,10 +445,10 @@ export const makeFilePubliclyViewable = async (
 };
 
 /**
- * List files inside the "Customer Reviews" folder
+ * List files inside the "Customer Reviews" folder (Supports Google Apps Script Webhook & Direct Drive API)
  */
 export const listReviewFolderFiles = async (
-  token: string
+  token?: string
 ): Promise<
   Array<{
     id: string;
@@ -457,32 +457,79 @@ export const listReviewFolderFiles = async (
     mimeType: string;
     createdTime?: string;
     size?: string;
+    driveLink?: string;
   }>
 > => {
+  // 1. Try Google Apps Script Webhook (no OAuth required)
   try {
-    const folderId = await getOrCreateReviewFolder(token);
-    const query = encodeURIComponent(`'${folderId}' in parents and trashed = false`);
-    const res = await fetch(
-      `https://www.googleapis.com/drive/v3/files?q=${query}&fields=files(id,name,mimeType,thumbnailLink,createdTime,size)&orderBy=createdTime desc&pageSize=50`,
-      {
-        headers: { Authorization: `Bearer ${token}` },
+    let webhookUrl = '';
+    if (typeof window !== 'undefined') {
+      webhookUrl = localStorage.getItem('kenax_google_drive_webhook') || '';
+      if (!webhookUrl) {
+        const rawSettings = localStorage.getItem('kenax_gmail_alert_settings');
+        if (rawSettings) {
+          try {
+            const parsed = JSON.parse(rawSettings);
+            webhookUrl = parsed.webhookUrl || '';
+          } catch {}
+        }
       }
-    );
-
-    if (res.ok) {
-      const data = await res.json();
-      return (data.files || []).map((f: any) => ({
-        id: f.id,
-        name: f.name,
-        url: getDrivePermanentUrl(f.id),
-        mimeType: f.mimeType,
-        createdTime: f.createdTime,
-        size: f.size,
-      }));
     }
-  } catch (err) {
-    console.warn('[Google Drive List Files Warning]:', err);
+
+    if (webhookUrl && webhookUrl.includes('script.google.com')) {
+      const gasRes = await fetch(webhookUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({ action: 'listReviewFiles' }),
+      }).catch(() => null);
+
+      if (gasRes && gasRes.ok) {
+        const data = await gasRes.json().catch(() => null);
+        if (data && Array.isArray(data.files) && data.files.length > 0) {
+          return data.files.map((f: any) => ({
+            id: f.id,
+            name: f.name || 'Review Photo',
+            url: f.url || getDrivePermanentUrl(f.id),
+            driveLink: f.driveLink || `https://drive.google.com/uc?export=view&id=${f.id}`,
+            mimeType: f.mimeType || 'image/jpeg',
+            createdTime: f.createdTime,
+            size: f.size,
+          }));
+        }
+      }
+    }
+  } catch (gasErr) {
+    console.warn('[Apps Script List Files Notice]:', gasErr);
   }
+
+  // 2. Try Direct Google Drive API if token is available
+  if (token) {
+    try {
+      const folderId = await getOrCreateReviewFolder(token);
+      const query = encodeURIComponent(`'${folderId}' in parents and trashed = false`);
+      const res = await fetch(
+        `https://www.googleapis.com/drive/v3/files?q=${query}&fields=files(id,name,mimeType,thumbnailLink,createdTime,size)&orderBy=createdTime desc&pageSize=50`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      );
+
+      if (res.ok) {
+        const data = await res.json();
+        return (data.files || []).map((f: any) => ({
+          id: f.id,
+          name: f.name,
+          url: getDrivePermanentUrl(f.id),
+          mimeType: f.mimeType,
+          createdTime: f.createdTime,
+          size: f.size,
+        }));
+      }
+    } catch (err) {
+      console.warn('[Google Drive List Files Warning]:', err);
+    }
+  }
+
   return [];
 };
 
@@ -682,7 +729,7 @@ export const uploadCustomerReviewPhoto = async (
       }
     }
     if (!webhookUrl) {
-      webhookUrl = 'https://script.google.com/macros/s/AKfycbw_UtesYomtnwD4Y7FrIlUW4RvhLvAj428-xJz3nuz4fdk_O0gIfBZVQN_JeDWuvJxduw/exec';
+      webhookUrl = 'https://script.google.com/macros/s/AKfycbz-561X29AU3IfkMxvjh__Wi6F9U0NteYNFIg7B2RpD8V5pbAvNoSVFP2Nu35NdP5HjXA/exec';
     }
 
     if (webhookUrl && webhookUrl.includes('script.google.com') && base64Data) {

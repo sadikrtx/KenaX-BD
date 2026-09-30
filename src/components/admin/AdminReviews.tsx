@@ -154,7 +154,7 @@ export const AdminReviews: React.FC<AdminReviewsProps> = ({
         } catch {}
       }
     }
-    return 'https://script.google.com/macros/s/AKfycbw_UtesYomtnwD4Y7FrIlUW4RvhLvAj428-xJz3nuz4fdk_O0gIfBZVQN_JeDWuvJxduw/exec';
+    return 'https://script.google.com/macros/s/AKfycbz-561X29AU3IfkMxvjh__Wi6F9U0NteYNFIg7B2RpD8V5pbAvNoSVFP2Nu35NdP5HjXA/exec';
   });
   const [isSavingGasWebhook, setIsSavingGasWebhook] = useState(false);
   const [isTestingGasWebhook, setIsTestingGasWebhook] = useState(false);
@@ -181,50 +181,44 @@ export const AdminReviews: React.FC<AdminReviewsProps> = ({
   const [editPhotos, setEditPhotos] = useState<string[]>([]);
   const [newPhotoUrlInput, setNewPhotoUrlInput] = useState('');
 
-  const APPS_SCRIPT_CODE = `function doPost(e) {
+  const APPS_SCRIPT_CODE = `function doGet(e) {
+  return handleListFiles();
+}
+
+function doPost(e) {
   try {
     var data = JSON.parse(e.postData.contents);
     
-    // ১. কাস্টমার রিভিউ ফটো সরাসরি Google Drive ফোল্ডারে সেভ করা
-    if (data.action === 'uploadReviewPhoto' || data.base64Data) {
-      var folderName = "Customer Reviews";
-      var folders = DriveApp.getFoldersByName(folderName);
-      var folder = folders.hasNext() ? folders.next() : DriveApp.createFolder(folderName);
-      folder.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
-      
-      var decoded = Utilities.base64Decode(data.base64Data);
-      var blob = Utilities.newBlob(decoded, data.mimeType || 'image/jpeg', data.filename || 'review_photo.jpg');
-      var file = folder.createFile(blob);
-      file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
-      
-      var fileId = file.getId();
-      var directUrl = "https://lh3.googleusercontent.com/d/" + fileId;
-      var driveLink = "https://drive.google.com/uc?export=view&id=" + fileId;
-      var folderUrl = folder.getUrl();
-      
-      return ContentService.createTextOutput(JSON.stringify({
-        success: true,
-        fileId: fileId,
-        url: directUrl,
-        driveLink: driveLink,
-        folderUrl: folderUrl
-      })).setMimeType(ContentService.MimeType.JSON);
+    // ১. কাস্টমার রিভিউ ফোল্ডারের ফাইল তালিকা (List all files in Customer Reviews folder)
+    if (data.action === 'listReviewFiles' || data.action === 'getReviewPhotos') {
+      return handleListFiles();
     }
     
-    // ২. জিমেইল নোটিফিকেশন ইমেইল পাঠানো
-    var to = data.to;
-    var subject = data.subject || "KenaX BD Notification";
-    var htmlBody = data.html || data.text || "Notification from KenaX BD";
+    // ২. কাস্টমার রিভিউ ফটো সরাসরি Google Drive ফোল্ডারে সেভ ও শেয়ার লিংক তৈরি
+    var folderName = "Customer Reviews";
+    var folders = DriveApp.getFoldersByName(folderName);
+    var folder = folders.hasNext() ? folders.next() : DriveApp.createFolder(folderName);
+    folder.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
     
-    MailApp.sendEmail({
-      to: to,
-      subject: subject,
-      htmlBody: htmlBody
-    });
+    var fileName = data.filename || ("review_" + new Date().getTime() + ".jpg");
+    var mimeType = data.mimeType || "image/jpeg";
+    var decoded = Utilities.base64Decode(data.base64Data);
+    var blob = Utilities.newBlob(decoded, mimeType, fileName);
+    
+    var file = folder.createFile(blob);
+    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+    
+    var fileId = file.getId();
+    var directUrl = "https://lh3.googleusercontent.com/d/" + fileId;
+    var driveLink = "https://drive.google.com/uc?export=view&id=" + fileId;
+    var folderUrl = folder.getUrl();
     
     return ContentService.createTextOutput(JSON.stringify({
       success: true,
-      status: "Delivered"
+      fileId: fileId,
+      url: directUrl,
+      driveLink: driveLink,
+      folderUrl: folderUrl
     })).setMimeType(ContentService.MimeType.JSON);
     
   } catch (err) {
@@ -233,25 +227,76 @@ export const AdminReviews: React.FC<AdminReviewsProps> = ({
       error: err.toString()
     })).setMimeType(ContentService.MimeType.JSON);
   }
+}
+
+function handleListFiles() {
+  try {
+    var folderName = "Customer Reviews";
+    var folders = DriveApp.getFoldersByName(folderName);
+    if (!folders.hasNext()) {
+      return ContentService.createTextOutput(JSON.stringify({
+        success: true,
+        files: [],
+        folderUrl: ""
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
+    
+    var folder = folders.next();
+    var fileIterator = folder.getFiles();
+    var fileList = [];
+    
+    while (fileIterator.hasNext()) {
+      var f = fileIterator.next();
+      var fId = f.getId();
+      var fName = f.getName();
+      var fMime = f.getMimeType();
+      var fCreated = f.getDateCreated() ? f.getDateCreated().toISOString() : "";
+      var fSize = f.getSize();
+      
+      try {
+        f.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+      } catch(e) {}
+      
+      fileList.push({
+        id: fId,
+        name: fName,
+        url: "https://lh3.googleusercontent.com/d/" + fId,
+        driveLink: "https://drive.google.com/uc?export=view&id=" + fId,
+        mimeType: fMime,
+        createdTime: fCreated,
+        size: fSize
+      });
+    }
+    
+    return ContentService.createTextOutput(JSON.stringify({
+      success: true,
+      files: fileList,
+      folderUrl: folder.getUrl()
+    })).setMimeType(ContentService.MimeType.JSON);
+  } catch(err) {
+    return ContentService.createTextOutput(JSON.stringify({
+      success: false,
+      error: err.toString(),
+      files: []
+    })).setMimeType(ContentService.MimeType.JSON);
+  }
 }`;
 
-  // Initialize Drive Auth
+  // Initialize Drive Auth & Load Files on Mount
   useEffect(() => {
     initGoogleDriveAuth((user) => {
       setGoogleUser(user);
     });
 
-    const checkToken = async () => {
+    const checkTokenAndFetch = async () => {
       const token = await getGoogleAccessToken();
       if (token) {
         setGoogleToken(token);
-        fetchDriveFolderFiles(token);
-      } else if (permanentKeyInput.trim()) {
-        fetchDriveFolderFiles(permanentKeyInput.trim());
       }
+      fetchDriveFolderFiles(token || permanentKeyInput.trim() || undefined);
     };
-    checkToken();
-  }, [permanentKeyInput]);
+    checkTokenAndFetch();
+  }, [permanentKeyInput, gasWebhookUrl]);
 
   // Click outside to close product select dropdown
   useEffect(() => {
@@ -989,34 +1034,60 @@ export const AdminReviews: React.FC<AdminReviewsProps> = ({
               </h3>
             </div>
 
-            <div className="flex items-center gap-1.5 bg-slate-100 dark:bg-slate-800 p-0.5 rounded-xl text-[11px] font-bold">
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <div className="flex items-center bg-slate-100 dark:bg-slate-800 p-0.5 rounded-xl text-[11px] font-bold">
+                <button
+                  type="button"
+                  onClick={() => setGalleryTab('all')}
+                  className={`px-2 py-0.5 rounded-lg transition-colors cursor-pointer ${
+                    galleryTab === 'all' ? 'bg-white dark:bg-slate-900 text-indigo-600 font-black shadow-2xs' : 'text-slate-500'
+                  }`}
+                >
+                  সকল ({customerUploadedPhotos.length + driveAndUploadedMedia.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setGalleryTab('customer')}
+                  className={`px-2 py-0.5 rounded-lg transition-colors cursor-pointer ${
+                    galleryTab === 'customer' ? 'bg-white dark:bg-slate-900 text-emerald-600 font-black shadow-2xs' : 'text-slate-500'
+                  }`}
+                >
+                  কাস্টমার ({customerUploadedPhotos.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setGalleryTab('drive')}
+                  className={`px-2 py-0.5 rounded-lg transition-colors cursor-pointer ${
+                    galleryTab === 'drive' ? 'bg-white dark:bg-slate-900 text-purple-600 font-black shadow-2xs' : 'text-slate-500'
+                  }`}
+                >
+                  ড্রাইভ ({driveAndUploadedMedia.length})
+                </button>
+              </div>
+
               <button
                 type="button"
-                onClick={() => setGalleryTab('all')}
-                className={`px-2 py-0.5 rounded-lg transition-colors cursor-pointer ${
-                  galleryTab === 'all' ? 'bg-white dark:bg-slate-900 text-indigo-600 font-black shadow-2xs' : 'text-slate-500'
-                }`}
+                onClick={() => fetchDriveFolderFiles()}
+                disabled={isLoadingFolderFiles}
+                className="px-2.5 py-1 rounded-xl bg-purple-100 hover:bg-purple-200 dark:bg-purple-900/50 text-purple-700 dark:text-purple-300 text-[11px] font-bold flex items-center gap-1 cursor-pointer transition-colors"
+                title="Google Drive ফোল্ডারের ফাইলগুলো রিফ্রেশ করুন"
               >
-                সকল ({customerUploadedPhotos.length + driveAndUploadedMedia.length})
+                <RefreshCw className={`w-3 h-3 ${isLoadingFolderFiles ? 'animate-spin' : ''}`} />
+                <span>{isLoadingFolderFiles ? 'লোড হচ্ছে...' : 'ড্রাইভ রিফ্রেশ'}</span>
               </button>
-              <button
-                type="button"
-                onClick={() => setGalleryTab('customer')}
-                className={`px-2 py-0.5 rounded-lg transition-colors cursor-pointer ${
-                  galleryTab === 'customer' ? 'bg-white dark:bg-slate-900 text-emerald-600 font-black shadow-2xs' : 'text-slate-500'
-                }`}
-              >
-                কাস্টমার ({customerUploadedPhotos.length})
-              </button>
-              <button
-                type="button"
-                onClick={() => setGalleryTab('drive')}
-                className={`px-2 py-0.5 rounded-lg transition-colors cursor-pointer ${
-                  galleryTab === 'drive' ? 'bg-white dark:bg-slate-900 text-purple-600 font-black shadow-2xs' : 'text-slate-500'
-                }`}
-              >
-                ড্রাইভ ({driveAndUploadedMedia.length})
-              </button>
+
+              {folderUrl && (
+                <a
+                  href={folderUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-2 py-1 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-[11px] font-bold flex items-center gap-1 cursor-pointer"
+                >
+                  <Folder className="w-3 h-3 text-purple-600" />
+                  <span>ফোল্ডার</span>
+                  <ExternalLink className="w-2.5 h-2.5" />
+                </a>
+              )}
             </div>
           </div>
 

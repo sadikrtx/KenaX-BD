@@ -766,7 +766,7 @@ export const INITIAL_REVIEWS: Review[] = [
     comment: 'Great value for money. Cash on delivery was hassle-free. Customer support was very responsive.',
     photos: [],
     verifiedPurchase: true,
-    status: 'pending',
+    status: 'approved',
     createdAt: '2025-02-11T09:00:00Z',
     isDemo: false,
   },
