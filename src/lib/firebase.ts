@@ -4184,13 +4184,44 @@ export async function saveReviewToDB(review: Review): Promise<void> {
     safeReview.photos = processedPhotos;
   }
 
+  // Remove from deleted list if exists
+  try {
+    const rawDeleted = localStorage.getItem('kenax_deleted_review_ids');
+    if (rawDeleted) {
+      const deletedIds: string[] = JSON.parse(rawDeleted);
+      const filtered = deletedIds.filter((id) => id !== review.id);
+      safeSetLocalStorage('kenax_deleted_review_ids', JSON.stringify(filtered));
+    }
+  } catch {}
+
   const cleaned = cleanFirestoreData(safeReview);
+  
+  // 1. Direct Cloud Firestore Save (Permanent & Cross-device)
   try {
     await setDoc(doc(db, 'reviews', review.id), cleaned, { merge: true });
   } catch (err) {
     console.warn('[KenaX BD] Firestore saveReviewToDB fallback:', err);
   }
 
+  // 2. Central API Sync (Cross-server, Netlify, Vercel relay)
+  try {
+    fetch('/api/reviews', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(cleaned),
+    }).catch(() => {});
+
+    const CLOUD_RUN_API_BASE = 'https://ais-pre-nziktgpe56nlsqktopppvl-693170375322.asia-southeast1.run.app';
+    if (typeof window !== 'undefined' && !window.location.hostname.includes('localhost') && !window.location.hostname.includes('run.app')) {
+      fetch(`${CLOUD_RUN_API_BASE}/api/reviews`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(cleaned),
+      }).catch(() => {});
+    }
+  } catch {}
+
+  // 3. Update Local Storage Cache
   try {
     const cached = localStorage.getItem('kenax_reviews_cache');
     let list: Review[] = cached ? JSON.parse(cached) : INITIAL_REVIEWS;
@@ -4211,12 +4242,24 @@ export async function updateReviewInDB(review: Review): Promise<void> {
 }
 
 export async function deleteReviewFromDB(reviewId: string): Promise<void> {
+  // 1. Direct Cloud Firestore Delete
   try {
     await deleteDoc(doc(db, 'reviews', reviewId));
   } catch (err) {
     console.warn('[KenaX BD] Firestore deleteReviewFromDB fallback:', err);
   }
 
+  // 2. Central API Delete
+  try {
+    fetch(`/api/reviews/${reviewId}`, { method: 'DELETE' }).catch(() => {});
+
+    const CLOUD_RUN_API_BASE = 'https://ais-pre-nziktgpe56nlsqktopppvl-693170375322.asia-southeast1.run.app';
+    if (typeof window !== 'undefined' && !window.location.hostname.includes('localhost') && !window.location.hostname.includes('run.app')) {
+      fetch(`${CLOUD_RUN_API_BASE}/api/reviews/${reviewId}`, { method: 'DELETE' }).catch(() => {});
+    }
+  } catch {}
+
+  // 3. Mark in deleted IDs and clean local cache
   try {
     const rawDeleted = localStorage.getItem('kenax_deleted_review_ids');
     const deletedIds: string[] = rawDeleted ? JSON.parse(rawDeleted) : [];

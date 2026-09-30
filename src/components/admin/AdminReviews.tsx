@@ -25,6 +25,8 @@ import {
   ExternalLink,
   Copy,
   Folder,
+  FolderSearch,
+  Plus,
   Layers,
   Link2,
   Key,
@@ -36,6 +38,7 @@ import { Review, UserRole, StaffUser, Product } from '../../types';
 import {
   signInWithGoogleDrive,
   uploadFileToGoogleDrive,
+  uploadCustomerReviewPhoto,
   getGoogleAccessToken,
   getGoogleUser,
   initGoogleDriveAuth,
@@ -174,12 +177,21 @@ export const AdminReviews: React.FC<AdminReviewsProps> = ({
   const [converterInput, setConverterInput] = useState('');
   const [resolvedConverterUrl, setResolvedConverterUrl] = useState('');
 
-  // Editing state
-  const [editingReviewId, setEditingReviewId] = useState<string | null>(null);
+  // Dedicated Review Edit Modal State
+  const [editingReview, setEditingReview] = useState<Review | null>(null);
+  const [editCustomerName, setEditCustomerName] = useState('');
+  const [editProductId, setEditProductId] = useState('');
+  const [editProductName, setEditProductName] = useState('');
   const [editComment, setEditComment] = useState('');
   const [editRating, setEditRating] = useState(5);
+  const [editStatus, setEditStatus] = useState<'approved' | 'pending' | 'hidden'>('approved');
+  const [editVerified, setEditVerified] = useState(true);
   const [editPhotos, setEditPhotos] = useState<string[]>([]);
-  const [newPhotoUrlInput, setNewPhotoUrlInput] = useState('');
+  const [editPhotoInput, setEditPhotoInput] = useState('');
+  const [isEditMediaExplorerOpen, setIsEditMediaExplorerOpen] = useState(false);
+  const [editExplorerSearch, setEditExplorerSearch] = useState('');
+  const [isUploadingEditPhoto, setIsUploadingEditPhoto] = useState(false);
+  const editReviewPhotoUploadRef = useRef<HTMLInputElement>(null);
 
   const APPS_SCRIPT_CODE = `function doGet(e) {
   return handleListFiles();
@@ -752,33 +764,102 @@ function handleListFiles() {
   };
 
   const handleStartEdit = (r: Review) => {
-    setEditingReviewId(r.id);
-    setEditComment(r.comment);
-    setEditRating(r.rating);
-    setEditPhotos(r.photos || []);
-    setNewPhotoUrlInput('');
+    setEditingReview(r);
+    setEditCustomerName(r.customerName || (r as any).userName || 'Valued Customer');
+    setEditProductId(r.productId || '');
+    setEditProductName(r.productName || '');
+    setEditComment(r.comment || '');
+    setEditRating(r.rating || 5);
+    setEditStatus(r.status === 'rejected' ? 'hidden' : (r.status || 'approved'));
+    setEditVerified(Boolean(r.verifiedPurchase));
+    setEditPhotos(Array.isArray(r.photos) ? [...r.photos] : []);
+    setEditPhotoInput('');
+    setIsEditMediaExplorerOpen(false);
   };
 
-  const handleSaveEdit = (r: Review) => {
-    const updated: Review = {
-      ...r,
-      comment: editComment.trim() || r.comment,
-      rating: editRating,
-      photos: editPhotos,
-    };
-    onUpdateReview(updated);
-    setEditingReviewId(null);
+  const handleCloseEdit = () => {
+    setEditingReview(null);
+    setEditPhotoInput('');
+    setIsEditMediaExplorerOpen(false);
   };
 
   const handleAddEditPhotoUrl = () => {
-    if (!newPhotoUrlInput.trim()) return;
-    const resolved = resolveGoogleDriveUrl(newPhotoUrlInput.trim());
-    setEditPhotos([...editPhotos, resolved]);
-    setNewPhotoUrlInput('');
+    if (!editPhotoInput.trim()) return;
+    const resolved = resolveGoogleDriveUrl(editPhotoInput.trim());
+    if (!editPhotos.includes(resolved)) {
+      setEditPhotos((prev) => [...prev, resolved]);
+    }
+    setEditPhotoInput('');
   };
 
-  const handleRemovePhoto = (index: number) => {
-    setEditPhotos(editPhotos.filter((_, idx) => idx !== index));
+  const handleAttachDrivePhotoToEdit = (url: string) => {
+    const resolved = resolveGoogleDriveUrl(url);
+    if (!editPhotos.includes(resolved)) {
+      setEditPhotos((prev) => [...prev, resolved]);
+    }
+  };
+
+  const handleRemoveEditPhoto = (index: number) => {
+    setEditPhotos((prev) => prev.filter((_, idx) => idx !== index));
+  };
+
+  const handleUploadPhotoForEdit = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsUploadingEditPhoto(true);
+    try {
+      const activeProd = products.find((p) => p.id === editProductId);
+      const prodName = activeProd?.name || editProductName || 'Product';
+      const custName = editCustomerName.trim() || 'Customer';
+
+      const res = await uploadCustomerReviewPhoto(file, {
+        productTitle: prodName,
+        customerName: custName,
+        onProgress: () => {},
+      });
+
+      if (res && res.url) {
+        const directUrl = resolveGoogleDriveUrl(res.url);
+        setEditPhotos((prev) => [...prev, directUrl]);
+        setRecentUploadedPhotos((prev) => [
+          {
+            id: res.fileId || `photo-${Date.now()}`,
+            name: res.name || file.name,
+            url: directUrl,
+            createdTime: new Date().toISOString(),
+          },
+          ...prev,
+        ]);
+        fetchDriveFolderFiles();
+      }
+    } catch (err: any) {
+      console.warn('[Edit Photo Upload Error]:', err);
+    } finally {
+      setIsUploadingEditPhoto(false);
+      if (e.target) e.target.value = '';
+    }
+  };
+
+  const handleSaveEdit = () => {
+    if (!editingReview) return;
+    const activeProd = products.find((p) => p.id === editProductId);
+    const resolvedProductName = activeProd?.name || editProductName || editingReview.productName || 'Product';
+
+    const updated: Review = {
+      ...editingReview,
+      customerName: editCustomerName.trim() || editingReview.customerName || 'Valued Customer',
+      productId: editProductId || editingReview.productId,
+      productName: resolvedProductName,
+      comment: editComment.trim() || editingReview.comment,
+      rating: editRating,
+      status: editStatus,
+      verifiedPurchase: editVerified,
+      photos: editPhotos.map((p) => resolveGoogleDriveUrl(p)),
+    };
+
+    onUpdateReview(updated);
+    setEditingReview(null);
   };
 
   return (
@@ -1440,7 +1521,6 @@ function handleListFiles() {
           const isApproved = r.status === 'approved' || (!r.status && !r.isDemo);
           const isPending = r.status === 'pending';
           const isHidden = r.status === 'hidden' || (r as any).status === 'rejected';
-          const isEditing = editingReviewId === r.id;
 
           return (
             <div
@@ -1478,7 +1558,7 @@ function handleListFiles() {
                         {[1, 2, 3, 4, 5].map((s) => (
                           <Star
                             key={s}
-                            className={`w-3 h-3 ${s <= (isEditing ? editRating : r.rating) ? 'fill-amber-400' : 'text-slate-200 dark:text-slate-700'}`}
+                            className={`w-3 h-3 ${s <= (r.rating || 5) ? 'fill-amber-400' : 'text-slate-200 dark:text-slate-700'}`}
                           />
                         ))}
                       </div>
@@ -1509,135 +1589,89 @@ function handleListFiles() {
                   </span>
                 </div>
 
-                {/* Body / Edit Mode */}
-                {isEditing ? (
-                  <div className="space-y-2 p-2.5 rounded-xl bg-purple-50/60 dark:bg-slate-800/80 border border-purple-200 text-xs">
-                    <textarea
-                      rows={2}
-                      value={editComment}
-                      onChange={(e) => setEditComment(e.target.value)}
-                      className="w-full p-2 rounded-lg border border-slate-300 dark:border-slate-700 text-xs bg-white dark:bg-slate-900"
-                    />
-                    <div className="flex items-center gap-1">
-                      <input
-                        type="url"
-                        placeholder="Add photo link..."
-                        value={newPhotoUrlInput}
-                        onChange={(e) => setNewPhotoUrlInput(e.target.value)}
-                        className="flex-1 px-2 py-1 rounded-lg border border-slate-300 text-[11px]"
-                      />
-                      <button
-                        type="button"
-                        onClick={handleAddEditPhotoUrl}
-                        className="px-2 py-1 rounded-lg bg-purple-600 text-white text-[11px] font-bold"
-                      >
-                        +
-                      </button>
-                    </div>
-                    <div className="flex items-center justify-end gap-1.5 pt-1">
-                      <button
-                        type="button"
-                        onClick={() => setEditingReviewId(null)}
-                        className="px-2.5 py-1 rounded-lg border border-slate-300 text-[11px] font-bold"
-                      >
-                        বাতিল
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleSaveEdit(r)}
-                        className="px-3 py-1 rounded-lg bg-purple-600 text-white text-[11px] font-black"
-                      >
-                        সেভ
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <>
-                    <p className="text-xs text-slate-700 dark:text-slate-200 leading-relaxed bg-slate-50 dark:bg-slate-800/50 p-2.5 rounded-xl border border-slate-100 dark:border-slate-800/80 italic">
-                      "{r.comment}"
-                    </p>
+                {/* Body */}
+                <p className="text-xs text-slate-700 dark:text-slate-200 leading-relaxed bg-slate-50 dark:bg-slate-800/50 p-2.5 rounded-xl border border-slate-100 dark:border-slate-800/80 italic">
+                  "{r.comment}"
+                </p>
 
-                    {/* Customer Photos */}
-                    {r.photos && r.photos.length > 0 && (
-                      <div className="flex flex-wrap gap-1.5 pt-0.5">
-                        {r.photos.map((photo, pIdx) => (
-                          <button
-                            key={pIdx}
-                            type="button"
-                            onClick={() => setPreviewModalUrl(photo)}
-                            className="w-12 h-12 rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700 hover:scale-105 transition-transform block bg-slate-100 shrink-0 cursor-pointer shadow-2xs"
-                            title="বড় করে দেখতে ক্লিক করুন"
-                          >
-                            <img
-                              src={getDriveDirectImageUrl(photo)}
-                              alt="Review attachment"
-                              className="w-full h-full object-cover"
-                              onError={(e) => handleImageErrorFallback(e, photo)}
-                            />
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </>
+                {/* Customer Photos */}
+                {r.photos && r.photos.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 pt-0.5">
+                    {r.photos.map((photo, pIdx) => (
+                      <button
+                        key={pIdx}
+                        type="button"
+                        onClick={() => setPreviewModalUrl(photo)}
+                        className="w-12 h-12 rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700 hover:scale-105 transition-transform block bg-slate-100 shrink-0 cursor-pointer shadow-2xs"
+                        title="বড় করে দেখতে ক্লিক করুন"
+                      >
+                        <img
+                          src={getDriveDirectImageUrl(photo)}
+                          alt="Review attachment"
+                          className="w-full h-full object-cover"
+                          onError={(e) => handleImageErrorFallback(e, photo)}
+                        />
+                      </button>
+                    ))}
+                  </div>
                 )}
               </div>
 
               {/* Action Buttons Footer */}
-              {!isEditing && (
-                <div className="pt-2 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between gap-1.5 text-xs">
-                  <div className="flex items-center gap-1.5">
-                    {isPending ? (
-                      <button
-                        type="button"
-                        onClick={() => onApproveReview(r.id)}
-                        className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center gap-1 shadow-2xs cursor-pointer"
-                        title="অনুমোদন করুন (Approve)"
-                      >
-                        <Check className="w-3.5 h-3.5" />
-                        <span>অনুমোদন</span>
-                      </button>
-                    ) : isApproved ? (
-                      <button
-                        type="button"
-                        onClick={() => onHideReview(r.id)}
-                        className="px-2.5 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold text-xs flex items-center gap-1 cursor-pointer"
-                        title="হাইড করুন (Hide)"
-                      >
-                        <EyeOff className="w-3.5 h-3.5" />
-                        <span>হাইড</span>
-                      </button>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => onApproveReview(r.id)}
-                        className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center gap-1 cursor-pointer"
-                        title="পুনরায় সক্রিয় করুন"
-                      >
-                        <Check className="w-3.5 h-3.5" />
-                        <span>লাইভ করুন</span>
-                      </button>
-                    )}
-
+              <div className="pt-2 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between gap-1.5 text-xs">
+                <div className="flex items-center gap-1.5">
+                  {isPending ? (
                     <button
                       type="button"
-                      onClick={() => handleStartEdit(r)}
-                      className="p-1.5 rounded-xl text-slate-500 hover:text-purple-600 hover:bg-purple-50 dark:hover:bg-slate-800 cursor-pointer"
-                      title="সম্পাদনা করুন (Edit)"
+                      onClick={() => onApproveReview(r.id)}
+                      className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center gap-1 shadow-2xs cursor-pointer"
+                      title="অনুমোদন করুন (Approve)"
                     >
-                      <Edit3 className="w-3.5 h-3.5" />
+                      <Check className="w-3.5 h-3.5" />
+                      <span>অনুমোদন</span>
                     </button>
-                  </div>
+                  ) : isApproved ? (
+                    <button
+                      type="button"
+                      onClick={() => onHideReview(r.id)}
+                      className="px-2.5 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold text-xs flex items-center gap-1 cursor-pointer"
+                      title="হাইড করুন (Hide)"
+                    >
+                      <EyeOff className="w-3.5 h-3.5" />
+                      <span>হাইড</span>
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => onApproveReview(r.id)}
+                      className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center gap-1 cursor-pointer"
+                      title="পুনরায় সক্রিয় করুন"
+                    >
+                      <Check className="w-3.5 h-3.5" />
+                      <span>লাইভ করুন</span>
+                    </button>
+                  )}
 
                   <button
                     type="button"
-                    onClick={() => onDeleteReview(r.id)}
-                    className="p-1.5 rounded-xl text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-slate-800 cursor-pointer"
-                    title="স্থায়ীভাবে মুছুন (Delete)"
+                    onClick={() => handleStartEdit(r)}
+                    className="p-1.5 rounded-xl text-slate-500 hover:text-purple-600 hover:bg-purple-50 dark:hover:bg-slate-800 cursor-pointer flex items-center gap-1 font-bold text-[11px] px-2"
+                    title="সম্পাদনা ও ড্রাইভ ফটো যুক্ত করুন (Edit & Manage Photos)"
                   >
-                    <Trash2 className="w-3.5 h-3.5" />
+                    <Edit3 className="w-3.5 h-3.5" />
+                    <span>এডিট</span>
                   </button>
                 </div>
-              )}
+
+                <button
+                  type="button"
+                  onClick={() => onDeleteReview(r.id)}
+                  className="p-1.5 rounded-xl text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-slate-800 cursor-pointer"
+                  title="স্থায়ীভাবে মুছুন (Delete)"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              </div>
             </div>
           );
         })}
@@ -1648,6 +1682,448 @@ function handleListFiles() {
           </div>
         )}
       </div>
+
+      {/* 7. DEDICATED REVIEW EDIT & GOOGLE DRIVE MEDIA MANAGER MODAL */}
+      {editingReview && (
+        <div
+          className="fixed inset-0 z-50 bg-black/75 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto"
+          onClick={handleCloseEdit}
+        >
+          <div
+            className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-2xl max-w-3xl w-full my-auto overflow-hidden flex flex-col max-h-[92vh]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Modal Header */}
+            <div className="p-4 sm:p-5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-gradient-to-r from-purple-500/10 via-indigo-500/10 to-transparent">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-purple-600 text-white flex items-center justify-center font-bold shadow-xs">
+                  <Edit3 className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-slate-900 dark:text-white">
+                    রিভিউ সম্পাদনা ও গুগল ড্রাইভ ফটো ম্যানেজার
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    কাস্টমার তথ্য, প্রোডাক্ট লিংক এবং ড্রাইভ থেকে ছবি যুক্ত ও কপি করুন
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={handleCloseEdit}
+                className="p-2 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-4 sm:p-6 overflow-y-auto space-y-5 text-xs">
+              {/* Product & Customer Details Row */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {/* Product Selection */}
+                <div className="space-y-1.5">
+                  <label className="font-bold text-slate-700 dark:text-slate-300">
+                    প্রোডাক্ট নির্বাচন (Product)
+                  </label>
+                  <select
+                    value={editProductId}
+                    onChange={(e) => {
+                      const selId = e.target.value;
+                      setEditProductId(selId);
+                      const matched = products?.find((p) => p.id === selId);
+                      if (matched) setEditProductName(matched.name);
+                    }}
+                    className="w-full p-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-xs font-medium"
+                  >
+                    <option value="">-- প্রোডাক্ট নির্বাচন করুন --</option>
+                    {(products || []).map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Customer Name */}
+                <div className="space-y-1.5">
+                  <label className="font-bold text-slate-700 dark:text-slate-300">
+                    কাস্টমারের নাম (Customer Name)
+                  </label>
+                  <input
+                    type="text"
+                    value={editCustomerName}
+                    onChange={(e) => setEditCustomerName(e.target.value)}
+                    placeholder="কাস্টমারের নাম লিখুন..."
+                    className="w-full p-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-xs font-medium"
+                  />
+                </div>
+              </div>
+
+              {/* Rating, Status & Verified Buyer Row */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 items-center bg-slate-50 dark:bg-slate-800/40 p-3 rounded-2xl border border-slate-200/80 dark:border-slate-800">
+                {/* Rating */}
+                <div className="space-y-1">
+                  <span className="font-bold text-slate-700 dark:text-slate-300 block">
+                    রেটিং (Rating)
+                  </span>
+                  <div className="flex items-center gap-1.5">
+                    {[1, 2, 3, 4, 5].map((s) => (
+                      <button
+                        key={s}
+                        type="button"
+                        onClick={() => setEditRating(s)}
+                        className="p-1 cursor-pointer hover:scale-110 transition-transform"
+                      >
+                        <Star
+                          className={`w-5 h-5 ${
+                            s <= editRating ? 'text-amber-400 fill-amber-400' : 'text-slate-300 dark:text-slate-600'
+                          }`}
+                        />
+                      </button>
+                    ))}
+                    <span className="font-black text-amber-500 ml-1">({editRating}/5)</span>
+                  </div>
+                </div>
+
+                {/* Status */}
+                <div className="space-y-1">
+                  <span className="font-bold text-slate-700 dark:text-slate-300 block">
+                    মডারেশন স্ট্যাটাস (Status)
+                  </span>
+                  <select
+                    value={editStatus}
+                    onChange={(e) => setEditStatus(e.target.value as any)}
+                    className="w-full p-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-xs font-bold"
+                  >
+                    <option value="approved">✅ অনুমোদিত (লাইভ)</option>
+                    <option value="pending">⏳ পেন্ডিং (অপেক্ষমাণ)</option>
+                    <option value="hidden">👁️‍🗨️ লুকানো (হাইড)</option>
+                  </select>
+                </div>
+
+                {/* Verified Purchase Checkbox */}
+                <div className="flex items-center pt-2 sm:pt-4">
+                  <label className="flex items-center gap-2 cursor-pointer select-none font-bold text-slate-700 dark:text-slate-300 text-[11px]">
+                    <input
+                      type="checkbox"
+                      checked={editVerified}
+                      onChange={(e) => setEditVerified(e.target.checked)}
+                      className="w-4 h-4 rounded text-purple-600 focus:ring-purple-500 cursor-pointer"
+                    />
+                    <span>ভেরিফাইড ক্রেতা ব্যাজ</span>
+                  </label>
+                </div>
+              </div>
+
+              {/* Customer Comment */}
+              <div className="space-y-1.5">
+                <label className="font-bold text-slate-700 dark:text-slate-300">
+                  কাস্টমারের মন্তব্য (Review Comment)
+                </label>
+                <textarea
+                  rows={3}
+                  value={editComment}
+                  onChange={(e) => setEditComment(e.target.value)}
+                  placeholder="রিভিউয়ের বিস্তারিত মন্তব্য..."
+                  className="w-full p-3 rounded-2xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-xs leading-relaxed"
+                />
+              </div>
+
+              {/* GOOGLE DRIVE PHOTO ATTACHMENT SECTION */}
+              <div className="space-y-3 pt-2 border-t border-slate-200 dark:border-slate-800">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <div className="w-6 h-6 rounded-lg bg-emerald-100 dark:bg-emerald-950/80 text-emerald-600 flex items-center justify-center font-black">
+                      📸
+                    </div>
+                    <span className="font-black text-slate-900 dark:text-white text-sm">
+                      সংযুক্ত গুগল ড্রাইভ ফটো ({editPhotos.length})
+                    </span>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    {/* Upload Directly to Drive */}
+                    <input
+                      ref={editReviewPhotoUploadRef}
+                      type="file"
+                      accept="image/*"
+                      onChange={handleUploadPhotoForEdit}
+                      className="hidden"
+                    />
+                    <button
+                      type="button"
+                      disabled={isUploadingEditPhoto}
+                      onClick={() => editReviewPhotoUploadRef.current?.click()}
+                      className="px-3 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs flex items-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-50"
+                    >
+                      <Upload className="w-3.5 h-3.5" />
+                      <span>{isUploadingEditPhoto ? 'আপলোড হচ্ছে...' : 'ড্রাইভে আপলোড ও যুক্ত করুন'}</span>
+                    </button>
+
+                    {/* Toggle Media Explorer */}
+                    <button
+                      type="button"
+                      onClick={() => setIsEditMediaExplorerOpen(!isEditMediaExplorerOpen)}
+                      className="px-3 py-1.5 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 border border-indigo-200 dark:border-indigo-800 font-bold text-xs flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <FolderSearch className="w-3.5 h-3.5" />
+                      <span>{isEditMediaExplorerOpen ? 'এক্সপ্লোরার লুকান' : 'ড্রাইভ এক্সপ্লোরার খুলুন'}</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Paste Direct Drive Link Input */}
+                <div className="flex items-center gap-2">
+                  <div className="relative flex-1">
+                    <input
+                      type="url"
+                      value={editPhotoInput}
+                      onChange={(e) => setEditPhotoInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          handleAddEditPhotoUrl();
+                        }
+                      }}
+                      placeholder="গুগল ড্রাইভ লিংক বা ইমেজ URL পেস্ট করুন (যেমন: https://drive.google.com/file/d/...)..."
+                      className="w-full pl-3 pr-20 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-xs font-mono placeholder:font-sans"
+                    />
+                    {editPhotoInput && (
+                      <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] text-emerald-600 font-bold bg-emerald-50 dark:bg-emerald-950/60 px-1.5 py-0.5 rounded">
+                        CDN অটো-কনভার্ট
+                      </span>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleAddEditPhotoUrl}
+                    className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shrink-0 cursor-pointer shadow-xs"
+                  >
+                    + যুক্ত করুন
+                  </button>
+                </div>
+
+                {/* Attached Photos Thumbnail Cards with 1-Click Copy and Remove */}
+                {editPhotos.length > 0 ? (
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2.5 p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200/80 dark:border-slate-800">
+                    {editPhotos.map((photoUrl, pIdx) => {
+                      const directDriveUrl = resolveGoogleDriveUrl(photoUrl);
+                      const isCopied = copiedUrl === directDriveUrl;
+                      return (
+                        <div
+                          key={pIdx}
+                          className="group relative rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-xs flex flex-col"
+                        >
+                          <div className="h-24 w-full bg-slate-100 dark:bg-slate-800 relative overflow-hidden">
+                            <img
+                              src={getDriveDirectImageUrl(photoUrl)}
+                              alt={`Attached photo ${pIdx + 1}`}
+                              className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                              onError={(e) => handleImageErrorFallback(e, photoUrl)}
+                            />
+                            <button
+                              type="button"
+                              onClick={() => setPreviewModalUrl(photoUrl)}
+                              className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 flex items-center justify-center text-white transition-opacity font-bold text-[10px] cursor-pointer"
+                            >
+                              🔍 বড় করে দেখুন
+                            </button>
+                          </div>
+
+                          <div className="p-1.5 flex items-center justify-between gap-1 bg-white dark:bg-slate-900 border-t border-slate-100 dark:border-slate-800">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                navigator.clipboard.writeText(directDriveUrl);
+                                setCopiedUrl(directDriveUrl);
+                                setTimeout(() => setCopiedUrl(null), 2500);
+                              }}
+                              className={`flex-1 px-1.5 py-1 rounded-lg text-[10px] font-bold flex items-center justify-center gap-1 transition-colors cursor-pointer ${
+                                isCopied
+                                  ? 'bg-emerald-600 text-white'
+                                  : 'bg-purple-50 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300 hover:bg-purple-100'
+                              }`}
+                              title="গুগল ড্রাইভ লিংক কপি করুন"
+                            >
+                              <Copy className="w-2.5 h-2.5" />
+                              <span>{isCopied ? 'কপি হয়েছে!' : 'ড্রাইভ লিংক কপি'}</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveEditPhoto(pIdx)}
+                              className="p-1 rounded-lg text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/60 transition-colors shrink-0 cursor-pointer"
+                              title="ছবিটি বাদ দিন"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <p className="text-[11px] text-slate-400 italic py-2">
+                    এখনও কোনো ছবি সংযুক্ত করা হয়নি। ওপরের ইনপুটে ড্রাইভ লিংক দিন অথবা নিচের ড্রাইভ এক্সপ্লোরার থেকে ছবি বেছে নিন।
+                  </p>
+                )}
+
+                {/* EMBEDDED GOOGLE DRIVE MEDIA EXPLORER (With 1-Click Copy and Attach) */}
+                {isEditMediaExplorerOpen && (
+                  <div className="p-4 rounded-2xl bg-indigo-50/50 dark:bg-slate-800/80 border-2 border-dashed border-indigo-300 dark:border-indigo-800 space-y-3 mt-3">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <Folder className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                        <span className="font-bold text-slate-900 dark:text-white text-xs">
+                          গুগল ড্রাইভ Customer Reviews ফোল্ডার ও সাম্প্রতিক আপলোড
+                        </span>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="text"
+                          value={editExplorerSearch}
+                          onChange={(e) => setEditExplorerSearch(e.target.value)}
+                          placeholder="ফাইল বা প্রোডাক্ট নাম দিয়ে খুঁজুন..."
+                          className="px-2.5 py-1 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-[11px] w-48"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => fetchDriveFolderFiles()}
+                          className="px-2.5 py-1 rounded-lg bg-indigo-600 text-white font-bold text-[11px] flex items-center gap-1 cursor-pointer"
+                        >
+                          <RefreshCw className={`w-3 h-3 ${isLoadingFolderFiles ? 'animate-spin' : ''}`} />
+                          <span>রিফ্রেশ</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Drive Media Files Grid */}
+                    {isLoadingFolderFiles ? (
+                      <div className="py-8 text-center text-slate-400 text-xs flex items-center justify-center gap-2">
+                        <div className="w-4 h-4 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin" />
+                        <span>গুগল ড্রাইভ থেকে ফটো লোড হচ্ছে...</span>
+                      </div>
+                    ) : (() => {
+                      const allAvailablePhotos = [
+                        ...folderFiles.map((f) => ({ id: f.id, name: f.name, url: f.url })),
+                        ...recentUploadedPhotos.map((p) => ({ id: p.id, name: p.name, url: p.url })),
+                      ].filter((photo, idx, arr) => arr.findIndex((x) => x.url === photo.url) === idx);
+
+                      const filteredDrivePhotos = allAvailablePhotos.filter((p) =>
+                        p.name.toLowerCase().includes(editExplorerSearch.toLowerCase()) ||
+                        p.url.toLowerCase().includes(editExplorerSearch.toLowerCase())
+                      );
+
+                      if (filteredDrivePhotos.length === 0) {
+                        return (
+                          <div className="p-6 text-center text-slate-400 text-xs bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700">
+                            কোনো ফটো পাওয়া যায়নি। "ড্রাইভে আপলোড ও যুক্ত করুন" বাটনে ক্লিক করে নতুন ছবি আপলোড করতে পারেন।
+                          </div>
+                        );
+                      }
+
+                      return (
+                        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2.5 max-h-64 overflow-y-auto p-1">
+                          {filteredDrivePhotos.map((item) => {
+                            const directUrl = resolveGoogleDriveUrl(item.url);
+                            const isAlreadyAttached = editPhotos.includes(directUrl);
+                            const isCopied = copiedUrl === directUrl;
+
+                            return (
+                              <div
+                                key={item.id}
+                                className={`rounded-xl overflow-hidden border bg-white dark:bg-slate-900 shadow-2xs flex flex-col justify-between transition-all ${
+                                  isAlreadyAttached
+                                    ? 'border-emerald-500 ring-2 ring-emerald-500/30'
+                                    : 'border-slate-200 dark:border-slate-700 hover:border-indigo-400'
+                                }`}
+                              >
+                                <div className="h-20 w-full bg-slate-100 dark:bg-slate-800 relative">
+                                  <img
+                                    src={getDriveDirectImageUrl(item.url)}
+                                    alt={item.name}
+                                    className="w-full h-full object-cover"
+                                    onError={(e) => handleImageErrorFallback(e, item.url)}
+                                  />
+                                  {isAlreadyAttached && (
+                                    <span className="absolute top-1 right-1 bg-emerald-600 text-white text-[9px] font-black px-1.5 py-0.2 rounded-md shadow-xs">
+                                      ✓ যুক্ত
+                                    </span>
+                                  )}
+                                </div>
+
+                                <div className="p-1.5 space-y-1 bg-white dark:bg-slate-900">
+                                  <p className="text-[10px] font-bold text-slate-700 dark:text-slate-300 truncate" title={item.name}>
+                                    {item.name}
+                                  </p>
+                                  <div className="flex items-center gap-1">
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        navigator.clipboard.writeText(directUrl);
+                                        setCopiedUrl(directUrl);
+                                        setTimeout(() => setCopiedUrl(null), 2500);
+                                      }}
+                                      className={`px-1.5 py-1 rounded text-[9px] font-bold flex items-center justify-center gap-0.5 shrink-0 cursor-pointer ${
+                                        isCopied
+                                          ? 'bg-emerald-600 text-white'
+                                          : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200'
+                                      }`}
+                                      title="লিংক কপি করুন"
+                                    >
+                                      <Copy className="w-2.5 h-2.5" />
+                                      <span>{isCopied ? 'কপি!' : 'কপি'}</span>
+                                    </button>
+
+                                    <button
+                                      type="button"
+                                      onClick={() => handleAttachDrivePhotoToEdit(directUrl)}
+                                      disabled={isAlreadyAttached}
+                                      className={`flex-1 px-1.5 py-1 rounded text-[9px] font-black flex items-center justify-center gap-0.5 ${
+                                        isAlreadyAttached
+                                          ? 'bg-slate-100 dark:bg-slate-800 text-slate-400 cursor-not-allowed'
+                                          : 'bg-indigo-600 hover:bg-indigo-700 text-white cursor-pointer'
+                                      }`}
+                                    >
+                                      <Plus className="w-2.5 h-2.5" />
+                                      <span>{isAlreadyAttached ? 'যুক্ত' : 'যুক্ত করুন'}</span>
+                                    </button>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      );
+                    })()}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-4 sm:p-5 border-t border-slate-100 dark:border-slate-800 flex items-center justify-end gap-2 bg-slate-50 dark:bg-slate-900/60">
+              <button
+                type="button"
+                onClick={handleCloseEdit}
+                className="px-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 font-bold hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+              >
+                বাতিল
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveEdit}
+                className="px-6 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-black shadow-xs flex items-center gap-2 cursor-pointer"
+              >
+                <Save className="w-4 h-4" />
+                <span>রিভিউ সংরক্ষণ করুন</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 7. FULL RESOLUTION IMAGE PREVIEW MODAL */}
       {previewModalUrl && (

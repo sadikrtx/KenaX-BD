@@ -203,9 +203,9 @@ export const ProductPageView: React.FC<ProductPageViewProps> = ({
       (r) => r.productId === product.id || r.productName?.toLowerCase() === product.name?.toLowerCase()
     );
 
-    // 2. Customer sees approved reviews + reviews they submitted themselves on this device/session
+    // 2. All visitors (guests, accounts, all devices) see all active reviews
     const visibleReviews = matching.filter(
-      (r) => r.status === 'approved' || mySubmittedReviewIds.includes(r.id) || r.isDemo
+      (r) => r.status !== 'hidden' && (r as any).status !== 'rejected'
     );
 
     const mappedRealReviews: CustomerReview[] = visibleReviews.map((r) => {
@@ -694,7 +694,7 @@ export const ProductPageView: React.FC<ProductPageViewProps> = ({
       rating: newReviewRating,
       comment: newReviewComment.trim(),
       photos: newReviewPhotos.filter((p) => typeof p === 'string' && p.trim() !== ''),
-      status: 'pending', // Arrives as pending in Admin Dashboard for moderation
+      status: 'approved', // Live & permanently visible across all devices, guest users, and accounts
       verifiedPurchase: true,
       createdAt: nowIso,
     };

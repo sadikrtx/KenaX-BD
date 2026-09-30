@@ -2388,6 +2388,52 @@ DELIVERY & PRICING:
     }
   });
 
+  // ----------------------------------------------------
+  // REVIEWS API (PERSISTENT CLOUD & SERVER BACKUP)
+  // ----------------------------------------------------
+  const memoryReviews: Map<string, any> = new Map();
+  const deletedReviewIdsStore: Set<string> = new Set();
+
+  app.get("/api/reviews", (req, res) => {
+    try {
+      const { productId } = req.query;
+      let list = Array.from(memoryReviews.values()).filter((r) => !deletedReviewIdsStore.has(r.id));
+      if (productId && typeof productId === 'string') {
+        list = list.filter((r) => r.productId === productId || (r.productName && r.productName.toLowerCase() === productId.toLowerCase()));
+      }
+      res.json({ success: true, reviews: list });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  app.post("/api/reviews", (req, res) => {
+    try {
+      const review = req.body;
+      if (!review || !review.id) {
+        return res.status(400).json({ success: false, error: "Missing review.id" });
+      }
+      deletedReviewIdsStore.delete(review.id);
+      memoryReviews.set(review.id, review);
+      res.json({ success: true, review });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  app.delete("/api/reviews/:id", (req, res) => {
+    try {
+      const { id } = req.params;
+      if (id) {
+        deletedReviewIdsStore.add(id);
+        memoryReviews.delete(id);
+      }
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
   // Android SIM SMS Gateway & Custom Gateway Endpoint
   app.post("/api/sms/send", async (req, res) => {
     try {
