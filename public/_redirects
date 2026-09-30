@@ -1,5 +1,2 @@
-# Netlify API proxy to Cloud Run backend server
-/api/*  https://ais-pre-nziktgpe56nlsqktopppvl-693170375322.asia-southeast1.run.app/api/:splat  200!
-
-# SPA Client routing fallback
+/api/email/*  /.netlify/functions/email  200!
 /*  /index.html  200

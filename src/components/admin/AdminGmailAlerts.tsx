@@ -26,6 +26,10 @@ import {
   FileText,
   Copy,
   Layers,
+  EyeOff,
+  Key,
+  Lock,
+  Loader2,
 } from 'lucide-react';
 import {
   EmailLog,
@@ -94,6 +98,9 @@ export const AdminGmailAlerts: React.FC<AdminGmailAlertsProps> = ({
   const [settings, setSettings] = useState<GmailAlertSettings>(DEFAULT_GMAIL_SETTINGS);
   const [isSavingSettings, setIsSavingSettings] = useState(false);
   const [settingsSaveSuccess, setSettingsSaveSuccess] = useState(false);
+  const [showSmtpPass, setShowSmtpPass] = useState(false);
+  const [isTestingSmtp, setIsTestingSmtp] = useState(false);
+  const [smtpTestResult, setSmtpTestResult] = useState<{ success: boolean; message: string } | null>(null);
 
   // Email Logs State
   const [logs, setLogs] = useState<EmailLog[]>([]);
@@ -250,6 +257,52 @@ export const AdminGmailAlerts: React.FC<AdminGmailAlertsProps> = ({
       console.error('Failed to save settings:', err);
     } finally {
       setIsSavingSettings(false);
+    }
+  };
+
+  // Handle Test Live SMTP Connection
+  const handleTestSmtpConnection = async () => {
+    setIsTestingSmtp(true);
+    setSmtpTestResult(null);
+    try {
+      await saveGmailAlertSettingsToDB(settings);
+      invalidateEmailCache();
+
+      const res = await dispatchEmail({
+        type: 'staff_new_order_alert',
+        to: settings.superAdminEmail || 'sadikrtx3060@gmail.com',
+        recipientRole: 'Super Admin',
+        isTest: true,
+        data: {
+          orderId: `LIVE-TEST-${Date.now().toString().slice(-4)}`,
+          customerName: 'KenaX Live Test Customer',
+          customerMobile: '+880 1700-000000',
+          totalAmount: '৳1,500',
+          paymentMethod: 'Cash on Delivery',
+          deliveryZone: 'Dhaka City (Live Test)',
+          itemsList: '1x KenaX BD Live Test Item',
+          adminOrderUrl: window.location.href,
+        },
+      });
+
+      if (res.success && (res.log.status === 'Delivered' || res.log.status === 'Sent')) {
+        setSmtpTestResult({
+          success: true,
+          message: `✅ লাইভ টেস্ট ইমেইল সফলভাবে পাঠানো হয়েছে! আপনার ইনবক্স (${settings.superAdminEmail || 'sadikrtx3060@gmail.com'}) চেক করুন।`,
+        });
+      } else {
+        setSmtpTestResult({
+          success: false,
+          message: `⚠️ ইমেইল পাঠানো যায়নি: ${res.log.error || '১৬ অক্ষরের গুগল অ্যাপ পাসওয়ার্ড ঠিক আছে কিনা চেক করুন'}`,
+        });
+      }
+    } catch (err: any) {
+      setSmtpTestResult({
+        success: false,
+        message: `সমস্যা: ${err?.message || 'Error occurred'}`,
+      });
+    } finally {
+      setIsTestingSmtp(false);
     }
   };
 
@@ -1272,6 +1325,137 @@ export const AdminGmailAlerts: React.FC<AdminGmailAlertsProps> = ({
                 />
                 <div className="w-11 h-6 bg-slate-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-red-600" />
               </label>
+            </div>
+
+            {/* Live Gmail SMTP Credentials Setup Card */}
+            <div className="p-5 rounded-2xl bg-gradient-to-br from-amber-500/10 via-red-500/5 to-slate-50 dark:from-slate-900 dark:to-slate-800 border-2 border-amber-400/60 dark:border-amber-600/40 space-y-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-xl bg-amber-500 text-white flex items-center justify-center shadow-xs">
+                    <Key className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-black text-slate-900 dark:text-white flex items-center gap-2">
+                      <span>লাইভ জিমেইল প্রেরক ও অ্যাপ পাসওয়ার্ড (Live Gmail SMTP Setup)</span>
+                    </h4>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      টেলিগ্রাম বটের মতোই এখানে আপনার জিমেইল ও ১৬ অক্ষরের Google App Password বসিয়ে টেস্ট করুন।
+                    </p>
+                  </div>
+                </div>
+                {settings.smtpPass ? (
+                  <span className="px-3 py-1 rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 text-xs font-bold border border-emerald-300 flex items-center gap-1">
+                    <CheckCircle2 className="w-3.5 h-3.5" /> কনফিগার করা
+                  </span>
+                ) : (
+                  <span className="px-3 py-1 rounded-full bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 text-xs font-bold border border-amber-300 flex items-center gap-1">
+                    <AlertTriangle className="w-3.5 h-3.5" /> পাসওয়ার্ড প্রয়োজন
+                  </span>
+                )}
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1.5">
+                    আপনার প্রেরক জিমেইল অ্যাড্রেস (Gmail Address / SMTP User) *
+                  </label>
+                  <input
+                    type="email"
+                    value={settings.smtpUser || settings.superAdminEmail || 'sadikrtx3060@gmail.com'}
+                    onChange={(e) =>
+                      setSettings({
+                        ...settings,
+                        smtpUser: e.target.value,
+                        senderEmail: e.target.value,
+                      })
+                    }
+                    placeholder="sadikrtx3060@gmail.com"
+                    className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-3.5 py-2 text-sm text-slate-900 dark:text-white font-mono font-medium focus:outline-hidden focus:border-red-500"
+                  />
+                  <span className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 block">
+                    যে জিমেইল অ্যাকাউন্ট থেকে কাস্টমার ও সুপার এডমিনের কাছে সরাসরি ইমেইল যাবে।
+                  </span>
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
+                      Google App Password (১৬ অক্ষরের অ্যাপ পাসওয়ার্ড) *
+                    </label>
+                    <a
+                      href="https://myaccount.google.com/apppasswords"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-[11px] text-amber-700 dark:text-amber-400 font-bold underline hover:text-amber-800 flex items-center gap-1"
+                    >
+                      পাসওয়ার্ড তৈরি করুন <ExternalLink className="w-3 h-3" />
+                    </a>
+                  </div>
+                  <div className="relative">
+                    <input
+                      type={showSmtpPass ? 'text' : 'password'}
+                      value={settings.smtpPass || ''}
+                      onChange={(e) => setSettings({ ...settings, smtpPass: e.target.value })}
+                      placeholder="e.g. abcd efgh ijkl mnop"
+                      className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-3.5 py-2 pr-10 text-sm text-slate-900 dark:text-white font-mono font-medium focus:outline-hidden focus:border-red-500"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowSmtpPass(!showSmtpPass)}
+                      className="absolute right-3 top-2.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer"
+                    >
+                      {showSmtpPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                  <span className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 block">
+                    Google Security &gt; 2-Step Verification &gt; App Passwords থেকে ১৬ অক্ষরের কোডটি কপি করে বসান।
+                  </span>
+                </div>
+              </div>
+
+              {/* Test Action & Feedback */}
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pt-2 border-t border-slate-200 dark:border-slate-700">
+                <div className="text-xs text-slate-600 dark:text-slate-400">
+                  সার্ভার: <code className="bg-slate-200 dark:bg-slate-800 px-1 py-0.5 rounded text-[11px]">smtp.gmail.com:465 (SSL)</code>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleTestSmtpConnection}
+                    disabled={isTestingSmtp}
+                    className="px-4 py-2 bg-gradient-to-r from-red-600 to-amber-600 hover:from-red-700 hover:to-amber-700 text-white font-bold text-xs rounded-xl shadow-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer disabled:opacity-50"
+                  >
+                    {isTestingSmtp ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+                    <span>টেস্ট ইমেইল পাঠান (Test Live Email)</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Test Result Alert */}
+              {smtpTestResult && (
+                <div
+                  className={`p-3 rounded-xl text-xs font-semibold flex items-center gap-2 ${
+                    smtpTestResult.success
+                      ? 'bg-emerald-50 dark:bg-emerald-950/70 border border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200'
+                      : 'bg-rose-50 dark:bg-rose-950/70 border border-rose-200 dark:border-rose-800 text-rose-800 dark:text-rose-200'
+                  }`}
+                >
+                  {smtpTestResult.success ? (
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  ) : (
+                    <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                  )}
+                  <span className="flex-1">{smtpTestResult.message}</span>
+                  <button
+                    type="button"
+                    onClick={() => setSmtpTestResult(null)}
+                    className="text-slate-400 hover:text-slate-600 text-xs px-1 cursor-pointer"
+                  >
+                    ✕
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* Email Addresses Setup */}

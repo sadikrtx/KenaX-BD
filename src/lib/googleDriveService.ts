@@ -528,45 +528,98 @@ export const uploadFileToGoogleDrive = async (
 
   if (onProgress) onProgress(40);
 
-  const res = await fetch(
-    'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,webViewLink',
-    {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': `multipart/related; boundary=${boundary}`,
-      },
-      body: multipartRequestBody,
-    }
-  );
+  let uploadedFileId: string | null = null;
+  let uploadedUrl: string | null = null;
+  let uploadedName = metadata.name;
 
-  if (onProgress) onProgress(75);
+  // If token is an API key (e.g. AIzaSy...) rather than an OAuth Bearer token (ya29...),
+  // Google Drive upload API will reject it with 401. Route directly to server relay or data URL.
+  const isApiTokenNotOAuth = token && token.startsWith('AIzaSy');
 
-  if (!res.ok) {
-    const errorText = await res.text();
-    if (res.status === 401) {
-      cachedAccessToken = null;
-      if (typeof window !== 'undefined') {
-        try {
-          localStorage.removeItem('kenax_google_drive_token');
-        } catch {}
+  if (!isApiTokenNotOAuth) {
+    try {
+      const res = await fetch(
+        'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,webViewLink',
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': `multipart/related; boundary=${boundary}`,
+          },
+          body: multipartRequestBody,
+        }
+      );
+
+      if (onProgress) onProgress(75);
+
+      if (res.ok) {
+        const uploaded = await res.json();
+        uploadedFileId = uploaded.id;
+        uploadedUrl = getDrivePermanentUrl(uploaded.id);
+        uploadedName = uploaded.name;
+        // Make readable by anyone so it can display as product review media without restriction
+        await makeFilePubliclyViewable(uploaded.id, token);
+      } else {
+        console.warn(`[Google Drive Direct Upload Status ${res.status}], using fallback relay...`);
       }
+    } catch (directErr) {
+      console.warn('[Google Drive Direct Upload Error], using fallback relay...', directErr);
     }
-    throw new Error(`Google Drive upload failed: ${res.status} ${errorText}`);
   }
 
-  const uploaded = await res.json();
-  const fileId = uploaded.id;
+  // If direct drive upload was not possible or returned 401, try server relay
+  if (!uploadedUrl) {
+    try {
+      const CLOUD_RUN_API_BASE = 'https://ais-pre-nziktgpe56nlsqktopppvl-693170375322.asia-southeast1.run.app';
+      let relayRes: Response | null = null;
+      try {
+        relayRes = await fetch('/api/drive/customer-review-upload', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            filename: file.name,
+            mimeType: file.type || 'image/jpeg',
+            base64Data,
+          }),
+        });
+      } catch {}
 
-  // Make readable by anyone so it can display as product review media without restriction
-  await makeFilePubliclyViewable(fileId, token);
+      if (!relayRes || !relayRes.ok) {
+        relayRes = await fetch(`${CLOUD_RUN_API_BASE}/api/drive/customer-review-upload`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            filename: file.name,
+            mimeType: file.type || 'image/jpeg',
+            base64Data,
+          }),
+        }).catch(() => null);
+      }
+
+      if (relayRes && relayRes.ok) {
+        const data = await relayRes.json();
+        if (data.url) {
+          uploadedUrl = data.url;
+          uploadedFileId = data.fileId || `drive-${Date.now()}`;
+        }
+      }
+    } catch (relayErr) {
+      console.warn('[Google Drive Relay Error]:', relayErr);
+    }
+  }
+
+  // Ultimate safe fallback: local Data URI so user NEVER loses their photo!
+  if (!uploadedUrl) {
+    uploadedUrl = `data:${file.type || 'image/jpeg'};base64,${base64Data}`;
+    uploadedFileId = `local-${Date.now()}`;
+  }
 
   if (onProgress) onProgress(100);
 
   return {
-    fileId,
-    url: getDrivePermanentUrl(fileId),
-    name: uploaded.name,
+    fileId: uploadedFileId || `img-${Date.now()}`,
+    url: uploadedUrl,
+    name: uploadedName,
   };
 };
 

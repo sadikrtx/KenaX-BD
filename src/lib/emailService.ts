@@ -1670,18 +1670,33 @@ export async function dispatchEmail(options: DispatchOptions): Promise<{ success
 
   try {
     let res: Response | null = null;
-    // 1. Try direct or relative /api/email/send
-    try {
-      res = await fetch('/api/email/send', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(emailPayload),
-      });
-    } catch (localErr) {
-      console.warn('[EmailService] Relative API dispatch failed, trying Cloud Run endpoint:', localErr);
+    // 1. If running on Netlify, try Netlify Serverless Function first
+    if (isNetlifyOrExternal) {
+      try {
+        res = await fetch('/.netlify/functions/email', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(emailPayload),
+        });
+      } catch (nErr) {
+        console.warn('[EmailService] Netlify function dispatch error:', nErr);
+      }
     }
 
-    // 2. If running on Netlify or relative failed (404/network error), forward directly to Cloud Run backend
+    // 2. Try direct or relative /api/email/send
+    if (!res || !res.ok) {
+      try {
+        res = await fetch('/api/email/send', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(emailPayload),
+        });
+      } catch (localErr) {
+        console.warn('[EmailService] Relative API dispatch failed:', localErr);
+      }
+    }
+
+    // 3. If relative failed, forward directly to Cloud Run backend
     if ((!res || !res.ok) && (isNetlifyOrExternal || !res)) {
       try {
         res = await fetch(`${CLOUD_RUN_API_BASE}/api/email/send`, {
