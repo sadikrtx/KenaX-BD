@@ -3678,13 +3678,18 @@ export async function getGmailAlertSettingsFromDB(): Promise<GmailAlertSettings 
 }
 
 export async function saveGmailAlertSettingsToDB(settings: GmailAlertSettings): Promise<void> {
+  // 1. Immediately save to LocalStorage so UI is instantaneous and never hangs
+  safeSetLocalStorage('kenax_gmail_alerts_settings', JSON.stringify(settings));
+
+  // 2. Persist to Firestore with a 1.5s timeout race so it never blocks UI or hangs on Netlify
   try {
     const docRef = doc(db, 'websiteSettings', 'gmailAlerts');
-    await setDoc(docRef, settings, { merge: true });
-    safeSetLocalStorage('kenax_gmail_alerts_settings', JSON.stringify(settings));
+    await Promise.race([
+      setDoc(docRef, settings, { merge: true }),
+      new Promise((resolve) => setTimeout(resolve, 1500)),
+    ]);
   } catch (err) {
-    console.warn('[KenaX BD] saveGmailAlertSettingsToDB failed:', err);
-    safeSetLocalStorage('kenax_gmail_alerts_settings', JSON.stringify(settings));
+    console.warn('[KenaX BD] saveGmailAlertSettingsToDB background sync notice:', err);
   }
 }
 

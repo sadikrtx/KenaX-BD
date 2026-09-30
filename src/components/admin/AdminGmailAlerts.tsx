@@ -119,6 +119,9 @@ export const AdminGmailAlerts: React.FC<AdminGmailAlertsProps> = ({
       setEditingTemplate(loadedTemplates[selectedTemplateId] || DEFAULT_EMAIL_TEMPLATES[selectedTemplateId]);
 
       const loadedSettings = await getActiveGmailSettings();
+      if (!loadedSettings.webhookUrl) {
+        loadedSettings.webhookUrl = 'https://script.google.com/macros/s/AKfycbw_UtesYomtnwD4Y7FrIlUW4RvhLvAj428-xJz3nuz4fdk_O0gIfBZVQN_JeDWuvJxduw/exec';
+      }
       setSettings(loadedSettings);
 
       const loadedLogs = await getEmailLogsFromDB();
@@ -1411,6 +1414,28 @@ export const AdminGmailAlerts: React.FC<AdminGmailAlertsProps> = ({
                     Google Security &gt; 2-Step Verification &gt; App Passwords থেকে ১৬ অক্ষরের কোডটি কপি করে বসান।
                   </span>
                 </div>
+              </div>
+
+              {/* Netlify / Google Apps Script Webhook Alternative */}
+              <div className="pt-3 border-t border-slate-200/60 dark:border-slate-700/60 space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider flex items-center gap-1.5">
+                    <span>🌐 নেটলিফাই অল্টারনেটিভ: Google Apps Script Webhook (টেলিগ্রামের মতো ১০০% গ্যারান্টি)</span>
+                    <span className="px-1.5 py-0.5 rounded-full bg-sky-100 dark:bg-sky-950 text-sky-800 dark:text-sky-300 text-[10px] font-bold border border-sky-300">
+                      জিরো পোর্ট ব্লকিং
+                    </span>
+                  </label>
+                </div>
+                <input
+                  type="url"
+                  value={settings.webhookUrl || ''}
+                  onChange={(e) => setSettings({ ...settings, webhookUrl: e.target.value })}
+                  placeholder="e.g. https://script.google.com/macros/s/.../exec"
+                  className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-3.5 py-2 text-xs text-slate-900 dark:text-white font-mono focus:outline-hidden focus:border-sky-500"
+                />
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
+                  💡 <b>কেন এটি দরকার?</b> নেটলিফাই (Netlify/AWS) সাধারণত সার্ভারলেস ফাংশন থেকে সাধারণ SMTP পোর্ট (465/587) ব্লক করে রাখে। ঠিক যেমন টেলিগ্রাম বট লিঙ্ক দিয়ে চলে, তেমনি Google Apps Script-এর একটি ফ্রি ওয়েব লিঙ্ক বসালে নেটলিফাই থেকে কোনো পোর্ট ব্লকিং ছাড়াই আপনার জিমেইল অ্যাকাউন্ট থেকেই শতভাগ সরাসরি ইমেইল চলে যাবে।
+                </p>
               </div>
 
               {/* Test Action & Feedback */}

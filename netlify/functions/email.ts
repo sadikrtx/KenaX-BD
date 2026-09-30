@@ -70,6 +70,9 @@ export const handler: Handler = async (event: HandlerEvent) => {
           ? nodemailer.createTransport({
               service: "gmail",
               auth: { user, pass },
+              connectionTimeout: 5000,
+              greetingTimeout: 5000,
+              socketTimeout: 5000,
               tls: { rejectUnauthorized: false },
             })
           : nodemailer.createTransport({
@@ -77,6 +80,9 @@ export const handler: Handler = async (event: HandlerEvent) => {
               port,
               secure: port === 465,
               auth: { user, pass },
+              connectionTimeout: 5000,
+              greetingTimeout: 5000,
+              socketTimeout: 5000,
               tls: { rejectUnauthorized: false },
             });
 
@@ -98,7 +104,20 @@ export const handler: Handler = async (event: HandlerEvent) => {
           mailPayload.bcc = bccList;
         }
 
-        const info = await transporter.sendMail(mailPayload);
+        const info: any = await Promise.race([
+          transporter.sendMail(mailPayload),
+          new Promise((_, reject) =>
+            setTimeout(
+              () =>
+                reject(
+                  new Error(
+                    "SMTP connection timed out (Netlify/AWS cloud blocks outbound SMTP port 465/587)."
+                  )
+                ),
+              6000
+            )
+          ),
+        ]);
         console.log(`[Netlify SMTP Live SUCCESS] MessageId: ${info.messageId}`);
 
         return {

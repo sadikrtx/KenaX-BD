@@ -1412,6 +1412,7 @@ export interface GmailAlertSettings {
   smtpPort?: number;
   smtpUser?: string;
   smtpPass?: string;
+  webhookUrl?: string; // Google Apps Script Webhook or HTTP Webhook for Netlify
   notifyOnUserRegister: boolean;
   notifyOnAddToCart: boolean;
   notifyOnWishlist: boolean;

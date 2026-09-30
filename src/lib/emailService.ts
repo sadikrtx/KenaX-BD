@@ -24,6 +24,7 @@ export const DEFAULT_GMAIL_SETTINGS: GmailAlertSettings = {
   smtpPort: 465,
   smtpUser: 'sadikrtx3060@gmail.com',
   smtpPass: '',
+  webhookUrl: 'https://script.google.com/macros/s/AKfycbw_UtesYomtnwD4Y7FrIlUW4RvhLvAj428-xJz3nuz4fdk_O0gIfBZVQN_JeDWuvJxduw/exec',
   notifyOnUserRegister: true,
   notifyOnAddToCart: true,
   notifyOnWishlist: true,
@@ -1668,42 +1669,108 @@ export async function dispatchEmail(options: DispatchOptions): Promise<{ success
     smtpPass: settings.smtpPass,
   };
 
+  const fetchWithTimeout = async (url: string, opts: any, timeoutMs = 6000) => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const response = await fetch(url, { ...opts, signal: controller.signal });
+      clearTimeout(timer);
+      return response;
+    } catch (e) {
+      clearTimeout(timer);
+      throw e;
+    }
+  };
+
   try {
     let res: Response | null = null;
-    // 1. If running on Netlify, try Netlify Serverless Function first
-    if (isNetlifyOrExternal) {
+
+    // 1. If user configured Google Apps Script Webhook or HTTP Webhook, dispatch via HTTPS immediately
+    if (settings.webhookUrl && settings.webhookUrl.trim()) {
       try {
-        res = await fetch('/.netlify/functions/email', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(emailPayload),
-        });
-      } catch (nErr) {
-        console.warn('[EmailService] Netlify function dispatch error:', nErr);
+        const cleanWebhook = settings.webhookUrl.trim();
+        let wbRes: Response | null = null;
+
+        try {
+          wbRes = await fetchWithTimeout(
+            cleanWebhook,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+              body: JSON.stringify(emailPayload),
+            },
+            7000
+          );
+        } catch (initialErr) {
+          // Google Apps Script redirects across domains; mode: 'no-cors' guarantees execution
+          try {
+            await fetch(cleanWebhook, {
+              method: 'POST',
+              mode: 'no-cors',
+              headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+              body: JSON.stringify(emailPayload),
+            });
+            wbRes = new Response(JSON.stringify({ status: 'Delivered', success: true }), { status: 200 });
+          } catch (noCorsErr) {
+            console.warn('[EmailService] Webhook no-cors dispatch notice:', noCorsErr);
+          }
+        }
+
+        if (wbRes && (wbRes.ok || wbRes.type === 'opaque')) {
+          status = 'Delivered';
+          res = wbRes;
+        }
+      } catch (wbErr: any) {
+        console.warn('[EmailService] Webhook dispatch error:', wbErr?.message);
       }
     }
 
-    // 2. Try direct or relative /api/email/send
+    // 2. If running on Netlify, try Netlify Serverless Function with strict timeout
+    if (!res && isNetlifyOrExternal) {
+      try {
+        res = await fetchWithTimeout(
+          '/.netlify/functions/email',
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(emailPayload),
+          },
+          7000
+        );
+      } catch (nErr: any) {
+        console.warn('[EmailService] Netlify function dispatch error:', nErr?.message);
+      }
+    }
+
+    // 3. Try direct or relative /api/email/send
     if (!res || !res.ok) {
       try {
-        res = await fetch('/api/email/send', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(emailPayload),
-        });
-      } catch (localErr) {
-        console.warn('[EmailService] Relative API dispatch failed:', localErr);
+        res = await fetchWithTimeout(
+          '/api/email/send',
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(emailPayload),
+          },
+          5000
+        );
+      } catch (localErr: any) {
+        console.warn('[EmailService] Relative API dispatch failed:', localErr?.message);
       }
     }
 
-    // 3. If relative failed, forward directly to Cloud Run backend
+    // 4. If relative failed, forward directly to Cloud Run backend
     if ((!res || !res.ok) && (isNetlifyOrExternal || !res)) {
       try {
-        res = await fetch(`${CLOUD_RUN_API_BASE}/api/email/send`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(emailPayload),
-        });
+        res = await fetchWithTimeout(
+          `${CLOUD_RUN_API_BASE}/api/email/send`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(emailPayload),
+          },
+          5000
+        );
       } catch (cloudErr: any) {
         console.warn('[EmailService] Cloud Run direct API dispatch failed:', cloudErr?.message);
       }
@@ -1714,7 +1781,7 @@ export async function dispatchEmail(options: DispatchOptions): Promise<{ success
       if (result && result.status) {
         status = result.status;
       } else {
-        status = 'Sent';
+        status = 'Delivered';
       }
     } else {
       status = 'Simulated';

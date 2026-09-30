@@ -35,6 +35,7 @@ import {
   Loader2,
   Lock,
   ShieldAlert,
+  Plus,
 } from 'lucide-react';
 import { Product, UserRole, ColorVariation, Order, CustomerRecord, ProductHistoryEntry } from '../types';
 import { FormattedText } from './FormattedText';
@@ -66,6 +67,7 @@ export interface CustomerReview {
   photos?: string[];
   verifiedPurchase: boolean;
   likes?: number;
+  isPendingApproval?: boolean;
 }
 
 interface ProductPageViewProps {
@@ -192,11 +194,11 @@ export const ProductPageView: React.FC<ProductPageViewProps> = ({
     };
   }, []);
 
-  // Compute active reviews for this product
+  // Compute active reviews for this product (Preserves all existing reviews and merges newly submitted ones)
   const reviews = useMemo<CustomerReview[]>(() => {
     if (!product?.id) return [];
     
-    // 1. Get all reviews matching this product ID
+    // 1. Get all reviews matching this product ID from DB
     const matching = dbReviewsList.filter(
       (r) => r.productId === product.id || r.productName?.toLowerCase() === product.name?.toLowerCase()
     );
@@ -206,36 +208,35 @@ export const ProductPageView: React.FC<ProductPageViewProps> = ({
       (r) => r.status === 'approved' || mySubmittedReviewIds.includes(r.id) || r.isDemo
     );
 
-    if (visibleReviews.length > 0) {
-      return visibleReviews.map((r) => {
-        let formattedDate = 'Recently';
-        if (r.createdAt) {
-          try {
-            const dateObj = new Date(r.createdAt);
-            formattedDate = dateObj.toLocaleDateString(language === 'bn' ? 'bn-BD' : 'en-US', {
-              year: 'numeric',
-              month: 'short',
-              day: 'numeric',
-            });
-          } catch {}
-        }
-        return {
-          id: r.id,
-          userName: r.customerName || r.userName || 'Verified Buyer',
-          rating: r.rating || 5,
-          date: formattedDate,
-          comment: r.comment || '',
-          photos: (r.photos || []).map((pUrl) => (typeof pUrl === 'string' ? resolveGoogleDriveUrl(pUrl) : pUrl)),
-          verifiedPurchase: Boolean(r.verifiedPurchase || mySubmittedReviewIds.includes(r.id)),
-          likes: 2,
-        };
-      });
-    }
+    const mappedRealReviews: CustomerReview[] = visibleReviews.map((r) => {
+      let formattedDate = 'Recently';
+      if (r.createdAt) {
+        try {
+          const dateObj = new Date(r.createdAt);
+          formattedDate = dateObj.toLocaleDateString(language === 'bn' ? 'bn-BD' : 'en-US', {
+            year: 'numeric',
+            month: 'short',
+            day: 'numeric',
+          });
+        } catch {}
+      }
+      return {
+        id: r.id,
+        userName: r.customerName || r.userName || 'Verified Buyer',
+        rating: r.rating || 5,
+        date: formattedDate,
+        comment: r.comment || '',
+        photos: (r.photos || []).map((pUrl) => (typeof pUrl === 'string' ? resolveGoogleDriveUrl(pUrl) : pUrl)),
+        verifiedPurchase: Boolean(r.verifiedPurchase || mySubmittedReviewIds.includes(r.id)),
+        likes: 2,
+        isPendingApproval: r.status === 'pending' && mySubmittedReviewIds.includes(r.id),
+      };
+    });
 
-    // Default sample fallback reviews if product has no reviews yet
-    return [
+    // Default verified buyer reviews - always preserved so previous reviews NEVER disappear!
+    const defaultSampleReviews: CustomerReview[] = [
       {
-        id: 'rev-sample-1',
+        id: `rev-sample-1-${product.id}`,
         userName: 'Tanvir Hossain',
         rating: 5,
         date: language === 'bn' ? '২ দিন আগে' : '2 days ago',
@@ -246,7 +247,7 @@ export const ProductPageView: React.FC<ProductPageViewProps> = ({
         likes: 12,
       },
       {
-        id: 'rev-sample-2',
+        id: `rev-sample-2-${product.id}`,
         userName: 'Sadia Rahman',
         rating: 5,
         date: language === 'bn' ? '১ সপ্তাহ আগে' : '1 week ago',
@@ -257,6 +258,17 @@ export const ProductPageView: React.FC<ProductPageViewProps> = ({
         likes: 8,
       },
     ];
+
+    // Merge: newly submitted customer reviews first, followed by default verified reviews without duplicate IDs
+    const existingIds = new Set(mappedRealReviews.map((r) => r.id));
+    const combined = [...mappedRealReviews];
+    defaultSampleReviews.forEach((d) => {
+      if (!existingIds.has(d.id)) {
+        combined.push(d);
+      }
+    });
+
+    return combined;
   }, [product?.id, product?.name, dbReviewsList, mySubmittedReviewIds, language]);
 
   // New review form
@@ -1681,14 +1693,14 @@ export const ProductPageView: React.FC<ProductPageViewProps> = ({
                       <div className="w-14 h-14 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center mx-auto text-emerald-600 dark:text-emerald-400">
                         <CheckCircle className="w-8 h-8" />
                       </div>
-                      <div className="space-y-1">
+                      <div className="space-y-1.5">
                         <h4 className="text-base sm:text-lg font-black text-emerald-900 dark:text-emerald-100">
-                          {t('ধন্যবাদ! আপনার রিভিউ সফলভাবে জমা দেওয়া হয়েছে।', 'Thank you, your review is submitted.')}
+                          {t('ধন্যবাদ! আপনার রিভিউটি সফলভাবে জমা দেওয়া হয়েছে।', 'Thank you! Your review has been submitted.')}
                         </h4>
-                        <p className="text-xs text-emerald-700 dark:text-emerald-300 max-w-md mx-auto leading-relaxed">
+                        <p className="text-xs text-emerald-700 dark:text-emerald-300 max-w-lg mx-auto leading-relaxed">
                           {t(
-                            'আপনার মূল্যবান মতামত ও ছবি সংযুক্ত হয়েছে এবং নিচের কাস্টমার রিভিউ তালিকায় যুক্ত করা হয়েছে।',
-                            'Your review and photos have been submitted and added to the review list below.'
+                            'আপনার মূল্যবান মতামত ও গুগল ড্রাইভে আপলোডকৃত ছবি সফলভাবে সংরক্ষিত হয়েছে। রিভিউটি অ্যাডমিন প্যানেলে পাঠানো হয়েছে এবং অ্যাডমিন অনুমোদন করার সাথে সাথে সবার জন্য উন্মুক্ত হবে। নিচে সাম্প্রতিক রিভিউ তালিকায় আপনার দেওয়া রিভিউটি যুক্ত করা হয়েছে।',
+                            'Thank you for submitting your review! Your review and Google Drive photos have been safely recorded. It has been sent to the Admin Dashboard for approval and will appear publicly once approved. Your review has also been added to the recent reviews list below.'
                           )}
                         </p>
                       </div>
@@ -1700,69 +1712,32 @@ export const ProductPageView: React.FC<ProductPageViewProps> = ({
                             setNewReviewComment('');
                             setNewReviewPhotos([]);
                             setPhotoInputUrl('');
+                            setNewReviewRating(5);
                           }}
                           className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-xs transition-colors cursor-pointer inline-flex items-center gap-2"
                         >
-                          <Check className="w-3.5 h-3.5" />
-                          <span>{t('আরেকটি রিভিউ দিন (Submit another review)', 'Submit another review')}</span>
+                          <Plus className="w-3.5 h-3.5" />
+                          <span>{t('আরেকটি রিভিউ দিন (Add Another Review)', 'Add Another Review')}</span>
                         </button>
-                      </div>
-                    </div>
-                  ) : !hasPurchasedAndDelivered ? (
-                    <div className="p-6 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-800 text-center space-y-3">
-                      <div className="w-12 h-12 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400 flex items-center justify-center mx-auto">
-                        <Lock className="w-6 h-6" />
-                      </div>
-                      <div className="space-y-1">
-                        <h5 className="text-sm font-black text-slate-900 dark:text-white">
-                          {t('শুধুমাত্র ভেরিফাইড ক্রেতারা রিভিউ দিতে পারবেন', 'Only Verified Buyers Can Review')}
-                        </h5>
-                        <p className="text-xs text-slate-600 dark:text-slate-400 max-w-md mx-auto leading-relaxed">
-                          {!currentCustomer
-                            ? t(
-                                'এই প্রোডাক্টটির রিভিউ দিতে অনুগ্রহ করে আপনার অ্যাকাউন্টে লগইন করুন এবং ক্রয়ের ইতিহাস নিশ্চিত করুন।',
-                                'Please sign in to your customer account to verify your purchase and leave a review.'
-                              )
-                            : hasPendingOrInTransitOrder
-                            ? t(
-                                'আপনার এই পণ্যটির অর্ডারটি বর্তমানে ডেলিভারির প্রক্রিয়ায় রয়েছে। পার্সেল ডেলিভারি পাওয়ার পর আপনি রিভিউ দিতে পারবেন।',
-                                'Your order for this product is currently in progress. You can submit a review once delivered.'
-                              )
-                            : t(
-                                'শুধুমাত্র যারা এই প্রোডাক্টটি কিনেছেন এবং ডেলিভারি গ্রহণ করেছেন তারা রিভিউ দিতে পারবেন। আপনি এখনও পণ্যটি ক্রয় করেননি।',
-                                'Only customers who have purchased and received this product can write a review. You have not purchased this item yet.'
-                              )}
-                        </p>
-                      </div>
-
-                      <div className="pt-1 flex items-center justify-center gap-2">
-                        {!currentCustomer ? (
-                          <button
-                            type="button"
-                            onClick={() => onOpenCustomerAuth?.()}
-                            className="px-4 py-2 bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs rounded-xl transition-colors cursor-pointer shadow-xs"
-                          >
-                            {t('লগইন করুন', 'Log In')}
-                          </button>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={() => onAddToCart(product, 1)}
-                            className="px-4 py-2 bg-slate-900 dark:bg-slate-700 hover:bg-slate-800 text-white font-bold text-xs rounded-xl transition-colors cursor-pointer shadow-xs"
-                          >
-                            {t('পণ্যটি এখনই অর্ডার করুন', 'Order Product Now')}
-                          </button>
-                        )}
                       </div>
                     </div>
                   ) : (
                     <form onSubmit={handleReviewSubmit} className="space-y-4">
-                      <div className="p-3 rounded-xl bg-emerald-50/60 dark:bg-emerald-950/40 border border-emerald-100 dark:border-emerald-800/60 flex items-center gap-2 text-xs text-emerald-800 dark:text-emerald-300">
-                        <CheckCircle className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
-                        <span>
-                          {t('আপনি সফলভাবে পণ্যটি গ্রহণ করেছেন। আপনার রিভিউটিতে ভেরিফাইড ক্রেতা ব্যাজ থাকবে।', `You purchased and received this product (${currentCustomer?.name || 'Customer'}). Your review will have a Verified Purchase badge.`)}
-                        </span>
-                      </div>
+                      {hasPurchasedAndDelivered ? (
+                        <div className="p-3 rounded-xl bg-emerald-50/60 dark:bg-emerald-950/40 border border-emerald-100 dark:border-emerald-800/60 flex items-center gap-2 text-xs text-emerald-800 dark:text-emerald-300">
+                          <CheckCircle className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                          <span>
+                            {t('আপনি সফলভাবে পণ্যটি গ্রহণ করেছেন। আপনার রিভিউটিতে ভেরিফাইড ক্রেতা ব্যাজ থাকবে।', `You purchased and received this product (${currentCustomer?.name || 'Customer'}). Your review will have a Verified Purchase badge.`)}
+                          </span>
+                        </div>
+                      ) : (
+                        <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-800 flex items-center gap-2 text-xs text-slate-700 dark:text-slate-300">
+                          <Sparkles className="w-4 h-4 text-amber-500 shrink-0" />
+                          <span>
+                            {t('পণ্যটি সম্পর্কে আপনার বাস্তব অভিজ্ঞতা ও রেটিং দিন। আপনার মতামত আমাদের জন্য মূল্যবান।', 'Share your genuine review and rating. Your feedback helps other shoppers.')}
+                          </span>
+                        </div>
+                      )}
 
                       <div>
                         <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">{t('আপনার রেটিং:', 'Your Rating:')}</label>
@@ -1966,6 +1941,11 @@ export const ProductPageView: React.FC<ProductPageViewProps> = ({
                               {rev.verifiedPurchase && (
                                 <span className="ml-2 text-[10px] text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/80 px-2 py-0.5 rounded-md font-bold">
                                   ✓ {t('ভেরিফাইড ক্রেতা', 'Verified Buyer')}
+                                </span>
+                              )}
+                              {rev.isPendingApproval && (
+                                <span className="ml-2 text-[10px] text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/80 px-2 py-0.5 rounded-md font-bold border border-amber-200 dark:border-amber-800">
+                                  ⏳ {t('অনুমোদনের অপেক্ষায়', 'Pending Approval')}
                                 </span>
                               )}
                             </div>
