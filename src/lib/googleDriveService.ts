@@ -625,7 +625,7 @@ export const uploadFileToGoogleDrive = async (
 
 /**
  * Universal Review Photo Upload:
- * Handles seamless customer upload directly to Google Drive via server or client
+ * Handles seamless customer upload directly to Google Drive via server or Google Apps Script relay
  * without prompting the customer for any Google sign-in.
  */
 export const uploadCustomerReviewPhoto = async (
@@ -649,7 +649,8 @@ export const uploadCustomerReviewPhoto = async (
     }
   }
 
-  // 2. Upload through Server Relay with linked Admin Google Drive
+  // Read file data
+  let base64Data = '';
   try {
     const fileBuffer = await file.arrayBuffer();
     const fileBytes = new Uint8Array(fileBuffer);
@@ -658,34 +659,74 @@ export const uploadCustomerReviewPhoto = async (
     for (let i = 0; i < len; i++) {
       binary += String.fromCharCode(fileBytes[i]);
     }
-    const base64Data = btoa(binary);
+    base64Data = btoa(binary);
+  } catch (readErr) {
+    console.warn('[File read error]:', readErr);
+  }
 
-    if (onProgress) onProgress(50);
+  if (onProgress) onProgress(45);
 
-    const CLOUD_RUN_API_BASE = 'https://ais-pre-nziktgpe56nlsqktopppvl-693170375322.asia-southeast1.run.app';
-    const isNetlifyOrExternal = typeof window !== 'undefined' && (
-      window.location.hostname.includes('netlify.app') ||
-      (!window.location.hostname.includes('localhost') && !window.location.hostname.includes('run.app'))
-    );
+  // 2. Upload via Google Apps Script Webhook to Google Drive "Customer Reviews" folder
+  try {
+    let webhookUrl = '';
+    if (typeof window !== 'undefined') {
+      webhookUrl = localStorage.getItem('kenax_google_drive_webhook') || '';
+      if (!webhookUrl) {
+        const rawSettings = localStorage.getItem('kenax_gmail_alert_settings');
+        if (rawSettings) {
+          try {
+            const parsed = JSON.parse(rawSettings);
+            webhookUrl = parsed.webhookUrl || '';
+          } catch {}
+        }
+      }
+    }
+    if (!webhookUrl) {
+      webhookUrl = 'https://script.google.com/macros/s/AKfycbw_UtesYomtnwD4Y7FrIlUW4RvhLvAj428-xJz3nuz4fdk_O0gIfBZVQN_JeDWuvJxduw/exec';
+    }
 
-    let res: Response | null = null;
-    try {
-      res = await fetch('/api/drive/customer-review-upload', {
+    if (webhookUrl && webhookUrl.includes('script.google.com') && base64Data) {
+      const gasRes = await fetch(webhookUrl, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
         body: JSON.stringify({
+          action: 'uploadReviewPhoto',
           filename: file.name,
           mimeType: file.type || 'image/jpeg',
           base64Data,
         }),
-      });
-    } catch (e) {
-      console.warn('[Local Server Drive Relay Notice]:', e);
-    }
+      }).catch(() => null);
 
-    if ((!res || !res.ok) && (isNetlifyOrExternal || !res)) {
+      if (gasRes && gasRes.ok) {
+        const data = await gasRes.json().catch(() => null);
+        if (data && data.url) {
+          if (onProgress) onProgress(100);
+          return {
+            url: data.url,
+            fileId: data.fileId,
+            isGoogleDrive: true,
+          };
+        }
+      }
+    }
+  } catch (gasErr) {
+    console.warn('[Google Apps Script Photo Upload]:', gasErr);
+  }
+
+  // 3. Upload through Server Relay with linked Admin Google Drive
+  try {
+    if (base64Data) {
+      if (onProgress) onProgress(65);
+
+      const CLOUD_RUN_API_BASE = 'https://ais-pre-nziktgpe56nlsqktopppvl-693170375322.asia-southeast1.run.app';
+      const isNetlifyOrExternal = typeof window !== 'undefined' && (
+        window.location.hostname.includes('netlify.app') ||
+        (!window.location.hostname.includes('localhost') && !window.location.hostname.includes('run.app'))
+      );
+
+      let res: Response | null = null;
       try {
-        res = await fetch(`${CLOUD_RUN_API_BASE}/api/drive/customer-review-upload`, {
+        res = await fetch('/api/drive/customer-review-upload', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -694,38 +735,82 @@ export const uploadCustomerReviewPhoto = async (
             base64Data,
           }),
         });
-      } catch (cloudErr) {
-        console.warn('[Cloud Run Drive Relay Notice]:', cloudErr);
+      } catch (e) {
+        console.warn('[Local Server Drive Relay Notice]:', e);
       }
-    }
 
-    if (onProgress) onProgress(85);
+      if ((!res || !res.ok) && (isNetlifyOrExternal || !res)) {
+        try {
+          res = await fetch(`${CLOUD_RUN_API_BASE}/api/drive/customer-review-upload`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              filename: file.name,
+              mimeType: file.type || 'image/jpeg',
+              base64Data,
+            }),
+          });
+        } catch (cloudErr) {
+          console.warn('[Cloud Run Drive Relay Notice]:', cloudErr);
+        }
+      }
 
-    if (res && res.ok) {
-      const data = await res.json();
-      if (data.url) {
-        if (onProgress) onProgress(100);
-        return {
-          url: data.url,
-          fileId: data.fileId,
-          isGoogleDrive: Boolean(data.inDrive),
-        };
+      if (onProgress) onProgress(85);
+
+      if (res && res.ok) {
+        const data = await res.json();
+        if (data.url) {
+          if (onProgress) onProgress(100);
+          return {
+            url: data.url,
+            fileId: data.fileId,
+            isGoogleDrive: Boolean(data.inDrive),
+          };
+        }
       }
     }
   } catch (serverErr) {
     console.warn('[Server Drive Upload Error, using Local Data URI]:', serverErr);
   }
 
-  // 3. Fallback Data URI
+  // 4. Fallback: Compact Canvas compressed Data URI (max 800px, ~30KB) so Firestore 1MB limit is never exceeded
   return new Promise((resolve) => {
     const reader = new FileReader();
     reader.onload = (e) => {
-      const result = (e.target?.result as string) || '';
-      if (onProgress) onProgress(100);
-      resolve({
-        url: result,
-        isGoogleDrive: false,
-      });
+      const rawDataUrl = (e.target?.result as string) || '';
+      const img = new Image();
+      img.onload = () => {
+        let width = img.width;
+        let height = img.height;
+        const maxDim = 800;
+        if (width > maxDim || height > maxDim) {
+          if (width > height) {
+            height = Math.round((height * maxDim) / width);
+            width = maxDim;
+          } else {
+            width = Math.round((width * maxDim) / height);
+            height = maxDim;
+          }
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(img, 0, 0, width, height);
+          const compressed = canvas.toDataURL('image/jpeg', 0.72);
+          if (onProgress) onProgress(100);
+          resolve({ url: compressed, isGoogleDrive: false });
+        } else {
+          if (onProgress) onProgress(100);
+          resolve({ url: rawDataUrl, isGoogleDrive: false });
+        }
+      };
+      img.onerror = () => {
+        if (onProgress) onProgress(100);
+        resolve({ url: rawDataUrl, isGoogleDrive: false });
+      };
+      img.src = rawDataUrl;
     };
     reader.onerror = () => {
       if (onProgress) onProgress(100);

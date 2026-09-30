@@ -1943,11 +1943,6 @@ export const ProductPageView: React.FC<ProductPageViewProps> = ({
                                   ✓ {t('ভেরিফাইড ক্রেতা', 'Verified Buyer')}
                                 </span>
                               )}
-                              {rev.isPendingApproval && (
-                                <span className="ml-2 text-[10px] text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/80 px-2 py-0.5 rounded-md font-bold border border-amber-200 dark:border-amber-800">
-                                  ⏳ {t('অনুমোদনের অপেক্ষায়', 'Pending Approval')}
-                                </span>
-                              )}
                             </div>
                           </div>
                           <span className="text-[11px] text-slate-400">{rev.date}</span>

@@ -17,11 +17,17 @@ import type { PolicyTab } from './components/PolicyModal';
 import { ProductPageView } from './components/ProductPageView';
 import { AuthPageView } from './components/AuthPageView';
 
-// Portals & Core Views: Direct imports ensure rock-solid React hook dispatcher stability across all routes
-import AdminPortal from './components/AdminPortal';
-import { SellerPortal } from './components/seller/SellerPortal';
-import { ResellerPortal } from './components/reseller/ResellerPortal';
-import { PartnerLoginPage } from './components/partner/PartnerLoginPage';
+// Portals & Core Views: Lazy loaded with suspense to ensure ultra-fast initial storefront load
+const AdminPortal = React.lazy(() => import('./components/AdminPortal'));
+const SellerPortal = React.lazy(() =>
+  import('./components/seller/SellerPortal').then((m) => ({ default: m.SellerPortal }))
+);
+const ResellerPortal = React.lazy(() =>
+  import('./components/reseller/ResellerPortal').then((m) => ({ default: m.ResellerPortal }))
+);
+const PartnerLoginPage = React.lazy(() =>
+  import('./components/partner/PartnerLoginPage').then((m) => ({ default: m.PartnerLoginPage }))
+);
 
 // High-Performance Core Views & Modals: Direct imports ensure rock-solid React hook dispatcher stability
 import { CustomerFloatingChat } from './components/CustomerFloatingChat';

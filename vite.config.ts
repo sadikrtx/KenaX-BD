@@ -45,6 +45,30 @@ export default defineConfig(() => {
             if (id.includes('node_modules/firebase')) {
               return 'vendor-firebase';
             }
+            if (id.includes('node_modules/lucide-react')) {
+              return 'vendor-lucide';
+            }
+            if (
+              id.includes('node_modules/html2canvas') ||
+              id.includes('node_modules/jspdf') ||
+              id.includes('node_modules/xlsx') ||
+              id.includes('node_modules/canvas-confetti')
+            ) {
+              return 'vendor-heavy-tools';
+            }
+            if (id.includes('node_modules/motion') || id.includes('node_modules/framer-motion')) {
+              return 'vendor-motion';
+            }
+            if (id.includes('src/components/admin/')) {
+              return 'chunk-admin';
+            }
+            if (
+              id.includes('src/components/seller/') ||
+              id.includes('src/components/reseller/') ||
+              id.includes('src/components/partner/')
+            ) {
+              return 'chunk-portals';
+            }
           },
         },
       },

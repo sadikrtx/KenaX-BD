@@ -4044,16 +4044,29 @@ export async function getReviewsFromDB(): Promise<Review[]> {
   try {
     const colRef = collection(db, 'reviews');
     const snapshot = await getDocs(colRef);
+    const items: Review[] = [];
     if (!snapshot.empty) {
-      const items: Review[] = [];
       snapshot.forEach((docSnap) => {
         const data = docSnap.data() as Review;
         if (data && data.id) items.push(data);
       });
-      items.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-      safeSetLocalStorage('kenax_reviews_cache', JSON.stringify(items));
-      return items;
     }
+
+    const rawDeleted = localStorage.getItem('kenax_deleted_review_ids');
+    const deletedIds: string[] = rawDeleted ? JSON.parse(rawDeleted) : [];
+    const valid = items.filter((r) => !deletedIds.includes(r.id));
+    const existingIds = new Set(valid.map((r) => r.id));
+    const combined = [...valid];
+
+    INITIAL_REVIEWS.forEach((initRev) => {
+      if (!existingIds.has(initRev.id) && !deletedIds.includes(initRev.id)) {
+        combined.push(initRev);
+      }
+    });
+
+    combined.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    safeSetLocalStorage('kenax_reviews_cache', JSON.stringify(combined));
+    return combined;
   } catch (err) {
     console.warn('[KenaX BD] Firestore getReviewsFromDB fallback:', err);
   }
@@ -4082,9 +4095,22 @@ export function subscribeToReviews(
           const data = docSnap.data() as Review;
           if (data && data.id) items.push(data);
         });
-        items.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-        safeSetLocalStorage('kenax_reviews_cache', JSON.stringify(items));
-        onReviewsChanged(items);
+
+        const rawDeleted = localStorage.getItem('kenax_deleted_review_ids');
+        const deletedIds: string[] = rawDeleted ? JSON.parse(rawDeleted) : [];
+        const valid = items.filter((r) => !deletedIds.includes(r.id));
+        const existingIds = new Set(valid.map((r) => r.id));
+        const combined = [...valid];
+
+        INITIAL_REVIEWS.forEach((initRev) => {
+          if (!existingIds.has(initRev.id) && !deletedIds.includes(initRev.id)) {
+            combined.push(initRev);
+          }
+        });
+
+        combined.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+        safeSetLocalStorage('kenax_reviews_cache', JSON.stringify(combined));
+        onReviewsChanged(combined);
       },
       (error) => {
         console.warn('[KenaX BD] subscribeToReviews listener error:', error);
@@ -4098,7 +4124,19 @@ export function subscribeToReviews(
 }
 
 export async function saveReviewToDB(review: Review): Promise<void> {
-  const cleaned = cleanFirestoreData(review);
+  // Compress any overly large base64 image strings so Firestore 1MB document limit is never exceeded
+  const safeReview = { ...review };
+  if (Array.isArray(safeReview.photos)) {
+    safeReview.photos = safeReview.photos.map((p) => {
+      if (typeof p === 'string' && p.startsWith('data:image') && p.length > 500000) {
+        // Truncate overly long data URIs or keep first chunk to protect Firestore
+        return p.slice(0, 300000);
+      }
+      return p;
+    });
+  }
+
+  const cleaned = cleanFirestoreData(safeReview);
   try {
     await setDoc(doc(db, 'reviews', review.id), cleaned, { merge: true });
   } catch (err) {
@@ -4110,9 +4148,9 @@ export async function saveReviewToDB(review: Review): Promise<void> {
     let list: Review[] = cached ? JSON.parse(cached) : INITIAL_REVIEWS;
     const idx = list.findIndex((r) => r.id === review.id);
     if (idx >= 0) {
-      list[idx] = { ...list[idx], ...review };
+      list[idx] = { ...list[idx], ...safeReview };
     } else {
-      list.unshift(review);
+      list.unshift(safeReview);
     }
     safeSetLocalStorage('kenax_reviews_cache', JSON.stringify(list));
   } catch (e) {
@@ -4132,6 +4170,12 @@ export async function deleteReviewFromDB(reviewId: string): Promise<void> {
   }
 
   try {
+    const rawDeleted = localStorage.getItem('kenax_deleted_review_ids');
+    const deletedIds: string[] = rawDeleted ? JSON.parse(rawDeleted) : [];
+    if (!deletedIds.includes(reviewId)) {
+      deletedIds.push(reviewId);
+      safeSetLocalStorage('kenax_deleted_review_ids', JSON.stringify(deletedIds));
+    }
     const cached = localStorage.getItem('kenax_reviews_cache');
     if (cached) {
       const list: Review[] = JSON.parse(cached);

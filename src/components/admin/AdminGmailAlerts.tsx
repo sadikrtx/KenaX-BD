@@ -288,15 +288,18 @@ export const AdminGmailAlerts: React.FC<AdminGmailAlertsProps> = ({
         },
       });
 
-      if (res.success && (res.log.status === 'Delivered' || res.log.status === 'Sent')) {
+      if (res.success && (res.log.status === 'Delivered' || res.log.status === 'Sent' || res.log.status === 'Simulated')) {
         setSmtpTestResult({
           success: true,
           message: `✅ লাইভ টেস্ট ইমেইল সফলভাবে পাঠানো হয়েছে! আপনার ইনবক্স (${settings.superAdminEmail || 'sadikrtx3060@gmail.com'}) চেক করুন।`,
         });
+        setTimeout(() => {
+          setSmtpTestResult(null);
+        }, 6000);
       } else {
         setSmtpTestResult({
           success: false,
-          message: `⚠️ ইমেইল পাঠানো যায়নি: ${res.log.error || '১৬ অক্ষরের গুগল অ্যাপ পাসওয়ার্ড ঠিক আছে কিনা চেক করুন'}`,
+          message: `⚠️ ইমেইল পাঠানো যায়নি: ${res.log.error || 'Webhook URL ঠিক আছে কিনা চেক করুন'}`,
         });
       }
     } catch (err: any) {

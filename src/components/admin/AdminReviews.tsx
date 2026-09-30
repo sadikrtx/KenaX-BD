@@ -29,6 +29,8 @@ import {
   Link2,
   Key,
   ZoomIn,
+  Settings,
+  Filter,
 } from 'lucide-react';
 import { Review, UserRole, StaffUser, Product } from '../../types';
 import {
@@ -73,6 +75,11 @@ export const AdminReviews: React.FC<AdminReviewsProps> = ({
   const [statusFilter, setStatusFilter] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
   
+  // Collapsible Control Drawers (Keeps main dashboard compact & clutter-free)
+  const [isDriveSettingsOpen, setIsDriveSettingsOpen] = useState(false);
+  const [isMediaGalleryOpen, setIsMediaGalleryOpen] = useState(false);
+  const [activeSettingsTab, setActiveSettingsTab] = useState<'script' | 'key' | 'auth'>('script');
+
   // Add Demo Review Modal state
   const [isAddDemoOpen, setIsAddDemoOpen] = useState(false);
   const [demoProductId, setDemoProductId] = useState(products[0]?.id || '');
@@ -134,6 +141,145 @@ export const AdminReviews: React.FC<AdminReviewsProps> = ({
   const [galleryTab, setGalleryTab] = useState<'all' | 'customer' | 'drive'>('all');
   const [previewModalUrl, setPreviewModalUrl] = useState<string | null>(null);
 
+  // Google Apps Script Webhook State & Test Manager
+  const [gasWebhookUrl, setGasWebhookUrl] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('kenax_google_drive_webhook');
+      if (saved) return saved;
+      const gmailSettings = localStorage.getItem('kenax_gmail_alert_settings');
+      if (gmailSettings) {
+        try {
+          const parsed = JSON.parse(gmailSettings);
+          if (parsed.webhookUrl) return parsed.webhookUrl;
+        } catch {}
+      }
+    }
+    return 'https://script.google.com/macros/s/AKfycbw_UtesYomtnwD4Y7FrIlUW4RvhLvAj428-xJz3nuz4fdk_O0gIfBZVQN_JeDWuvJxduw/exec';
+  });
+  const [isSavingGasWebhook, setIsSavingGasWebhook] = useState(false);
+  const [isTestingGasWebhook, setIsTestingGasWebhook] = useState(false);
+  const [gasTestResult, setGasTestResult] = useState<{ success: boolean; message: string; url?: string; folderUrl?: string } | null>(null);
+  const [isScriptCodeCopied, setIsScriptCodeCopied] = useState(false);
+
+  // Permanent Key (Google App Password / API Key style) state
+  const [permanentKeyInput, setPermanentKeyInput] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('kenax_google_drive_permanent_key') || '';
+    }
+    return '';
+  });
+  const [isSavingPermanentKey, setIsSavingPermanentKey] = useState(false);
+
+  // URL Converter & Live Link Resolver State
+  const [converterInput, setConverterInput] = useState('');
+  const [resolvedConverterUrl, setResolvedConverterUrl] = useState('');
+
+  // Editing state
+  const [editingReviewId, setEditingReviewId] = useState<string | null>(null);
+  const [editComment, setEditComment] = useState('');
+  const [editRating, setEditRating] = useState(5);
+  const [editPhotos, setEditPhotos] = useState<string[]>([]);
+  const [newPhotoUrlInput, setNewPhotoUrlInput] = useState('');
+
+  const APPS_SCRIPT_CODE = `function doPost(e) {
+  try {
+    var data = JSON.parse(e.postData.contents);
+    
+    // ১. কাস্টমার রিভিউ ফটো সরাসরি Google Drive ফোল্ডারে সেভ করা
+    if (data.action === 'uploadReviewPhoto' || data.base64Data) {
+      var folderName = "Customer Reviews";
+      var folders = DriveApp.getFoldersByName(folderName);
+      var folder = folders.hasNext() ? folders.next() : DriveApp.createFolder(folderName);
+      folder.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+      
+      var decoded = Utilities.base64Decode(data.base64Data);
+      var blob = Utilities.newBlob(decoded, data.mimeType || 'image/jpeg', data.filename || 'review_photo.jpg');
+      var file = folder.createFile(blob);
+      file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+      
+      var fileId = file.getId();
+      var directUrl = "https://lh3.googleusercontent.com/d/" + fileId;
+      var driveLink = "https://drive.google.com/uc?export=view&id=" + fileId;
+      var folderUrl = folder.getUrl();
+      
+      return ContentService.createTextOutput(JSON.stringify({
+        success: true,
+        fileId: fileId,
+        url: directUrl,
+        driveLink: driveLink,
+        folderUrl: folderUrl
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
+    
+    // ২. জিমেইল নোটিফিকেশন ইমেইল পাঠানো
+    var to = data.to;
+    var subject = data.subject || "KenaX BD Notification";
+    var htmlBody = data.html || data.text || "Notification from KenaX BD";
+    
+    MailApp.sendEmail({
+      to: to,
+      subject: subject,
+      htmlBody: htmlBody
+    });
+    
+    return ContentService.createTextOutput(JSON.stringify({
+      success: true,
+      status: "Delivered"
+    })).setMimeType(ContentService.MimeType.JSON);
+    
+  } catch (err) {
+    return ContentService.createTextOutput(JSON.stringify({
+      success: false,
+      error: err.toString()
+    })).setMimeType(ContentService.MimeType.JSON);
+  }
+}`;
+
+  // Initialize Drive Auth
+  useEffect(() => {
+    initGoogleDriveAuth((user) => {
+      setGoogleUser(user);
+    });
+
+    const checkToken = async () => {
+      const token = await getGoogleAccessToken();
+      if (token) {
+        setGoogleToken(token);
+        fetchDriveFolderFiles(token);
+      } else if (permanentKeyInput.trim()) {
+        fetchDriveFolderFiles(permanentKeyInput.trim());
+      }
+    };
+    checkToken();
+  }, [permanentKeyInput]);
+
+  // Click outside to close product select dropdown
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (productDropdownRef.current && !productDropdownRef.current.contains(event.target as Node)) {
+        setIsProductDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  // Filtered products for select dropdown
+  const filteredProductsForSelect = useMemo(() => {
+    if (!productSearchTerm.trim()) return products;
+    const term = productSearchTerm.toLowerCase();
+    return products.filter(
+      (p) =>
+        p.name.toLowerCase().includes(term) ||
+        (p.category && p.category.toLowerCase().includes(term)) ||
+        (p.sku && p.sku.toLowerCase().includes(term))
+    );
+  }, [products, productSearchTerm]);
+
+  const selectedProductObj = useMemo(() => {
+    return products.find((p) => p.id === demoProductId) || products[0];
+  }, [products, demoProductId]);
+
   // Collect all customer-uploaded review photos from existing reviews
   const customerUploadedPhotos = useMemo(() => {
     const list: Array<{
@@ -152,10 +298,10 @@ export const AdminReviews: React.FC<AdminReviewsProps> = ({
           const directUrl = resolveGoogleDriveUrl(pUrl.trim());
           list.push({
             id: `cust-rev-${r.id}-${idx}`,
-            name: `${r.customerName || r.userName || 'Customer'} (${r.productName || 'Review'})`,
+            name: `${r.customerName || (r as any).userName || 'Customer'} (${r.productName || 'Review'})`,
             url: directUrl,
             createdTime: r.createdAt,
-            customerName: r.customerName || r.userName || 'Customer',
+            customerName: r.customerName || (r as any).userName || 'Customer',
             productName: r.productName || 'Product',
             reviewId: r.id,
             rating: r.rating,
@@ -187,7 +333,6 @@ export const AdminReviews: React.FC<AdminReviewsProps> = ({
     if (galleryTab === 'drive') {
       return driveAndUploadedMedia;
     }
-    // 'all': Combine customer review photos + drive/uploaded photos without duplicate URLs
     const map = new Map<string, { id: string; name: string; url: string; createdTime?: string; isCustomer?: boolean; customerName?: string; productName?: string }>();
     customerUploadedPhotos.forEach((c) => {
       map.set(c.url, { ...c, isCustomer: true });
@@ -200,19 +345,164 @@ export const AdminReviews: React.FC<AdminReviewsProps> = ({
     return Array.from(map.values());
   }, [galleryTab, customerUploadedPhotos, driveAndUploadedMedia]);
 
-  // URL Converter & Live Link Resolver State
-  const [converterInput, setConverterInput] = useState('');
-  const [resolvedConverterUrl, setResolvedConverterUrl] = useState('');
+  // Category / Status Counts for Badges
+  const counts = useMemo(() => {
+    let pending = 0;
+    let approved = 0;
+    let hidden = 0;
+    let photos = 0;
+    let demo = 0;
+    (reviews || []).forEach((r) => {
+      if (r.status === 'pending') {
+        pending++;
+      } else if (r.status === 'hidden' || (r as any).status === 'rejected') {
+        hidden++;
+      } else {
+        approved++;
+      }
 
-  // Permanent Key (Google App Password / API Key style) state
-  const [permanentKeyInput, setPermanentKeyInput] = useState(() => {
-    if (typeof window !== 'undefined') {
-      return localStorage.getItem('kenax_google_drive_permanent_key') || '';
+      if (Array.isArray(r.photos) && r.photos.length > 0) {
+        photos++;
+      }
+      if (r.isDemo) {
+        demo++;
+      }
+    });
+    return {
+      all: (reviews || []).length,
+      pending,
+      approved,
+      hidden,
+      photos,
+      demo,
+    };
+  }, [reviews]);
+
+  const filteredReviews = useMemo(() => {
+    return (reviews || []).filter((r) => {
+      const cName = r.customerName || (r as any).userName || '';
+      const matchesSearch =
+        cName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (r.comment && r.comment.toLowerCase().includes(searchQuery.toLowerCase())) ||
+        (r.productName && r.productName.toLowerCase().includes(searchQuery.toLowerCase()));
+
+      let matchesStatus = true;
+      if (statusFilter === 'pending') {
+        matchesStatus = r.status === 'pending';
+      } else if (statusFilter === 'approved') {
+        matchesStatus = r.status === 'approved' || (!r.status && !r.isDemo);
+      } else if (statusFilter === 'hidden') {
+        matchesStatus = r.status === 'hidden' || (r as any).status === 'rejected';
+      } else if (statusFilter === 'photos') {
+        matchesStatus = Array.isArray(r.photos) && r.photos.length > 0;
+      } else if (statusFilter === 'demo') {
+        matchesStatus = Boolean(r.isDemo);
+      }
+
+      return matchesSearch && matchesStatus;
+    });
+  }, [reviews, searchQuery, statusFilter]);
+
+  // Load Google Drive Customer Reviews Folder Files
+  const fetchDriveFolderFiles = async (token?: string) => {
+    setIsLoadingFolderFiles(true);
+    try {
+      const activeToken = token || googleToken || (await getGoogleAccessToken()) || permanentKeyInput.trim() || '';
+      if (!activeToken) return;
+      const files = await listReviewFolderFiles(activeToken);
+      if (Array.isArray(files)) {
+        setFolderFiles(files);
+      }
+    } catch (err: any) {
+      console.warn('[Fetch Drive Media Folder Notice]:', err?.message);
+    } finally {
+      setIsLoadingFolderFiles(false);
     }
-    return '';
-  });
-  const [isSavingPermanentKey, setIsSavingPermanentKey] = useState(false);
-  const [showPermanentKeyInput, setShowPermanentKeyInput] = useState(false);
+  };
+
+  const handleCopyLink = (url: string) => {
+    navigator.clipboard.writeText(url);
+    setCopiedUrl(url);
+    setTimeout(() => setCopiedUrl(null), 2500);
+  };
+
+  const handleCopyAppsScript = () => {
+    navigator.clipboard.writeText(APPS_SCRIPT_CODE);
+    setIsScriptCodeCopied(true);
+    setTimeout(() => setIsScriptCodeCopied(false), 3000);
+  };
+
+  const handleSaveGasWebhook = () => {
+    setIsSavingGasWebhook(true);
+    try {
+      localStorage.setItem('kenax_google_drive_webhook', gasWebhookUrl.trim());
+      const rawGmail = localStorage.getItem('kenax_gmail_alert_settings');
+      if (rawGmail) {
+        try {
+          const parsed = JSON.parse(rawGmail);
+          parsed.webhookUrl = gasWebhookUrl.trim();
+          localStorage.setItem('kenax_gmail_alert_settings', JSON.stringify(parsed));
+        } catch {}
+      }
+      setDriveStatusMsg({
+        type: 'success',
+        text: '✅ Google Apps Script Webhook URL সফলভাবে সংরক্ষিত হয়েছে!',
+      });
+    } catch (e: any) {
+      setDriveStatusMsg({ type: 'error', text: `সংরক্ষণে সমস্যা: ${e?.message}` });
+    } finally {
+      setIsSavingGasWebhook(false);
+    }
+  };
+
+  const handleTestGasWebhook = async () => {
+    if (!gasWebhookUrl.trim()) return;
+    setIsTestingGasWebhook(true);
+    setGasTestResult(null);
+    try {
+      const testBase64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+      const res = await fetch(gasWebhookUrl.trim(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({
+          action: 'uploadReviewPhoto',
+          filename: 'test_review_ping.jpg',
+          mimeType: 'image/jpeg',
+          base64Data: testBase64,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json().catch(() => null);
+        if (data && data.success) {
+          if (data.folderUrl) setFolderUrl(data.folderUrl);
+          setGasTestResult({
+            success: true,
+            message: '🎉 অভিনন্দন! Google Drive Webhook সফলভাবে কানেক্ট হয়েছে এবং আপনার ড্রাইভে "Customer Reviews" ফোল্ডার তৈরি হয়েছে!',
+            url: data.url,
+            folderUrl: data.folderUrl,
+          });
+          fetchDriveFolderFiles();
+        } else {
+          setGasTestResult({
+            success: false,
+            message: `⚠️ গুগল ড্রাইভ স্ক্রিপ্ট ত্রুটি: ${data?.error || 'Unknown response'}`,
+          });
+        }
+      } else {
+        setGasTestResult({
+          success: false,
+          message: `⚠️ কানেকশন ব্যর্থ হয়েছে (HTTP Status: ${res.status})। নিশ্চিত করুন Web App Deployment Access "Anyone" দেওয়া আছে।`,
+        });
+      }
+    } catch (err: any) {
+      setGasTestResult({
+        success: false,
+        message: `সমস্যা: ${err?.message || 'Error communicating with Google Apps Script'}`,
+      });
+    } finally {
+      setIsTestingGasWebhook(false);
+    }
+  };
 
   const handleSavePermanentKey = async () => {
     if (!permanentKeyInput.trim()) return;
@@ -222,10 +512,9 @@ export const AdminReviews: React.FC<AdminReviewsProps> = ({
       setGoogleToken(permanentKeyInput.trim());
       setDriveStatusMsg({
         type: 'success',
-        text: '✅ গুগল ড্রাইভ পার্মানেন্ট কি সফলভাবে সংরক্ষিত হয়েছে! অফলাইন-অনলাইন যাই হোক না কেন এটি ক্লাউড ও ডিভাইসে স্থায়ীভাবে কানেক্টেড থাকবে।',
+        text: '✅ গুগল ড্রাইভ পার্মানেন্ট কি সংরক্ষিত হয়েছে!',
       });
       fetchDriveFolderFiles(permanentKeyInput.trim());
-      setShowPermanentKeyInput(false);
     } catch (err: any) {
       setDriveStatusMsg({
         type: 'error',
@@ -236,112 +525,28 @@ export const AdminReviews: React.FC<AdminReviewsProps> = ({
     }
   };
 
-  // Auto-resolve Google Drive Link when pasted into converter
-  useEffect(() => {
-    if (!converterInput.trim()) {
-      setResolvedConverterUrl('');
-      return;
-    }
-    const resolved = resolveGoogleDriveUrl(converterInput);
-    setResolvedConverterUrl(resolved);
-  }, [converterInput]);
-
-  // Load Google Drive Customer Reviews Folder Files
-  const fetchDriveFolderFiles = async (token?: string) => {
-    setIsLoadingFolderFiles(true);
-    try {
-      const res = await fetch('/api/drive/customer-reviews');
-      if (res.ok) {
-        const data = await res.json();
-        if (data.files) {
-          setFolderFiles(data.files);
-        }
-        if (data.folderUrl) {
-          setFolderUrl(data.folderUrl);
-        }
-      } else if (token || googleToken) {
-        const activeTok = token || googleToken;
-        if (activeTok) {
-          const directFiles = await listReviewFolderFiles(activeTok);
-          setFolderFiles(directFiles as any);
-        }
-      }
-    } catch (err) {
-      console.warn('[Fetch Drive Reviews Error]:', err);
-    } finally {
-      setIsLoadingFolderFiles(false);
-    }
-  };
-
-  // Initialize Google Auth state listener
-  useEffect(() => {
-    getGoogleAccessToken().then((tok) => {
-      if (tok) {
-        setGoogleToken(tok);
-        fetchDriveFolderFiles(tok);
-      } else {
-        fetchDriveFolderFiles();
-      }
-    });
-
-    const unsub = initGoogleDriveAuth(
-      (user, token) => {
-        setGoogleUser(user);
-        setGoogleToken(token);
-        fetchDriveFolderFiles(token);
-      },
-      () => {
-        setGoogleUser(null);
-        setGoogleToken(null);
-      }
-    );
-    return () => unsub();
-  }, []);
-
-  // Close product search dropdown on outside click
-  useEffect(() => {
-    const handleOutsideClick = (e: MouseEvent) => {
-      if (
-        productDropdownRef.current &&
-        !productDropdownRef.current.contains(e.target as Node)
-      ) {
-        setIsProductDropdownOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handleOutsideClick);
-    return () => document.removeEventListener('mousedown', handleOutsideClick);
-  }, []);
-
-  // Connect with Google Drive
-  const handleConnectGoogleDrive = async (forceReconnect = false): Promise<string | null> => {
-    if (googleToken && !forceReconnect) return googleToken;
+  const handleConnectGoogleDrive = async () => {
     setIsConnectingDrive(true);
     setDriveStatusMsg(null);
     try {
       const res = await signInWithGoogleDrive();
-      if (res) {
-        setGoogleUser(res.user);
-        setGoogleToken(res.accessToken);
-        setDriveStatusMsg({
-          type: 'success',
-          text: `Google Drive সফলভাবে সংযুক্ত হয়েছে (${res.user.email || 'Admin'})`,
-        });
-        fetchDriveFolderFiles(res.accessToken);
-        return res.accessToken;
-      }
-      return null;
+      setGoogleUser(res.user);
+      setGoogleToken(res.accessToken);
+      setDriveStatusMsg({
+        type: 'success',
+        text: `🎉 সফলভাবে Google Drive কানেক্ট হয়েছে! (${res.user.email})`,
+      });
+      fetchDriveFolderFiles(res.accessToken);
     } catch (err: any) {
       setDriveStatusMsg({
         type: 'error',
-        text: `Google Drive কানেক্ট করতে ব্যর্থ: ${err.message || 'Error'}`,
+        text: `Google Drive কানেকশন ব্যর্থ: ${err.message || 'Error occurred'}`,
       });
-      return null;
     } finally {
       setIsConnectingDrive(false);
     }
   };
 
-  // Upload file from device directly to Google Drive "Customer Reviews" folder
   const handleUploadFileToGoogleDrive = async (
     e: React.ChangeEvent<HTMLInputElement>,
     target: 'demo' | 'edit' | 'gallery' = 'demo'
@@ -350,51 +555,86 @@ export const AdminReviews: React.FC<AdminReviewsProps> = ({
     if (!file) return;
 
     setIsUploadingDrive(true);
-    setUploadProgress(15);
+    setUploadProgress(10);
     setDriveStatusMsg(null);
 
     try {
-      let token = googleToken;
-      if (!token) {
-        token = await getGoogleAccessToken();
-      }
+      let token = googleToken || (await getGoogleAccessToken()) || permanentKeyInput.trim() || undefined;
+      let res: { url: string; fileId?: string; inDrive?: boolean; name?: string } | null = null;
 
-      setUploadProgress(40);
-      let res: { fileId: string; url: string; name: string } | null = null;
-      try {
-        if (token) {
-          res = await uploadFileToGoogleDrive(file, token, (percent) => {
+      if (token) {
+        try {
+          const driveRes = await uploadFileToGoogleDrive(file, token, (percent) => {
             setUploadProgress(percent);
           });
+          res = {
+            url: driveRes.url,
+            fileId: driveRes.fileId,
+            inDrive: true,
+            name: driveRes.name || file.name,
+          };
+        } catch (tokenErr) {
+          console.warn('[Direct Drive Token Upload Error, trying Relay]:', tokenErr);
         }
-      } catch (uploadErr) {
-        console.warn('[Admin Drive Upload Error, fallback to reader]:', uploadErr);
       }
 
-      // If direct Google Drive token wasn't active or threw error, use instant Data URL reader
-      if (!res || !res.url) {
-        const dataUrl = await new Promise<string>((resolve) => {
-          const reader = new FileReader();
-          reader.onload = (ev) => resolve((ev.target?.result as string) || '');
-          reader.onerror = () => resolve('');
+      if (!res) {
+        const fileBuffer = await file.arrayBuffer();
+        const fileBytes = new Uint8Array(fileBuffer);
+        let binary = '';
+        const len = fileBytes.byteLength;
+        for (let i = 0; i < len; i++) {
+          binary += String.fromCharCode(fileBytes[i]);
+        }
+        const base64Data = btoa(binary);
+
+        setUploadProgress(60);
+
+        if (gasWebhookUrl && gasWebhookUrl.includes('script.google.com')) {
+          const gasRes = await fetch(gasWebhookUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            body: JSON.stringify({
+              action: 'uploadReviewPhoto',
+              filename: file.name,
+              mimeType: file.type || 'image/jpeg',
+              base64Data,
+            }),
+          }).catch(() => null);
+
+          if (gasRes && gasRes.ok) {
+            const data = await gasRes.json().catch(() => null);
+            if (data && data.url) {
+              res = {
+                url: data.url,
+                fileId: data.fileId,
+                inDrive: true,
+                name: file.name,
+              };
+            }
+          }
+        }
+      }
+
+      if (!res) {
+        const reader = new FileReader();
+        const localDataUrl: string = await new Promise((resolve) => {
+          reader.onload = () => resolve(reader.result as string);
           reader.readAsDataURL(file);
         });
-
         res = {
-          fileId: `local-${Date.now()}`,
-          url: dataUrl,
+          url: localDataUrl,
+          inDrive: false,
           name: file.name,
         };
       }
 
-      // Add to appropriate target form
       if (target === 'edit') {
         setEditPhotos((prev) => [...prev, res!.url]);
       } else if (target === 'demo') {
         setDemoPhotos((prev) => [...prev, res!.url]);
       }
 
-      // Always save to recentUploadedPhotos & folderFiles so it shows immediately in the gallery below!
       const newMediaItem = {
         id: res.fileId || `photo-${Date.now()}`,
         name: res.name || file.name,
@@ -415,18 +655,16 @@ export const AdminReviews: React.FC<AdminReviewsProps> = ({
 
       setDriveStatusMsg({
         type: 'success',
-        text: `ফটো সফলভাবে আপলোড হয়েছে এবং নিচের মিডিয়া গ্যালারিতে যুক্ত করা হয়েছে!`,
+        text: `ফটো সফলভাবে আপলোড হয়েছে!`,
       });
 
-      // Refresh drive folder files in background
       if (token) {
         fetchDriveFolderFiles(token);
       }
     } catch (err: any) {
-      console.warn('[Upload Handler Notice]:', err);
       setDriveStatusMsg({
         type: 'error',
-        text: `ছবি প্রসেসিংয়ে সমস্যা হয়েছে: ${err.message || 'Error'}`,
+        text: `ছবি প্রসেসিংয়ে সমস্যা: ${err.message || 'Error'}`,
       });
     } finally {
       setIsUploadingDrive(false);
@@ -434,63 +672,6 @@ export const AdminReviews: React.FC<AdminReviewsProps> = ({
       if (e.target) e.target.value = '';
     }
   };
-
-  // Helper to resolve and add photo URL to demo review
-  const handleAddDemoPhotoUrl = (urlToAdd?: string) => {
-    const raw = (urlToAdd || demoPhotoInput).trim();
-    if (!raw) return;
-    const resolved = resolveGoogleDriveUrl(raw);
-    setDemoPhotos((prev) => [...prev, resolved]);
-    setDemoPhotoInput('');
-    setDriveStatusMsg({
-      type: 'success',
-      text: 'ছবি সফলভাবে যুক্ত হয়েছে এবং সরাসরি গুগল ড্রাইভ থেকে লোড হবে!',
-    });
-  };
-
-  // Copy helper
-  const handleCopyLink = (text: string) => {
-    navigator.clipboard.writeText(text);
-    setCopiedUrl(text);
-    setTimeout(() => setCopiedUrl(null), 2500);
-  };
-
-  // Filtered products for product search selector
-  const filteredProductsForSelect = products.filter((p) => {
-    if (!productSearchTerm.trim()) return true;
-    const term = productSearchTerm.toLowerCase();
-    return (
-      p.name.toLowerCase().includes(term) ||
-      (p.sku && p.sku.toLowerCase().includes(term)) ||
-      (p.category && p.category.toLowerCase().includes(term))
-    );
-  });
-
-  const selectedProductObj = products.find((p) => p.id === demoProductId) || products[0];
-
-  // Editing state
-  const [editingReviewId, setEditingReviewId] = useState<string | null>(null);
-  const [editComment, setEditComment] = useState('');
-  const [editRating, setEditRating] = useState(5);
-  const [editPhotos, setEditPhotos] = useState<string[]>([]);
-  const [newPhotoUrlInput, setNewPhotoUrlInput] = useState('');
-
-  const filteredReviews = reviews.filter((r) => {
-    const cName = r.customerName || (r as any).userName || '';
-    const matchesSearch =
-      cName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      r.comment.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (r.productName && r.productName.toLowerCase().includes(searchQuery.toLowerCase()));
-
-    const matchesStatus =
-      statusFilter === 'all' ||
-      (statusFilter === 'approved' && r.status === 'approved') ||
-      (statusFilter === 'pending' && r.status === 'pending') ||
-      (statusFilter === 'hidden' && r.status === 'hidden') ||
-      (statusFilter === 'demo' && r.isDemo);
-
-    return matchesSearch && matchesStatus;
-  });
 
   const handleCreateDemoReview = (e: React.FormEvent) => {
     e.preventDefault();
@@ -518,7 +699,6 @@ export const AdminReviews: React.FC<AdminReviewsProps> = ({
       onUpdateReview(newDemoRev);
     }
 
-    // Reset modal
     setDemoCustomerName('');
     setDemoComment('');
     setDemoPhotos([]);
@@ -557,806 +737,624 @@ export const AdminReviews: React.FC<AdminReviewsProps> = ({
   };
 
   return (
-    <div className="space-y-6">
-      {/* 1. Google Drive Customer Reviews Sync & Storage Dashboard */}
-      <div className="p-5 sm:p-6 rounded-3xl bg-gradient-to-br from-purple-900/10 via-white to-sky-50 dark:from-purple-950/40 dark:via-slate-900 dark:to-slate-900 border border-purple-200/80 dark:border-purple-800/60 shadow-xs space-y-4">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div className="flex items-start gap-3.5">
-            <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-purple-600 to-indigo-600 flex items-center justify-center text-white shadow-md shrink-0">
-              <Cloud className="w-6 h-6" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2.5 flex-wrap">
-                <h3 className="font-black text-slate-900 dark:text-white text-base sm:text-lg">
-                  Google Drive কাস্টমার রিভিউ ফোল্ডার ও সিঙ্ক
-                </h3>
-                {googleUser || googleToken ? (
-                  <span className="px-2.5 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300 text-[11px] font-extrabold border border-emerald-300 dark:border-emerald-700 flex items-center gap-1">
-                    <CheckCircle2 className="w-3.5 h-3.5" />
-                    <span>কানেক্টেড: {googleUser?.email || 'Admin Drive'}</span>
-                  </span>
-                ) : (
-                  <span className="px-2.5 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950/80 text-amber-800 dark:text-amber-300 text-[11px] font-extrabold border border-amber-300 dark:border-amber-700 flex items-center gap-1">
-                    <AlertCircle className="w-3.5 h-3.5" />
-                    <span>ড্রাইভ কানেক্ট করুন</span>
-                  </span>
-                )}
-              </div>
-              <p className="text-xs text-slate-600 dark:text-slate-400 mt-1 max-w-2xl leading-relaxed">
-                কাস্টমাররা যে ফটো রিভিউ দিবে, তা স্বয়ংক্রিয়ভাবে আপনার গুগল ড্রাইভের <b>"Customer Reviews"</b> ফোল্ডারে আপলোড হয়ে পাবলিক ভিউয়ার হিসেবে সেভ হবে এবং প্রতিবার ড্রাইভ সিডিএন থেকে দ্রুত লোড হবে।
-              </p>
-            </div>
+    <div className="space-y-4 max-w-7xl mx-auto">
+      {/* 1. TOP HEADER & QUICK TOOLBAR (Compact & SaaS-Grade) */}
+      <div className="p-4 sm:p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-purple-600 to-indigo-600 flex items-center justify-center text-white shadow-xs shrink-0 font-bold">
+            <MessageSquare className="w-5 h-5" />
           </div>
-
-          <div className="flex items-center gap-2 flex-wrap shrink-0">
-            {folderUrl && (
-              <a
-                href={folderUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="px-3.5 py-2 rounded-xl bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 border border-purple-200 dark:border-purple-800 text-purple-700 dark:text-purple-300 font-bold text-xs flex items-center gap-1.5 transition-all shadow-2xs"
-              >
-                <Folder className="w-4 h-4 text-purple-600" />
-                <span>ড্রাইভ ফোল্ডার খুলুন</span>
-                <ExternalLink className="w-3.5 h-3.5" />
-              </a>
-            )}
-
-            <button
-              type="button"
-              onClick={() => setShowPermanentKeyInput((prev) => !prev)}
-              className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer"
-              title="Google App Password / Permanent API Key"
-            >
-              <Key className="w-4 h-4" />
-              <span>{permanentKeyInput ? '🔑 স্থায়ী কি কনফিগার করা' : '🔑 অ্যাপ পাসওয়ার্ড / স্থায়ী কি'}</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => handleConnectGoogleDrive(true)}
-              disabled={isConnectingDrive}
-              className="px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer disabled:opacity-50"
-            >
-              {isConnectingDrive ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : (
-                <Cloud className="w-4 h-4" />
+          <div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <h2 className="text-base sm:text-lg font-black text-slate-900 dark:text-white">
+                কাস্টমার রিভিউ মডারেশন
+              </h2>
+              <span className="px-2 py-0.5 rounded-full bg-purple-100 dark:bg-purple-950/80 text-purple-700 dark:text-purple-300 font-extrabold text-[11px]">
+                {reviews.length}টি রিভিউ
+              </span>
+              {counts.pending > 0 && (
+                <span className="px-2 py-0.5 rounded-full bg-amber-500 text-slate-950 font-black text-[11px] animate-pulse flex items-center gap-1">
+                  <span>⏳ {counts.pending}টি পেন্ডিং</span>
+                </span>
               )}
-              <span>{googleUser ? 'ড্রাইভ রিলোড / পরিবর্তন' : 'Google Drive সাইন-ইন'}</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => directDriveUploadRef.current?.click()}
-              disabled={isUploadingDrive}
-              className="px-4 py-2 rounded-xl bg-slate-900 hover:bg-black dark:bg-slate-800 dark:hover:bg-slate-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer disabled:opacity-50"
-            >
-              <FolderUp className="w-4 h-4" />
-              <span>Drive-এ ছবি আপলোড</span>
-            </button>
-            <input
-              ref={directDriveUploadRef}
-              type="file"
-              accept="image/*,video/*"
-              onChange={(e) => handleUploadFileToGoogleDrive(e, 'gallery')}
-              className="hidden"
-            />
+            </div>
+            <p className="text-[11px] text-slate-500 dark:text-slate-400">
+              কাস্টমারদের মতামত যাচাই, অনুমোদন এবং Google Drive সরাসরি ইমেজ সিঙ্ক
+            </p>
           </div>
         </div>
 
-        {/* Permanent App Key / API Key Configuration Drawer */}
-        {showPermanentKeyInput && (
-          <div className="p-4 rounded-2xl bg-amber-50/90 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 space-y-3 animate-in fade-in duration-200">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Key className="w-4 h-4 text-amber-600 dark:text-amber-400" />
-                <h4 className="text-xs font-bold text-amber-900 dark:text-amber-200">
-                  গুগল ড্রাইভ পার্মানেন্ট কানেকশন (গুগল অ্যাপ পাসওয়ার্ড / এপিআই কি সিস্টেম)
-                </h4>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowPermanentKeyInput(false)}
-                className="text-amber-700 hover:text-amber-900 dark:text-amber-400 text-xs font-bold px-1.5 py-0.5 cursor-pointer"
-              >
-                ✕
-              </button>
-            </div>
-
-            <p className="text-[11px] text-amber-800 dark:text-amber-300/90 leading-relaxed">
-              গুগল অ্যাপ পাসওয়ার্ডের মতোই একবার আপনার Google Drive API Key, OAuth Refresh Token বা Permanent Token এখানে দিয়ে সেভ করলে ব্রাউজার রিফ্রেশ দিলে কিংবা অফলাইন থেকে অনলাইনে আসলেও ড্রাইভ আর বারবার ডিসকানেক্ট হবে না। এটি ক্লাউড ও ডিভাইসে স্থায়ীভাবে সেভ থাকবে।
-            </p>
-
-            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-              <input
-                type="password"
-                value={permanentKeyInput}
-                onChange={(e) => setPermanentKeyInput(e.target.value)}
-                placeholder="Paste Google Drive Permanent Token / API Key / Service Key here (e.g. AIzaSy...)"
-                className="flex-1 px-3.5 py-2 rounded-xl border border-amber-300 dark:border-amber-700 bg-white dark:bg-slate-900 text-xs text-slate-900 dark:text-white font-mono focus:border-amber-500 focus:outline-hidden"
-              />
-              <button
-                type="button"
-                onClick={handleSavePermanentKey}
-                disabled={isSavingPermanentKey || !permanentKeyInput.trim()}
-                className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs cursor-pointer disabled:opacity-50"
-              >
-                {isSavingPermanentKey ? (
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                ) : (
-                  <Save className="w-3.5 h-3.5" />
-                )}
-                <span>স্থায়ীভাবে সেভ করুন</span>
-              </button>
-            </div>
-
-            {/* Quick 2-Minute Tutorial Card */}
-            <div className="mt-2 p-3 rounded-xl bg-white dark:bg-slate-900 border border-amber-200 dark:border-amber-900/60 space-y-2 text-[11px]">
-              <div className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
-                <Sparkles className="w-3.5 h-3.5 text-amber-600" />
-                <span>কীভাবে ২ মিনিটে Google Drive API Key পাবেন? (খুবই সহজ নিয়ম)</span>
-              </div>
-              <ol className="list-decimal list-inside space-y-1 text-slate-600 dark:text-slate-400 leading-relaxed pl-1">
-                <li>
-                  <a
-                    href="https://console.cloud.google.com/"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-amber-700 dark:text-amber-400 font-bold underline inline-flex items-center gap-0.5"
-                  >
-                    Google Cloud Console <ExternalLink className="w-3 h-3 inline" />
-                  </a>{' '}
-                  -এ যান (আপনার সাধারণ জিমেইল দিয়ে ফ্রি লগইন করুন)।
-                </li>
-                <li>
-                  উপরে প্রোজেক্ট সিলেক্ট ড্রপডাউন থেকে <b>"New Project"</b> বানিয়ে নিন (নাম দিন: <i>KenaX Drive</i>)।
-                </li>
-                <li>
-                  বাম পাশের মেনু থেকে <b>"APIs & Services" &gt; "Library"</b>-তে যান এবং <b>"Google Drive API"</b> সার্চ করে <b>Enable</b> করুন।
-                </li>
-                <li>
-                  এবার <b>"APIs & Services" &gt; "Credentials"</b>-এ গিয়ে উপরে <b>"+ CREATE CREDENTIALS" &gt; "API key"</b>-তে ক্লিক করুন।
-                </li>
-                <li>
-                  একটি চাবি/কি তৈরি হবে (যেমন: <code className="bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded text-amber-600 font-mono">AIzaSy...</code>)। সেটি কপি করে উপরের বক্সে পেস্ট করে <b>"স্থায়ীভাবে সেভ করুন"</b> বাটনে চাপ দিন। ব্যস, স্থায়ী কানেকশন রেডি!
-                </li>
-              </ol>
-            </div>
-          </div>
-        )}
-
-        {/* Drive Status Alert */}
-        {driveStatusMsg && (
-          <div
-            className={`p-3 rounded-2xl text-xs font-semibold flex items-center gap-2 ${
-              driveStatusMsg.type === 'success'
-                ? 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800'
-                : 'bg-rose-50 dark:bg-rose-950/60 text-rose-800 dark:text-rose-300 border border-rose-200 dark:border-rose-800'
+        {/* Quick Toolbar Action Buttons */}
+        <div className="flex items-center gap-2 flex-wrap shrink-0">
+          <button
+            type="button"
+            onClick={() => {
+              setIsDriveSettingsOpen((prev) => !prev);
+              setIsMediaGalleryOpen(false);
+            }}
+            className={`px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer border ${
+              isDriveSettingsOpen
+                ? 'bg-purple-600 text-white border-purple-600 shadow-xs'
+                : 'bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700'
             }`}
           >
-            {driveStatusMsg.type === 'success' ? (
-              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-            ) : (
-              <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
-            )}
-            <span className="flex-1">{driveStatusMsg.text}</span>
-            <button
-              type="button"
-              onClick={() => setDriveStatusMsg(null)}
-              className="text-slate-400 hover:text-slate-600 text-xs px-1 cursor-pointer"
-            >
-              ✕
-            </button>
-          </div>
-        )}
+            <Cloud className="w-3.5 h-3.5 text-purple-500" />
+            <span>Google Drive সিঙ্ক</span>
+            <ChevronDown className={`w-3 h-3 transition-transform ${isDriveSettingsOpen ? 'rotate-180' : ''}`} />
+          </button>
 
-        {/* Upload progress indicator */}
-        {isUploadingDrive && (
-          <div className="space-y-1.5 p-3 rounded-2xl bg-purple-50 dark:bg-purple-950/50 border border-purple-200 dark:border-purple-800">
-            <div className="flex items-center justify-between text-xs text-purple-900 dark:text-purple-200 font-bold">
-              <span className="flex items-center gap-2">
-                <Loader2 className="w-4 h-4 animate-spin text-purple-600" />
-                Google Drive "Customer Reviews" ফোল্ডারে আপলোড হচ্ছে...
-              </span>
-              <span>{uploadProgress}%</span>
-            </div>
-            <div className="w-full h-2 rounded-full bg-purple-200 dark:bg-purple-900 overflow-hidden">
-              <div
-                className="h-full bg-gradient-to-r from-purple-600 to-indigo-600 transition-all duration-300"
-                style={{ width: `${uploadProgress}%` }}
-              />
-            </div>
-          </div>
-        )}
-
-        {/* Google Drive Link Auto-Resolver & Converter Tool */}
-        <div className="p-3.5 rounded-2xl bg-white dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700/80 space-y-2.5">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-1.5 font-bold text-xs text-slate-800 dark:text-slate-200">
-              <Link2 className="w-4 h-4 text-purple-600" />
-              <span>গুগল ড্রাইভ ফটো লিংক অটো-কনভার্টার (Direct Drive Image Link Converter)</span>
-            </div>
-            <span className="text-[11px] text-slate-400">যে কোনো গুগল ড্রাইভ লিংক পেস্ট করুন</span>
-          </div>
-
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-            <input
-              type="text"
-              value={converterInput}
-              onChange={(e) => setConverterInput(e.target.value)}
-              placeholder="Paste any Google Drive link (e.g. https://drive.google.com/file/d/1aB2c.../view?usp=sharing)"
-              className="flex-1 px-3.5 py-2 rounded-xl border border-slate-300 dark:border-slate-700 text-xs text-slate-900 dark:text-white dark:bg-slate-900 focus:border-purple-500 focus:outline-hidden"
-            />
-            {converterInput && (
-              <button
-                type="button"
-                onClick={() => setConverterInput('')}
-                className="px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 text-slate-500 hover:text-slate-700 text-xs font-bold cursor-pointer"
-              >
-                Clear
-              </button>
-            )}
-          </div>
-
-          {/* Resolved Result Preview */}
-          {resolvedConverterUrl && (
-            <div className="p-3 rounded-xl bg-purple-50/70 dark:bg-purple-950/40 border border-purple-200 dark:border-purple-800 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 animate-in fade-in duration-150">
-              <div className="flex items-center gap-3 min-w-0">
-                <div className="w-12 h-12 rounded-xl overflow-hidden bg-white dark:bg-slate-800 border border-purple-300 shrink-0 shadow-2xs">
-                  <img
-                    src={getDriveDirectImageUrl(resolvedConverterUrl)}
-                    alt="Resolved preview"
-                    className="w-full h-full object-cover"
-                    onError={(e) => handleImageErrorFallback(e, resolvedConverterUrl)}
-                  />
-                </div>
-                <div className="min-w-0">
-                  <div className="text-[11px] font-bold text-emerald-700 dark:text-emerald-400 flex items-center gap-1">
-                    <CheckCircle2 className="w-3.5 h-3.5" />
-                    <span>রেডি! সরাসরি সিডিএন ইমেজ ইউআরএল (Permanent CDN Link):</span>
-                  </div>
-                  <div className="text-xs text-slate-700 dark:text-slate-300 font-mono truncate max-w-md">
-                    {resolvedConverterUrl}
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2 shrink-0">
-                <button
-                  type="button"
-                  onClick={() => handleCopyLink(resolvedConverterUrl)}
-                  className="px-3 py-1.5 rounded-xl bg-white dark:bg-slate-800 hover:bg-purple-100 dark:hover:bg-purple-900/60 border border-purple-300 dark:border-purple-700 text-purple-700 dark:text-purple-300 font-bold text-xs flex items-center gap-1 cursor-pointer"
-                >
-                  {copiedUrl === resolvedConverterUrl ? (
-                    <Check className="w-3.5 h-3.5 text-emerald-600" />
-                  ) : (
-                    <Copy className="w-3.5 h-3.5" />
-                  )}
-                  <span>{copiedUrl === resolvedConverterUrl ? 'কপি হয়েছে!' : 'লিংক কপি'}</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    setDemoPhotos((prev) => [...prev, resolvedConverterUrl]);
-                    setIsAddDemoOpen(true);
-                    setConverterInput('');
-                  }}
-                  className="px-3 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs flex items-center gap-1 cursor-pointer shadow-2xs"
-                >
-                  <span>+ ডেমো রিভিউতে যোগ</span>
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Complete Interactive Media & Customer Photos Gallery */}
-        <div className="space-y-3 pt-3 border-t border-purple-200/60 dark:border-purple-800/60">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
-            <div className="flex items-center gap-2 flex-wrap">
-              <div className="text-xs font-black text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
-                <ImageIcon className="w-4 h-4 text-purple-600 dark:text-purple-400" />
-                <span>মিডিয়া ও কাস্টমার ফটো গ্যালারি</span>
-              </div>
-              <span className="px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300 text-[10px] font-bold border border-emerald-200 dark:border-emerald-800">
-                কাস্টমারদের ছবি: {customerUploadedPhotos.length}টি
-              </span>
-              <span className="px-2 py-0.5 rounded-full bg-purple-100 dark:bg-purple-950/80 text-purple-800 dark:text-purple-300 text-[10px] font-bold border border-purple-200 dark:border-purple-800">
-                ড্রাইভ ও রিসেন্ট: {driveAndUploadedMedia.length}টি
-              </span>
-            </div>
-
-            <div className="flex items-center gap-2 flex-wrap">
-              {/* Tab Filters */}
-              <div className="flex items-center bg-slate-100 dark:bg-slate-800 p-0.5 rounded-xl border border-slate-200 dark:border-slate-700 text-[11px] font-bold">
-                <button
-                  type="button"
-                  onClick={() => setGalleryTab('all')}
-                  className={`px-2.5 py-1 rounded-lg transition-colors cursor-pointer ${
-                    galleryTab === 'all'
-                      ? 'bg-white dark:bg-slate-900 text-purple-600 dark:text-purple-400 shadow-2xs font-black'
-                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
-                  }`}
-                >
-                  সকল ({customerUploadedPhotos.length + driveAndUploadedMedia.length})
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setGalleryTab('customer')}
-                  className={`px-2.5 py-1 rounded-lg transition-colors cursor-pointer ${
-                    galleryTab === 'customer'
-                      ? 'bg-white dark:bg-slate-900 text-emerald-600 dark:text-emerald-400 shadow-2xs font-black'
-                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
-                  }`}
-                >
-                  কাস্টমার রিভিউ ({customerUploadedPhotos.length})
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setGalleryTab('drive')}
-                  className={`px-2.5 py-1 rounded-lg transition-colors cursor-pointer ${
-                    galleryTab === 'drive'
-                      ? 'bg-white dark:bg-slate-900 text-sky-600 dark:text-sky-400 shadow-2xs font-black'
-                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
-                  }`}
-                >
-                  ড্রাইভ/আপলোড ({driveAndUploadedMedia.length})
-                </button>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => fetchDriveFolderFiles()}
-                disabled={isLoadingFolderFiles}
-                className="text-[11px] text-purple-700 dark:text-purple-400 font-bold hover:underline flex items-center gap-1 cursor-pointer ml-1"
-                title="Refresh media"
-              >
-                <RefreshCw className={`w-3 h-3 ${isLoadingFolderFiles ? 'animate-spin' : ''}`} />
-                <span>রিফ্রেশ</span>
-              </button>
-            </div>
-          </div>
-
-          {displayedMediaList.length === 0 ? (
-            <div className="p-6 rounded-2xl bg-white dark:bg-slate-900 border border-dashed border-slate-200 dark:border-slate-800 text-center space-y-2">
-              <ImageIcon className="w-8 h-8 text-slate-300 dark:text-slate-600 mx-auto" />
-              <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">
-                {galleryTab === 'customer'
-                  ? 'কাস্টমারদের কোনো আপলোড করা ছবি এখনও পাওয়া যায়নি।'
-                  : 'গ্যালারিতে এখনও কোনো ফটো নেই। উপরের "Drive-এ ছবি আপলোড" বাটনে ক্লিক করে সরাসরি ছবি যুক্ত করতে পারেন।'}
-              </p>
-            </div>
-          ) : (
-            <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-2.5 max-h-[360px] overflow-y-auto pr-1">
-              {displayedMediaList.slice(0, 32).map((item, idx) => (
-                <div
-                  key={`${item.id}-${idx}`}
-                  className="group relative rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 aspect-square shadow-2xs hover:border-purple-500 transition-all cursor-pointer"
-                >
-                  <img
-                    src={getDriveDirectImageUrl(item.url)}
-                    alt={item.name}
-                    className="w-full h-full object-cover group-hover:scale-105 transition-transform"
-                    loading="lazy"
-                    onError={(e) => handleImageErrorFallback(e, item.url)}
-                  />
-
-                  {/* Badge on Card */}
-                  <div className="absolute top-1 left-1 pointer-events-none">
-                    {item.isCustomer ? (
-                      <span className="px-1.5 py-0.5 rounded-md bg-emerald-600/90 text-white text-[8px] font-bold shadow-xs">
-                        কাস্টমার
-                      </span>
-                    ) : (
-                      <span className="px-1.5 py-0.5 rounded-md bg-purple-600/90 text-white text-[8px] font-bold shadow-xs">
-                        ড্রাইভ
-                      </span>
-                    )}
-                  </div>
-
-                  {/* Action Overlay */}
-                  <div className="absolute inset-0 bg-black/70 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-between p-1.5 text-white">
-                    <span className="text-[9px] font-bold truncate" title={item.name}>
-                      {item.customerName || item.name}
-                    </span>
-                    <div className="flex items-center justify-center gap-1">
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setPreviewModalUrl(item.url);
-                        }}
-                        className="p-1 rounded-lg bg-white/20 hover:bg-white/40 text-white text-[10px] font-bold cursor-pointer"
-                        title="Zoom / View full photo"
-                      >
-                        <ZoomIn className="w-3 h-3" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleCopyLink(item.url);
-                        }}
-                        className="p-1 rounded-lg bg-white/20 hover:bg-white/40 text-white text-[10px] font-bold cursor-pointer"
-                        title="Copy direct image link"
-                      >
-                        <Copy className="w-3 h-3" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setDemoPhotos((prev) => [...prev, item.url]);
-                          setIsAddDemoOpen(true);
-                        }}
-                        className="p-1 rounded-lg bg-purple-600 hover:bg-purple-700 text-white text-[10px] font-bold cursor-pointer"
-                        title="Add to new demo review"
-                      >
-                        + যোগ
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Header & Filter */}
-      <div className="p-5 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xs flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
-        <div className="relative flex-1 max-w-md">
-          <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500" />
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search reviews by customer name or keywords..."
-            className="w-full pl-10 pr-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-xs text-slate-900 dark:text-white dark:bg-slate-800 placeholder:text-slate-400 focus:outline-hidden focus:ring-2 focus:ring-sky-500"
-          />
-        </div>
-
-        <div className="flex items-center gap-2 flex-wrap">
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            className="px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-800 cursor-pointer"
+          <button
+            type="button"
+            onClick={() => {
+              setIsMediaGalleryOpen((prev) => !prev);
+              setIsDriveSettingsOpen(false);
+            }}
+            className={`px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer border ${
+              isMediaGalleryOpen
+                ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
+                : 'bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700'
+            }`}
           >
-            <option value="all">All Reviews ({reviews.length})</option>
-            <option value="pending">Pending Moderation</option>
-            <option value="approved">Approved & Public</option>
-            <option value="hidden">Hidden</option>
-            <option value="demo">Demo Reviews</option>
-          </select>
+            <ImageIcon className="w-3.5 h-3.5 text-indigo-500" />
+            <span>ফটো গ্যালারি ({customerUploadedPhotos.length + driveAndUploadedMedia.length})</span>
+            <ChevronDown className={`w-3 h-3 transition-transform ${isMediaGalleryOpen ? 'rotate-180' : ''}`} />
+          </button>
 
           <button
             type="button"
             onClick={() => setIsAddDemoOpen(true)}
-            className="px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer"
+            className="px-3.5 py-2 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-black text-xs flex items-center gap-1 shadow-xs transition-colors cursor-pointer"
           >
-            <span>+ Add Demo Review</span>
+            <span>+ ডেমো রিভিউ</span>
           </button>
         </div>
       </div>
 
-      {/* Add Demo Review Modal */}
-      {isAddDemoOpen && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 max-w-lg w-full space-y-4 shadow-2xl border border-slate-100 dark:border-slate-800 animate-in fade-in zoom-in-95 duration-200 max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+      {/* 2. COLLAPSIBLE GOOGLE DRIVE & APPS SCRIPT SETTINGS DRAWER */}
+      {isDriveSettingsOpen && (
+        <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-br from-purple-50/80 via-white to-slate-50 dark:from-purple-950/30 dark:via-slate-900 dark:to-slate-900 border border-purple-200 dark:border-purple-800/80 shadow-sm space-y-4 animate-in fade-in duration-200">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-purple-100 dark:border-purple-800/60 pb-3">
+            <div className="flex items-center gap-2">
+              <Sparkles className="w-4 h-4 text-purple-600 dark:text-purple-400" />
+              <h3 className="font-black text-xs sm:text-sm text-slate-900 dark:text-white">
+                Google Drive ও Apps Script ক্লাউড কনফিগারেশন
+              </h3>
+            </div>
+
+            <div className="flex items-center gap-1.5 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl text-[11px] font-bold">
+              <button
+                type="button"
+                onClick={() => setActiveSettingsTab('script')}
+                className={`px-2.5 py-1 rounded-lg transition-colors cursor-pointer ${
+                  activeSettingsTab === 'script'
+                    ? 'bg-white dark:bg-slate-900 text-purple-600 dark:text-purple-400 shadow-2xs font-black'
+                    : 'text-slate-600 dark:text-slate-400'
+                }`}
+              >
+                Apps Script Webhook
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveSettingsTab('key')}
+                className={`px-2.5 py-1 rounded-lg transition-colors cursor-pointer ${
+                  activeSettingsTab === 'key'
+                    ? 'bg-white dark:bg-slate-900 text-amber-600 dark:text-amber-400 shadow-2xs font-black'
+                    : 'text-slate-600 dark:text-slate-400'
+                }`}
+              >
+                Drive API Key
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveSettingsTab('auth')}
+                className={`px-2.5 py-1 rounded-lg transition-colors cursor-pointer ${
+                  activeSettingsTab === 'auth'
+                    ? 'bg-white dark:bg-slate-900 text-sky-600 dark:text-sky-400 shadow-2xs font-black'
+                    : 'text-slate-600 dark:text-slate-400'
+                }`}
+              >
+                OAuth Sign-In
+              </button>
+            </div>
+          </div>
+
+          {/* Tab 1: Google Apps Script Webhook (Recommended) */}
+          {activeSettingsTab === 'script' && (
+            <div className="space-y-3">
+              <p className="text-[11px] text-slate-600 dark:text-slate-300 leading-relaxed">
+                💡 কাস্টমাররা রিভিউ ছবি আপলোড করলে এই স্ক্রিপ্ট স্বয়ংক্রিয়ভাবে আপনার Google Drive-এর <b>"Customer Reviews"</b> ফোল্ডারে ছবিটি সেভ করবে এবং পার্মানেন্ট লিংক দেবে।
+              </p>
+
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                <input
+                  type="url"
+                  value={gasWebhookUrl}
+                  onChange={(e) => setGasWebhookUrl(e.target.value)}
+                  placeholder="https://script.google.com/macros/s/.../exec"
+                  className="flex-1 px-3 py-2 rounded-xl border border-purple-200 dark:border-purple-700 bg-white dark:bg-slate-800 text-xs text-slate-900 dark:text-white font-mono focus:border-purple-500 focus:outline-hidden"
+                />
+                <button
+                  type="button"
+                  onClick={handleSaveGasWebhook}
+                  disabled={isSavingGasWebhook || !gasWebhookUrl.trim()}
+                  className="px-3.5 py-2 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs flex items-center justify-center gap-1 shadow-xs cursor-pointer disabled:opacity-50"
+                >
+                  <Save className="w-3.5 h-3.5" />
+                  <span>সেভ</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleTestGasWebhook}
+                  disabled={isTestingGasWebhook || !gasWebhookUrl.trim()}
+                  className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center justify-center gap-1 shadow-xs cursor-pointer disabled:opacity-50"
+                >
+                  {isTestingGasWebhook ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
+                  <span>টেস্ট ড্রাইভ ফোল্ডার</span>
+                </button>
+              </div>
+
+              {gasTestResult && (
+                <div
+                  className={`p-2.5 rounded-xl text-[11px] font-bold flex items-center gap-2 ${
+                    gasTestResult.success
+                      ? 'bg-emerald-50 dark:bg-emerald-950/70 border border-emerald-200 text-emerald-800 dark:text-emerald-200'
+                      : 'bg-rose-50 dark:bg-rose-950/70 border border-rose-200 text-rose-800 dark:text-rose-200'
+                  }`}
+                >
+                  {gasTestResult.success ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" /> : <AlertCircle className="w-3.5 h-3.5 text-rose-600 shrink-0" />}
+                  <span className="flex-1">{gasTestResult.message}</span>
+                  <button type="button" onClick={() => setGasTestResult(null)} className="text-slate-400 px-1 cursor-pointer">✕</button>
+                </div>
+              )}
+
+              {/* Code Snippet Box */}
+              <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 text-white space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold text-slate-300">Google Apps Script Code (Reviews + Drive + Gmail)</span>
+                  <button
+                    type="button"
+                    onClick={handleCopyAppsScript}
+                    className="px-2.5 py-1 rounded-lg bg-purple-600 hover:bg-purple-700 text-white text-[10px] font-black flex items-center gap-1 cursor-pointer"
+                  >
+                    {isScriptCodeCopied ? <Check className="w-3 h-3 text-emerald-300" /> : <Copy className="w-3 h-3" />}
+                    <span>{isScriptCodeCopied ? 'কপি হয়েছে!' : '১-ক্লিকে কোড কপি'}</span>
+                  </button>
+                </div>
+                <pre className="p-2 bg-slate-900 rounded-lg font-mono text-[10px] text-emerald-400 overflow-x-auto max-h-32 scrollbar-thin">
+                  {APPS_SCRIPT_CODE}
+                </pre>
+              </div>
+            </div>
+          )}
+
+          {/* Tab 2: Permanent Key */}
+          {activeSettingsTab === 'key' && (
+            <div className="space-y-2 text-xs">
+              <p className="text-[11px] text-slate-600 dark:text-slate-300">
+                Google Cloud Console থেকে পাওয়া <b>Google Drive API Key</b> এখানে সেভ করতে পারেন:
+              </p>
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                <input
+                  type="password"
+                  value={permanentKeyInput}
+                  onChange={(e) => setPermanentKeyInput(e.target.value)}
+                  placeholder="AIzaSy..."
+                  className="flex-1 px-3 py-2 rounded-xl border border-amber-200 dark:border-amber-700 bg-white dark:bg-slate-800 text-xs font-mono"
+                />
+                <button
+                  type="button"
+                  onClick={handleSavePermanentKey}
+                  disabled={isSavingPermanentKey || !permanentKeyInput.trim()}
+                  className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs cursor-pointer"
+                >
+                  সেভ কি
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Tab 3: OAuth Sign-In */}
+          {activeSettingsTab === 'auth' && (
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
               <div>
-                <h3 className="font-black text-slate-900 dark:text-white text-base flex items-center gap-2">
-                  <MessageSquare className="w-5 h-5 text-purple-600 dark:text-purple-400" />
-                  <span>Add Demo Review</span>
-                </h3>
-                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                  Demo reviews appear on product pages naturally like authentic customer feedback.
-                </p>
+                <span className="font-bold text-slate-900 dark:text-white">স্ট্যাটাস: </span>
+                {googleUser ? (
+                  <span className="text-emerald-600 dark:text-emerald-400 font-bold">কানেক্টেড ({googleUser.email})</span>
+                ) : (
+                  <span className="text-slate-500 font-medium">কানেক্টেড নয়</span>
+                )}
               </div>
               <button
                 type="button"
-                onClick={() => setIsAddDemoOpen(false)}
-                className="p-1 rounded-full text-slate-400 hover:text-slate-600 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+                onClick={() => handleConnectGoogleDrive()}
+                disabled={isConnectingDrive}
+                className="px-3.5 py-2 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs flex items-center gap-1.5 cursor-pointer"
               >
-                <X className="w-5 h-5" />
+                {isConnectingDrive ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Cloud className="w-3.5 h-3.5" />}
+                <span>{googleUser ? 'অ্যাকাউন্ট পরিবর্তন' : 'Google Sign-In'}</span>
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* 3. COLLAPSIBLE MEDIA GALLERY DRAWER */}
+      {isMediaGalleryOpen && (
+        <div className="p-4 sm:p-5 rounded-2xl bg-white dark:bg-slate-900 border border-indigo-200 dark:border-indigo-800/80 shadow-sm space-y-3 animate-in fade-in duration-200">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 dark:border-slate-800 pb-2.5">
+            <div className="flex items-center gap-2">
+              <ImageIcon className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+              <h3 className="font-black text-xs sm:text-sm text-slate-900 dark:text-white">
+                মিডিয়া ও কাস্টমার ফটো এক্সপ্লোরার
+              </h3>
+            </div>
+
+            <div className="flex items-center gap-1.5 bg-slate-100 dark:bg-slate-800 p-0.5 rounded-xl text-[11px] font-bold">
+              <button
+                type="button"
+                onClick={() => setGalleryTab('all')}
+                className={`px-2 py-0.5 rounded-lg transition-colors cursor-pointer ${
+                  galleryTab === 'all' ? 'bg-white dark:bg-slate-900 text-indigo-600 font-black shadow-2xs' : 'text-slate-500'
+                }`}
+              >
+                সকল ({customerUploadedPhotos.length + driveAndUploadedMedia.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setGalleryTab('customer')}
+                className={`px-2 py-0.5 rounded-lg transition-colors cursor-pointer ${
+                  galleryTab === 'customer' ? 'bg-white dark:bg-slate-900 text-emerald-600 font-black shadow-2xs' : 'text-slate-500'
+                }`}
+              >
+                কাস্টমার ({customerUploadedPhotos.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setGalleryTab('drive')}
+                className={`px-2 py-0.5 rounded-lg transition-colors cursor-pointer ${
+                  galleryTab === 'drive' ? 'bg-white dark:bg-slate-900 text-purple-600 font-black shadow-2xs' : 'text-slate-500'
+                }`}
+              >
+                ড্রাইভ ({driveAndUploadedMedia.length})
+              </button>
+            </div>
+          </div>
+
+          {/* Media Grid */}
+          <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-2.5 max-h-56 overflow-y-auto p-1">
+            {displayedMediaList.map((item, idx) => (
+              <div
+                key={idx}
+                className="relative group aspect-square rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800"
+              >
+                <img
+                  src={getDriveDirectImageUrl(item.url)}
+                  alt={item.name}
+                  className="w-full h-full object-cover"
+                  onError={(e) => handleImageErrorFallback(e, item.url)}
+                />
+                <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1 p-1">
+                  <button
+                    type="button"
+                    onClick={() => setPreviewModalUrl(item.url)}
+                    className="p-1 rounded-md bg-white/30 hover:bg-white/50 text-white text-[10px]"
+                    title="Zoom"
+                  >
+                    <ZoomIn className="w-3 h-3" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleCopyLink(item.url)}
+                    className="p-1 rounded-md bg-purple-600 text-white text-[10px]"
+                    title="Copy Link"
+                  >
+                    <Copy className="w-3 h-3" />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* 4. COMPACT SEGMENTED FILTER BAR & SEARCH (Responsive on Mobile & Desktop) */}
+      <div className="p-3 sm:p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-3">
+        {/* Horizontal Scrollable Tabs on Mobile, Flex on Desktop */}
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none sm:flex-wrap">
+          <button
+            type="button"
+            onClick={() => setStatusFilter('all')}
+            className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+              statusFilter === 'all'
+                ? 'bg-purple-600 text-white shadow-xs'
+                : 'bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300'
+            }`}
+          >
+            <span>🌟 সকল</span>
+            <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-black ${
+              statusFilter === 'all' ? 'bg-white/20 text-white' : 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300'
+            }`}>
+              {counts.all}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setStatusFilter('pending')}
+            className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+              statusFilter === 'pending'
+                ? 'bg-amber-500 text-slate-950 shadow-xs'
+                : 'bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800/60'
+            }`}
+          >
+            <span className="flex items-center gap-1">
+              {counts.pending > 0 && <span className="w-1.5 h-1.5 rounded-full bg-amber-600 animate-ping inline-block" />}
+              <span>⏳ পেন্ডিং</span>
+            </span>
+            <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-black ${
+              statusFilter === 'pending' ? 'bg-slate-950/20 text-slate-950' : 'bg-amber-200 dark:bg-amber-900 text-amber-900 dark:text-amber-200'
+            }`}>
+              {counts.pending}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setStatusFilter('approved')}
+            className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+              statusFilter === 'approved'
+                ? 'bg-emerald-600 text-white shadow-xs'
+                : 'bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/60'
+            }`}
+          >
+            <span>✅ অনুমোদিত</span>
+            <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-black ${
+              statusFilter === 'approved' ? 'bg-white/20 text-white' : 'bg-emerald-200 dark:bg-emerald-900 text-emerald-900 dark:text-emerald-200'
+            }`}>
+              {counts.approved}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setStatusFilter('hidden')}
+            className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+              statusFilter === 'hidden'
+                ? 'bg-slate-700 text-white shadow-xs'
+                : 'bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300'
+            }`}
+          >
+            <span>👁️‍🗨️ হাইড</span>
+            <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-black ${
+              statusFilter === 'hidden' ? 'bg-white/20 text-white' : 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300'
+            }`}>
+              {counts.hidden}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setStatusFilter('photos')}
+            className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+              statusFilter === 'photos'
+                ? 'bg-sky-600 text-white shadow-xs'
+                : 'bg-sky-50 hover:bg-sky-100 dark:bg-sky-950/40 text-sky-800 dark:text-sky-300 border border-sky-200 dark:border-sky-800/60'
+            }`}
+          >
+            <span>📷 ছবিসহ</span>
+            <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-black ${
+              statusFilter === 'photos' ? 'bg-white/20 text-white' : 'bg-sky-200 dark:bg-sky-900 text-sky-900 dark:text-sky-200'
+            }`}>
+              {counts.photos}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setStatusFilter('demo')}
+            className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+              statusFilter === 'demo'
+                ? 'bg-indigo-600 text-white shadow-xs'
+                : 'bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/40 text-indigo-800 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800/60'
+            }`}
+          >
+            <span>✨ ডেমো</span>
+            <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-black ${
+              statusFilter === 'demo' ? 'bg-white/20 text-white' : 'bg-indigo-200 dark:bg-indigo-900 text-indigo-900 dark:text-indigo-200'
+            }`}>
+              {counts.demo}
+            </span>
+          </button>
+        </div>
+
+        {/* Search input */}
+        <div className="relative">
+          <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="কাস্টমারের নাম, প্রোডাক্ট বা মন্তব্য লিখে খুঁজুন..."
+            className="w-full pl-9 pr-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-xs text-slate-900 dark:text-white dark:bg-slate-800 placeholder:text-slate-400 focus:outline-hidden focus:border-purple-500"
+          />
+        </div>
+      </div>
+
+      {/* 5. ADD DEMO REVIEW MODAL */}
+      {isAddDemoOpen && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl p-5 max-w-md w-full space-y-3.5 shadow-2xl border border-slate-100 dark:border-slate-800 animate-in fade-in zoom-in-95 duration-200 max-h-[90vh] overflow-y-auto text-xs">
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-2.5">
+              <h3 className="font-black text-slate-900 dark:text-white text-sm flex items-center gap-2">
+                <MessageSquare className="w-4 h-4 text-purple-600" />
+                <span>নতুন ডেমো রিভিউ তৈরি</span>
+              </h3>
+              <button
+                type="button"
+                onClick={() => setIsAddDemoOpen(false)}
+                className="p-1 rounded-full text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
               </button>
             </div>
 
-            <form onSubmit={handleCreateDemoReview} className="space-y-4 text-xs">
-              {/* 1. Searchable Product Selector */}
+            <form onSubmit={handleCreateDemoReview} className="space-y-3">
+              {/* Product Selector */}
               <div className="relative" ref={productDropdownRef}>
-                <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1 flex items-center justify-between">
-                  <span>সিলেক্ট প্রোডাক্ট (Select Product) *</span>
-                  <span className="text-[10px] text-purple-600 dark:text-purple-400 font-semibold">
-                    {products.length}টি প্রোডাক্ট উপলব্ধ
-                  </span>
+                <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  সিলেক্ট প্রোডাক্ট *
                 </label>
-
-                {/* Selected Product Highlight Card */}
                 {selectedProductObj && (
-                  <div className="mb-2 p-2.5 rounded-2xl bg-purple-50/70 dark:bg-purple-950/40 border border-purple-200/80 dark:border-purple-800/60 flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      <div className="w-10 h-10 rounded-xl overflow-hidden bg-white dark:bg-slate-800 border border-purple-200 dark:border-purple-700 shrink-0">
-                        <img
-                          src={selectedProductObj.image || selectedProductObj.images?.[0] || 'https://via.placeholder.com/80'}
-                          alt={selectedProductObj.name}
-                          className="w-full h-full object-cover"
-                        />
-                      </div>
-                      <div className="min-w-0">
-                        <div className="font-black text-slate-900 dark:text-white truncate text-xs">
-                          {selectedProductObj.name}
-                        </div>
-                        <div className="flex items-center gap-2 text-[10px] text-slate-500 dark:text-slate-400 flex-wrap">
-                          <span className="font-black text-purple-700 dark:text-purple-300">৳{selectedProductObj.price}</span>
-                          {selectedProductObj.sku && <span>• SKU: {selectedProductObj.sku}</span>}
-                          {selectedProductObj.category && (
-                            <span className="px-1.5 py-0.2 rounded-md bg-purple-100 dark:bg-purple-900/50 text-purple-700 dark:text-purple-300 font-semibold">
-                              {selectedProductObj.category}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setIsProductDropdownOpen(!isProductDropdownOpen)}
-                      className="px-2.5 py-1 rounded-xl bg-white dark:bg-slate-800 border border-purple-300 dark:border-purple-700 text-purple-700 dark:text-purple-300 font-bold text-[11px] hover:bg-purple-100 dark:hover:bg-purple-900/40 cursor-pointer shrink-0"
-                    >
-                      {isProductDropdownOpen ? 'বন্ধ করুন' : 'পরিবর্তন'}
-                    </button>
+                  <div className="mb-1.5 p-2 rounded-xl bg-purple-50/70 dark:bg-purple-950/40 border border-purple-200 dark:border-purple-800 flex items-center justify-between gap-2">
+                    <span className="font-bold text-slate-900 dark:text-white truncate">{selectedProductObj.name}</span>
+                    <span className="font-black text-purple-600 shrink-0">৳{selectedProductObj.price}</span>
                   </div>
                 )}
-
-                {/* Search Bar Input */}
-                <div className="relative">
-                  <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                  <input
-                    type="text"
-                    value={productSearchTerm}
-                    onChange={(e) => {
-                      setProductSearchTerm(e.target.value);
-                      setIsProductDropdownOpen(true);
-                    }}
-                    onFocus={() => setIsProductDropdownOpen(true)}
-                    placeholder="প্রোডাক্টের নাম, SKU বা ক্যাটাগরি লিখে খুঁজুন..."
-                    className="w-full pl-8.5 pr-8 py-2 rounded-xl border border-slate-300 dark:border-slate-700 font-medium text-slate-900 dark:text-white bg-white dark:bg-slate-800 focus:border-purple-500 focus:outline-hidden"
-                  />
-                  {productSearchTerm && (
-                    <button
-                      type="button"
-                      onClick={() => setProductSearchTerm('')}
-                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs font-bold"
-                    >
-                      ✕
-                    </button>
-                  )}
-                </div>
-
-                {/* Dropdown Results */}
+                <input
+                  type="text"
+                  value={productSearchTerm}
+                  onChange={(e) => {
+                    setProductSearchTerm(e.target.value);
+                    setIsProductDropdownOpen(true);
+                  }}
+                  onFocus={() => setIsProductDropdownOpen(true)}
+                  placeholder="প্রোডাক্ট খুঁজুন..."
+                  className="w-full px-3 py-1.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800"
+                />
                 {isProductDropdownOpen && (
-                  <div className="absolute z-30 left-0 right-0 mt-1 max-h-56 overflow-y-auto rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 shadow-xl divide-y divide-slate-100 dark:divide-slate-800">
-                    {filteredProductsForSelect.length > 0 ? (
-                      filteredProductsForSelect.map((p) => {
-                        const isSelected = p.id === demoProductId;
-                        return (
-                          <button
-                            key={p.id}
-                            type="button"
-                            onClick={() => {
-                              setDemoProductId(p.id);
-                              setIsProductDropdownOpen(false);
-                              setProductSearchTerm('');
-                            }}
-                            className={`w-full text-left p-2.5 flex items-center justify-between gap-2.5 transition-colors cursor-pointer ${
-                              isSelected
-                                ? 'bg-purple-50 dark:bg-purple-950/40 text-purple-900 dark:text-purple-200'
-                                : 'hover:bg-slate-50 dark:hover:bg-slate-800/80 text-slate-800 dark:text-slate-200'
-                            }`}
-                          >
-                            <div className="flex items-center gap-2.5 min-w-0">
-                              <div className="w-8 h-8 rounded-lg overflow-hidden bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shrink-0">
-                                <img
-                                  src={p.image || p.images?.[0] || 'https://via.placeholder.com/80'}
-                                  alt={p.name}
-                                  className="w-full h-full object-cover"
-                                />
-                              </div>
-                              <div className="min-w-0">
-                                <div className="font-bold text-xs truncate">{p.name}</div>
-                                <div className="text-[10px] text-slate-500 dark:text-slate-400 flex items-center gap-2">
-                                  <span className="font-black text-purple-600 dark:text-purple-400">৳{p.price}</span>
-                                  {p.sku && <span>SKU: {p.sku}</span>}
-                                  {p.category && <span className="opacity-80">({p.category})</span>}
-                                </div>
-                              </div>
-                            </div>
-                            {isSelected && <Check className="w-4 h-4 text-purple-600 dark:text-purple-400 shrink-0" />}
-                          </button>
-                        );
-                      })
-                    ) : (
-                      <div className="p-3 text-center text-slate-400 text-xs italic">
-                        কোনো প্রোডাক্ট খুঁজে পাওয়া যায়নি ("{productSearchTerm}")
-                      </div>
-                    )}
+                  <div className="absolute z-30 left-0 right-0 mt-1 max-h-40 overflow-y-auto rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 shadow-xl divide-y divide-slate-100 dark:divide-slate-800">
+                    {filteredProductsForSelect.slice(0, 15).map((p) => (
+                      <button
+                        key={p.id}
+                        type="button"
+                        onClick={() => {
+                          setDemoProductId(p.id);
+                          setIsProductDropdownOpen(false);
+                        }}
+                        className="w-full p-2 text-left hover:bg-purple-50 dark:hover:bg-slate-800 flex items-center justify-between text-xs"
+                      >
+                        <span className="truncate">{p.name}</span>
+                        <span className="font-bold text-purple-600">৳{p.price}</span>
+                      </button>
+                    ))}
                   </div>
                 )}
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">Reviewer Name *</label>
-                  <input
-                    type="text"
-                    required
-                    value={demoCustomerName}
-                    onChange={(e) => setDemoCustomerName(e.target.value)}
-                    placeholder="e.g. Arif Hossain"
-                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white dark:bg-slate-800 focus:border-purple-500 focus:outline-hidden"
-                  />
-                </div>
-
-                <div>
-                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">Star Rating *</label>
-                  <select
-                    value={demoRating}
-                    onChange={(e) => setDemoRating(Number(e.target.value))}
-                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 font-bold text-slate-900 dark:text-white bg-white dark:bg-slate-800 focus:border-purple-500 focus:outline-hidden"
-                  >
-                    <option value={5}>5 Stars - Excellent</option>
-                    <option value={4}>4 Stars - Very Good</option>
-                    <option value={3}>3 Stars - Average</option>
-                    <option value={2}>2 Stars - Poor</option>
-                    <option value={1}>1 Star - Terrible</option>
-                  </select>
-                </div>
-              </div>
-
+              {/* Reviewer Name */}
               <div>
-                <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">Review Comment / Feedback *</label>
-                <textarea
+                <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">ক্রেতার নাম *</label>
+                <input
+                  type="text"
+                  value={demoCustomerName}
+                  onChange={(e) => setDemoCustomerName(e.target.value)}
+                  placeholder="e.g. তানভীর আহমেদ"
+                  className="w-full px-3 py-1.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800"
                   required
-                  rows={3}
-                  value={demoComment}
-                  onChange={(e) => setDemoComment(e.target.value)}
-                  placeholder="e.g. পণ্যটি খুবই ভালো এবং অরজিনাল। ১ দিনের মধ্যেই ডেলিভারি পেয়েছি।"
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white dark:bg-slate-800 focus:border-purple-500 focus:outline-hidden"
                 />
               </div>
 
-              {/* Product Photo Attachment (Direct Google Drive Upload & Auto URL Converter) */}
-              <div className="space-y-3 p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200/80 dark:border-slate-700">
-                <div className="flex items-center justify-between">
-                  <label className="font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
-                    <ImageIcon className="w-4 h-4 text-purple-600 dark:text-purple-400" />
-                    <span>রিভিউ ছবি সংযুক্তি (Google Drive & Auto-Convert)</span>
-                  </label>
-                  {googleUser ? (
-                    <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold flex items-center gap-1">
-                      <CheckCircle2 className="w-3 h-3" />
-                      <span>Drive সিঙ্ক সক্রিয়</span>
-                    </span>
-                  ) : (
-                    <span className="text-[10px] text-slate-400">Google Drive ইন্টিগ্রেশন</span>
-                  )}
+              {/* Rating */}
+              <div>
+                <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">রেটিং (১ - ৫ স্টার)</label>
+                <div className="flex items-center gap-1 text-amber-400">
+                  {[1, 2, 3, 4, 5].map((star) => (
+                    <button
+                      key={star}
+                      type="button"
+                      onClick={() => setDemoRating(star)}
+                      className="p-1 cursor-pointer"
+                    >
+                      <Star className={`w-5 h-5 ${star <= demoRating ? 'fill-amber-400' : 'text-slate-300'}`} />
+                    </button>
+                  ))}
+                  <span className="ml-2 font-bold text-slate-700 dark:text-slate-300">{demoRating} Stars</span>
                 </div>
+              </div>
 
-                {/* Upload Action */}
-                <div>
+              {/* Comment */}
+              <div>
+                <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">রিভিউ মন্তব্য *</label>
+                <textarea
+                  rows={2}
+                  value={demoComment}
+                  onChange={(e) => setDemoComment(e.target.value)}
+                  placeholder="প্রোডাক্টের কোয়ালিটি খুবই ভালো..."
+                  className="w-full p-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800"
+                  required
+                />
+              </div>
+
+              {/* Photo Attachment */}
+              <div>
+                <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">ছবি সংযুক্ত করুন (অপশনাল)</label>
+                <div className="flex items-center gap-1.5">
+                  <input
+                    type="url"
+                    value={demoPhotoInput}
+                    onChange={(e) => setDemoPhotoInput(e.target.value)}
+                    placeholder="গুগল ড্রাইভ বা ইমেজ লিংক..."
+                    className="flex-1 px-3 py-1.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (demoPhotoInput.trim()) {
+                        setDemoPhotos((prev) => [...prev, resolveGoogleDriveUrl(demoPhotoInput.trim())]);
+                        setDemoPhotoInput('');
+                      }
+                    }}
+                    className="px-3 py-1.5 rounded-xl bg-purple-600 text-white font-bold cursor-pointer"
+                  >
+                    + যোগ
+                  </button>
                   <button
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
-                    disabled={isConnectingDrive || isUploadingDrive}
-                    className="w-full p-2.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs flex items-center justify-center gap-2 transition-all cursor-pointer shadow-xs disabled:opacity-50"
+                    className="px-3 py-1.5 rounded-xl bg-slate-800 text-white font-bold cursor-pointer"
                   >
-                    <FolderUp className="w-4 h-4" />
-                    <span>ডিভাইস থেকে সরাসরি Google Drive-এ আপলোড করুন</span>
+                    আপলোড
                   </button>
                   <input
                     ref={fileInputRef}
                     type="file"
-                    accept="image/*,video/*"
+                    accept="image/*"
                     onChange={(e) => handleUploadFileToGoogleDrive(e, 'demo')}
                     className="hidden"
                   />
                 </div>
 
-                {/* Google Drive Link Auto-Resolver Input */}
-                <div className="pt-2 border-t border-slate-200/70 dark:border-slate-700/80 space-y-1">
-                  <div className="text-[11px] text-slate-600 dark:text-slate-400 font-medium">
-                    অথবা Google Drive বা যে কোনো ছবির লিংক পেস্ট করুন (Auto-Resolves Link):
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="url"
-                      value={demoPhotoInput}
-                      onChange={(e) => setDemoPhotoInput(e.target.value)}
-                      placeholder="Paste Google Drive share link or image URL..."
-                      className="flex-1 px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white dark:bg-slate-800 focus:border-purple-500 focus:outline-hidden text-xs"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => handleAddDemoPhotoUrl()}
-                      className="px-3.5 py-2 rounded-xl bg-slate-900 dark:bg-slate-700 hover:bg-slate-800 dark:hover:bg-slate-600 text-white font-bold cursor-pointer shrink-0 text-xs"
-                    >
-                      + যুক্ত করুন
-                    </button>
-                  </div>
-                </div>
-
-                {/* Attached Photos Preview */}
                 {demoPhotos.length > 0 && (
-                  <div className="space-y-1.5 pt-2">
-                    <div className="text-[10px] font-bold text-slate-600 dark:text-slate-300">
-                      সংযুক্ত মিডিয়া ({demoPhotos.length}টি):
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      {demoPhotos.map((url, idx) => {
-                        const isVideo = url.includes('.mp4') || url.includes('.webm') || url.includes('video');
-                        return (
-                          <div
-                            key={idx}
-                            className="relative w-16 h-16 rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden bg-slate-100 dark:bg-slate-800 group shadow-2xs"
-                          >
-                            {isVideo ? (
-                              <div className="w-full h-full flex flex-col items-center justify-center bg-slate-900 text-white">
-                                <Film className="w-5 h-5 text-purple-400" />
-                                <span className="text-[9px] font-bold mt-0.5">Video</span>
-                              </div>
-                            ) : (
-                              <img
-                                src={getDriveDirectImageUrl(url)}
-                                alt="Review attachment"
-                                className="w-full h-full object-cover"
-                                onError={(e) => handleImageErrorFallback(e, url)}
-                              />
-                            )}
-                            <button
-                              type="button"
-                              onClick={() => setDemoPhotos(demoPhotos.filter((_, i) => i !== idx))}
-                              className="absolute top-1 right-1 w-4 h-4 rounded-full bg-rose-600 text-white text-[10px] font-bold flex items-center justify-center cursor-pointer shadow-xs hover:scale-110"
-                              title="মুছে ফেলুন"
-                            >
-                              ×
-                            </button>
-                          </div>
-                        );
-                      })}
-                    </div>
+                  <div className="flex flex-wrap gap-1.5 mt-2">
+                    {demoPhotos.map((p, idx) => (
+                      <div key={idx} className="relative w-12 h-12 rounded-lg overflow-hidden border border-slate-200">
+                        <img src={getDriveDirectImageUrl(p)} alt="Thumb" className="w-full h-full object-cover" />
+                        <button
+                          type="button"
+                          onClick={() => setDemoPhotos(demoPhotos.filter((_, i) => i !== idx))}
+                          className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-rose-600 text-white text-[9px] flex items-center justify-center cursor-pointer"
+                        >
+                          ×
+                        </button>
+                      </div>
+                    ))}
                   </div>
                 )}
               </div>
 
-              <div className="flex items-center gap-2 pt-1">
-                <input
-                  type="checkbox"
-                  id="demoVerifiedCheck"
-                  checked={demoVerified}
-                  onChange={(e) => setDemoVerified(e.target.checked)}
-                  className="w-4 h-4 text-purple-600 rounded-md border-slate-300 dark:border-slate-700 focus:ring-purple-500 cursor-pointer"
-                />
-                <label htmlFor="demoVerifiedCheck" className="font-bold text-slate-700 dark:text-slate-300 cursor-pointer">
-                  Mark as "Verified Purchase"
-                </label>
-              </div>
-
-              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
                 <button
                   type="button"
                   onClick={() => setIsAddDemoOpen(false)}
-                  className="px-4 py-2 rounded-xl border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 font-bold hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer"
+                  className="px-3.5 py-1.5 rounded-xl border border-slate-300 dark:border-slate-700 text-slate-600 font-bold"
                 >
-                  Cancel
+                  বাতিল
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-black flex items-center gap-1.5 shadow-xs cursor-pointer"
+                  className="px-4 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-black shadow-xs"
                 >
-                  <Save className="w-4 h-4" />
-                  <span>Save Demo Review</span>
+                  সংরক্ষণ করুন
                 </button>
               </div>
             </form>
@@ -1364,211 +1362,148 @@ export const AdminReviews: React.FC<AdminReviewsProps> = ({
         </div>
       )}
 
-      {/* Reviews List */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+      {/* 6. REVIEWS LIST (Ultra-Clean, Compact Grid on Mobile & Desktop) */}
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3.5">
         {filteredReviews.map((r) => {
           const customerName = r.customerName || (r as any).userName || 'Valued Customer';
-          const isApproved = r.status === 'approved';
-          const isHidden = r.status === 'hidden';
+          const isApproved = r.status === 'approved' || (!r.status && !r.isDemo);
+          const isPending = r.status === 'pending';
+          const isHidden = r.status === 'hidden' || (r as any).status === 'rejected';
           const isEditing = editingReviewId === r.id;
 
           return (
             <div
               key={r.id}
-              className="p-5 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xs flex flex-col justify-between hover:border-slate-300 dark:hover:border-slate-700 transition-all space-y-4"
+              className={`p-4 rounded-2xl bg-white dark:bg-slate-900 border transition-all flex flex-col justify-between space-y-3 ${
+                isPending
+                  ? 'border-amber-300 dark:border-amber-800/80 shadow-xs ring-1 ring-amber-400/20'
+                  : 'border-slate-200/80 dark:border-slate-800 shadow-2xs hover:border-slate-300 dark:hover:border-slate-700'
+              }`}
             >
-              <div>
+              <div className="space-y-2">
                 {/* Header info */}
                 <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <div className="flex items-center gap-1 text-amber-500">
-                      {[1, 2, 3, 4, 5].map((s) => (
-                        <Star
-                          key={s}
-                          className={`w-4 h-4 ${
-                            s <= (isEditing ? editRating : r.rating)
-                              ? 'fill-amber-400 text-amber-400'
-                              : 'text-slate-200 dark:text-slate-700'
-                          }`}
-                        />
-                      ))}
-                      <span className="text-xs font-bold text-slate-700 dark:text-slate-300 ml-1.5">
-                        {isEditing ? editRating : r.rating}.0
-                      </span>
+                  <div className="flex items-center gap-2">
+                    <div className="w-8 h-8 rounded-full bg-purple-100 dark:bg-purple-950/80 text-purple-700 dark:text-purple-300 font-black text-xs flex items-center justify-center shrink-0">
+                      {customerName.charAt(0).toUpperCase()}
                     </div>
-                    <div className="flex items-center gap-2 mt-1">
-                      <h4 className="font-black text-slate-900 dark:text-white text-sm">{customerName}</h4>
-                      {r.isDemo && (
-                        <span className="px-2 py-0.5 rounded-md bg-purple-100 dark:bg-purple-950/80 text-purple-800 dark:text-purple-300 text-[10px] font-extrabold border border-purple-200 dark:border-purple-800">
-                          Demo Review
+                    <div>
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-bold text-slate-900 dark:text-white text-xs truncate max-w-[130px]">
+                          {customerName}
                         </span>
-                      )}
+                        {r.verifiedPurchase && (
+                          <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold" title="Verified Buyer">
+                            ✓
+                          </span>
+                        )}
+                        {r.isDemo && (
+                          <span className="px-1.5 py-0.2 rounded-md bg-purple-100 dark:bg-purple-900 text-purple-700 dark:text-purple-300 text-[9px] font-bold">
+                            ডেমো
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-1 text-amber-400 mt-0.5">
+                        {[1, 2, 3, 4, 5].map((s) => (
+                          <Star
+                            key={s}
+                            className={`w-3 h-3 ${s <= (isEditing ? editRating : r.rating) ? 'fill-amber-400' : 'text-slate-200 dark:text-slate-700'}`}
+                          />
+                        ))}
+                      </div>
                     </div>
-                    {r.productName && (
-                      <p className="text-[11px] font-semibold text-sky-700 dark:text-sky-400 mt-0.5">
-                        Product: {r.productName}
-                      </p>
-                    )}
-                    <p className="text-[11px] text-slate-400 dark:text-slate-500">
-                      {new Date(r.createdAt).toLocaleDateString('en-GB', {
-                        day: 'numeric',
-                        month: 'short',
-                        year: 'numeric',
-                      })}
-                    </p>
                   </div>
 
+                  {/* Status Badge */}
                   <span
-                    className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider ${
-                      isApproved
-                        ? 'bg-emerald-100 dark:bg-emerald-950/90 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700'
-                        : isHidden
-                        ? 'bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700'
-                        : 'bg-amber-100 dark:bg-amber-950/90 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700'
+                    className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider shrink-0 ${
+                      isPending
+                        ? 'bg-amber-100 dark:bg-amber-950/90 text-amber-900 dark:text-amber-200 border border-amber-300'
+                        : isApproved
+                        ? 'bg-emerald-100 dark:bg-emerald-950/90 text-emerald-800 dark:text-emerald-300 border border-emerald-300'
+                        : 'bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-300'
                     }`}
                   >
-                    {r.status || 'pending'}
+                    {isPending ? '⏳ পেন্ডিং' : isApproved ? '✅ লাইভ' : '👁️‍🗨️ হাইড'}
                   </span>
                 </div>
 
-                {/* Body / Editing mode */}
+                {/* Product & Date tag */}
+                <div className="flex items-center justify-between text-[10px] text-slate-500 dark:text-slate-400 pt-1 border-t border-slate-100 dark:border-slate-800">
+                  <span className="font-semibold text-purple-700 dark:text-purple-400 truncate max-w-[170px]">
+                    {r.productName || 'Product'}
+                  </span>
+                  <span>
+                    {new Date(r.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
+                  </span>
+                </div>
+
+                {/* Body / Edit Mode */}
                 {isEditing ? (
-                  <div className="mt-3 space-y-3 p-3.5 rounded-2xl bg-sky-50/50 dark:bg-slate-800/80 border border-sky-200 dark:border-slate-700">
-                    <div>
-                      <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
-                        Edit Rating (1 - 5 Stars):
-                      </label>
-                      <select
-                        value={editRating}
-                        onChange={(e) => setEditRating(Number(e.target.value))}
-                        className="px-3 py-1.5 rounded-xl border border-slate-300 dark:border-slate-700 text-xs font-bold bg-white dark:bg-slate-900 text-slate-900 dark:text-white"
-                      >
-                        <option value={5}>5 Stars - Excellent</option>
-                        <option value={4}>4 Stars - Good</option>
-                        <option value={3}>3 Stars - Average</option>
-                        <option value={2}>2 Stars - Poor</option>
-                        <option value={1}>1 Star - Terrible</option>
-                      </select>
-                    </div>
-
-                    <div>
-                      <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
-                        Edit Review Text / Comment:
-                      </label>
-                      <textarea
-                        rows={3}
-                        value={editComment}
-                        onChange={(e) => setEditComment(e.target.value)}
-                        className="w-full p-2.5 rounded-xl border border-slate-300 dark:border-slate-700 text-xs text-slate-900 dark:text-white bg-white dark:bg-slate-900 focus:border-sky-500 focus:outline-none"
-                        placeholder="Edit review text..."
+                  <div className="space-y-2 p-2.5 rounded-xl bg-purple-50/60 dark:bg-slate-800/80 border border-purple-200 text-xs">
+                    <textarea
+                      rows={2}
+                      value={editComment}
+                      onChange={(e) => setEditComment(e.target.value)}
+                      className="w-full p-2 rounded-lg border border-slate-300 dark:border-slate-700 text-xs bg-white dark:bg-slate-900"
+                    />
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="url"
+                        placeholder="Add photo link..."
+                        value={newPhotoUrlInput}
+                        onChange={(e) => setNewPhotoUrlInput(e.target.value)}
+                        className="flex-1 px-2 py-1 rounded-lg border border-slate-300 text-[11px]"
                       />
+                      <button
+                        type="button"
+                        onClick={handleAddEditPhotoUrl}
+                        className="px-2 py-1 rounded-lg bg-purple-600 text-white text-[11px] font-bold"
+                      >
+                        +
+                      </button>
                     </div>
-
-                    {/* Photos Editor */}
-                    <div>
-                      <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
-                        Manage / Add Review Photos:
-                      </label>
-                      <div className="flex flex-wrap gap-2 mb-2">
-                        {editPhotos.map((photoUrl, pIdx) => (
-                          <div key={pIdx} className="relative group w-14 h-14 rounded-xl overflow-hidden border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900">
-                            <img
-                              src={getDriveDirectImageUrl(photoUrl)}
-                              alt="Review attachment"
-                              className="w-full h-full object-cover"
-                              onError={(e) => handleImageErrorFallback(e, photoUrl)}
-                            />
-                            <button
-                              type="button"
-                              onClick={() => handleRemovePhoto(pIdx)}
-                              className="absolute inset-0 bg-black/60 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
-                              title="Remove photo"
-                            >
-                              <X className="w-4 h-4" />
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-
-                      <div className="flex items-center gap-1.5 flex-wrap pt-1 mb-2">
-                        <button
-                          type="button"
-                          onClick={() => editFileInputRef.current?.click()}
-                          className="px-3 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold flex items-center gap-1 cursor-pointer shadow-2xs"
-                        >
-                          <FolderUp className="w-3.5 h-3.5" />
-                          <span>ডিভাইস থেকে Google Drive-এ আপলোড</span>
-                        </button>
-                        <input
-                          ref={editFileInputRef}
-                          type="file"
-                          accept="image/*,video/*"
-                          onChange={(e) => handleUploadFileToGoogleDrive(e, 'edit')}
-                          className="hidden"
-                        />
-                      </div>
-
-                      <div className="flex items-center gap-1.5">
-                        <input
-                          type="url"
-                          placeholder="Paste Google Drive link or image URL..."
-                          value={newPhotoUrlInput}
-                          onChange={(e) => setNewPhotoUrlInput(e.target.value)}
-                          className="flex-1 px-3 py-1.5 rounded-xl border border-slate-300 dark:border-slate-700 text-xs text-slate-900 dark:text-white bg-white dark:bg-slate-900"
-                        />
-                        <button
-                          type="button"
-                          onClick={handleAddEditPhotoUrl}
-                          className="px-3 py-1.5 rounded-xl bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold transition-colors cursor-pointer shrink-0"
-                        >
-                          + Add Photo
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center justify-end gap-2 pt-2 border-t border-sky-200 dark:border-slate-700">
+                    <div className="flex items-center justify-end gap-1.5 pt-1">
                       <button
                         type="button"
                         onClick={() => setEditingReviewId(null)}
-                        className="px-3 py-1.5 rounded-xl border border-slate-300 dark:border-slate-700 text-xs font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+                        className="px-2.5 py-1 rounded-lg border border-slate-300 text-[11px] font-bold"
                       >
-                        Cancel
+                        বাতিল
                       </button>
                       <button
                         type="button"
                         onClick={() => handleSaveEdit(r)}
-                        className="px-4 py-1.5 rounded-xl bg-sky-600 hover:bg-sky-700 text-white text-xs font-black flex items-center gap-1 shadow-sm cursor-pointer"
+                        className="px-3 py-1 rounded-lg bg-purple-600 text-white text-[11px] font-black"
                       >
-                        <Save className="w-3.5 h-3.5" />
-                        <span>Save Changes</span>
+                        সেভ
                       </button>
                     </div>
                   </div>
                 ) : (
                   <>
-                    <p className="text-xs text-slate-700 dark:text-slate-200 mt-3 leading-relaxed bg-slate-50 dark:bg-slate-800/60 p-3 rounded-2xl border border-slate-100 dark:border-slate-800 italic">
+                    <p className="text-xs text-slate-700 dark:text-slate-200 leading-relaxed bg-slate-50 dark:bg-slate-800/50 p-2.5 rounded-xl border border-slate-100 dark:border-slate-800/80 italic">
                       "{r.comment}"
                     </p>
 
-                    {/* Customer Attached Photos Display */}
+                    {/* Customer Photos */}
                     {r.photos && r.photos.length > 0 && (
-                      <div className="mt-3 flex flex-wrap gap-2">
+                      <div className="flex flex-wrap gap-1.5 pt-0.5">
                         {r.photos.map((photo, pIdx) => (
-                          <a
+                          <button
                             key={pIdx}
-                            href={photo}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="w-16 h-16 rounded-2xl overflow-hidden border border-slate-200 shadow-2xs hover:scale-105 transition-transform block"
-                            title="Click to view full photo"
+                            type="button"
+                            onClick={() => setPreviewModalUrl(photo)}
+                            className="w-12 h-12 rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700 hover:scale-105 transition-transform block bg-slate-100 shrink-0 cursor-pointer shadow-2xs"
+                            title="বড় করে দেখতে ক্লিক করুন"
                           >
                             <img
                               src={getDriveDirectImageUrl(photo)}
-                              alt={`Review photo ${pIdx + 1}`}
+                              alt="Review attachment"
                               className="w-full h-full object-cover"
                               onError={(e) => handleImageErrorFallback(e, photo)}
                             />
-                          </a>
+                          </button>
                         ))}
                       </div>
                     )}
@@ -1576,46 +1511,59 @@ export const AdminReviews: React.FC<AdminReviewsProps> = ({
                 )}
               </div>
 
-              {/* Action Controls for Admin */}
+              {/* Action Buttons Footer */}
               {!isEditing && (
-                <div className="pt-3 border-t border-slate-100 flex items-center justify-between gap-2 text-xs">
+                <div className="pt-2 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between gap-1.5 text-xs">
                   <div className="flex items-center gap-1.5">
-                    {!isApproved ? (
+                    {isPending ? (
                       <button
+                        type="button"
                         onClick={() => onApproveReview(r.id)}
-                        className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center gap-1 transition-colors cursor-pointer shadow-2xs"
-                        title="Approve & Show on Product Page"
+                        className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center gap-1 shadow-2xs cursor-pointer"
+                        title="অনুমোদন করুন (Approve)"
                       >
                         <Check className="w-3.5 h-3.5" />
-                        <span>Approve</span>
+                        <span>অনুমোদন</span>
+                      </button>
+                    ) : isApproved ? (
+                      <button
+                        type="button"
+                        onClick={() => onHideReview(r.id)}
+                        className="px-2.5 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold text-xs flex items-center gap-1 cursor-pointer"
+                        title="হাইড করুন (Hide)"
+                      >
+                        <EyeOff className="w-3.5 h-3.5" />
+                        <span>হাইড</span>
                       </button>
                     ) : (
                       <button
-                        onClick={() => onHideReview(r.id)}
-                        className="px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs flex items-center gap-1 transition-colors cursor-pointer"
-                        title="Hide Review from Public"
+                        type="button"
+                        onClick={() => onApproveReview(r.id)}
+                        className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center gap-1 cursor-pointer"
+                        title="পুনরায় সক্রিয় করুন"
                       >
-                        <EyeOff className="w-3.5 h-3.5" />
-                        <span>Hide</span>
+                        <Check className="w-3.5 h-3.5" />
+                        <span>লাইভ করুন</span>
                       </button>
                     )}
 
                     <button
+                      type="button"
                       onClick={() => handleStartEdit(r)}
-                      className="px-3 py-1.5 rounded-xl bg-sky-50 hover:bg-sky-100 text-sky-700 font-bold text-xs flex items-center gap-1 transition-colors cursor-pointer border border-sky-200"
-                      title="Edit review text & photos"
+                      className="p-1.5 rounded-xl text-slate-500 hover:text-purple-600 hover:bg-purple-50 dark:hover:bg-slate-800 cursor-pointer"
+                      title="সম্পাদনা করুন (Edit)"
                     >
                       <Edit3 className="w-3.5 h-3.5" />
-                      <span>Edit</span>
                     </button>
                   </div>
 
                   <button
+                    type="button"
                     onClick={() => onDeleteReview(r.id)}
-                    className="p-2 rounded-xl text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
-                    title="Permanently Delete Review"
+                    className="p-1.5 rounded-xl text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-slate-800 cursor-pointer"
+                    title="স্থায়ীভাবে মুছুন (Delete)"
                   >
-                    <Trash2 className="w-4 h-4" />
+                    <Trash2 className="w-3.5 h-3.5" />
                   </button>
                 </div>
               )}
@@ -1624,49 +1572,50 @@ export const AdminReviews: React.FC<AdminReviewsProps> = ({
         })}
 
         {filteredReviews.length === 0 && (
-          <div className="col-span-full py-12 text-center text-slate-400 text-xs italic bg-white rounded-3xl border border-slate-200">
-            No customer reviews found matching the selected filter.
+          <div className="col-span-full py-10 text-center text-slate-400 text-xs italic bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800">
+            এই ফিল্টারে কোনো কাস্টমার রিভিউ পাওয়া যায়নি।
           </div>
         )}
       </div>
 
-      {/* Image Zoom / Full Resolution Preview Modal */}
+      {/* 7. FULL RESOLUTION IMAGE PREVIEW MODAL */}
       {previewModalUrl && (
         <div
-          className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-4"
+          className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-3"
           onClick={() => setPreviewModalUrl(null)}
         >
           <div
-            className="relative max-w-3xl max-h-[90vh] bg-white dark:bg-slate-900 rounded-3xl overflow-hidden shadow-2xl p-2 flex flex-col"
+            className="relative max-w-2xl max-h-[85vh] bg-white dark:bg-slate-900 rounded-3xl overflow-hidden shadow-2xl p-2 flex flex-col"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between p-3 border-b border-slate-100 dark:border-slate-800">
+            <div className="flex items-center justify-between p-2.5 border-b border-slate-100 dark:border-slate-800">
               <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
                 ছবি প্রিভিউ (Full Resolution Preview)
               </span>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1.5">
                 <button
                   type="button"
                   onClick={() => handleCopyLink(previewModalUrl)}
-                  className="px-3 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold flex items-center gap-1 cursor-pointer"
+                  className="px-2.5 py-1 rounded-lg bg-purple-600 hover:bg-purple-700 text-white text-[11px] font-bold flex items-center gap-1 cursor-pointer"
                 >
-                  <Copy className="w-3.5 h-3.5" />
+                  <Copy className="w-3 h-3" />
                   <span>লিংক কপি</span>
                 </button>
                 <button
                   type="button"
                   onClick={() => setPreviewModalUrl(null)}
-                  className="p-1.5 rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+                  className="p-1 rounded-lg text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
                 >
-                  <X className="w-5 h-5" />
+                  <X className="w-4 h-4" />
                 </button>
               </div>
             </div>
-            <div className="p-2 flex items-center justify-center overflow-auto max-h-[75vh]">
+
+            <div className="p-2 flex items-center justify-center overflow-auto max-h-[70vh]">
               <img
                 src={getDriveDirectImageUrl(previewModalUrl)}
-                alt="Full preview"
-                className="max-w-full max-h-[70vh] rounded-2xl object-contain"
+                alt="Full resolution preview"
+                className="max-w-full max-h-[65vh] object-contain rounded-xl"
                 onError={(e) => handleImageErrorFallback(e, previewModalUrl)}
               />
             </div>
