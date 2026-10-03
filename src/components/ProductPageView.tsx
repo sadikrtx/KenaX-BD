@@ -2008,6 +2008,8 @@ export const ProductPageView: React.FC<ProductPageViewProps> = ({
                                     src={getDriveDirectImageUrl(pImg)}
                                     alt="Review attachment"
                                     className="w-full h-full object-cover"
+                                    referrerPolicy="no-referrer"
+                                    loading="lazy"
                                     onError={(e) => handleImageErrorFallback(e, pImg)}
                                   />
                                 </a>

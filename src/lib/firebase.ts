@@ -4039,29 +4039,65 @@ export function subscribeToSMSLogs(onLogsChanged: (logs: SMSLog[]) => void): Uns
 
 // ----------------------------------------------------
 // PRODUCT REVIEWS & MODERATION (REAL + DEMO REVIEWS)
+// Multi-Device, Cross-Browser, Permanent Cloud & Netlify Sync
 // ----------------------------------------------------
+const CLOUD_RUN_API_BASE = 'https://ais-pre-nziktgpe56nlsqktopppvl-693170375322.asia-southeast1.run.app';
+
 export async function getReviewsFromDB(): Promise<Review[]> {
   const items: Review[] = [];
 
-  // 1. Fetch from Cloud Firestore
+  // 1. Fetch from Cloud Firestore (Primary source of truth across all devices)
   try {
-    const colRef = collection(db, 'reviews');
-    const snapshot = await getDocs(colRef);
-    if (!snapshot.empty) {
-      snapshot.forEach((docSnap) => {
+    const [snap1, snap2] = await Promise.all([
+      getDocs(collection(db, 'reviews')).catch(() => ({ empty: true, forEach: () => {} } as any)),
+      getDocs(collection(db, 'preview_reviews')).catch(() => ({ empty: true, forEach: () => {} } as any)),
+    ]);
+
+    const seenDocIds = new Set<string>();
+    if (!snap1.empty) {
+      snap1.forEach((docSnap: any) => {
         const data = docSnap.data() as Review;
-        if (data && data.id) items.push(data);
+        if (data && data.id && !seenDocIds.has(data.id)) {
+          seenDocIds.add(data.id);
+          items.push(data);
+        }
+      });
+    }
+    if (!snap2.empty) {
+      snap2.forEach((docSnap: any) => {
+        const data = docSnap.data() as Review;
+        if (data && data.id && !seenDocIds.has(data.id)) {
+          seenDocIds.add(data.id);
+          items.push(data);
+        }
       });
     }
   } catch (err) {
     console.warn('[KenaX BD] Firestore getReviewsFromDB fallback:', err);
   }
 
-  // 2. Fetch from Local Node Server / Cloud Run API (disk persistence)
+  // 2. Fetch from Local Node Server and Cloud Run Relay API (Essential for Netlify & Vercel deployments)
   try {
-    const srvRes = await fetch('/api/reviews');
-    if (srvRes.ok) {
-      const srvJson = await srvRes.json();
+    const fetchPromises: Promise<any>[] = [
+      fetch('/api/reviews').then((r) => (r.ok ? r.json() : null)).catch(() => null),
+    ];
+
+    if (
+      typeof window !== 'undefined' &&
+      !window.location.hostname.includes('localhost') &&
+      !window.location.hostname.includes('127.0.0.1') &&
+      !window.location.hostname.includes('run.app')
+    ) {
+      // Deployed on Netlify, GitHub Pages, or custom domain -> fetch from cloud relay
+      fetchPromises.push(
+        fetch(`${CLOUD_RUN_API_BASE}/api/reviews`)
+          .then((r) => (r.ok ? r.json() : null))
+          .catch(() => null)
+      );
+    }
+
+    const results = await Promise.all(fetchPromises);
+    results.forEach((srvJson) => {
       if (srvJson?.success && Array.isArray(srvJson.reviews)) {
         srvJson.reviews.forEach((sr: Review) => {
           if (sr && sr.id) {
@@ -4074,12 +4110,31 @@ export async function getReviewsFromDB(): Promise<Review[]> {
           }
         });
       }
+    });
+  } catch {}
+
+  // 3. Fetch from IndexedDB for high-capacity local offline store
+  try {
+    const idbRaw = await getIdbItem('kenax_reviews_idb');
+    if (idbRaw) {
+      const idbList: Review[] = JSON.parse(idbRaw);
+      if (Array.isArray(idbList)) {
+        idbList.forEach((ir) => {
+          if (ir && ir.id && !items.some((it) => it.id === ir.id)) {
+            items.push(ir);
+          }
+        });
+      }
     }
   } catch {}
 
-  // 3. Merge with local custom edited reviews dictionary (Guaranteed zero-loss on refresh)
-  const rawDeleted = typeof window !== 'undefined' ? localStorage.getItem('kenax_deleted_review_ids') : null;
-  const deletedIds: string[] = rawDeleted ? JSON.parse(rawDeleted) : [];
+  // 4. Merge with local custom edited reviews dictionary (Guaranteed zero-loss on refresh)
+  let deletedIds: string[] = [];
+  try {
+    const rawDeleted = localStorage.getItem('kenax_deleted_review_ids');
+    if (rawDeleted) deletedIds = JSON.parse(rawDeleted);
+  } catch {}
+
   const valid = items.filter((r) => !deletedIds.includes(r.id));
   const existingIds = new Set(valid.map((r) => r.id));
   const combined = [...valid];
@@ -4107,15 +4162,35 @@ export async function getReviewsFromDB(): Promise<Review[]> {
     }
   });
 
-  // 4. Fill in initial demo reviews for missing IDs (Only if not customized or deleted)
+  // 5. Fill in initial demo reviews for missing IDs (Only if not customized or deleted)
   INITIAL_REVIEWS.forEach((initRev) => {
     if (!existingIds.has(initRev.id) && !deletedIds.includes(initRev.id) && !customMap[initRev.id]) {
       combined.push(initRev);
     }
   });
 
+  // 6. Ensure all photos have high-speed Google Drive direct CDN format
+  combined.forEach((r) => {
+    if (Array.isArray(r.photos)) {
+      r.photos = r.photos.map((p) => {
+        if (typeof p === 'string' && p.trim()) {
+          const trimmed = p.trim().replace(/^["']|["']$/g, '');
+          const matchFileD = trimmed.match(/\/file(?:\/u\/\d+)?\/d\/([a-zA-Z0-9_-]+)/i);
+          if (matchFileD && matchFileD[1]) return `https://lh3.googleusercontent.com/d/${matchFileD[1]}`;
+          const matchOpenId = trimmed.match(/[?&]id=([a-zA-Z0-9_-]+)/i);
+          if (matchOpenId && matchOpenId[1]) return `https://lh3.googleusercontent.com/d/${matchOpenId[1]}`;
+          const matchUc = trimmed.match(/\/uc\?.*id=([a-zA-Z0-9_-]+)/i);
+          if (matchUc && matchUc[1]) return `https://lh3.googleusercontent.com/d/${matchUc[1]}`;
+          return trimmed;
+        }
+        return p;
+      });
+    }
+  });
+
   combined.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
   safeSetLocalStorage('kenax_reviews_cache', JSON.stringify(combined));
+  setIdbItem('kenax_reviews_idb', JSON.stringify(combined)).catch(() => {});
   return combined;
 }
 
@@ -4170,10 +4245,11 @@ export function subscribeToReviews(
 
         combined.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
         safeSetLocalStorage('kenax_reviews_cache', JSON.stringify(combined));
+        setIdbItem('kenax_reviews_idb', JSON.stringify(combined)).catch(() => {});
         onReviewsChanged(combined);
       },
       (error) => {
-        console.warn('[KenaX BD] subscribeToReviews listener error:', error);
+        console.warn('[KenaX BD] subscribeToReviews listener notice:', error);
         if (onError) onError(error);
       }
     );
@@ -4233,11 +4309,24 @@ export async function saveReviewToDB(review: Review): Promise<void> {
     const processedPhotos: string[] = [];
     for (const p of safeReview.photos) {
       if (typeof p === 'string' && p.trim()) {
-        if (p.startsWith('data:image')) {
-          const comp = await compressImageToSafeSize(p);
+        const trimmed = p.trim().replace(/^["']|["']$/g, '');
+        if (trimmed.startsWith('data:image')) {
+          const comp = await compressImageToSafeSize(trimmed);
           processedPhotos.push(comp);
         } else {
-          processedPhotos.push(p.trim());
+          // Clean Google Drive URL to high-speed CDN direct format
+          const matchFileD = trimmed.match(/\/file(?:\/u\/\d+)?\/d\/([a-zA-Z0-9_-]+)/i);
+          const matchOpenId = trimmed.match(/[?&]id=([a-zA-Z0-9_-]+)/i);
+          const matchUc = trimmed.match(/\/uc\?.*id=([a-zA-Z0-9_-]+)/i);
+          if (matchFileD && matchFileD[1]) {
+            processedPhotos.push(`https://lh3.googleusercontent.com/d/${matchFileD[1]}`);
+          } else if (matchOpenId && matchOpenId[1]) {
+            processedPhotos.push(`https://lh3.googleusercontent.com/d/${matchOpenId[1]}`);
+          } else if (matchUc && matchUc[1]) {
+            processedPhotos.push(`https://lh3.googleusercontent.com/d/${matchUc[1]}`);
+          } else {
+            processedPhotos.push(trimmed);
+          }
         }
       }
     }
@@ -4256,17 +4345,17 @@ export async function saveReviewToDB(review: Review): Promise<void> {
 
   const cleaned = cleanFirestoreData(safeReview);
   
-  // 1. Direct Cloud Firestore Save (Permanent & Cross-device with safe timeout)
+  // 1. Direct Cloud Firestore Save (Dual write to reviews & preview_reviews for absolute multi-device permanence)
   try {
-    await Promise.race([
-      setDoc(doc(db, 'reviews', review.id), cleaned, { merge: true }),
-      new Promise((_, reject) => setTimeout(() => reject(new Error('Firestore timeout')), 2000)),
-    ]);
+    setDoc(doc(db, 'reviews', review.id), cleaned, { merge: true }).catch((err) => {
+      console.warn('[KenaX BD] Firestore reviews save fallback:', err);
+    });
+    setDoc(doc(db, 'preview_reviews', review.id), cleaned, { merge: true }).catch(() => {});
   } catch (err) {
-    console.warn('[KenaX BD] Firestore saveReviewToDB fallback/timeout:', err);
+    console.warn('[KenaX BD] Firestore saveReviewToDB fallback:', err);
   }
 
-  // 2. Central API Sync (Cross-server, Netlify, Vercel relay)
+  // 2. Central API Sync (Cross-server, Netlify, Vercel, Cloud Run relay)
   try {
     fetch('/api/reviews', {
       method: 'POST',
@@ -4274,8 +4363,12 @@ export async function saveReviewToDB(review: Review): Promise<void> {
       body: JSON.stringify(cleaned),
     }).catch(() => {});
 
-    const CLOUD_RUN_API_BASE = 'https://ais-pre-nziktgpe56nlsqktopppvl-693170375322.asia-southeast1.run.app';
-    if (typeof window !== 'undefined' && !window.location.hostname.includes('localhost') && !window.location.hostname.includes('run.app')) {
+    if (
+      typeof window !== 'undefined' &&
+      !window.location.hostname.includes('localhost') &&
+      !window.location.hostname.includes('127.0.0.1') &&
+      !window.location.hostname.includes('run.app')
+    ) {
       fetch(`${CLOUD_RUN_API_BASE}/api/reviews`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -4284,28 +4377,29 @@ export async function saveReviewToDB(review: Review): Promise<void> {
     }
   } catch {}
 
-    // 3. Update Local Storage Custom Reviews Dictionary (Persistent against initial resets)
-    try {
-      const rawMap = localStorage.getItem('kenax_custom_reviews_map');
-      const map = rawMap ? JSON.parse(rawMap) : {};
-      map[review.id] = safeReview;
-      safeSetLocalStorage('kenax_custom_reviews_map', JSON.stringify(map));
-    } catch {}
+  // 3. Update Local Storage Custom Reviews Dictionary (Persistent against initial resets)
+  try {
+    const rawMap = localStorage.getItem('kenax_custom_reviews_map');
+    const map = rawMap ? JSON.parse(rawMap) : {};
+    map[review.id] = safeReview;
+    safeSetLocalStorage('kenax_custom_reviews_map', JSON.stringify(map));
+  } catch {}
 
-    // 4. Update Local Storage Cache
-    try {
-      const cached = localStorage.getItem('kenax_reviews_cache');
-      let list: Review[] = cached ? JSON.parse(cached) : INITIAL_REVIEWS;
-      const idx = list.findIndex((r) => r.id === review.id);
-      if (idx >= 0) {
-        list[idx] = { ...list[idx], ...safeReview };
-      } else {
-        list.unshift(safeReview);
-      }
-      safeSetLocalStorage('kenax_reviews_cache', JSON.stringify(list));
-    } catch (e) {
-      console.warn('[KenaX BD] saveReviewToDB local cache error:', e);
+  // 4. Update Local Storage Cache & IndexedDB
+  try {
+    const cached = localStorage.getItem('kenax_reviews_cache');
+    let list: Review[] = cached ? JSON.parse(cached) : INITIAL_REVIEWS;
+    const idx = list.findIndex((r) => r.id === review.id);
+    if (idx >= 0) {
+      list[idx] = { ...list[idx], ...safeReview };
+    } else {
+      list.unshift(safeReview);
     }
+    safeSetLocalStorage('kenax_reviews_cache', JSON.stringify(list));
+    setIdbItem('kenax_reviews_idb', JSON.stringify(list)).catch(() => {});
+  } catch (e) {
+    console.warn('[KenaX BD] saveReviewToDB local cache error:', e);
+  }
 }
 
 export async function updateReviewInDB(review: Review): Promise<void> {
@@ -4315,7 +4409,9 @@ export async function updateReviewInDB(review: Review): Promise<void> {
 export async function deleteReviewFromDB(reviewId: string): Promise<void> {
   // 1. Direct Cloud Firestore Delete
   try {
-    await deleteDoc(doc(db, 'reviews', reviewId));
+    deleteDoc(doc(db, 'reviews', reviewId)).catch(() => {});
+    deleteDoc(doc(db, 'preview_reviews', reviewId)).catch(() => {});
+    setDoc(doc(db, 'deletedReviews', reviewId), { id: reviewId, deletedAt: new Date().toISOString() }, { merge: true }).catch(() => {});
   } catch (err) {
     console.warn('[KenaX BD] Firestore deleteReviewFromDB fallback:', err);
   }
@@ -4324,8 +4420,12 @@ export async function deleteReviewFromDB(reviewId: string): Promise<void> {
   try {
     fetch(`/api/reviews/${reviewId}`, { method: 'DELETE' }).catch(() => {});
 
-    const CLOUD_RUN_API_BASE = 'https://ais-pre-nziktgpe56nlsqktopppvl-693170375322.asia-southeast1.run.app';
-    if (typeof window !== 'undefined' && !window.location.hostname.includes('localhost') && !window.location.hostname.includes('run.app')) {
+    if (
+      typeof window !== 'undefined' &&
+      !window.location.hostname.includes('localhost') &&
+      !window.location.hostname.includes('127.0.0.1') &&
+      !window.location.hostname.includes('run.app')
+    ) {
       fetch(`${CLOUD_RUN_API_BASE}/api/reviews/${reviewId}`, { method: 'DELETE' }).catch(() => {});
     }
   } catch {}
@@ -4351,6 +4451,7 @@ export async function deleteReviewFromDB(reviewId: string): Promise<void> {
       const list: Review[] = JSON.parse(cached);
       const filtered = list.filter((r) => r.id !== reviewId);
       safeSetLocalStorage('kenax_reviews_cache', JSON.stringify(filtered));
+      setIdbItem('kenax_reviews_idb', JSON.stringify(filtered)).catch(() => {});
     }
   } catch (e) {}
 }

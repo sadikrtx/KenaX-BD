@@ -59,6 +59,15 @@ service cloud.firestore {
     match /reviews/{reviewId} {
       allow read, write: if true;
     }
+    match /preview_reviews/{reviewId} {
+      allow read, write: if true;
+    }
+    match /deletedReviews/{reviewId} {
+      allow read, write: if true;
+    }
+    match /preview_deletedReviews/{reviewId} {
+      allow read, write: if true;
+    }
     // Orders: Anyone can create an order, read by id or query, admin can manage/delete
     match /orders/{orderId} {
       allow read, write: if true;

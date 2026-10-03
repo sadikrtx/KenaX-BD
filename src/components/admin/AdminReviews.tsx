@@ -1685,6 +1685,8 @@ function handleListFiles() {
                           src={getDriveDirectImageUrl(photo)}
                           alt="Review attachment"
                           className="w-full h-full object-cover"
+                          referrerPolicy="no-referrer"
+                          loading="lazy"
                           onError={(e) => handleImageErrorFallback(e, photo)}
                         />
                       </button>
@@ -1996,6 +1998,8 @@ function handleListFiles() {
                               src={getDriveDirectImageUrl(photoUrl)}
                               alt={`Attached photo ${pIdx + 1}`}
                               className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                              referrerPolicy="no-referrer"
+                              loading="lazy"
                               onError={(e) => handleImageErrorFallback(e, photoUrl)}
                             />
                             <button
@@ -2121,6 +2125,8 @@ function handleListFiles() {
                                     src={getDriveDirectImageUrl(item.url)}
                                     alt={item.name}
                                     className="w-full h-full object-cover"
+                                    referrerPolicy="no-referrer"
+                                    loading="lazy"
                                     onError={(e) => handleImageErrorFallback(e, item.url)}
                                   />
                                   {isAlreadyAttached && (
@@ -2274,6 +2280,7 @@ function handleListFiles() {
                 src={getDriveDirectImageUrl(previewModalUrl)}
                 alt="Full resolution preview"
                 className="max-w-full max-h-[65vh] object-contain rounded-xl"
+                referrerPolicy="no-referrer"
                 onError={(e) => handleImageErrorFallback(e, previewModalUrl)}
               />
             </div>
