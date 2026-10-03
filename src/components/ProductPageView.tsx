@@ -154,10 +154,13 @@ export const ProductPageView: React.FC<ProductPageViewProps> = ({
   const [dbReviewsList, setDbReviewsList] = useState<Review[]>(() => {
     try {
       const cached = localStorage.getItem('kenax_reviews_cache');
-      if (cached) {
-        const parsed = JSON.parse(cached);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      let list = cached ? JSON.parse(cached) : [];
+      const customRaw = localStorage.getItem('kenax_custom_reviews_map');
+      if (customRaw) {
+        const customMap = JSON.parse(customRaw);
+        list = list.map((r: Review) => customMap[r.id] ? { ...r, ...customMap[r.id] } : r);
       }
+      if (Array.isArray(list) && list.length > 0) return list;
     } catch {}
     return [];
   });

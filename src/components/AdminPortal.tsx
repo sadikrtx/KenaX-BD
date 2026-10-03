@@ -619,10 +619,13 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   const [reviews, setReviews] = useState<Review[]>(() => {
     try {
       const cached = localStorage.getItem('kenax_reviews_cache');
-      if (cached) {
-        const parsed = JSON.parse(cached);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      let list = cached ? JSON.parse(cached) : INITIAL_REVIEWS;
+      const customRaw = localStorage.getItem('kenax_custom_reviews_map');
+      if (customRaw) {
+        const customMap = JSON.parse(customRaw);
+        list = list.map((r: Review) => customMap[r.id] ? { ...r, ...customMap[r.id] } : r);
       }
+      if (Array.isArray(list) && list.length > 0) return list;
     } catch {}
     return INITIAL_REVIEWS;
   });
@@ -2105,7 +2108,25 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
               }}
               onUpdateReview={async (updated) => {
                 setReviews((prev) => prev.map((r) => (r.id === updated.id ? updated : r)));
-                await saveReviewToDB(updated);
+                try {
+                  const raw = localStorage.getItem('kenax_custom_reviews_map');
+                  const map = raw ? JSON.parse(raw) : {};
+                  map[updated.id] = updated;
+                  safeSetLocalStorage('kenax_custom_reviews_map', JSON.stringify(map));
+                } catch {}
+                try {
+                  const cached = localStorage.getItem('kenax_reviews_cache');
+                  let list: Review[] = cached ? JSON.parse(cached) : [];
+                  const idx = list.findIndex((r) => r.id === updated.id);
+                  if (idx >= 0) {
+                    list[idx] = updated;
+                  } else {
+                    list.unshift(updated);
+                  }
+                  safeSetLocalStorage('kenax_reviews_cache', JSON.stringify(list));
+                } catch {}
+                // Trigger cloud & API sync in background without blocking UI
+                saveReviewToDB(updated).catch((e) => console.warn('[Review DB Sync]', e));
                 recordAuditLog('Review Edited', 'reviews', updated.id, `Edited review content/rating/photos for #${updated.id}`);
               }}
               onAddDemoReview={async (newDemo) => {

@@ -3873,6 +3873,8 @@ export default function App() {
               window.scrollTo({ top: 0, behavior: 'smooth' });
             }}
             onOpenPolicy={handleOpenPolicy}
+            products={products}
+            siteSettings={siteSettings}
           />
         )}
 

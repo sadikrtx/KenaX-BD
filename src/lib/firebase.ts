@@ -4041,44 +4041,82 @@ export function subscribeToSMSLogs(onLogsChanged: (logs: SMSLog[]) => void): Uns
 // PRODUCT REVIEWS & MODERATION (REAL + DEMO REVIEWS)
 // ----------------------------------------------------
 export async function getReviewsFromDB(): Promise<Review[]> {
+  const items: Review[] = [];
+
+  // 1. Fetch from Cloud Firestore
   try {
     const colRef = collection(db, 'reviews');
     const snapshot = await getDocs(colRef);
-    const items: Review[] = [];
     if (!snapshot.empty) {
       snapshot.forEach((docSnap) => {
         const data = docSnap.data() as Review;
         if (data && data.id) items.push(data);
       });
     }
-
-    const rawDeleted = localStorage.getItem('kenax_deleted_review_ids');
-    const deletedIds: string[] = rawDeleted ? JSON.parse(rawDeleted) : [];
-    const valid = items.filter((r) => !deletedIds.includes(r.id));
-    const existingIds = new Set(valid.map((r) => r.id));
-    const combined = [...valid];
-
-    INITIAL_REVIEWS.forEach((initRev) => {
-      if (!existingIds.has(initRev.id) && !deletedIds.includes(initRev.id)) {
-        combined.push(initRev);
-      }
-    });
-
-    combined.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-    safeSetLocalStorage('kenax_reviews_cache', JSON.stringify(combined));
-    return combined;
   } catch (err) {
     console.warn('[KenaX BD] Firestore getReviewsFromDB fallback:', err);
   }
 
-  const cached = localStorage.getItem('kenax_reviews_cache');
-  if (cached) {
+  // 2. Fetch from Local Node Server / Cloud Run API (disk persistence)
+  try {
+    const srvRes = await fetch('/api/reviews');
+    if (srvRes.ok) {
+      const srvJson = await srvRes.json();
+      if (srvJson?.success && Array.isArray(srvJson.reviews)) {
+        srvJson.reviews.forEach((sr: Review) => {
+          if (sr && sr.id) {
+            const exIdx = items.findIndex((it) => it.id === sr.id);
+            if (exIdx >= 0) {
+              items[exIdx] = { ...items[exIdx], ...sr };
+            } else {
+              items.push(sr);
+            }
+          }
+        });
+      }
+    }
+  } catch {}
+
+  // 3. Merge with local custom edited reviews dictionary (Guaranteed zero-loss on refresh)
+  const rawDeleted = typeof window !== 'undefined' ? localStorage.getItem('kenax_deleted_review_ids') : null;
+  const deletedIds: string[] = rawDeleted ? JSON.parse(rawDeleted) : [];
+  const valid = items.filter((r) => !deletedIds.includes(r.id));
+  const existingIds = new Set(valid.map((r) => r.id));
+  const combined = [...valid];
+
+  let customMap: Record<string, Review> = {};
+  if (typeof window !== 'undefined') {
     try {
-      const list: Review[] = JSON.parse(cached);
-      if (Array.isArray(list) && list.length > 0) return list;
+      const customRaw = localStorage.getItem('kenax_custom_reviews_map');
+      if (customRaw) customMap = JSON.parse(customRaw);
     } catch {}
   }
-  return INITIAL_REVIEWS;
+
+  // Apply custom edits over existing items
+  combined.forEach((r, idx) => {
+    if (customMap[r.id]) {
+      combined[idx] = { ...r, ...customMap[r.id] };
+    }
+  });
+
+  // Add any custom reviews that were not in items yet
+  Object.keys(customMap).forEach((cId) => {
+    if (!deletedIds.includes(cId) && !existingIds.has(cId)) {
+      combined.push(customMap[cId]);
+      existingIds.add(cId);
+    }
+  });
+
+  // 4. Fill in initial demo reviews for missing IDs (Only if not customized or deleted)
+  INITIAL_REVIEWS.forEach((initRev) => {
+    if (!existingIds.has(initRev.id) && !deletedIds.includes(initRev.id) && !customMap[initRev.id]) {
+      combined.push(initRev);
+    }
+  });
+
+  combined.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+  safeSetLocalStorage('kenax_reviews_cache', JSON.stringify(combined));
+  return combined;
 }
 
 export function subscribeToReviews(
@@ -4096,19 +4134,41 @@ export function subscribeToReviews(
           if (data && data.id) items.push(data);
         });
 
-        const rawDeleted = localStorage.getItem('kenax_deleted_review_ids');
+        const rawDeleted = typeof window !== 'undefined' ? localStorage.getItem('kenax_deleted_review_ids') : null;
         const deletedIds: string[] = rawDeleted ? JSON.parse(rawDeleted) : [];
         const valid = items.filter((r) => !deletedIds.includes(r.id));
         const existingIds = new Set(valid.map((r) => r.id));
         const combined = [...valid];
 
+        let customMap: Record<string, Review> = {};
+        if (typeof window !== 'undefined') {
+          try {
+            const customRaw = localStorage.getItem('kenax_custom_reviews_map');
+            if (customRaw) customMap = JSON.parse(customRaw);
+          } catch {}
+        }
+
+        // Apply custom edits
+        combined.forEach((r, idx) => {
+          if (customMap[r.id]) {
+            combined[idx] = { ...r, ...customMap[r.id] };
+          }
+        });
+
+        Object.keys(customMap).forEach((cId) => {
+          if (!deletedIds.includes(cId) && !existingIds.has(cId)) {
+            combined.push(customMap[cId]);
+            existingIds.add(cId);
+          }
+        });
+
         INITIAL_REVIEWS.forEach((initRev) => {
-          if (!existingIds.has(initRev.id) && !deletedIds.includes(initRev.id)) {
+          if (!existingIds.has(initRev.id) && !deletedIds.includes(initRev.id) && !customMap[initRev.id]) {
             combined.push(initRev);
           }
         });
 
-        combined.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+        combined.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
         safeSetLocalStorage('kenax_reviews_cache', JSON.stringify(combined));
         onReviewsChanged(combined);
       },
@@ -4196,11 +4256,14 @@ export async function saveReviewToDB(review: Review): Promise<void> {
 
   const cleaned = cleanFirestoreData(safeReview);
   
-  // 1. Direct Cloud Firestore Save (Permanent & Cross-device)
+  // 1. Direct Cloud Firestore Save (Permanent & Cross-device with safe timeout)
   try {
-    await setDoc(doc(db, 'reviews', review.id), cleaned, { merge: true });
+    await Promise.race([
+      setDoc(doc(db, 'reviews', review.id), cleaned, { merge: true }),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('Firestore timeout')), 2000)),
+    ]);
   } catch (err) {
-    console.warn('[KenaX BD] Firestore saveReviewToDB fallback:', err);
+    console.warn('[KenaX BD] Firestore saveReviewToDB fallback/timeout:', err);
   }
 
   // 2. Central API Sync (Cross-server, Netlify, Vercel relay)
@@ -4221,20 +4284,28 @@ export async function saveReviewToDB(review: Review): Promise<void> {
     }
   } catch {}
 
-  // 3. Update Local Storage Cache
-  try {
-    const cached = localStorage.getItem('kenax_reviews_cache');
-    let list: Review[] = cached ? JSON.parse(cached) : INITIAL_REVIEWS;
-    const idx = list.findIndex((r) => r.id === review.id);
-    if (idx >= 0) {
-      list[idx] = { ...list[idx], ...safeReview };
-    } else {
-      list.unshift(safeReview);
+    // 3. Update Local Storage Custom Reviews Dictionary (Persistent against initial resets)
+    try {
+      const rawMap = localStorage.getItem('kenax_custom_reviews_map');
+      const map = rawMap ? JSON.parse(rawMap) : {};
+      map[review.id] = safeReview;
+      safeSetLocalStorage('kenax_custom_reviews_map', JSON.stringify(map));
+    } catch {}
+
+    // 4. Update Local Storage Cache
+    try {
+      const cached = localStorage.getItem('kenax_reviews_cache');
+      let list: Review[] = cached ? JSON.parse(cached) : INITIAL_REVIEWS;
+      const idx = list.findIndex((r) => r.id === review.id);
+      if (idx >= 0) {
+        list[idx] = { ...list[idx], ...safeReview };
+      } else {
+        list.unshift(safeReview);
+      }
+      safeSetLocalStorage('kenax_reviews_cache', JSON.stringify(list));
+    } catch (e) {
+      console.warn('[KenaX BD] saveReviewToDB local cache error:', e);
     }
-    safeSetLocalStorage('kenax_reviews_cache', JSON.stringify(list));
-  } catch (e) {
-    console.warn('[KenaX BD] saveReviewToDB local cache error:', e);
-  }
 }
 
 export async function updateReviewInDB(review: Review): Promise<void> {
@@ -4259,7 +4330,7 @@ export async function deleteReviewFromDB(reviewId: string): Promise<void> {
     }
   } catch {}
 
-  // 3. Mark in deleted IDs and clean local cache
+  // 3. Mark in deleted IDs and clean local cache & custom map
   try {
     const rawDeleted = localStorage.getItem('kenax_deleted_review_ids');
     const deletedIds: string[] = rawDeleted ? JSON.parse(rawDeleted) : [];
@@ -4267,6 +4338,14 @@ export async function deleteReviewFromDB(reviewId: string): Promise<void> {
       deletedIds.push(reviewId);
       safeSetLocalStorage('kenax_deleted_review_ids', JSON.stringify(deletedIds));
     }
+
+    const rawMap = localStorage.getItem('kenax_custom_reviews_map');
+    if (rawMap) {
+      const map = JSON.parse(rawMap);
+      delete map[reviewId];
+      safeSetLocalStorage('kenax_custom_reviews_map', JSON.stringify(map));
+    }
+
     const cached = localStorage.getItem('kenax_reviews_cache');
     if (cached) {
       const list: Review[] = JSON.parse(cached);

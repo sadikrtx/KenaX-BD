@@ -27,6 +27,10 @@ import {
   ShoppingCart,
   Plus,
   ShoppingBag,
+  Banknote,
+  Wallet,
+  RotateCcw,
+  Award,
 } from 'lucide-react';
 import {
   Order,
@@ -145,6 +149,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   const [customerEmail, setCustomerEmail] = useState('');
   const [guestPassword, setGuestPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [shouldCreateAccount, setShouldCreateAccount] = useState(false);
 
   // Internal sync for cart items with variation selection
   const [itemsList, setItemsList] = useState<OrderItem[]>(() => {
@@ -532,6 +537,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 
   // Address presets
   const [selectedAddressPreset, setSelectedAddressPreset] = useState<string>('custom');
+  const [showOptionalMobileEmail, setShowOptionalMobileEmail] = useState(false);
 
   // Pre-fill from logged-in customer or Telegram WebApp if available
   useEffect(() => {
@@ -710,21 +716,45 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
       );
     }
 
-    // Guest email and password check
-    if (!currentCustomer) {
-      const emailValidationError = getEmailValidationError(customerEmail);
-      if (emailValidationError) {
-        errs.email = t('সঠিক ইমেইল ঠিকানা দিন', emailValidationError);
-      }
+    // Ensure division/district/upazila defaults for mobile single-address flow
+    const effectiveDivision = division || 'Dhaka';
+    const effectiveDistrict = district || (selectedDeliveryMethod === 'inside' ? 'Dhaka' : 'Outside Dhaka');
+    const effectiveUpazila = upazila || (selectedDeliveryMethod === 'inside' ? 'Dhaka City' : 'General');
+    if (!division) setDivision(effectiveDivision);
+    if (!district) setDistrict(effectiveDistrict);
+    if (!upazila) setUpazila(effectiveUpazila);
 
-      if (!guestPassword || guestPassword.trim().length < 4) {
-        errs.password = t('কমপক্ষে ৪ অক্ষরের একটি পাসওয়ার্ড তৈরি করুন', 'Create a password (minimum 4 characters) to secure your account');
+    // Guest email and password check - smart fallback for fast-checkout or explicit account creation
+    if (!currentCustomer) {
+      if (shouldCreateAccount) {
+        if (!customerEmail || !customerEmail.trim()) {
+          errs.email = t('ইমেইল অ্যাড্রেস লিখুন', 'Please enter your email address');
+        } else {
+          const emailValidationError = getEmailValidationError(customerEmail);
+          if (emailValidationError) {
+            errs.email = t('সঠিক ইমেইল ঠিকানা দিন', emailValidationError);
+          }
+        }
+
+        if (!guestPassword || guestPassword.trim().length < 4) {
+          errs.password = t('কমপক্ষে ৪ অক্ষরের পাসওয়ার্ড দিন', 'Enter at least 4 characters');
+        }
+      } else {
+        if (customerEmail && customerEmail.trim()) {
+          const emailValidationError = getEmailValidationError(customerEmail);
+          if (emailValidationError) {
+            errs.email = t('সঠিক ইমেইল ঠিকানা দিন', emailValidationError);
+          }
+        } else {
+          const safeMobile = cleanBDPhoneNumber(deliveryMobile || customerMobile) || 'customer';
+          setCustomerEmail(`${safeMobile}@kenax.com.bd`);
+        }
+
+        if (!guestPassword || guestPassword.trim().length < 4) {
+          setGuestPassword('1234');
+        }
       }
     }
-
-    if (!division) errs.division = t('অনুগ্রহ করে বিভাগ নির্বাচন করুন', 'Please select your division');
-    if (!district) errs.district = t('অনুগ্রহ করে জেলা নির্বাচন করুন', 'Please select your district');
-    if (!upazila) errs.upazila = t('অনুগ্রহ করে উপজেলা/থানা নির্বাচন করুন', 'Please select your upazila/thana');
 
     if (!fullAddress.trim()) {
       errs.address = t('অনুগ্রহ করে সম্পূর্ণ ডেলিভারি ঠিকানা দিন', 'Please enter your complete delivery address');
@@ -1048,19 +1078,20 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
               </div>
             )}
 
-            {/* 1. Customer Information - Compact & Vertical on mobile */}
+            {/* 1. Customer Information & Delivery Address (Unified Layer) */}
             <div className="bg-slate-50/70 dark:bg-slate-800/40 border border-slate-200/80 dark:border-slate-700/60 rounded-2xl p-3 sm:p-3.5 space-y-2.5">
               <div className="flex items-center justify-between">
                 <h3 className="text-[11px] sm:text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-200 flex items-center gap-1.5">
                   <span className="w-5 h-5 rounded-md bg-sky-600 text-white flex items-center justify-center text-[10px] font-black">1</span>
-                  <span>{t('গ্রাহকের বিবরণ', 'Customer Details')}</span>
+                  <span>{t('কাস্টমার ডিটেইলস', 'Customer Details')}</span>
                 </h3>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-2.5">
+                {/* Your Name */}
                 <div>
                   <label className="text-[10px] sm:text-[11px] font-bold text-slate-700 dark:text-slate-300 block mb-0.5">
-                    {t('আপনার নাম', 'Your Name')} <span className="text-rose-500">*</span>
+                    {t('ইউর নেম (আপনার নাম)', 'Your Name')} <span className="text-rose-500">*</span>
                   </label>
                   <div className="relative">
                     <input
@@ -1070,7 +1101,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                         setCustomerName(e.target.value);
                         setDeliveryName(e.target.value);
                       }}
-                      placeholder={t('উদা: তানভীর হোসেন', 'e.g. Tanvir Hossain')}
+                      placeholder={t('আপনার নাম লিখুন', 'Enter your name')}
                       className={`w-full px-3 py-2 text-xs rounded-xl border bg-white dark:bg-slate-900 text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500 ${
                         errors.name ? 'border-rose-400 dark:border-rose-500 bg-rose-50 dark:bg-rose-950/20' : 'border-slate-300 dark:border-slate-700'
                       } focus:outline-hidden focus:ring-2 focus:ring-sky-500 transition-all`}
@@ -1079,9 +1110,10 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                   {errors.name && <p className="text-[10px] text-rose-500 mt-0.5">{errors.name}</p>}
                 </div>
 
+                {/* Mobile Number */}
                 <div>
                   <label className="text-[10px] sm:text-[11px] font-bold text-slate-700 dark:text-slate-300 block mb-0.5">
-                    {t('মোবাইল নম্বর (১১ ডিজিট)', 'Mobile Number (11-Digit)')} <span className="text-rose-500">*</span>
+                    {t('মোবাইল নাম্বার (১১ ডিজিট)', 'Mobile Number (11-Digit)')} <span className="text-rose-500">*</span>
                   </label>
                   <input
                     type="tel"
@@ -1109,172 +1141,199 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                 </div>
               </div>
 
-              <div className={`grid grid-cols-1 ${!currentCustomer ? 'sm:grid-cols-2' : ''} gap-2 sm:gap-2.5`}>
-                <div>
-                  <label className="text-[10px] sm:text-[11px] font-bold text-slate-700 dark:text-slate-300 block mb-0.5">
-                    {t('ইমেইল ঠিকানা', 'Email Address')} <span className="text-rose-500">{!currentCustomer ? '*' : ''}</span>
-                  </label>
-                  <input
-                    type="email"
-                    value={customerEmail}
-                    onChange={(e) => setCustomerEmail(e.target.value)}
-                    placeholder="yourname@gmail.com"
-                    className={`w-full px-3 py-2 text-xs rounded-xl border bg-white dark:bg-slate-900 text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500 ${
-                      errors.email ? 'border-rose-400 dark:border-rose-500 bg-rose-50 dark:bg-rose-950/20' : 'border-slate-300 dark:border-slate-700'
-                    } focus:outline-hidden focus:ring-2 focus:ring-sky-500 transition-all`}
-                  />
-                  {errors.email && <p className="text-[10px] text-rose-500 mt-0.5">{errors.email}</p>}
-                </div>
-
-                {/* Password field: STRICTLY shown only if guest (not logged in) */}
-                {!currentCustomer && (
-                  <div>
-                    <label className="text-[10px] sm:text-[11px] font-bold text-slate-700 dark:text-slate-300 block mb-0.5">
-                      {t('পাসওয়ার্ড তৈরি করুন', 'Create Password')} <span className="text-rose-500">*</span>
-                    </label>
-                    <div className="relative">
-                      <input
-                        type={showPassword ? 'text' : 'password'}
-                        value={guestPassword}
-                        onChange={(e) => setGuestPassword(e.target.value)}
-                        placeholder={t('ন্যূনতম ৪ অক্ষর', 'Min. 4 characters')}
-                        className={`w-full pl-3 pr-8 py-2 text-xs rounded-xl border bg-white dark:bg-slate-900 text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500 ${
-                          errors.password ? 'border-rose-400 dark:border-rose-500 bg-rose-50 dark:bg-rose-950/20' : 'border-slate-300 dark:border-slate-700'
-                        } focus:outline-hidden focus:ring-2 focus:ring-sky-500 transition-all`}
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowPassword(!showPassword)}
-                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 cursor-pointer"
-                      >
-                        {showPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                      </button>
-                    </div>
-                    {errors.password && <p className="text-[10px] text-rose-500 mt-0.5">{errors.password}</p>}
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* 2. Delivery Address - Stacked vertically on mobile */}
-            <div className="bg-slate-50/70 dark:bg-slate-800/40 border border-slate-200/80 dark:border-slate-700/60 rounded-2xl p-3 sm:p-3.5 space-y-2.5">
-              <h3 className="text-[11px] sm:text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-200 flex items-center gap-1.5">
-                <span className="w-5 h-5 rounded-md bg-sky-600 text-white flex items-center justify-center text-[10px] font-black">2</span>
-                <span>{t('ডেলিভারি ঠিকানা', 'Delivery Address')}</span>
-              </h3>
-
-              {/* 3 Selectors: Responsive 1 col on mobile, 3 cols on tablet/desktop */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-2.5">
-                {/* Division */}
-                <div>
-                  <label className="text-[10px] sm:text-[11px] font-bold text-slate-700 dark:text-slate-300 block mb-1">
-                    {t('বিভাগ', 'Division')} <span className="text-rose-500">*</span>
-                  </label>
-                  <select
-                    value={division}
-                    onChange={(e) => handleDivisionChange(e.target.value)}
-                    className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-medium focus:ring-2 focus:ring-sky-500 cursor-pointer"
-                  >
-                    {Object.keys(BANGLADESH_LOCATIONS).map((div) => (
-                      <option key={div} value={div}>
-                        {div}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* District */}
-                <div>
-                  <label className="text-[10px] sm:text-[11px] font-bold text-slate-700 dark:text-slate-300 block mb-1">
-                    {t('জেলা', 'District')} <span className="text-rose-500">*</span>
-                  </label>
-                  <select
-                    value={district}
-                    onChange={(e) => handleDistrictChange(e.target.value)}
-                    className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-medium focus:ring-2 focus:ring-sky-500 cursor-pointer"
-                  >
-                    {availableDistricts.map((dist) => (
-                      <option key={dist} value={dist}>
-                        {dist}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* Upazila / Thana */}
-                <div>
-                  <label className="text-[10px] sm:text-[11px] font-bold text-slate-700 dark:text-slate-300 block mb-1">
-                    {t('থানা / উপজেলা', 'Thana / Upazila')} <span className="text-rose-500">*</span>
-                  </label>
-                  <select
-                    value={upazila}
-                    onChange={(e) => setUpazila(e.target.value)}
-                    className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-medium focus:ring-2 focus:ring-sky-500 cursor-pointer"
-                  >
-                    {availableUpazilas.map((upz) => (
-                      <option key={upz} value={upz}>
-                        {upz}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              {/* Area & Road Details */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-2.5">
-                <div>
-                  <label className="text-[10px] sm:text-[11px] font-bold text-slate-700 dark:text-slate-300 block mb-1">
-                    {t('এলাকা / সেক্টর / গ্রাম', 'Area / Sector / Village')}
-                  </label>
-                  <input
-                    type="text"
-                    value={area}
-                    onChange={(e) => setArea(e.target.value)}
-                    placeholder={t('উদা: কাজীপাড়া / সেক্টর ৪', 'e.g. Kazipara / Sector 4')}
-                    className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:ring-2 focus:ring-sky-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="text-[10px] sm:text-[11px] font-bold text-slate-700 dark:text-slate-300 block mb-1">
-                    {t('বাসা / রোড / ফ্ল্যাট নং', 'House / Road / Flat No.')}
-                  </label>
-                  <input
-                    type="text"
-                    value={houseRoad}
-                    onChange={(e) => setHouseRoad(e.target.value)}
-                    placeholder={t('বাসা ১২, রোড ৪', 'House 12, Road 4')}
-                    className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:ring-2 focus:ring-sky-500"
-                  />
-                </div>
-              </div>
-
-              {/* Full Address */}
+              {/* Full Permanent Address - Directly inside Customer Details Layer */}
               <div>
                 <label className="text-[10px] sm:text-[11px] font-bold text-slate-700 dark:text-slate-300 block mb-0.5">
-                  {t('সম্পূর্ণ ডেলিভারি ঠিকানা', 'Complete Delivery Address')} <span className="text-rose-500">*</span>
+                  <span>{t('ফুল পার্মানেন্ট অ্যাড্রেস (সম্পূর্ণ ডেলিভারি ঠিকানা)', 'Full Permanent Address')}</span> <span className="text-rose-500">*</span>
                 </label>
                 <textarea
                   rows={2}
                   value={fullAddress}
-                  onChange={(e) => setFullAddress(e.target.value)}
-                  placeholder={t('বাসা/ফ্ল্যাট নং, রোড নং, এলাকা এবং বিস্তারিত ঠিকানা...', 'House/Flat number, Road, Area, and detailed address instructions...')}
+                  onChange={(e) => {
+                    setFullAddress(e.target.value);
+                    if (errors.address) {
+                      setErrors((prev) => {
+                        const n = { ...prev };
+                        delete n.address;
+                        return n;
+                      });
+                    }
+                  }}
+                  placeholder={t('বাসা নং, রোড নং, গ্রাম/এলাকা, থানা ও জেলা সহ সম্পূর্ণ স্থায়ী ঠিকানা লিখুন...', 'Enter complete permanent address including House/Road, Area, Thana & District...')}
                   className={`w-full px-3 py-2 text-xs rounded-xl border bg-white dark:bg-slate-900 text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500 ${
                     errors.address ? 'border-rose-400 dark:border-rose-500 bg-rose-50 dark:bg-rose-950/20' : 'border-slate-300 dark:border-slate-700'
-                  } focus:ring-2 focus:ring-sky-500 transition-all`}
+                  } focus:ring-2 focus:ring-sky-500 transition-all leading-relaxed`}
                 />
                 {errors.address && <p className="text-[10px] text-rose-500 mt-0.5">{errors.address}</p>}
               </div>
+
+              {/* Create an Account Checkbox & Expandable Fields for Logged-Out Guests (Mobile & Desktop) */}
+              {!currentCustomer ? (
+                <div className="pt-2 border-t border-slate-200/70 dark:border-slate-700/60">
+                  <label className="inline-flex items-center gap-2 cursor-pointer select-none group">
+                    <input
+                      type="checkbox"
+                      checked={shouldCreateAccount}
+                      onChange={(e) => {
+                        setShouldCreateAccount(e.target.checked);
+                        if (!e.target.checked) {
+                          setErrors((prev) => {
+                            const n = { ...prev };
+                            delete n.email;
+                            delete n.password;
+                            return n;
+                          });
+                        }
+                      }}
+                      className="w-4 h-4 rounded-md text-sky-600 border-slate-300 dark:border-slate-600 focus:ring-sky-500 cursor-pointer accent-sky-600"
+                    />
+                    <span className="text-xs font-bold text-slate-800 dark:text-slate-200 group-hover:text-sky-600 dark:group-hover:text-sky-400 transition-colors">
+                      {t('একটি অ্যাকাউন্ট তৈরি করুন (Create an Account)', 'Create an account')}
+                    </span>
+                  </label>
+
+                  {/* Expandable Email & Password Inputs */}
+                  {shouldCreateAccount && (
+                    <div className="mt-2.5 grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-2.5 p-2.5 sm:p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-700/90 shadow-2xs animate-in fade-in zoom-in-95 duration-200">
+                      <div>
+                        <label className="text-[10px] sm:text-[11px] font-bold text-slate-700 dark:text-slate-300 block mb-0.5">
+                          {t('ইমেইল অ্যাড্রেস', 'Email Address')} <span className="text-rose-500">*</span>
+                        </label>
+                        <input
+                          type="email"
+                          value={customerEmail}
+                          onChange={(e) => {
+                            setCustomerEmail(e.target.value);
+                            if (errors.email) {
+                              setErrors((prev) => {
+                                const n = { ...prev };
+                                delete n.email;
+                                return n;
+                              });
+                            }
+                          }}
+                          placeholder="yourname@gmail.com"
+                          className={`w-full px-3 py-2 text-xs rounded-xl border bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500 ${
+                            errors.email ? 'border-rose-400 dark:border-rose-500 bg-rose-50 dark:bg-rose-950/20' : 'border-slate-300 dark:border-slate-700'
+                          } focus:outline-hidden focus:ring-2 focus:ring-sky-500 transition-all`}
+                        />
+                        {errors.email && <p className="text-[10px] text-rose-500 mt-0.5">{errors.email}</p>}
+                      </div>
+
+                      <div>
+                        <label className="text-[10px] sm:text-[11px] font-bold text-slate-700 dark:text-slate-300 block mb-0.5">
+                          {t('পাসওয়ার্ড তৈরি করুন', 'Create Password')} <span className="text-rose-500">*</span>
+                        </label>
+                        <div className="relative">
+                          <input
+                            type={showPassword ? 'text' : 'password'}
+                            value={guestPassword}
+                            onChange={(e) => {
+                              setGuestPassword(e.target.value);
+                              if (errors.password) {
+                                setErrors((prev) => {
+                                  const n = { ...prev };
+                                  delete n.password;
+                                  return n;
+                                });
+                              }
+                            }}
+                            placeholder={t('ন্যূনতম ৪ অক্ষরের পাসওয়ার্ড', 'Min. 4 characters')}
+                            className={`w-full pl-3 pr-8 py-2 text-xs rounded-xl border bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500 ${
+                              errors.password ? 'border-rose-400 dark:border-rose-500 bg-rose-50 dark:bg-rose-950/20' : 'border-slate-300 dark:border-slate-700'
+                            } focus:outline-hidden focus:ring-2 focus:ring-sky-500 transition-all`}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowPassword(!showPassword)}
+                            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 cursor-pointer"
+                          >
+                            {showPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                          </button>
+                        </div>
+                        {errors.password && <p className="text-[10px] text-rose-500 mt-0.5">{errors.password}</p>}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="pt-2 border-t border-slate-200/70 dark:border-slate-700/60 flex items-center justify-between text-[11px]">
+                  <span className="text-slate-500 dark:text-slate-400">{t('কাস্টমার অ্যাকাউন্ট:', 'Customer Account:')}</span>
+                  <span className="font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
+                    <CheckCircle className="w-3.5 h-3.5" />
+                    <span>{currentCustomer.name}</span>
+                  </span>
+                </div>
+              )}
+
+              {/* Optional Selectors - Desktop Only */}
+              <div className="hidden sm:block space-y-2.5 pt-1 border-t border-slate-200/60 dark:border-slate-700/60">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-2.5">
+                  {/* Division */}
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-700 dark:text-slate-300 block mb-1">
+                      {t('বিভাগ', 'Division')}
+                    </label>
+                    <select
+                      value={division}
+                      onChange={(e) => handleDivisionChange(e.target.value)}
+                      className="w-full px-2.5 py-1.5 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-medium focus:ring-2 focus:ring-sky-500 cursor-pointer"
+                    >
+                      {Object.keys(BANGLADESH_LOCATIONS).map((div) => (
+                        <option key={div} value={div}>
+                          {div}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* District */}
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-700 dark:text-slate-300 block mb-1">
+                      {t('জেলা', 'District')}
+                    </label>
+                    <select
+                      value={district}
+                      onChange={(e) => handleDistrictChange(e.target.value)}
+                      className="w-full px-2.5 py-1.5 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-medium focus:ring-2 focus:ring-sky-500 cursor-pointer"
+                    >
+                      {availableDistricts.map((dist) => (
+                        <option key={dist} value={dist}>
+                          {dist}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Upazila / Thana */}
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-700 dark:text-slate-300 block mb-1">
+                      {t('থানা / উপজেলা', 'Thana / Upazila')}
+                    </label>
+                    <select
+                      value={upazila}
+                      onChange={(e) => setUpazila(e.target.value)}
+                      className="w-full px-2.5 py-1.5 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-medium focus:ring-2 focus:ring-sky-500 cursor-pointer"
+                    >
+                      {availableUpazilas.map((upz) => (
+                        <option key={upz} value={upz}>
+                          {upz}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              </div>
             </div>
 
-            {/* 3. Delivery Method - Responsive vertical stacking on mobile */}
+            {/* 2. Delivery Method - Inside Dhaka & Outside Dhaka */}
             <div className="bg-slate-50/70 dark:bg-slate-800/40 border border-slate-200/80 dark:border-slate-700/60 rounded-2xl p-3 sm:p-3.5 space-y-2">
               <h3 className="text-[11px] sm:text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-200 flex items-center gap-1.5">
-                <span className="w-5 h-5 rounded-md bg-sky-600 text-white flex items-center justify-center text-[10px] font-black">3</span>
-                <span>{t('ডেলিভারি পদ্ধতি', 'Delivery Method')}</span>
+                <span className="w-5 h-5 rounded-md bg-sky-600 text-white flex items-center justify-center text-[10px] font-black">2</span>
+                <span>{t('ডেলিভারি মেথড', 'Delivery Method')}</span>
               </h3>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <div className="grid grid-cols-2 gap-2">
                 {/* Inside Dhaka */}
                 <button
                   type="button"
@@ -1286,7 +1345,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                   }`}
                 >
                   <div className="flex items-center justify-between gap-1">
-                    <span className="text-xs font-black text-slate-900 dark:text-white truncate">{t('ঢাকার ভিতরে', 'Inside Dhaka')}</span>
+                    <span className="text-xs font-black text-slate-900 dark:text-white truncate">{t('ঢাকার ভেতরে', 'Inside Dhaka')}</span>
                     <div className="flex items-center gap-1 shrink-0">
                       <span className="text-xs font-black text-sky-700 dark:text-sky-400">
                         {subtotal >= 5000 ? t('ফ্রি', 'FREE') : `৳${siteSettings?.insideDhakaDeliveryFee ?? defaultInsideCityFee}`}
@@ -1323,35 +1382,48 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
               </div>
             </div>
 
-            {/* 4. Payment Method - Vertical on mobile, 3 cols on desktop */}
+            {/* 3. Payment Method - Horizontal Compact Layout with Icons on Mobile */}
             <div className="bg-slate-50/70 dark:bg-slate-800/40 border border-slate-200/80 dark:border-slate-700/60 rounded-2xl p-3 sm:p-3.5 space-y-2.5">
               <h3 className="text-[11px] sm:text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-200 flex items-center gap-1.5">
-                <span className="w-5 h-5 rounded-md bg-sky-600 text-white flex items-center justify-center text-[10px] font-black">4</span>
-                <span>{t('পেমেন্ট পদ্ধতি', 'Payment Method')}</span>
+                <span className="w-5 h-5 rounded-md bg-sky-600 text-white flex items-center justify-center text-[10px] font-black">3</span>
+                <span>{t('পেমেন্ট মেথড', 'Payment Method')}</span>
               </h3>
 
-              {/* Responsive Payment Options: 1-column on mobile, 3-columns on sm+ */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              {/* Horizontal 3-Column Compact Grid with Icons */}
+              <div className="grid grid-cols-3 gap-1.5 sm:gap-2">
                 {/* A. Cash on Delivery */}
                 <button
                   type="button"
                   onClick={() => setPaymentOptionType('cod')}
-                  className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between ${
+                  className={`p-2 sm:p-2.5 rounded-xl border text-center sm:text-left transition-all cursor-pointer flex flex-col justify-between items-center sm:items-stretch relative ${
                     paymentOptionType === 'cod'
-                      ? 'border-sky-600 dark:border-sky-500 bg-white dark:bg-slate-900 ring-2 ring-sky-500/20 shadow-xs'
-                      : 'border-slate-200 dark:border-slate-700 bg-white/80 dark:bg-slate-800/80 hover:bg-white dark:hover:bg-slate-800'
+                      ? 'border-emerald-600 dark:border-emerald-500 bg-emerald-50/70 dark:bg-emerald-950/40 ring-2 ring-emerald-500/25 shadow-xs'
+                      : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/80 hover:bg-slate-50 dark:hover:bg-slate-800'
                   }`}
                 >
-                  <div>
-                    <div className="flex items-center justify-between mb-0.5">
-                      <span className="text-xs font-black text-slate-900 dark:text-white leading-tight">{t('ক্যাশ অন ডেলিভারি', 'Cash on Delivery')}</span>
+                  <div className="flex sm:flex-row flex-col items-center sm:items-start gap-1 sm:gap-2 w-full">
+                    <div className={`w-7 h-7 sm:w-7 sm:h-7 rounded-lg flex items-center justify-center shrink-0 ${
+                      paymentOptionType === 'cod'
+                        ? 'bg-emerald-600 text-white'
+                        : 'bg-emerald-50 dark:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400'
+                    }`}>
+                      <Banknote className="w-4 h-4" />
                     </div>
-                    <p className="text-[10px] text-slate-500 dark:text-slate-400 line-clamp-1">{t('পণ্য পেয়ে টাকা দিন', 'Pay upon delivery')}</p>
+                    <div className="min-w-0 flex-1">
+                      <span className="text-[10px] sm:text-xs font-black text-slate-900 dark:text-white leading-tight block truncate">
+                        {t('ক্যাশ অন ডেলিভারি', 'Cash on Delivery')}
+                      </span>
+                      <p className="hidden sm:block text-[10px] text-slate-500 dark:text-slate-400 truncate mt-0.5">
+                        {t('পণ্য পেয়ে টাকা দিন', 'Pay upon delivery')}
+                      </p>
+                    </div>
                   </div>
-                  <div className="mt-2 flex items-center justify-between">
-                    <span className="text-xs font-extrabold text-sky-700 dark:text-sky-400">৳{finalTotal}</span>
+                  <div className="mt-1 sm:mt-2 flex items-center justify-center sm:justify-between w-full">
+                    <span className="text-[11px] sm:text-xs font-black text-emerald-700 dark:text-emerald-400">
+                      ৳{finalTotal}
+                    </span>
                     {paymentOptionType === 'cod' && (
-                      <CheckCircle className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400 shrink-0" />
+                      <CheckCircle className="hidden sm:inline w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
                     )}
                   </div>
                 </button>
@@ -1360,46 +1432,72 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                 <button
                   type="button"
                   onClick={() => setPaymentOptionType('full')}
-                  className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between ${
+                  className={`p-2 sm:p-2.5 rounded-xl border text-center sm:text-left transition-all cursor-pointer flex flex-col justify-between items-center sm:items-stretch relative ${
                     paymentOptionType === 'full'
-                      ? 'border-sky-600 dark:border-sky-500 bg-white dark:bg-slate-900 ring-2 ring-sky-500/20 shadow-xs'
-                      : 'border-slate-200 dark:border-slate-700 bg-white/80 dark:bg-slate-800/80 hover:bg-white dark:hover:bg-slate-800'
+                      ? 'border-sky-600 dark:border-sky-500 bg-sky-50/70 dark:bg-sky-950/40 ring-2 ring-sky-500/25 shadow-xs'
+                      : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/80 hover:bg-slate-50 dark:hover:bg-slate-800'
                   }`}
                 >
-                  <div>
-                    <div className="flex items-center justify-between mb-0.5">
-                      <span className="text-xs font-black text-slate-900 dark:text-white leading-tight">{t('সম্পূর্ণ অগ্রিম পরিশোধ', 'Full Advance')}</span>
+                  <div className="flex sm:flex-row flex-col items-center sm:items-start gap-1 sm:gap-2 w-full">
+                    <div className={`w-7 h-7 sm:w-7 sm:h-7 rounded-lg flex items-center justify-center shrink-0 ${
+                      paymentOptionType === 'full'
+                        ? 'bg-sky-600 text-white'
+                        : 'bg-sky-50 dark:bg-sky-950/50 text-sky-600 dark:text-sky-400'
+                    }`}>
+                      <Wallet className="w-4 h-4" />
                     </div>
-                    <p className="text-[10px] text-slate-500 dark:text-slate-400 line-clamp-1">{t('বিকাশ, নগদ, রকেট', 'bKash, Nagad, Rocket')}</p>
+                    <div className="min-w-0 flex-1">
+                      <span className="text-[10px] sm:text-xs font-black text-slate-900 dark:text-white leading-tight block truncate">
+                        {t('সম্পূর্ণ অগ্রিম', 'Full Advance')}
+                      </span>
+                      <p className="hidden sm:block text-[10px] text-slate-500 dark:text-slate-400 truncate mt-0.5">
+                        {t('বিকাশ, নগদ, রকেট', 'bKash, Nagad, Rocket')}
+                      </p>
+                    </div>
                   </div>
-                  <div className="mt-2 flex items-center justify-between">
-                    <span className="text-xs font-extrabold text-emerald-700 dark:text-emerald-400">{t('পরিশোধ', 'Pay')} ৳{finalTotal}</span>
+                  <div className="mt-1 sm:mt-2 flex items-center justify-center sm:justify-between w-full">
+                    <span className="text-[11px] sm:text-xs font-black text-sky-700 dark:text-sky-400">
+                      ৳{finalTotal}
+                    </span>
                     {paymentOptionType === 'full' && (
-                      <CheckCircle className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400 shrink-0" />
+                      <CheckCircle className="hidden sm:inline w-3.5 h-3.5 text-sky-600 dark:text-sky-400 shrink-0" />
                     )}
                   </div>
                 </button>
 
-                {/* C. Delivery Charge */}
+                {/* C. Delivery Charge Advance */}
                 <button
                   type="button"
                   onClick={() => setPaymentOptionType('delivery_only')}
-                  className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between ${
+                  className={`p-2 sm:p-2.5 rounded-xl border text-center sm:text-left transition-all cursor-pointer flex flex-col justify-between items-center sm:items-stretch relative ${
                     paymentOptionType === 'delivery_only'
-                      ? 'border-sky-600 dark:border-sky-500 bg-white dark:bg-slate-900 ring-2 ring-sky-500/20 shadow-xs'
-                      : 'border-slate-200 dark:border-slate-700 bg-white/80 dark:bg-slate-800/80 hover:bg-white dark:hover:bg-slate-800'
+                      ? 'border-amber-600 dark:border-amber-500 bg-amber-50/70 dark:bg-amber-950/40 ring-2 ring-amber-500/25 shadow-xs'
+                      : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/80 hover:bg-slate-50 dark:hover:bg-slate-800'
                   }`}
                 >
-                  <div>
-                    <div className="flex items-center justify-between mb-0.5">
-                      <span className="text-xs font-black text-slate-900 dark:text-white leading-tight">{t('ডেলিভারি চার্জ অগ্রিম', 'Delivery Charge')}</span>
+                  <div className="flex sm:flex-row flex-col items-center sm:items-start gap-1 sm:gap-2 w-full">
+                    <div className={`w-7 h-7 sm:w-7 sm:h-7 rounded-lg flex items-center justify-center shrink-0 ${
+                      paymentOptionType === 'delivery_only'
+                        ? 'bg-amber-600 text-white'
+                        : 'bg-amber-50 dark:bg-amber-950/50 text-amber-600 dark:text-amber-400'
+                    }`}>
+                      <Truck className="w-4 h-4" />
                     </div>
-                    <p className="text-[10px] text-slate-500 dark:text-slate-400 line-clamp-1">{t('শুধু ডেলিভারি ফি অগ্রিম', 'Advance delivery fee')}</p>
+                    <div className="min-w-0 flex-1">
+                      <span className="text-[10px] sm:text-xs font-black text-slate-900 dark:text-white leading-tight block truncate">
+                        {t('ডেলিভারি চার্জ', 'Delivery Charge')}
+                      </span>
+                      <p className="hidden sm:block text-[10px] text-slate-500 dark:text-slate-400 truncate mt-0.5">
+                        {t('শুধু ডেলিভারি ফি অগ্রিম', 'Advance delivery fee')}
+                      </p>
+                    </div>
                   </div>
-                  <div className="mt-2 flex items-center justify-between">
-                    <span className="text-xs font-extrabold text-amber-700 dark:text-amber-400">{t('পরিশোধ', 'Pay')} ৳{deliveryCharge}</span>
+                  <div className="mt-1 sm:mt-2 flex items-center justify-center sm:justify-between w-full">
+                    <span className="text-[11px] sm:text-xs font-black text-amber-700 dark:text-amber-400">
+                      ৳{deliveryCharge}
+                    </span>
                     {paymentOptionType === 'delivery_only' && (
-                      <CheckCircle className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400 shrink-0" />
+                      <CheckCircle className="hidden sm:inline w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
                     )}
                   </div>
                 </button>
@@ -1563,7 +1661,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
           </div>
 
           {/* Right Column: Order Summary & Placement */}
-          <div className="lg:col-span-5 p-4 sm:p-5 md:p-6 bg-slate-50/80 dark:bg-slate-900/90 border-t lg:border-t-0 lg:border-l border-slate-200 dark:border-slate-800 flex flex-col justify-between pb-8 lg:pb-6">
+          <div className="lg:col-span-5 p-4 sm:p-5 md:p-6 bg-slate-50/80 dark:bg-slate-900/90 border-t lg:border-t-0 lg:border-l border-slate-200 dark:border-slate-800 flex flex-col justify-between pb-14 sm:pb-6 lg:pb-6">
             <div>
               {/* Cart Items Confirmation / Inclusion Card (Positioned at Top of Right Column) */}
               {otherCartItems.length > 0 && (
@@ -1959,16 +2057,6 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                     <span>৳ {finalTotal} {t('(বাকি: ৳০)', '(Due: ৳0)')}</span>
                   </div>
                 )}
-              </div>
-
-              {/* Trust Callout */}
-              <div className="mt-3 p-2.5 rounded-xl bg-white dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/80 text-slate-600 dark:text-slate-300 text-[10px] sm:text-[11px] space-y-1 shadow-2xs">
-                <div className="flex items-center gap-1.5 font-bold text-slate-800 dark:text-slate-200">
-                  <ShieldCheck className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400" />
-                  <span>{t('কেনার গ্যারান্টি', 'KenaX BD Guarantee')}</span>
-                </div>
-                <p>{t('• ওয়ারেন্টিসহ ১০০% আসল পণ্য', '• 100% Original Products with warranty')}</p>
-                <p>{t('• সারা বাংলাদেশের ৬৪ জেলায় ক্যাশ অন ডেলিভারি', '• Cash on delivery across all 64 districts')}</p>
               </div>
             </div>
 

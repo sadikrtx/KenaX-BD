@@ -838,130 +838,8 @@ export const Header: React.FC<HeaderProps> = ({
           )}
         </div>
       </div>
-    </header>
 
-      {/* Mobile Sub-Navigation Bar: Directly connected to Admin Store Settings -> Header Navigation & Priority */}
-      <div className="md:hidden bg-slate-50 dark:bg-slate-950 border-t border-slate-200/80 dark:border-slate-800/80 px-3 py-2 overflow-x-auto no-scrollbar scroll-smooth">
-        <div className="flex items-center gap-2 w-max pr-2">
-          {navItems.map((item) => {
-            const isTag = item.targetView.startsWith('tag:');
-            const tagVal = isTag ? item.targetView.replace(/^tag:/, '').trim() : '';
-            const lowerTag = tagVal.toLowerCase();
-            const lowerLabel = item.label.toLowerCase();
-
-            // Determine active state
-            let isActive = false;
-            if (item.targetView === 'home') {
-              isActive = currentView === 'home';
-            } else if (item.targetView === 'shop') {
-              isActive = currentView === 'shop' && selectedCategory === 'All' && !searchQuery;
-            } else if (isTag) {
-              isActive =
-                currentView === item.targetView ||
-                currentView === `tag:${tagVal}` ||
-                currentView === `tag-${tagVal}` ||
-                (currentView === 'flash-sale' && lowerTag.includes('flash')) ||
-                (currentView === 'shop' && searchQuery.toLowerCase() === lowerTag);
-            } else if (item.targetView.startsWith('category:')) {
-              const catName = item.targetView.replace(/^category:/, '');
-              isActive = currentView === 'shop' && selectedCategory.toLowerCase() === catName.toLowerCase();
-            } else {
-              isActive = currentView === item.targetView;
-            }
-
-            // Click handler
-            const handleClick = () => {
-              if (item.targetView === 'home') {
-                onNavigate('home');
-              } else if (item.targetView === 'shop') {
-                setSearchQuery('');
-                onSelectCategory('All', 'All', 'All');
-                onNavigate('shop');
-              } else if (isTag) {
-                if (lowerTag === 'flash sale' || lowerTag === 'flash') {
-                  onNavigate('flash-sale');
-                } else {
-                  onNavigate(item.targetView);
-                }
-              } else {
-                onNavigate(item.targetView);
-              }
-              window.scrollTo({ top: 0, behavior: 'instant' });
-            };
-
-            // Dynamic Icon helper based on label or targetView
-            const renderIcon = () => {
-              if (lowerLabel.includes('flash') || lowerTag.includes('flash') || lowerLabel.includes('hot')) {
-                return <Flame className="w-3.5 h-3.5 text-amber-500 fill-amber-500 shrink-0" />;
-              }
-              if (lowerLabel.includes('trend') || lowerTag.includes('trend')) {
-                return <Zap className="w-3.5 h-3.5 text-amber-500 shrink-0" />;
-              }
-              if (lowerLabel.includes('bestseller') || lowerTag.includes('bestseller') || lowerLabel.includes('best seller')) {
-                return <Sparkles className="w-3.5 h-3.5 text-emerald-500 shrink-0" />;
-              }
-              if (lowerLabel.includes('new') || lowerTag.includes('new') || lowerLabel.includes('arrival')) {
-                return <Sparkles className="w-3.5 h-3.5 text-sky-500 shrink-0" />;
-              }
-              if (lowerLabel.includes('deal') || lowerTag.includes('deal') || lowerLabel.includes('offer')) {
-                return <Tag className="w-3.5 h-3.5 text-emerald-500 shrink-0" />;
-              }
-              if (
-                lowerLabel.includes('mobile') ||
-                lowerLabel.includes('smartphone') ||
-                lowerLabel.includes('phone') ||
-                lowerTag.includes('mobile') ||
-                lowerTag.includes('phone')
-              ) {
-                return <Smartphone className="w-3.5 h-3.5 text-blue-500 shrink-0" />;
-              }
-              if (lowerLabel.includes('xiaomi') || lowerTag.includes('xiaomi')) {
-                return <span className="w-2 h-2 rounded-full bg-orange-500 shrink-0" />;
-              }
-              if (lowerLabel.includes('redmi') || lowerTag.includes('redmi')) {
-                return <span className="w-2 h-2 rounded-full bg-red-500 shrink-0" />;
-              }
-              if (lowerLabel.includes('gadget') || lowerTag.includes('gadget')) {
-                return <Zap className="w-3.5 h-3.5 text-purple-500 shrink-0" />;
-              }
-              if (lowerLabel.includes('all') || lowerLabel.includes('shop')) {
-                return <Grid className="w-3.5 h-3.5 text-indigo-500 shrink-0" />;
-              }
-              if (lowerLabel.includes('home')) {
-                return <Home className="w-3.5 h-3.5 text-slate-500 shrink-0" />;
-              }
-              return <Tag className="w-3.5 h-3.5 text-sky-500 shrink-0" />;
-            };
-
-            return (
-              <button
-                key={item.id}
-                type="button"
-                onClick={handleClick}
-                className={`px-3 py-1.5 rounded-full text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 shrink-0 border select-none active:scale-95 ${
-                  isActive
-                    ? 'bg-sky-600 text-white border-sky-500 shadow-md ring-1 ring-sky-400/50'
-                    : 'bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 border-slate-200 dark:border-slate-750 hover:border-sky-300 dark:hover:border-sky-500 hover:text-sky-600 dark:hover:text-sky-300'
-                }`}
-              >
-                {renderIcon()}
-                <span>{getLocalizedNavLabel(item.label)}</span>
-                {item.isHot && (
-                  <span
-                    className={`${
-                      item.badgeColor || 'bg-red-500'
-                    } text-white text-[9px] font-extrabold px-1.5 py-0.2 rounded-full uppercase shadow-2xs ml-0.5`}
-                  >
-                    {item.badgeText || 'HOT'}
-                  </span>
-                )}
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* 3. Desktop Sub-Navigation Bar */}
+      {/* 3. Desktop Sub-Navigation Bar (Placed inside sticky header so it never hides when scrolling down on desktop) */}
       <div className="bg-white dark:bg-slate-900 border-t border-slate-100 dark:border-slate-800 hidden md:block">
         <div className="max-w-[1536px] mx-auto px-3 sm:px-6 lg:px-8 flex items-center justify-between">
           <div className="flex items-center gap-1">
@@ -1161,6 +1039,128 @@ export const Header: React.FC<HeaderProps> = ({
               })}
             </nav>
           </div>
+        </div>
+      </div>
+    </header>
+
+      {/* Mobile Sub-Navigation Bar: Directly connected to Admin Store Settings -> Header Navigation & Priority */}
+      <div className="md:hidden bg-slate-50 dark:bg-slate-950 border-t border-slate-200/80 dark:border-slate-800/80 px-3 py-2 overflow-x-auto no-scrollbar scroll-smooth">
+        <div className="flex items-center gap-2 w-max pr-2">
+          {navItems.map((item) => {
+            const isTag = item.targetView.startsWith('tag:');
+            const tagVal = isTag ? item.targetView.replace(/^tag:/, '').trim() : '';
+            const lowerTag = tagVal.toLowerCase();
+            const lowerLabel = item.label.toLowerCase();
+
+            // Determine active state
+            let isActive = false;
+            if (item.targetView === 'home') {
+              isActive = currentView === 'home';
+            } else if (item.targetView === 'shop') {
+              isActive = currentView === 'shop' && selectedCategory === 'All' && !searchQuery;
+            } else if (isTag) {
+              isActive =
+                currentView === item.targetView ||
+                currentView === `tag:${tagVal}` ||
+                currentView === `tag-${tagVal}` ||
+                (currentView === 'flash-sale' && lowerTag.includes('flash')) ||
+                (currentView === 'shop' && searchQuery.toLowerCase() === lowerTag);
+            } else if (item.targetView.startsWith('category:')) {
+              const catName = item.targetView.replace(/^category:/, '');
+              isActive = currentView === 'shop' && selectedCategory.toLowerCase() === catName.toLowerCase();
+            } else {
+              isActive = currentView === item.targetView;
+            }
+
+            // Click handler
+            const handleClick = () => {
+              if (item.targetView === 'home') {
+                onNavigate('home');
+              } else if (item.targetView === 'shop') {
+                setSearchQuery('');
+                onSelectCategory('All', 'All', 'All');
+                onNavigate('shop');
+              } else if (isTag) {
+                if (lowerTag === 'flash sale' || lowerTag === 'flash') {
+                  onNavigate('flash-sale');
+                } else {
+                  onNavigate(item.targetView);
+                }
+              } else {
+                onNavigate(item.targetView);
+              }
+              window.scrollTo({ top: 0, behavior: 'instant' });
+            };
+
+            // Dynamic Icon helper based on label or targetView
+            const renderIcon = () => {
+              if (lowerLabel.includes('flash') || lowerTag.includes('flash') || lowerLabel.includes('hot')) {
+                return <Flame className="w-3.5 h-3.5 text-amber-500 fill-amber-500 shrink-0" />;
+              }
+              if (lowerLabel.includes('trend') || lowerTag.includes('trend')) {
+                return <Zap className="w-3.5 h-3.5 text-amber-500 shrink-0" />;
+              }
+              if (lowerLabel.includes('bestseller') || lowerTag.includes('bestseller') || lowerLabel.includes('best seller')) {
+                return <Sparkles className="w-3.5 h-3.5 text-emerald-500 shrink-0" />;
+              }
+              if (lowerLabel.includes('new') || lowerTag.includes('new') || lowerLabel.includes('arrival')) {
+                return <Sparkles className="w-3.5 h-3.5 text-sky-500 shrink-0" />;
+              }
+              if (lowerLabel.includes('deal') || lowerTag.includes('deal') || lowerLabel.includes('offer')) {
+                return <Tag className="w-3.5 h-3.5 text-emerald-500 shrink-0" />;
+              }
+              if (
+                lowerLabel.includes('mobile') ||
+                lowerLabel.includes('smartphone') ||
+                lowerLabel.includes('phone') ||
+                lowerTag.includes('mobile') ||
+                lowerTag.includes('phone')
+              ) {
+                return <Smartphone className="w-3.5 h-3.5 text-blue-500 shrink-0" />;
+              }
+              if (lowerLabel.includes('xiaomi') || lowerTag.includes('xiaomi')) {
+                return <span className="w-2 h-2 rounded-full bg-orange-500 shrink-0" />;
+              }
+              if (lowerLabel.includes('redmi') || lowerTag.includes('redmi')) {
+                return <span className="w-2 h-2 rounded-full bg-red-500 shrink-0" />;
+              }
+              if (lowerLabel.includes('gadget') || lowerTag.includes('gadget')) {
+                return <Zap className="w-3.5 h-3.5 text-purple-500 shrink-0" />;
+              }
+              if (lowerLabel.includes('all') || lowerLabel.includes('shop')) {
+                return <Grid className="w-3.5 h-3.5 text-indigo-500 shrink-0" />;
+              }
+              if (lowerLabel.includes('home')) {
+                return <Home className="w-3.5 h-3.5 text-slate-500 shrink-0" />;
+              }
+              return <Tag className="w-3.5 h-3.5 text-sky-500 shrink-0" />;
+            };
+
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={handleClick}
+                className={`px-3 py-1.5 rounded-full text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 shrink-0 border select-none active:scale-95 ${
+                  isActive
+                    ? 'bg-sky-600 text-white border-sky-500 shadow-md ring-1 ring-sky-400/50'
+                    : 'bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 border-slate-200 dark:border-slate-750 hover:border-sky-300 dark:hover:border-sky-500 hover:text-sky-600 dark:hover:text-sky-300'
+                }`}
+              >
+                {renderIcon()}
+                <span>{getLocalizedNavLabel(item.label)}</span>
+                {item.isHot && (
+                  <span
+                    className={`${
+                      item.badgeColor || 'bg-red-500'
+                    } text-white text-[9px] font-extrabold px-1.5 py-0.2 rounded-full uppercase shadow-2xs ml-0.5`}
+                  >
+                    {item.badgeText || 'HOT'}
+                  </span>
+                )}
+              </button>
+            );
+          })}
         </div>
       </div>
 

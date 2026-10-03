@@ -7,14 +7,10 @@ import {
 } from 'firebase/auth';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 
-// Scopes required for Google Drive integration
-export const SCOPES = [
-  'https://www.googleapis.com/auth/drive.file',
-  'https://www.googleapis.com/auth/drive.metadata.readonly',
-];
+// Scopes required for Google Drive integration (disabled)
+export const SCOPES: string[] = [];
 
 const provider = new GoogleAuthProvider();
-SCOPES.forEach((scope) => provider.addScope(scope));
 provider.setCustomParameters({
   prompt: 'select_account',
 });
@@ -280,19 +276,19 @@ export const logoutGoogleDrive = async () => {
  */
 export function extractDriveFileId(urlOrId?: string): string | null {
   if (!urlOrId) return null;
-  const trimmed = urlOrId.trim();
+  const trimmed = urlOrId.trim().replace(/^["']|["']$/g, '');
   if (!trimmed) return null;
 
-  // If it is already a direct file ID (alphanumeric with underscores and hyphens, typically 25-45 chars)
+  // If it is already a direct file ID (alphanumeric with underscores and hyphens, typically 25-50 chars)
   if (/^[a-zA-Z0-9_-]{25,}$/.test(trimmed) && !trimmed.includes('/') && !trimmed.includes('.')) {
     return trimmed;
   }
 
-  // https://drive.google.com/file/d/FILE_ID/view...
+  // https://drive.google.com/file/d/FILE_ID/...
   const matchFileD = trimmed.match(/\/file(?:\/u\/\d+)?\/d\/([a-zA-Z0-9_-]+)/i);
   if (matchFileD && matchFileD[1]) return matchFileD[1];
 
-  // https://drive.google.com/open?id=FILE_ID or ?id=FILE_ID
+  // https://drive.google.com/open?id=FILE_ID or ?id=FILE_ID or &id=FILE_ID
   const matchOpenId = trimmed.match(/[?&]id=([a-zA-Z0-9_-]+)/i);
   if (matchOpenId && matchOpenId[1]) return matchOpenId[1];
 
@@ -300,9 +296,13 @@ export function extractDriveFileId(urlOrId?: string): string | null {
   const matchLh3 = trimmed.match(/googleusercontent\.com\/d\/([a-zA-Z0-9_-]+)/i);
   if (matchLh3 && matchLh3[1]) return matchLh3[1];
 
-  // https://drive.google.com/uc?id=FILE_ID
+  // https://drive.google.com/uc?id=FILE_ID or export=view&id=FILE_ID
   const matchUc = trimmed.match(/\/uc\?.*id=([a-zA-Z0-9_-]+)/i);
   if (matchUc && matchUc[1]) return matchUc[1];
+
+  // https://drive.google.com/thumbnail?id=FILE_ID
+  const matchThumbnail = trimmed.match(/\/thumbnail\?.*id=([a-zA-Z0-9_-]+)/i);
+  if (matchThumbnail && matchThumbnail[1]) return matchThumbnail[1];
 
   return null;
 }
@@ -316,7 +316,7 @@ export function getDriveStandardViewUrl(fileId: string): string {
  */
 export function getDriveDirectImageUrl(urlOrId: string): string {
   if (!urlOrId) return '';
-  const trimmed = urlOrId.trim();
+  const trimmed = urlOrId.trim().replace(/^["']|["']$/g, '');
   const fileId = extractDriveFileId(trimmed);
   if (fileId) {
     return `https://lh3.googleusercontent.com/d/${fileId}`;
@@ -337,7 +337,7 @@ export function getDrivePermanentUrl(fileId: string): string {
  */
 export function resolveGoogleDriveUrl(inputUrl: string): string {
   if (!inputUrl) return '';
-  const trimmed = inputUrl.trim();
+  const trimmed = inputUrl.trim().replace(/^["']|["']$/g, '');
   const fileId = extractDriveFileId(trimmed);
   if (fileId) {
     return `https://lh3.googleusercontent.com/d/${fileId}`;
@@ -348,14 +348,21 @@ export function resolveGoogleDriveUrl(inputUrl: string): string {
 /**
  * Image error handler fallback:
  * If lh3 CDN has a temporary block, try the direct Google Drive uc export view stream
+ * or high-res thumbnail before general fallback
  */
 export function handleImageErrorFallback(e: any, originalUrl?: string) {
   const target = e.currentTarget || e.target;
   if (!target) return;
   const fileId = extractDriveFileId(originalUrl || target.src);
-  if (fileId && !target.src.includes('uc?export=view')) {
-    target.src = `https://drive.google.com/uc?export=view&id=${fileId}`;
-    return;
+  if (fileId) {
+    if (!target.src.includes('uc?export=view')) {
+      target.src = `https://drive.google.com/uc?export=view&id=${fileId}`;
+      return;
+    }
+    if (!target.src.includes('thumbnail?id=')) {
+      target.src = `https://drive.google.com/thumbnail?id=${fileId}&sz=w800`;
+      return;
+    }
   }
   target.onerror = null;
   target.src = 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=400';

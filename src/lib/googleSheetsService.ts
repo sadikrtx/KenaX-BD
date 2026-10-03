@@ -4,12 +4,8 @@ import { auth } from './firebase.ts';
 import firebaseConfig from '../../firebase-applet-config.json' with { type: 'json' };
 import { CustomerRecord, Order, Product, StaffUser } from '../types/index.ts';
 
-// Google OAuth Scopes for Google Sheets & Drive File access
-export const GOOGLE_SHEETS_SCOPES = [
-  'https://www.googleapis.com/auth/spreadsheets',
-  'https://www.googleapis.com/auth/drive.file',
-  'https://www.googleapis.com/auth/drive',
-];
+// Google OAuth Scopes for Google Sheets & Drive File access (disabled)
+export const GOOGLE_SHEETS_SCOPES: string[] = [];
 
 // In-memory cache for OAuth access token
 let cachedAccessToken: string | null = null;
@@ -27,15 +23,12 @@ export const clearCachedAccessToken = () => {
   } catch {}
 };
 
-// Sign in with Google to get access token for Google Sheets API
+// Sign in with Google (Google Sheets integration disabled)
 export const signInForGoogleSheets = async (): Promise<{ user: User; accessToken: string }> => {
   const provider = new GoogleAuthProvider();
-  GOOGLE_SHEETS_SCOPES.forEach((scope) => provider.addScope(scope));
   
-  // Force consent screen to guarantee Google Sheets & Drive permissions are granted in token
   provider.setCustomParameters({
-    prompt: 'consent',
-    access_type: 'offline',
+    prompt: 'select_account',
   });
 
   try {

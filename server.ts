@@ -2389,10 +2389,65 @@ DELIVERY & PRICING:
   });
 
   // ----------------------------------------------------
-  // REVIEWS API (PERSISTENT CLOUD & SERVER BACKUP)
+  // REVIEWS API (PERSISTENT DISK, CLOUD & SERVER BACKUP)
   // ----------------------------------------------------
-  const memoryReviews: Map<string, any> = new Map();
-  const deletedReviewIdsStore: Set<string> = new Set();
+  const dataDirForReviews = path.join(process.cwd(), "data");
+  if (!fs.existsSync(dataDirForReviews)) {
+    try { fs.mkdirSync(dataDirForReviews, { recursive: true }); } catch {}
+  }
+  const reviewsFilePath = path.join(dataDirForReviews, "server_reviews.json");
+  const deletedReviewsFilePath = path.join(dataDirForReviews, "server_deleted_reviews.json");
+
+  const loadReviewsFromDisk = (): Map<string, any> => {
+    const map = new Map<string, any>();
+    try {
+      if (fs.existsSync(reviewsFilePath)) {
+        const raw = fs.readFileSync(reviewsFilePath, "utf-8");
+        const list = JSON.parse(raw);
+        if (Array.isArray(list)) {
+          list.forEach((r) => {
+            if (r && r.id) map.set(r.id, r);
+          });
+        }
+      }
+    } catch (e) {
+      console.warn("[Reviews Read Warning]:", e);
+    }
+    return map;
+  };
+
+  const loadDeletedReviewIds = (): Set<string> => {
+    const set = new Set<string>();
+    try {
+      if (fs.existsSync(deletedReviewsFilePath)) {
+        const raw = fs.readFileSync(deletedReviewsFilePath, "utf-8");
+        const list = JSON.parse(raw);
+        if (Array.isArray(list)) {
+          list.forEach((id) => set.add(id));
+        }
+      }
+    } catch {}
+    return set;
+  };
+
+  const memoryReviews: Map<string, any> = loadReviewsFromDisk();
+  const deletedReviewIdsStore: Set<string> = loadDeletedReviewIds();
+
+  const persistReviewsToDisk = () => {
+    try {
+      const list = Array.from(memoryReviews.values());
+      fs.writeFileSync(reviewsFilePath, JSON.stringify(list, null, 2), "utf-8");
+    } catch (e) {
+      console.warn("[Reviews Persist Warning]:", e);
+    }
+  };
+
+  const persistDeletedReviewsToDisk = () => {
+    try {
+      const list = Array.from(deletedReviewIdsStore);
+      fs.writeFileSync(deletedReviewsFilePath, JSON.stringify(list, null, 2), "utf-8");
+    } catch {}
+  };
 
   app.get("/api/reviews", (req, res) => {
     try {
@@ -2415,6 +2470,8 @@ DELIVERY & PRICING:
       }
       deletedReviewIdsStore.delete(review.id);
       memoryReviews.set(review.id, review);
+      persistReviewsToDisk();
+      persistDeletedReviewsToDisk();
       res.json({ success: true, review });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err.message });
@@ -2427,6 +2484,8 @@ DELIVERY & PRICING:
       if (id) {
         deletedReviewIdsStore.add(id);
         memoryReviews.delete(id);
+        persistReviewsToDisk();
+        persistDeletedReviewsToDisk();
       }
       res.json({ success: true });
     } catch (err: any) {

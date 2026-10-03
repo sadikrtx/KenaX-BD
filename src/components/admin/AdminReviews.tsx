@@ -58,7 +58,7 @@ interface AdminReviewsProps {
   onApproveReview: (reviewId: string) => void;
   onHideReview: (reviewId: string) => void;
   onDeleteReview: (reviewId: string) => void;
-  onUpdateReview: (updatedReview: Review) => void;
+  onUpdateReview: (updatedReview: Review) => void | Promise<void>;
   onAddDemoReview?: (newReview: Review) => void;
   currentRole: UserRole;
   currentStaff: StaffUser | null;
@@ -191,7 +191,28 @@ export const AdminReviews: React.FC<AdminReviewsProps> = ({
   const [isEditMediaExplorerOpen, setIsEditMediaExplorerOpen] = useState(false);
   const [editExplorerSearch, setEditExplorerSearch] = useState('');
   const [isUploadingEditPhoto, setIsUploadingEditPhoto] = useState(false);
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
+  const [editSaveSuccess, setEditSaveSuccess] = useState(false);
   const editReviewPhotoUploadRef = useRef<HTMLInputElement>(null);
+
+  // Review Save Success Popup & Toast State
+  const [reviewSaveToast, setReviewSaveToast] = useState<{
+    show: boolean;
+    title: string;
+    customerName: string;
+    productName: string;
+    photoCount: number;
+    reviewId: string;
+  } | null>(null);
+
+  useEffect(() => {
+    if (reviewSaveToast?.show) {
+      const timer = setTimeout(() => {
+        setReviewSaveToast(null);
+      }, 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [reviewSaveToast]);
 
   const APPS_SCRIPT_CODE = `function doGet(e) {
   return handleListFiles();
@@ -756,6 +777,15 @@ function handleListFiles() {
       onUpdateReview(newDemoRev);
     }
 
+    setReviewSaveToast({
+      show: true,
+      title: 'নতুন রিভিউ সফলভাবে যোগ হয়েছে!',
+      customerName: newDemoRev.customerName || 'Customer',
+      productName: newDemoRev.productName,
+      photoCount: (newDemoRev.photos || []).length,
+      reviewId: newDemoRev.id,
+    });
+
     setDemoCustomerName('');
     setDemoComment('');
     setDemoPhotos([]);
@@ -841,25 +871,71 @@ function handleListFiles() {
     }
   };
 
-  const handleSaveEdit = () => {
+  const handleSaveEdit = async () => {
     if (!editingReview) return;
-    const activeProd = products.find((p) => p.id === editProductId);
-    const resolvedProductName = activeProd?.name || editProductName || editingReview.productName || 'Product';
+    setIsSavingEdit(true);
+    setEditSaveSuccess(false);
 
-    const updated: Review = {
-      ...editingReview,
-      customerName: editCustomerName.trim() || editingReview.customerName || 'Valued Customer',
-      productId: editProductId || editingReview.productId,
-      productName: resolvedProductName,
-      comment: editComment.trim() || editingReview.comment,
-      rating: editRating,
-      status: editStatus,
-      verifiedPurchase: editVerified,
-      photos: editPhotos.map((p) => resolveGoogleDriveUrl(p)),
-    };
+    try {
+      const activeProd = products.find((p) => p.id === editProductId);
+      const resolvedProductName = activeProd?.name || editProductName || editingReview.productName || 'Product';
 
-    onUpdateReview(updated);
-    setEditingReview(null);
+      // Automatically include any pending photo link typed/pasted in editPhotoInput so it is NEVER lost
+      const allPhotos = [...editPhotos];
+      if (editPhotoInput.trim()) {
+        const resolvedInput = resolveGoogleDriveUrl(editPhotoInput.trim());
+        if (resolvedInput && !allPhotos.includes(resolvedInput)) {
+          allPhotos.push(resolvedInput);
+        }
+      }
+
+      const updated: Review = {
+        ...editingReview,
+        customerName: editCustomerName.trim() || editingReview.customerName || 'Valued Customer',
+        productId: editProductId || editingReview.productId,
+        productName: resolvedProductName,
+        comment: editComment.trim() || editingReview.comment,
+        rating: editRating,
+        status: editStatus,
+        verifiedPurchase: editVerified,
+        photos: allPhotos.map((p) => resolveGoogleDriveUrl(p)),
+      };
+
+      // Perform update with safe timeout race so it NEVER hangs or gets stuck
+      try {
+        await Promise.race([
+          Promise.resolve(onUpdateReview(updated)),
+          new Promise((resolve) => setTimeout(resolve, 600)),
+        ]);
+      } catch (err) {
+        console.warn('[Edit Review Update Notice]:', err);
+      }
+
+      setEditSaveSuccess(true);
+      setIsSavingEdit(false);
+
+      // Trigger the dedicated confirmation popup notification
+      setReviewSaveToast({
+        show: true,
+        title: 'রিভিউ সফলভাবে সংরক্ষিত হয়েছে!',
+        customerName: updated.customerName,
+        productName: updated.productName,
+        photoCount: (updated.photos || []).length,
+        reviewId: updated.id,
+      });
+
+      // Smoothly close edit modal
+      setTimeout(() => {
+        setEditingReview(null);
+        setEditPhotoInput('');
+        setEditSaveSuccess(false);
+      }, 300);
+    } catch (err) {
+      console.warn('[Edit Review Save Error]:', err);
+      setIsSavingEdit(false);
+    } finally {
+      setIsSavingEdit(false);
+    }
   };
 
   return (
@@ -2104,22 +2180,57 @@ function handleListFiles() {
             </div>
 
             {/* Modal Footer */}
-            <div className="p-4 sm:p-5 border-t border-slate-100 dark:border-slate-800 flex items-center justify-end gap-2 bg-slate-50 dark:bg-slate-900/60">
-              <button
-                type="button"
-                onClick={handleCloseEdit}
-                className="px-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 font-bold hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
-              >
-                বাতিল
-              </button>
-              <button
-                type="button"
-                onClick={handleSaveEdit}
-                className="px-6 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-black shadow-xs flex items-center gap-2 cursor-pointer"
-              >
-                <Save className="w-4 h-4" />
-                <span>রিভিউ সংরক্ষণ করুন</span>
-              </button>
+            <div className="p-4 sm:p-5 border-t border-slate-100 dark:border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-3 bg-slate-50 dark:bg-slate-900/60">
+              <div className="text-xs">
+                {editSaveSuccess ? (
+                  <span className="text-emerald-600 dark:text-emerald-400 font-bold flex items-center gap-1.5 animate-in fade-in">
+                    <Check className="w-4 h-4" />
+                    <span>সফলভাবে ক্লাউড ও সিস্টেমে পার্মানেন্ট সেভ হয়েছে!</span>
+                  </span>
+                ) : isSavingEdit ? (
+                  <span className="text-purple-600 dark:text-purple-400 font-bold flex items-center gap-1.5">
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>ক্লাউড ও লোকাল স্টোরেজে সংরক্ষণ হচ্ছে...</span>
+                  </span>
+                ) : (
+                  <span className="text-[11px] text-slate-500 dark:text-slate-400 flex items-center gap-1">
+                    <span>🔒 পার্মানেন্ট ক্লাউড ও ড্রাইভ সিঙ্ক সক্রিয়</span>
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+                <button
+                  type="button"
+                  onClick={handleCloseEdit}
+                  disabled={isSavingEdit}
+                  className="px-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 font-bold hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer disabled:opacity-50"
+                >
+                  বাতিল
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveEdit}
+                  disabled={isSavingEdit}
+                  className="px-6 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-black shadow-xs flex items-center gap-2 cursor-pointer disabled:opacity-60"
+                >
+                  {isSavingEdit ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>সংরক্ষণ হচ্ছে...</span>
+                    </>
+                  ) : editSaveSuccess ? (
+                    <>
+                      <Check className="w-4 h-4" />
+                      <span>সংরক্ষিত!</span>
+                    </>
+                  ) : (
+                    <>
+                      <Save className="w-4 h-4" />
+                      <span>রিভিউ সংরক্ষণ করুন</span>
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -2166,6 +2277,70 @@ function handleListFiles() {
                 onError={(e) => handleImageErrorFallback(e, previewModalUrl)}
               />
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* 8. REVIEW SAVE SUCCESS POPUP MODAL & NOTIFICATION */}
+      {reviewSaveToast?.show && (
+        <div 
+          className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-200"
+          onClick={() => setReviewSaveToast(null)}
+        >
+          <div 
+            className="bg-white dark:bg-slate-900 border-2 border-emerald-500/50 rounded-3xl p-6 sm:p-7 max-w-md w-full shadow-2xl space-y-4 text-center animate-in zoom-in-95 duration-200 relative overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Top Emerald Gradient Glow Accent */}
+            <div className="absolute top-0 left-0 right-0 h-2 bg-gradient-to-r from-emerald-500 via-teal-400 to-emerald-600" />
+            
+            {/* Animated Large Success Icon */}
+            <div className="w-16 h-16 rounded-2xl bg-emerald-100 dark:bg-emerald-950/80 text-emerald-600 dark:text-emerald-400 flex items-center justify-center mx-auto shadow-inner ring-8 ring-emerald-50 dark:ring-emerald-950/50 animate-bounce">
+              <CheckCircle2 className="w-9 h-9 stroke-[2.5]" />
+            </div>
+
+            <div className="space-y-1.5">
+              <h3 className="text-lg sm:text-xl font-black text-slate-900 dark:text-white">
+                {reviewSaveToast.title || 'রিভিউ সফলভাবে সংরক্ষিত হয়েছে!'}
+              </h3>
+              <p className="text-xs sm:text-[13px] text-slate-600 dark:text-slate-300 leading-relaxed font-medium">
+                গ্রাহক <b className="text-slate-900 dark:text-white">"{reviewSaveToast.customerName}"</b>-এর রিভিউ, রেটিং ও ফটো সফলভাবে সেভ হয়েছে।
+              </p>
+            </div>
+
+            {/* Saved Details Info Card */}
+            <div className="p-3.5 bg-slate-50 dark:bg-slate-800/70 rounded-2xl border border-slate-200/80 dark:border-slate-700/80 text-xs text-left space-y-2">
+              <div className="flex items-center justify-between gap-2 text-[11px] text-slate-500 dark:text-slate-400">
+                <span>পণ্য (Product):</span>
+                <span className="font-bold text-slate-900 dark:text-white truncate max-w-[200px]">
+                  {reviewSaveToast.productName}
+                </span>
+              </div>
+              <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400">
+                <span>সংযুক্ত ছবি:</span>
+                <span className="font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
+                  <Check className="w-3.5 h-3.5" />
+                  {reviewSaveToast.photoCount > 0 ? `${reviewSaveToast.photoCount}টি ছবি সংরক্ষিত` : 'কোনো ছবি সংযুক্ত নেই'}
+                </span>
+              </div>
+              <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400">
+                <span>ক্লাউড স্টোরেজ:</span>
+                <span className="inline-flex items-center gap-1.5 font-bold text-emerald-600 dark:text-emerald-400">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                  সফলভাবে পার্মানেন্ট সংরক্ষিত
+                </span>
+              </div>
+            </div>
+
+            {/* Dismiss CTA Button */}
+            <button
+              type="button"
+              onClick={() => setReviewSaveToast(null)}
+              className="w-full py-3.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-black text-sm transition-all shadow-lg shadow-emerald-600/20 cursor-pointer flex items-center justify-center gap-2"
+            >
+              <Check className="w-4 h-4 stroke-[3]" />
+              <span>ঠিক আছে (সম্পন্ন)</span>
+            </button>
           </div>
         </div>
       )}

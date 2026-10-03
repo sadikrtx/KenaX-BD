@@ -197,8 +197,8 @@ export const CheckoutPageView: React.FC<CheckoutPageViewProps> = ({
           </div>
         )}
 
-        {/* Bottom Trust & Assurance Grid for Bangladesh Customers */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 sm:gap-4 pt-2">
+        {/* Bottom Trust & Assurance Grid for Bangladesh Customers (Desktop view) */}
+        <div className="hidden sm:grid grid-cols-2 sm:grid-cols-4 gap-2.5 sm:gap-4 pt-2">
           <div className="p-3 bg-white rounded-2xl border border-slate-200 shadow-2xs flex items-center gap-2.5">
             <div className="w-9 h-9 rounded-xl bg-sky-50 text-sky-600 flex items-center justify-center shrink-0">
               <Truck className="w-4 h-4" />
