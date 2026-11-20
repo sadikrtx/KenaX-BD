@@ -90,26 +90,40 @@ export const AdminSMSGateway: React.FC<AdminSMSGatewayProps> = ({
   const canEdit = ['super_admin', 'admin', 'manager'].includes(currentRole);
 
   useEffect(() => {
+    let isMounted = true;
+    let logsReceived = false;
+
     async function loadData() {
       setLoading(true);
       try {
         const loadedSettings = await getActiveSMSSettings();
-        setSettings(loadedSettings);
-        const loadedLogs = await getSMSLogsFromDB();
-        setLogs(loadedLogs);
+        if (isMounted) setSettings(loadedSettings);
       } catch (err) {
         console.error('Failed loading SMS setup:', err);
       } finally {
-        setLoading(false);
+        if (isMounted) setLoading(false);
       }
     }
     loadData();
 
     const unsubscribe = subscribeToSMSLogs((updatedLogs) => {
-      setLogs(updatedLogs);
+      logsReceived = true;
+      if (isMounted) setLogs(updatedLogs);
     });
 
+    const fallbackTimer = window.setTimeout(() => {
+      if (isMounted && !logsReceived) {
+        getSMSLogsFromDB()
+          .then((loadedLogs) => {
+            if (isMounted) setLogs(loadedLogs);
+          })
+          .catch(() => {});
+      }
+    }, 1500);
+
     return () => {
+      isMounted = false;
+      window.clearTimeout(fallbackTimer);
       if (typeof unsubscribe === 'function') unsubscribe();
     };
   }, []);

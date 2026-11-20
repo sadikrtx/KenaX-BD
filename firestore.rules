@@ -145,9 +145,13 @@ service cloud.firestore {
     match /test/{docId} {
       allow read, write: if true;
     }
-    // Universal catch-all rule to prevent unhandled collection snapshot permission denial
-    match /{document=**} {
-      allow read, write: if true;
+    // Server-only Integration API Key hashes — NEVER readable or writable by any client role (including Manager/Admin)
+    match /integration_secrets/{docId} {
+      allow read, write: if false;
+    }
+    // Universal catch-all rule (strictly excludes server-only integration_secrets)
+    match /{collection}/{document=**} {
+      allow read, write: if collection != 'integration_secrets';
     }
   }
 }

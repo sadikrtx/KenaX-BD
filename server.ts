@@ -241,7 +241,7 @@ async function startServer() {
     res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, PATCH, OPTIONS");
     res.setHeader(
       "Access-Control-Allow-Headers",
-      "Content-Type, Authorization, X-Requested-With, x-app-env, X-API-Key, x-api-key, x-staff-role, x-staff-name, x-staff-email, Accept"
+      "Content-Type, Authorization, X-Requested-With, x-app-env, X-API-Key, x-api-key, x-staff-role, x-staff-name, x-staff-email, x-staff-id, Accept"
     );
     if (req.method === "OPTIONS") {
       return res.status(200).end();
@@ -7653,18 +7653,22 @@ DELIVERY & PRICING:
     return next();
   };
 
-  // Public non-secret low stock threshold helper (no API key exposed)
-  app.get("/api/integration/low-stock-threshold", (_req, res) => {
-    res.json({ ok: true, lowStockThreshold: getMuseLowStockThreshold() });
+  // Ensure every /api/integration/* response always returns JSON
+  app.use("/api/integration", (_req, res, next) => {
+    res.setHeader("Content-Type", "application/json; charset=utf-8");
+    res.setHeader("Cache-Control", "no-store");
+    next();
   });
 
   // Super Admin ONLY: View masked Muse API key & threshold settings
-  app.get("/api/admin/muse-integration/config", requireSuperAdminStaff, (_req, res) => {
-    res.json({ ok: true, config: getMuseIntegrationAdminView() });
-  });
+  const handleGetMuseAdminConfig = (_req: express.Request, res: express.Response) => {
+    res.json({ ok: true, config: getMuseIntegrationAdminView(), now: new Date().toISOString() });
+  };
+  app.get("/api/integration/admin/config", requireSuperAdminStaff, handleGetMuseAdminConfig);
+  app.get("/api/admin/muse-integration/config", requireSuperAdminStaff, handleGetMuseAdminConfig);
 
   // Super Admin ONLY: Generate or Regenerate the store Integration API Key
-  app.post("/api/admin/muse-integration/generate-key", requireSuperAdminStaff, (req, res) => {
+  const handleGenerateMuseKey = (req: express.Request, res: express.Response) => {
     try {
       const isEnvPreview = checkIsEnvPreview(req);
       const actorName = String(req.headers["x-staff-name"] || req.body?.actorName || "Super Admin");
@@ -7694,12 +7698,14 @@ DELIVERY & PRICING:
         now: new Date().toISOString(),
       });
     } catch (err: any) {
-      res.status(500).json({ ok: false, error: err.message });
+      res.status(500).json({ ok: false, error: err.message, now: new Date().toISOString() });
     }
-  });
+  };
+  app.post("/api/integration/admin/generate-key", requireSuperAdminStaff, handleGenerateMuseKey);
+  app.post("/api/admin/muse-integration/generate-key", requireSuperAdminStaff, handleGenerateMuseKey);
 
   // Super Admin ONLY: Update editable Low Stock Threshold (default 5)
-  app.post("/api/admin/muse-integration/settings", requireSuperAdminStaff, (req, res) => {
+  const handleUpdateMuseSettings = (req: express.Request, res: express.Response) => {
     try {
       const isEnvPreview = checkIsEnvPreview(req);
       const actorName = String(req.headers["x-staff-name"] || req.body?.actorName || "Super Admin");
@@ -7729,9 +7735,11 @@ DELIVERY & PRICING:
 
       res.json({ ok: true, config: view, now: new Date().toISOString() });
     } catch (err: any) {
-      res.status(500).json({ ok: false, error: err.message });
+      res.status(500).json({ ok: false, error: err.message, now: new Date().toISOString() });
     }
-  });
+  };
+  app.post("/api/integration/admin/settings", requireSuperAdminStaff, handleUpdateMuseSettings);
+  app.post("/api/admin/muse-integration/settings", requireSuperAdminStaff, handleUpdateMuseSettings);
 
   // Authenticate all /api/integration/* calls with X-API-Key header
   const authenticateMuseApiKey = (req: express.Request, res: express.Response, next: express.NextFunction) => {
@@ -7739,7 +7747,8 @@ DELIVERY & PRICING:
     if (!verifyMuseApiKey(providedKey)) {
       return res.status(401).json({
         ok: false,
-        error: "Unauthorized: Missing or invalid X-API-Key header.",
+        error: "invalid_api_key",
+        message: "Unauthorized: Missing or invalid X-API-Key header.",
         now: new Date().toISOString(),
       });
     }

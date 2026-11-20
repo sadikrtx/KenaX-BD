@@ -197,21 +197,33 @@ export const ProductPageView: React.FC<ProductPageViewProps> = ({
   });
 
   useEffect(() => {
-    getReviewsFromDB().then((items) => {
-      if (items && items.length > 0) {
-        setDbReviewsList(items);
-        safeSetLocalStorage('kenax_reviews_cache', JSON.stringify(items));
-      }
-    });
+    let isMounted = true;
+    let snapshotReceived = false;
 
     const unsub = subscribeToReviews((liveReviews) => {
-      if (liveReviews) {
+      snapshotReceived = true;
+      if (isMounted && liveReviews) {
         setDbReviewsList(liveReviews);
         safeSetLocalStorage('kenax_reviews_cache', JSON.stringify(liveReviews));
       }
     });
 
+    const fallbackTimer = window.setTimeout(() => {
+      if (isMounted && !snapshotReceived) {
+        getReviewsFromDB()
+          .then((items) => {
+            if (isMounted && items && items.length > 0) {
+              setDbReviewsList(items);
+              safeSetLocalStorage('kenax_reviews_cache', JSON.stringify(items));
+            }
+          })
+          .catch(() => {});
+      }
+    }, 1500);
+
     return () => {
+      isMounted = false;
+      window.clearTimeout(fallbackTimer);
       unsub();
     };
   }, []);

@@ -1,0 +1,40 @@
+name: Deploy KenaX BD to Firebase (Functions + Hosting + Firestore Rules)
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build_and_deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install frontend dependencies & build production dist
+        run: |
+          npm ci || npm install
+          npm run build
+
+      - name: Install Cloud Functions dependencies
+        working-directory: functions
+        run: npm ci || npm install
+
+      - name: Authenticate with Google Cloud Service Account (if provided)
+        if: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_GEN_LANG_CLIENT_0077501500 != '' }}
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_GEN_LANG_CLIENT_0077501500 }}
+
+      - name: Deploy Firebase Functions, Hosting, and Firestore Rules
+        env:
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+        run: |
+          npx --yes firebase-tools deploy --only functions,hosting,firestore:rules --project gen-lang-client-0077501500 --non-interactive --force

@@ -1,0 +1,19 @@
+{
+  "name": "kenax-bd-functions",
+  "version": "1.0.0",
+  "description": "Firebase Cloud Functions (2nd Gen) for KenaX BD Muse AI Integration API",
+  "main": "index.js",
+  "engines": {
+    "node": "20"
+  },
+  "scripts": {
+    "start": "node -e \"console.log('KenaX BD Cloud Functions ready')\""
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.21.2",
+    "firebase-admin": "^13.1.0",
+    "firebase-functions": "^6.1.0"
+  },
+  "private": true
+}

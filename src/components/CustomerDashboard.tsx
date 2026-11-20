@@ -257,6 +257,7 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
   // Real-time background synchronization for orders from Firestore & central DB
   useEffect(() => {
     let isMounted = true;
+    let snapshotReceived = false;
     const syncOrders = async () => {
       try {
         const fresh = await getOrdersFromDB();
@@ -265,8 +266,6 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
         }
       } catch (e) {}
     };
-
-    syncOrders();
 
     const handleOrderPlacedOrStorage = () => {
       try {
@@ -279,13 +278,21 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
     window.addEventListener('kenax_order_placed', handleOrderPlacedOrStorage);
     window.addEventListener('storage', handleOrderPlacedOrStorage);
     const unsub = subscribeToOrders((live) => {
+      snapshotReceived = true;
       if (isMounted && live && live.length > 0) {
         setDbSyncedOrders(live);
       }
     });
 
+    const fallbackTimer = window.setTimeout(() => {
+      if (isMounted && !snapshotReceived) {
+        syncOrders();
+      }
+    }, 1500);
+
     return () => {
       isMounted = false;
+      window.clearTimeout(fallbackTimer);
       window.removeEventListener('kenax_order_placed', handleOrderPlacedOrStorage);
       window.removeEventListener('storage', handleOrderPlacedOrStorage);
       if (unsub) unsub();

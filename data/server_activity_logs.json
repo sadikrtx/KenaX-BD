@@ -1,1 +1,14 @@
-[]
+[
+  {
+    "staffName": "Super Admin",
+    "staffEmail": "sadikrtx3060@gmail.com",
+    "staffRole": "super_admin",
+    "action": "Integration API Key Regenerated",
+    "module": "Settings",
+    "targetId": "muse-integration",
+    "source": "admin",
+    "details": "Muse AI Integration API Key generated/regenerated (knx_muse_••••••••••••••••••••••••36ec). Previous key invalidated immediately.",
+    "id": "act-1795190867380-4qimg",
+    "timestamp": "2026-11-20T16:07:47.380Z"
+  }
+]

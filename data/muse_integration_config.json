@@ -1,9 +1,9 @@
 {
-  "apiKeyHash": "d178baa910158d91c47b7dd4ee7f427d36d501fd2582ed2d0353ffc31b38014e",
+  "apiKeyHash": "aec8a1a1ba9cb249f652510fd1129a5032b85197252a45a24d203ae1efe9e812",
   "keyPrefix": "knx_muse_",
-  "keyLast4": "58c4",
+  "keyLast4": "36ec",
   "lowStockThreshold": 5,
   "createdAt": "2026-11-20T12:50:39.269Z",
-  "rotatedAt": "2026-11-20T12:50:39.584Z",
-  "updatedBy": "Sadik Rahman"
+  "rotatedAt": "2026-11-20T16:07:47.380Z",
+  "updatedBy": "Super Admin"
 }

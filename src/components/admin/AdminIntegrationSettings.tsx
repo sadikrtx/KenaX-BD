@@ -15,6 +15,8 @@ import {
   Activity,
 } from 'lucide-react';
 import { SiteSettings, StaffUser, UserRole } from '../../types';
+import { safeFetchJson } from '../../utils/safeFetchJson';
+import { auth } from '../../lib/firebase';
 
 interface MuseConfigView {
   hasKey: boolean;
@@ -58,13 +60,23 @@ export const AdminIntegrationSettings: React.FC<AdminIntegrationSettingsProps> =
   const [isSavingThreshold, setIsSavingThreshold] = useState(false);
   const [thresholdSavedMsg, setThresholdSavedMsg] = useState<string | null>(null);
 
-  const buildAuthHeaders = useCallback(() => {
+  const buildAuthHeaders = useCallback(async () => {
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
+      Accept: 'application/json',
       'x-staff-role': currentUserRole || '',
     };
+    if (currentStaff?.id) headers['x-staff-id'] = currentStaff.id;
     if (currentStaff?.name) headers['x-staff-name'] = currentStaff.name;
     if (currentStaff?.email) headers['x-staff-email'] = currentStaff.email;
+    try {
+      if (auth?.currentUser) {
+        const idToken = await auth.currentUser.getIdToken();
+        if (idToken) headers['Authorization'] = `Bearer ${idToken}`;
+      }
+    } catch {
+      // Optional Firebase Auth token; staff identity headers still sent
+    }
     return headers;
   }, [currentUserRole, currentStaff]);
 
@@ -73,19 +85,28 @@ export const AdminIntegrationSettings: React.FC<AdminIntegrationSettingsProps> =
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch('/api/admin/muse-integration/config', {
-        headers: buildAuthHeaders(),
-      });
-      const data = await res.json();
-      if (!res.ok || !data.ok) {
-        throw new Error(data.error || 'Failed to load integration configuration');
+      const headers = await buildAuthHeaders();
+      const result = await safeFetchJson<{ ok: boolean; config?: MuseConfigView; error?: string; message?: string }>(
+        '/api/integration/admin/config',
+        { headers }
+      );
+      if (!result.ok || !result.data?.ok || !result.data?.config) {
+        throw new Error(
+          result.error ||
+            result.data?.message ||
+            result.data?.error ||
+            'সার্ভার থেকে ইন্টিগ্রেশন সেটিংস লোড করা যায়নি (Failed to load integration configuration).'
+        );
       }
-      setConfig(data.config);
-      if (typeof data.config?.lowStockThreshold === 'number') {
-        setLowStockInput(data.config.lowStockThreshold);
+      setConfig(result.data.config);
+      if (typeof result.data.config?.lowStockThreshold === 'number') {
+        setLowStockInput(result.data.config.lowStockThreshold);
       }
     } catch (err: any) {
-      setError(err?.message || 'Could not load Muse Integration settings.');
+      setError(
+        err?.message ||
+          'সার্ভার থেকে সঠিক উত্তর আসেনি (Could not load Muse Integration settings).'
+      );
     } finally {
       setLoading(false);
     }
@@ -104,24 +125,41 @@ export const AdminIntegrationSettings: React.FC<AdminIntegrationSettingsProps> =
     setError(null);
     setConfirmRegenerate(false);
     try {
-      const res = await fetch('/api/admin/muse-integration/generate-key', {
+      const headers = await buildAuthHeaders();
+      const result = await safeFetchJson<{
+        ok: boolean;
+        apiKey?: string;
+        config?: MuseConfigView;
+        error?: string;
+        message?: string;
+      }>('/api/integration/admin/generate-key', {
         method: 'POST',
-        headers: buildAuthHeaders(),
+        headers,
         body: JSON.stringify({
+          actorId: currentStaff?.id || '',
           actorRole: currentUserRole,
           actorName: currentStaff?.name || 'Super Admin',
           actorEmail: currentStaff?.email || '',
         }),
       });
-      const data = await res.json();
-      if (!res.ok || !data.ok) {
-        throw new Error(data.error || 'Failed to generate API key');
+      if (!result.ok || !result.data?.ok || !result.data?.apiKey) {
+        throw new Error(
+          result.error ||
+            result.data?.message ||
+            result.data?.error ||
+            'সার্ভার থেকে API Key তৈরি করা যায়নি (Failed to generate API key).'
+        );
       }
-      setNewlyGeneratedKey(data.apiKey);
+      setNewlyGeneratedKey(result.data.apiKey);
       setShowNewKey(false);
-      setConfig(data.config);
+      if (result.data.config) {
+        setConfig(result.data.config);
+      }
     } catch (err: any) {
-      setError(err?.message || 'Failed to generate API key');
+      setError(
+        err?.message ||
+          'সার্ভার থেকে সঠিক উত্তর আসেনি (API server error — Failed to generate API key).'
+      );
     } finally {
       setIsGenerating(false);
     }
@@ -154,21 +192,32 @@ export const AdminIntegrationSettings: React.FC<AdminIntegrationSettingsProps> =
     setError(null);
     setThresholdSavedMsg(null);
     try {
-      const res = await fetch('/api/admin/muse-integration/settings', {
+      const headers = await buildAuthHeaders();
+      const result = await safeFetchJson<{
+        ok: boolean;
+        config?: MuseConfigView;
+        error?: string;
+        message?: string;
+      }>('/api/integration/admin/settings', {
         method: 'POST',
-        headers: buildAuthHeaders(),
+        headers,
         body: JSON.stringify({
           lowStockThreshold: cleanVal,
+          actorId: currentStaff?.id || '',
           actorRole: currentUserRole,
           actorName: currentStaff?.name || 'Super Admin',
           actorEmail: currentStaff?.email || '',
         }),
       });
-      const data = await res.json();
-      if (!res.ok || !data.ok) {
-        throw new Error(data.error || 'Failed to save low stock threshold');
+      if (!result.ok || !result.data?.ok || !result.data?.config) {
+        throw new Error(
+          result.error ||
+            result.data?.message ||
+            result.data?.error ||
+            'সার্ভার থেকে সেটিংস সেভ করা যায়নি (Failed to save low stock threshold).'
+        );
       }
-      setConfig(data.config);
+      setConfig(result.data.config);
       if (onUpdateSettings) {
         await Promise.resolve(
           onUpdateSettings({
@@ -180,7 +229,10 @@ export const AdminIntegrationSettings: React.FC<AdminIntegrationSettingsProps> =
       setThresholdSavedMsg(`Low Stock Threshold updated to ${cleanVal} units.`);
       setTimeout(() => setThresholdSavedMsg(null), 4000);
     } catch (err: any) {
-      setError(err?.message || 'Failed to save low stock threshold');
+      setError(
+        err?.message ||
+          'সার্ভার থেকে সঠিক উত্তর আসেনি (API server error — Failed to save low stock threshold).'
+      );
     } finally {
       setIsSavingThreshold(false);
     }

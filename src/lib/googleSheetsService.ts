@@ -3,6 +3,7 @@ import { GoogleAuthProvider, signInWithPopup, User } from 'firebase/auth';
 import { auth } from './firebase.ts';
 import firebaseConfig from '../../firebase-applet-config.json' with { type: 'json' };
 import type { CustomerRecord, Order, Product, StaffUser } from '../types/index.ts';
+import { loadGoogleApiScript } from '../utils/googleApiLoader.ts';
 
 // Google OAuth Scopes for Google Sheets & Drive File access (disabled)
 export const GOOGLE_SHEETS_SCOPES: string[] = [];
@@ -25,6 +26,8 @@ export const clearCachedAccessToken = () => {
 
 // Sign in with Google (Google Sheets integration disabled)
 export const signInForGoogleSheets = async (): Promise<{ user: User; accessToken: string }> => {
+  // Load Google API client script lazily only when Google Sheets/Drive integration is actually used
+  loadGoogleApiScript().catch(() => {});
   const provider = new GoogleAuthProvider();
   
   provider.setCustomParameters({

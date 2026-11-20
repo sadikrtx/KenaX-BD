@@ -841,7 +841,10 @@ const OrderActivityTimelineCard: React.FC<OrderActivityTimelineCardProps> = ({
   useEffect(() => {
     let active = true;
     fetch(`/api/activity-logs?orderId=${encodeURIComponent(order.id)}`)
-      .then((res) => (res.ok ? res.json() : []))
+      .then((res) => {
+        const ct = (res.headers.get('content-type') || '').toLowerCase();
+        return res.ok && ct.includes('application/json') ? res.json() : [];
+      })
       .then((data) => {
         if (active && Array.isArray(data)) {
           setServerLogs(data);

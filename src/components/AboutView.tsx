@@ -153,28 +153,42 @@ export const AboutView: React.FC<AboutViewProps> = ({
   const touchStartXRef = useRef<number | null>(null);
   const touchEndXRef = useRef<number | null>(null);
 
-  // Synchronize live reviews from DB & Firestore subscription
   useEffect(() => {
     if (reviews && reviews.length > 0) {
       setLiveReviewsList(reviews);
     }
+  }, [reviews]);
 
-    getReviewsFromDB().then((items) => {
-      if (items && items.length > 0) {
-        setLiveReviewsList(items);
-      }
-    });
+  // Synchronize live reviews from Firestore subscription (with offline/quota fallback)
+  useEffect(() => {
+    let isMounted = true;
+    let snapshotReceived = false;
 
     const unsub = subscribeToReviews((liveReviews) => {
-      if (liveReviews && liveReviews.length > 0) {
+      snapshotReceived = true;
+      if (isMounted && liveReviews && liveReviews.length > 0) {
         setLiveReviewsList(liveReviews);
       }
     });
 
+    const fallbackTimer = window.setTimeout(() => {
+      if (isMounted && !snapshotReceived) {
+        getReviewsFromDB()
+          .then((items) => {
+            if (isMounted && items && items.length > 0) {
+              setLiveReviewsList(items);
+            }
+          })
+          .catch(() => {});
+      }
+    }, 1500);
+
     return () => {
+      isMounted = false;
+      window.clearTimeout(fallbackTimer);
       unsub();
     };
-  }, [reviews]);
+  }, []);
 
   // Handle responsive visible card counts (Mobile: 1, Tablet: 2, Laptop: 3, Desktop: 4)
   useEffect(() => {

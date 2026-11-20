@@ -308,30 +308,51 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     }
   });
 
+  const hasParentCartSync = Boolean(onRefreshCartActivities);
+
   const loadCartActivities = async () => {
     const items = await getCartActivitiesFromDB();
     setInternalCartActivities(items || []);
   };
 
+  // Reuse App.tsx's single real-time cartActivities subscription when provided; only subscribe locally if mounted standalone
   useEffect(() => {
-    loadCartActivities();
+    if (hasParentCartSync) return;
+
+    let isMounted = true;
+    let snapshotReceived = false;
     const unsub = subscribeToCartActivities((liveCarts) => {
-      if (liveCarts) {
+      snapshotReceived = true;
+      if (isMounted && liveCarts) {
         setInternalCartActivities(liveCarts);
       }
     });
+    const fallbackTimer = window.setTimeout(() => {
+      if (isMounted && !snapshotReceived) {
+        loadCartActivities().catch(() => {});
+      }
+    }, 1500);
     return () => {
+      isMounted = false;
+      window.clearTimeout(fallbackTimer);
       unsub();
     };
-  }, []);
+  }, [hasParentCartSync]);
 
-  const rawCartsList = cartActivities && cartActivities.length > 0 ? cartActivities : internalCartActivities;
+  const rawCartsList = hasParentCartSync
+    ? cartActivities || []
+    : cartActivities && cartActivities.length > 0
+      ? cartActivities
+      : internalCartActivities;
   const activeCartsList = rawCartsList.filter((c) => c && c.items && c.items.length > 0 && (c.totalItems === undefined || c.totalItems > 0));
   const liveCartsCount = activeCartsList.filter((c) => c.status === 'active').length;
 
   const handleRefreshCartActivities = () => {
-    if (onRefreshCartActivities) onRefreshCartActivities();
-    loadCartActivities();
+    if (onRefreshCartActivities) {
+      onRefreshCartActivities();
+    } else {
+      loadCartActivities();
+    }
   };
 
   const handleUpdateCartStatus = async (
@@ -724,55 +745,30 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   // Invoice modal state
   const [selectedInvoiceOrder, setSelectedInvoiceOrder] = useState<Order | null>(null);
 
-  // Sync with Firestore on mount and establish real-time activity log listeners
+  // Sync with Firestore on mount: parallel one-shot reads for non-subscribed collections + real-time listeners (with fallback guards)
   useEffect(() => {
-    async function loadAdminData() {
-      const dbStaff = await getStaffFromDB();
+    let isMounted = true;
+    const received = {
+      logs: false,
+      customers: false,
+      expenses: false,
+      otherProfits: false,
+      suppliers: false,
+      sourcing: false,
+      reviews: false,
+    };
+
+    // Non-subscribed collections fetched in parallel (staff, notifications, stock logs)
+    Promise.all([
+      getStaffFromDB().catch(() => null),
+      getNotificationsFromDB().catch(() => null),
+      getStockLogsFromDB().catch(() => null),
+    ]).then(([dbStaff, dbNotifs, dbStockLogs]) => {
+      if (!isMounted) return;
       if (dbStaff && dbStaff.length > 0) setStaffList(dbStaff);
-
-      const dbCust = await getCustomersFromDB();
-      if (dbCust && dbCust.length > 0) setCustomers(dbCust);
-
-      const dbLogs = await getActivityLogsFromDB();
-      if (dbLogs && dbLogs.length > 0) setActivityLogs(dbLogs);
-
-      const dbNotifs = await getNotificationsFromDB();
       if (dbNotifs && dbNotifs.length > 0) setNotifications(dbNotifs);
-
-      const dbExpenses = await getExpensesFromDB();
-      const validDbExpenses = (dbExpenses || []).filter((e) => !isDemoExpense(e));
-      setExpenses(validDbExpenses);
-      safeSetLocalStorage('kenax_expenses_cache', JSON.stringify(validDbExpenses));
-
-      const dbOtherProfits = await getOtherProfitsFromDB();
-      const validDbProfits = (dbOtherProfits || []).filter((p) => !isDemoOtherProfit(p));
-      setOtherProfits(validDbProfits);
-      safeSetLocalStorage('kenax_other_profits_cache', JSON.stringify(validDbProfits));
-
-      const dbSuppliers = await getSuppliersFromDB();
-      if (dbSuppliers && dbSuppliers.length > 0) {
-        setSuppliers(dbSuppliers);
-        safeSetLocalStorage('kenax_suppliers_cache', JSON.stringify(dbSuppliers));
-      }
-
-      const dbSourcing = await getSourcingLocationsFromDB();
-      if (dbSourcing && dbSourcing.length > 0) {
-        setSourcingLocations(dbSourcing);
-        safeSetLocalStorage('kenax_sourcing_locations_cache', JSON.stringify(dbSourcing));
-      }
-
-      const dbReviews = await getReviewsFromDB();
-      if (dbReviews && dbReviews.length > 0) {
-        setReviews(dbReviews);
-        safeSetLocalStorage('kenax_reviews_cache', JSON.stringify(dbReviews));
-      }
-
-      const dbStockLogs = await getStockLogsFromDB();
-      if (dbStockLogs && dbStockLogs.length > 0) {
-        setStockLogs(dbStockLogs);
-      }
-    }
-    loadAdminData();
+      if (dbStockLogs && dbStockLogs.length > 0) setStockLogs(dbStockLogs);
+    });
 
     const handleStockLogsUpdated = () => {
       const cached = localStorage.getItem('kenax_stock_logs_cache');
@@ -790,9 +786,12 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
 
     // Fetch real persistent activity logs from server immediately
     fetch('/api/activity-logs')
-      .then((res) => (res.ok ? res.json() : []))
+      .then((res) => {
+        const ct = (res.headers.get('content-type') || '').toLowerCase();
+        return res.ok && ct.includes('application/json') ? res.json() : [];
+      })
       .then((serverLogs) => {
-        if (Array.isArray(serverLogs)) {
+        if (isMounted && Array.isArray(serverLogs)) {
           setActivityLogs((prev) => {
             const byId = new Map<string, ActivityLog>();
             [...serverLogs, ...prev].forEach((item) => {
@@ -806,28 +805,33 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
       })
       .catch(() => {});
 
-    // Permanent Real-time Firestore sync for all staff activity logs & customer accounts across devices
+    // Permanent Real-time Firestore sync for admin collections (eliminates duplicate initial getDocs reads)
     const unsubscribeLogs = subscribeToActivityLogs((freshLogs) => {
-      if (Array.isArray(freshLogs)) {
+      received.logs = true;
+      if (isMounted && Array.isArray(freshLogs)) {
         setActivityLogs(freshLogs);
       }
     });
 
     const unsubscribeCustomers = subscribeToCustomers((freshCusts) => {
-      if (freshCusts && freshCusts.length > 0) {
+      received.customers = true;
+      if (isMounted && freshCusts && freshCusts.length > 0) {
         setCustomers(freshCusts);
       }
     });
 
     const unsubscribeExpenses = subscribeToExpenses((freshExpenses) => {
-      if (freshExpenses && freshExpenses.length > 0) {
-        setExpenses(freshExpenses);
-        safeSetLocalStorage('kenax_expenses_cache', JSON.stringify(freshExpenses));
+      received.expenses = true;
+      if (isMounted && freshExpenses) {
+        const validExpenses = freshExpenses.filter((e) => !isDemoExpense(e));
+        setExpenses(validExpenses);
+        safeSetLocalStorage('kenax_expenses_cache', JSON.stringify(validExpenses));
       }
     });
 
     const unsubscribeOtherProfits = subscribeToOtherProfits((freshProfits) => {
-      if (freshProfits) {
+      received.otherProfits = true;
+      if (isMounted && freshProfits) {
         const cleanProfits = freshProfits.filter((p) => !isDemoOtherProfit(p));
         setOtherProfits(cleanProfits);
         safeSetLocalStorage('kenax_other_profits_cache', JSON.stringify(cleanProfits));
@@ -835,27 +839,117 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     });
 
     const unsubscribeSuppliers = subscribeToSuppliers((freshSuppliers) => {
-      if (freshSuppliers) {
+      received.suppliers = true;
+      if (isMounted && freshSuppliers) {
         setSuppliers(freshSuppliers);
         safeSetLocalStorage('kenax_suppliers_cache', JSON.stringify(freshSuppliers));
       }
     });
 
     const unsubscribeSourcing = subscribeToSourcingLocations((freshLocs) => {
-      if (freshLocs) {
+      received.sourcing = true;
+      if (isMounted && freshLocs) {
         setSourcingLocations(freshLocs);
         safeSetLocalStorage('kenax_sourcing_locations_cache', JSON.stringify(freshLocs));
       }
     });
 
     const unsubscribeReviews = subscribeToReviews((freshReviews) => {
-      if (freshReviews && freshReviews.length > 0) {
+      received.reviews = true;
+      if (isMounted && freshReviews && freshReviews.length > 0) {
         setReviews(freshReviews);
         safeSetLocalStorage('kenax_reviews_cache', JSON.stringify(freshReviews));
       }
     });
 
+    // Offline / quota safety fallback: fetch in parallel ONLY for collections whose snapshot didn't emit
+    const fallbackTimer = window.setTimeout(async () => {
+      if (!isMounted) return;
+      const tasks: Promise<void>[] = [];
+      if (!received.customers) {
+        tasks.push(
+          getCustomersFromDB()
+            .then((dbCust) => {
+              if (isMounted && dbCust && dbCust.length > 0) setCustomers(dbCust);
+            })
+            .catch(() => {})
+        );
+      }
+      if (!received.logs) {
+        tasks.push(
+          getActivityLogsFromDB()
+            .then((dbLogs) => {
+              if (isMounted && dbLogs && dbLogs.length > 0) setActivityLogs(dbLogs);
+            })
+            .catch(() => {})
+        );
+      }
+      if (!received.expenses) {
+        tasks.push(
+          getExpensesFromDB()
+            .then((dbExpenses) => {
+              if (!isMounted) return;
+              const valid = (dbExpenses || []).filter((e) => !isDemoExpense(e));
+              setExpenses(valid);
+              safeSetLocalStorage('kenax_expenses_cache', JSON.stringify(valid));
+            })
+            .catch(() => {})
+        );
+      }
+      if (!received.otherProfits) {
+        tasks.push(
+          getOtherProfitsFromDB()
+            .then((dbOtherProfits) => {
+              if (!isMounted) return;
+              const valid = (dbOtherProfits || []).filter((p) => !isDemoOtherProfit(p));
+              setOtherProfits(valid);
+              safeSetLocalStorage('kenax_other_profits_cache', JSON.stringify(valid));
+            })
+            .catch(() => {})
+        );
+      }
+      if (!received.suppliers) {
+        tasks.push(
+          getSuppliersFromDB()
+            .then((dbSuppliers) => {
+              if (isMounted && dbSuppliers && dbSuppliers.length > 0) {
+                setSuppliers(dbSuppliers);
+                safeSetLocalStorage('kenax_suppliers_cache', JSON.stringify(dbSuppliers));
+              }
+            })
+            .catch(() => {})
+        );
+      }
+      if (!received.sourcing) {
+        tasks.push(
+          getSourcingLocationsFromDB()
+            .then((dbSourcing) => {
+              if (isMounted && dbSourcing && dbSourcing.length > 0) {
+                setSourcingLocations(dbSourcing);
+                safeSetLocalStorage('kenax_sourcing_locations_cache', JSON.stringify(dbSourcing));
+              }
+            })
+            .catch(() => {})
+        );
+      }
+      if (!received.reviews) {
+        tasks.push(
+          getReviewsFromDB()
+            .then((dbReviews) => {
+              if (isMounted && dbReviews && dbReviews.length > 0) {
+                setReviews(dbReviews);
+                safeSetLocalStorage('kenax_reviews_cache', JSON.stringify(dbReviews));
+              }
+            })
+            .catch(() => {})
+        );
+      }
+      if (tasks.length > 0) await Promise.all(tasks);
+    }, 1500);
+
     return () => {
+      isMounted = false;
+      window.clearTimeout(fallbackTimer);
       unsubscribeLogs();
       unsubscribeCustomers();
       unsubscribeExpenses();

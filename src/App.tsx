@@ -6,21 +6,45 @@ import { HeroBanner } from './components/HeroBanner';
 import { CategoryNav } from './components/CategoryNav';
 import { PromoGrid } from './components/PromoGrid';
 import { ProductCard } from './components/ProductCard';
-import { CartDrawer } from './components/CartDrawer';
 import { Footer } from './components/Footer';
 import { FlashSaleBanner } from './components/FlashSaleBanner';
 import { MobileBottomNav } from './components/MobileBottomNav';
-import { OrderProcessingAnimation } from './components/OrderProcessingAnimation';
-import { MaintenanceModal } from './components/MaintenanceModal';
 import type { PolicyTab } from './components/PolicyModal';
-
-import { ProductPageView } from './components/ProductPageView';
-import { AuthPageView } from './components/AuthPageView';
 
 // Portals & Core Views: Lazy loaded with suspense to ensure ultra-fast initial storefront load
 const AdminPortal = React.lazy(() => import('./components/AdminPortal'));
 
 // Secondary Views & Modals: Lazy-loaded on demand for maximum initial load performance
+const ProductPageView = React.lazy(() =>
+  import('./components/ProductPageView').then((m) => ({ default: m.ProductPageView }))
+);
+const AuthPageView = React.lazy(() =>
+  import('./components/AuthPageView').then((m) => ({ default: m.AuthPageView }))
+);
+const CheckoutPageView = React.lazy(() =>
+  import('./components/CheckoutPageView').then((m) => ({ default: m.CheckoutPageView }))
+);
+const CheckoutModal = React.lazy(() =>
+  import('./components/CheckoutModal').then((m) => ({ default: m.CheckoutModal }))
+);
+const CartDrawer = React.lazy(() =>
+  import('./components/CartDrawer').then((m) => ({ default: m.CartDrawer }))
+);
+const OrderProcessingAnimation = React.lazy(() =>
+  import('./components/OrderProcessingAnimation').then((m) => ({ default: m.OrderProcessingAnimation }))
+);
+const OrderSuccessModal = React.lazy(() =>
+  import('./components/OrderSuccessModal').then((m) => ({ default: m.OrderSuccessModal }))
+);
+const MaintenanceModal = React.lazy(() =>
+  import('./components/MaintenanceModal').then((m) => ({ default: m.MaintenanceModal }))
+);
+const CustomerFloatingChat = React.lazy(() =>
+  import('./components/CustomerFloatingChat').then((m) => ({ default: m.CustomerFloatingChat }))
+);
+const OfferPopupModal = React.lazy(() =>
+  import('./components/OfferPopupModal').then((m) => ({ default: m.OfferPopupModal }))
+);
 const CustomerDashboard = React.lazy(() =>
   import('./components/CustomerDashboard').then((m) => ({ default: m.CustomerDashboard }))
 );
@@ -54,13 +78,6 @@ const CustomerAuthModal = React.lazy(() =>
 const AdminLoginModal = React.lazy(() =>
   import('./components/admin/AdminLoginModal').then((m) => ({ default: m.AdminLoginModal }))
 );
-
-// High-Performance Core Views: Direct imports for instant initial UI paint
-import { OfferPopupModal } from './components/OfferPopupModal';
-import { CustomerFloatingChat } from './components/CustomerFloatingChat';
-import { CheckoutModal } from './components/CheckoutModal';
-import { CheckoutPageView } from './components/CheckoutPageView';
-import { OrderSuccessModal } from './components/OrderSuccessModal';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { safeSetLocalStorage } from './lib/storage';
 import { getEnvStorageKey } from './utils/envHelper';
@@ -446,52 +463,6 @@ export default function App() {
     return res;
   });
 
-  useEffect(() => {
-    // Initial fetch from DB / Server store / Firestore
-    getStaffFromDB().then((dbStaff) => {
-      if (dbStaff && dbStaff.length > 0) {
-        setStaffList(dbStaff);
-        setCurrentStaff((prev) => {
-          if (!prev) return prev;
-          const matched = dbStaff.find(
-            (s) => s.id === prev.id || (s.email && prev.email && s.email.toLowerCase() === prev.email.toLowerCase())
-          );
-          if (matched) {
-            const ser = JSON.stringify(matched);
-            localStorage.setItem('kenax_current_staff', ser);
-            localStorage.setItem('kenax_authenticated_staff', ser);
-            return matched;
-          }
-          return prev;
-        });
-      }
-    });
-
-    // Real-time synchronization subscription
-    const unsubscribe = subscribeToStaff((latestStaff) => {
-      if (latestStaff && latestStaff.length > 0) {
-        setStaffList(latestStaff);
-        setCurrentStaff((prev) => {
-          if (!prev) return prev;
-          const matched = latestStaff.find(
-            (s) => s.id === prev.id || (s.email && prev.email && s.email.toLowerCase() === prev.email.toLowerCase())
-          );
-          if (matched) {
-            const ser = JSON.stringify(matched);
-            localStorage.setItem('kenax_current_staff', ser);
-            localStorage.setItem('kenax_authenticated_staff', ser);
-            return matched;
-          }
-          return prev;
-        });
-      }
-    });
-
-    return () => {
-      unsubscribe();
-    };
-  }, []);
-
   const [currentStaff, setCurrentStaff] = useState<StaffUser | null>(() => {
     const saved = localStorage.getItem('kenax_current_staff') || localStorage.getItem('kenax_authenticated_staff') || localStorage.getItem('preview_kenax_current_staff');
     if (saved) {
@@ -524,6 +495,75 @@ export default function App() {
 
   const [isAdminLoginOpen, setIsAdminLoginOpen] = useState(false);
   const [isAdminPortalAuthenticated, setIsAdminPortalAuthenticated] = useState(false);
+
+  // Defer non-critical storefront floating widgets (Chat & Offer Popup) until after first paint
+  const [deferredStorefrontWidgetsReady, setDeferredStorefrontWidgetsReady] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    const enableWidgets = () => {
+      if (!cancelled) setDeferredStorefrontWidgetsReady(true);
+    };
+    const w = window as any;
+    if (typeof w.requestIdleCallback === 'function') {
+      const idleId = w.requestIdleCallback(enableWidgets, { timeout: 800 });
+      return () => {
+        cancelled = true;
+        if (typeof w.cancelIdleCallback === 'function') w.cancelIdleCallback(idleId);
+      };
+    }
+    const timer = window.setTimeout(enableWidgets, 500);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, []);
+
+  // Sync staff list via real-time subscription ONLY when staff/admin context is active (avoids unnecessary reads for public visitors)
+  useEffect(() => {
+    const shouldSyncStaff = Boolean(currentStaff) || currentView === 'admin-dashboard' || isAdminLoginOpen;
+    if (!shouldSyncStaff) return;
+
+    let isMounted = true;
+    let staffSnapshotReceived = false;
+
+    const applyStaffList = (latestStaff: StaffUser[]) => {
+      if (!isMounted || !latestStaff || latestStaff.length === 0) return;
+      setStaffList(latestStaff);
+      setCurrentStaff((prev) => {
+        if (!prev) return prev;
+        const matched = latestStaff.find(
+          (s) => s.id === prev.id || (s.email && prev.email && s.email.toLowerCase() === prev.email.toLowerCase())
+        );
+        if (matched) {
+          const ser = JSON.stringify(matched);
+          localStorage.setItem('kenax_current_staff', ser);
+          localStorage.setItem('kenax_authenticated_staff', ser);
+          return matched;
+        }
+        return prev;
+      });
+    };
+
+    const unsubscribe = subscribeToStaff((latestStaff) => {
+      staffSnapshotReceived = true;
+      applyStaffList(latestStaff);
+    });
+
+    // Fallback one-shot read ONLY if real-time snapshot didn't emit (e.g. offline/quota mode)
+    const fallbackTimer = window.setTimeout(() => {
+      if (isMounted && !staffSnapshotReceived) {
+        getStaffFromDB().then((dbStaff) => {
+          if (dbStaff && dbStaff.length > 0) applyStaffList(dbStaff);
+        }).catch(() => {});
+      }
+    }, 1500);
+
+    return () => {
+      isMounted = false;
+      window.clearTimeout(fallbackTimer);
+      unsubscribe();
+    };
+  }, [Boolean(currentStaff), currentView === 'admin-dashboard', isAdminLoginOpen]);
 
   // Cart Activities for Admin / Manager / Moderator Tracking
   const [cartActivities, setCartActivities] = useState<CartActivity[]>(() => {
@@ -1545,86 +1585,106 @@ export default function App() {
     }
   };
 
-  // Initial database fetch & seed with real-time listeners (Products, Orders, Settings, Categories, Cart Activities)
+  // Real-time database listeners (Products, Settings, Categories) + network reconnect sync
   useEffect(() => {
-    let unsubscribeOrders: (() => void) | null = null;
-    let unsubscribeProducts: (() => void) | null = null;
-    let unsubscribeSettings: (() => void) | null = null;
-    let unsubscribeCategories: (() => void) | null = null;
-    let unsubscribeCartActivities: (() => void) | null = null;
+    let isMounted = true;
+    let productsReceived = false;
+    let settingsReceived = false;
+    let categoriesReceived = false;
 
-    async function initDB() {
-      // Background seed without blocking initial storefront paint
-      const seeded = localStorage.getItem('kenax_seeded_flag');
-      if (!seeded) {
-        setTimeout(() => {
-          seedAllDataToFirestore().catch(() => {});
-        }, 1200);
-      }
-
-      // Fetch products from Firestore & local cache
-      const dbProducts = await getProductsFromDB();
-      if (dbProducts && dbProducts.length > 0) {
-        setProducts(dbProducts);
-      }
-
-      // Fetch settings from Firestore
-      const dbSettings = await getSettingsFromDB();
-      if (dbSettings) {
-        setSiteSettings((prev) => {
-          const merged = sanitizeSiteSettings({ ...prev, ...dbSettings });
-          safeSetLocalStorage('kenax_site_settings', JSON.stringify(merged));
-          safeSetLocalStorage('kenax_settings_cache', JSON.stringify(merged));
-          return merged;
-        });
-      }
-
-      // Fetch categories from Firestore
-      const dbCategories = await getCategoriesFromDB();
-      if (dbCategories && dbCategories.length > 0) {
-        setCategories(dbCategories);
-      }
-
-      unsubscribeProducts = subscribeToProducts((liveProducts) => {
-        if (liveProducts && liveProducts.length > 0) {
-          setProducts(liveProducts);
-        }
-      });
-
-      unsubscribeSettings = subscribeToSettings((liveSettings) => {
-        if (liveSettings) {
-          setSiteSettings((prev) => {
-            const merged = sanitizeSiteSettings({ ...prev, ...liveSettings });
-            safeSetLocalStorage('kenax_site_settings', JSON.stringify(merged));
-            safeSetLocalStorage('kenax_settings_cache', JSON.stringify(merged));
-            return merged;
-          });
-        }
-      });
-
-      unsubscribeCategories = subscribeToCategories((liveCategories) => {
-        if (liveCategories && liveCategories.length > 0) {
-          setCategories(liveCategories);
-        }
-      });
+    // Background seed without blocking initial storefront paint
+    const seeded = localStorage.getItem('kenax_seeded_flag');
+    let seedTimer: number | null = null;
+    if (!seeded) {
+      seedTimer = window.setTimeout(() => {
+        seedAllDataToFirestore().catch(() => {});
+      }, 1200);
     }
 
-    initDB();
+    const applySettings = (incomingSettings: Partial<SiteSettings>) => {
+      setSiteSettings((prev) => {
+        const merged = sanitizeSiteSettings({ ...prev, ...incomingSettings });
+        safeSetLocalStorage('kenax_site_settings', JSON.stringify(merged));
+        safeSetLocalStorage('kenax_settings_cache', JSON.stringify(merged));
+        return merged;
+      });
+    };
 
-    const handleSyncOnNetworkOrPoll = async () => {
+    // Attach real-time Firestore listeners immediately (eliminates duplicate initial getDocs + onSnapshot reads)
+    const unsubscribeProducts = subscribeToProducts((liveProducts) => {
+      productsReceived = true;
+      if (isMounted && liveProducts && liveProducts.length > 0) {
+        setProducts(liveProducts);
+      }
+    });
+
+    const unsubscribeSettings = subscribeToSettings((liveSettings) => {
+      settingsReceived = true;
+      if (isMounted && liveSettings) {
+        applySettings(liveSettings);
+      }
+    });
+
+    const unsubscribeCategories = subscribeToCategories((liveCategories) => {
+      categoriesReceived = true;
+      if (isMounted && liveCategories && liveCategories.length > 0) {
+        setCategories(liveCategories);
+      }
+    });
+
+    // Offline / quota-exceeded safety fallback: fetch in parallel ONLY for collections whose snapshot didn't emit
+    const fallbackTimer = window.setTimeout(async () => {
+      if (!isMounted) return;
+      const tasks: Promise<void>[] = [];
+      if (!productsReceived) {
+        tasks.push(
+          getProductsFromDB()
+            .then((dbProducts) => {
+              if (isMounted && dbProducts && dbProducts.length > 0) setProducts(dbProducts);
+            })
+            .catch(() => {})
+        );
+      }
+      if (!settingsReceived) {
+        tasks.push(
+          getSettingsFromDB()
+            .then((dbSettings) => {
+              if (isMounted && dbSettings) applySettings(dbSettings);
+            })
+            .catch(() => {})
+        );
+      }
+      if (!categoriesReceived) {
+        tasks.push(
+          getCategoriesFromDB()
+            .then((dbCategories) => {
+              if (isMounted && dbCategories && dbCategories.length > 0) setCategories(dbCategories);
+            })
+            .catch(() => {})
+        );
+      }
+      if (tasks.length > 0) {
+        await Promise.all(tasks);
+      }
+    }, 1500);
+
+    // Network reconnect handler (replaces unnecessary 10-second full-collection polling)
+    const handleSyncOnReconnect = async () => {
       try {
-        const freshProducts = await getProductsFromDB();
+        const [freshProducts, freshSettings, freshCategories] = await Promise.all([
+          getProductsFromDB().catch(() => null),
+          getSettingsFromDB().catch(() => null),
+          getCategoriesFromDB().catch(() => null),
+        ]);
+        if (!isMounted) return;
         if (freshProducts && freshProducts.length > 0) {
           setProducts(freshProducts);
         }
-        const freshSettings = await getSettingsFromDB();
         if (freshSettings) {
-          setSiteSettings((prev) => {
-            const merged = sanitizeSiteSettings({ ...prev, ...freshSettings });
-            safeSetLocalStorage('kenax_site_settings', JSON.stringify(merged));
-            safeSetLocalStorage('kenax_settings_cache', JSON.stringify(merged));
-            return merged;
-          });
+          applySettings(freshSettings);
+        }
+        if (freshCategories && freshCategories.length > 0) {
+          setCategories(freshCategories);
         }
       } catch (e) {}
     };
@@ -1639,30 +1699,24 @@ export default function App() {
     const handleSettingsUpdatedEvent = (e: any) => {
       const updated = e.detail;
       if (updated) {
-        setSiteSettings((prev) => {
-          const merged = sanitizeSiteSettings({ ...prev, ...updated });
-          safeSetLocalStorage('kenax_site_settings', JSON.stringify(merged));
-          safeSetLocalStorage('kenax_settings_cache', JSON.stringify(merged));
-          return merged;
-        });
+        applySettings(updated);
       }
     };
 
-    window.addEventListener('online', handleSyncOnNetworkOrPoll);
+    window.addEventListener('online', handleSyncOnReconnect);
     window.addEventListener('kenax_product_deleted', handleProductDeletedEvent);
     window.addEventListener('kenax_settings_updated', handleSettingsUpdatedEvent);
-    const syncInterval = setInterval(handleSyncOnNetworkOrPoll, 10000);
 
     return () => {
-      window.removeEventListener('online', handleSyncOnNetworkOrPoll);
+      isMounted = false;
+      if (seedTimer !== null) window.clearTimeout(seedTimer);
+      window.clearTimeout(fallbackTimer);
+      window.removeEventListener('online', handleSyncOnReconnect);
       window.removeEventListener('kenax_product_deleted', handleProductDeletedEvent);
       window.removeEventListener('kenax_settings_updated', handleSettingsUpdatedEvent);
-      clearInterval(syncInterval);
-      if (unsubscribeOrders) unsubscribeOrders();
-      if (unsubscribeProducts) unsubscribeProducts();
-      if (unsubscribeSettings) unsubscribeSettings();
-      if (unsubscribeCategories) unsubscribeCategories();
-      if (unsubscribeCartActivities) unsubscribeCartActivities();
+      unsubscribeProducts();
+      unsubscribeSettings();
+      unsubscribeCategories();
     };
   }, []);
 
@@ -1727,38 +1781,53 @@ export default function App() {
     }
 
     let isMounted = true;
-    let unsubOrders: (() => void) | null = null;
-    let unsubCartActivities: (() => void) | null = null;
+    let ordersReceived = false;
+    let cartActivitiesReceived = false;
 
-    // Fetch store orders and cart activities for authenticated staff
-    getOrdersFromDB().then((dbOrders) => {
-      if (isMounted && dbOrders) {
-        setOrders(dbOrders);
-      }
-    });
-
-    unsubOrders = subscribeToOrders((liveOrders) => {
+    const unsubOrders = subscribeToOrders((liveOrders) => {
+      ordersReceived = true;
       if (isMounted && liveOrders) {
         setOrders(liveOrders);
       }
     });
 
-    getCartActivitiesFromDB().then((dbCartActivities) => {
-      if (isMounted && dbCartActivities) {
-        setCartActivities(dbCartActivities);
-      }
-    });
-
-    unsubCartActivities = subscribeToCartActivities((liveCartActivities) => {
+    const unsubCartActivities = subscribeToCartActivities((liveCartActivities) => {
+      cartActivitiesReceived = true;
       if (isMounted && liveCartActivities) {
         setCartActivities(liveCartActivities);
       }
     });
 
+    // Offline / quota fallback if a real-time snapshot didn't emit
+    const fallbackTimer = window.setTimeout(async () => {
+      if (!isMounted) return;
+      const tasks: Promise<void>[] = [];
+      if (!ordersReceived) {
+        tasks.push(
+          getOrdersFromDB()
+            .then((dbOrders) => {
+              if (isMounted && dbOrders) setOrders(dbOrders);
+            })
+            .catch(() => {})
+        );
+      }
+      if (!cartActivitiesReceived) {
+        tasks.push(
+          getCartActivitiesFromDB()
+            .then((dbCartActivities) => {
+              if (isMounted && dbCartActivities) setCartActivities(dbCartActivities);
+            })
+            .catch(() => {})
+        );
+      }
+      if (tasks.length > 0) await Promise.all(tasks);
+    }, 1500);
+
     return () => {
       isMounted = false;
-      if (unsubOrders) unsubOrders();
-      if (unsubCartActivities) unsubCartActivities();
+      window.clearTimeout(fallbackTimer);
+      unsubOrders();
+      unsubCartActivities();
     };
   }, [currentStaff?.id, currentStaff?.role]);
 
@@ -3109,6 +3178,13 @@ export default function App() {
             }}
             className="w-full transform-gpu"
           >
+            <React.Suspense
+              fallback={
+                <div className="min-h-[45vh] flex items-center justify-center py-12">
+                  <div className="w-8 h-8 border-4 border-sky-600 border-t-transparent rounded-full animate-spin" />
+                </div>
+              }
+            >
             {/* VIEW: Home */}
         {currentView === 'home' && (
           <div>
@@ -3981,196 +4057,202 @@ export default function App() {
             onNavigate={handleNavigate}
           />
         )}
+            </React.Suspense>
           </motion.div>
         </AnimatePresence>
       </main>
 
       {/* 3. Global Modals & Drawers */}
+      <React.Suspense fallback={null}>
+        {/* Cart Drawer */}
+        {isCartOpen && (
+          <CartDrawer
+            isOpen={isCartOpen}
+            onClose={() => setIsCartOpen(false)}
+            cartItems={cart}
+            onUpdateQuantity={handleUpdateCartQuantity}
+            onRemoveItem={handleRemoveCartItem}
+            onCheckout={() => {
+              checkoutItemsRef.current = cart;
+              setCheckoutItems(cart);
+              if (currentView !== 'checkout') {
+                setReturnViewAfterCheckout(currentView);
+              }
+              setIsCartOpen(false);
+              setIsCheckoutOpen(true);
+              setCurrentView('checkout');
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+            appliedCoupon={appliedCoupon}
+            discountAmount={discountAmount}
+            onApplyCoupon={handleApplyCoupon}
+            onRemoveCoupon={handleRemoveCoupon}
+            deliveryCharge={siteSettings.insideDhakaDeliveryFee}
+            products={products}
+            onSelectProduct={handleOpenProductDetail}
+          />
+        )}
 
-      {/* Cart Drawer */}
-      <CartDrawer
-        isOpen={isCartOpen}
-        onClose={() => setIsCartOpen(false)}
-        cartItems={cart}
-        onUpdateQuantity={handleUpdateCartQuantity}
-        onRemoveItem={handleRemoveCartItem}
-        onCheckout={() => {
-          checkoutItemsRef.current = cart;
-          setCheckoutItems(cart);
-          if (currentView !== 'checkout') {
-            setReturnViewAfterCheckout(currentView);
-          }
-          setIsCartOpen(false);
-          setIsCheckoutOpen(true);
-          setCurrentView('checkout');
-          window.scrollTo({ top: 0, behavior: 'smooth' });
-        }}
-        appliedCoupon={appliedCoupon}
-        discountAmount={discountAmount}
-        onApplyCoupon={handleApplyCoupon}
-        onRemoveCoupon={handleRemoveCoupon}
-        deliveryCharge={siteSettings.insideDhakaDeliveryFee}
-        products={products}
-        onSelectProduct={handleOpenProductDetail}
-      />
+        {/* Checkout Modal (Used if opened outside dedicated checkout page) */}
+        {isCheckoutOpen && currentView !== 'checkout' && (
+          <CheckoutModal
+            isOpen={isCheckoutOpen}
+            onClose={handleCloseCheckout}
+            cartItems={checkoutItems.length > 0 ? checkoutItems : cart}
+            fullCart={cart}
+            discountAmount={discountAmount}
+            couponCode={appliedCoupon || undefined}
+            orderSource={checkoutOrderSource}
+            onOrderPlaced={handleOrderPlaced}
+            savedAddresses={savedAddresses}
+            defaultInsideCityFee={siteSettings.insideDhakaDeliveryFee}
+            defaultOutsideCityFee={siteSettings.outsideDhakaDeliveryFee}
+            currentCustomer={currentCustomer}
+            onCustomerCreated={(newCust) => {
+              setCurrentCustomer(newCust);
+              try {
+                localStorage.setItem('kenax_current_customer', JSON.stringify(newCust));
+              } catch {}
+            }}
+            onRemoveItem={handleRemoveCartItem}
+            onUpdateCartItem={handleUpdateCartItem}
+            products={products}
+            siteSettings={siteSettings}
+          />
+        )}
 
-      {/* Checkout Modal (Used if opened outside dedicated checkout page) */}
-      {isCheckoutOpen && currentView !== 'checkout' && (
-        <CheckoutModal
-          isOpen={isCheckoutOpen}
-          onClose={handleCloseCheckout}
-          cartItems={checkoutItems.length > 0 ? checkoutItems : cart}
-          fullCart={cart}
-          discountAmount={discountAmount}
-          couponCode={appliedCoupon || undefined}
-          orderSource={checkoutOrderSource}
-          onOrderPlaced={handleOrderPlaced}
-          savedAddresses={savedAddresses}
-          defaultInsideCityFee={siteSettings.insideDhakaDeliveryFee}
-          defaultOutsideCityFee={siteSettings.outsideDhakaDeliveryFee}
-          currentCustomer={currentCustomer}
-          onCustomerCreated={(newCust) => {
-            setCurrentCustomer(newCust);
-            try {
-              localStorage.setItem('kenax_current_customer', JSON.stringify(newCust));
-            } catch {}
-          }}
-          onRemoveItem={handleRemoveCartItem}
-          onUpdateCartItem={handleUpdateCartItem}
-          products={products}
-          siteSettings={siteSettings}
-        />
-      )}
+        {/* Order Dispatch Animation (Moving KenaX BD Express Delivery Van with Real-time Status Steps) */}
+        {isProcessingAnimationOpen && (
+          <OrderProcessingAnimation
+            isOpen={isProcessingAnimationOpen}
+            order={processingOrder}
+            onComplete={handleProcessingAnimationComplete}
+          />
+        )}
 
-      {/* Order Dispatch Animation (Moving KenaX BD Express Delivery Van with Real-time Status Steps) */}
-      <OrderProcessingAnimation
-        isOpen={isProcessingAnimationOpen}
-        order={processingOrder}
-        onComplete={handleProcessingAnimationComplete}
-      />
-
-      {/* Order Received Success Popup Modal (Contact Notice, Receipt Download/Print, Track Order Button) */}
-      {isSuccessModalOpen && (
-        <ErrorBoundary
-          fallback={
-            <div className="fixed inset-0 z-[9999] bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
-              <div className="bg-white rounded-2xl max-w-md w-full p-6 text-center shadow-2xl border border-slate-200 space-y-4">
-                <div className="w-12 h-12 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto">
-                  <CheckCircle className="w-6 h-6" />
-                </div>
-                <h3 className="text-lg font-bold text-slate-900">
-                  অর্ডারটি সফলভাবে সম্পন্ন হয়েছে!
-                </h3>
-                <p className="text-xs text-slate-600">
-                  {successOrder?.id ? `অর্ডার আইডি: #${successOrder.id}` : 'আপনার অর্ডারটি গ্রহণ করা হয়েছে।'}
-                </p>
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIsSuccessModalOpen(false);
-                      setCurrentView('shop');
-                    }}
-                    className="flex-1 py-2 px-3 bg-sky-600 hover:bg-sky-700 text-white rounded-xl font-bold text-xs"
-                  >
-                    শপিং চালিয়ে যান
-                  </button>
-                  {successOrder && (
+        {/* Order Received Success Popup Modal (Contact Notice, Receipt Download/Print, Track Order Button) */}
+        {isSuccessModalOpen && (
+          <ErrorBoundary
+            fallback={
+              <div className="fixed inset-0 z-[9999] bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+                <div className="bg-white rounded-2xl max-w-md w-full p-6 text-center shadow-2xl border border-slate-200 space-y-4">
+                  <div className="w-12 h-12 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto">
+                    <CheckCircle className="w-6 h-6" />
+                  </div>
+                  <h3 className="text-lg font-bold text-slate-900">
+                    অর্ডারটি সফলভাবে সম্পন্ন হয়েছে!
+                  </h3>
+                  <p className="text-xs text-slate-600">
+                    {successOrder?.id ? `অর্ডার আইডি: #${successOrder.id}` : 'আপনার অর্ডারটি গ্রহণ করা হয়েছে।'}
+                  </p>
+                  <div className="flex gap-2">
                     <button
                       type="button"
                       onClick={() => {
                         setIsSuccessModalOpen(false);
-                        setSelectedTrackOrder(successOrder);
-                        setCurrentView('track');
+                        setCurrentView('shop');
                       }}
-                      className="flex-1 py-2 px-3 bg-slate-800 hover:bg-slate-900 text-white rounded-xl font-bold text-xs"
+                      className="flex-1 py-2 px-3 bg-sky-600 hover:bg-sky-700 text-white rounded-xl font-bold text-xs"
                     >
-                      ট্র্যাক অর্ডার
+                      শপিং চালিয়ে যান
                     </button>
-                  )}
+                    {successOrder && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsSuccessModalOpen(false);
+                          setSelectedTrackOrder(successOrder);
+                          setCurrentView('track');
+                        }}
+                        className="flex-1 py-2 px-3 bg-slate-800 hover:bg-slate-900 text-white rounded-xl font-bold text-xs"
+                      >
+                        ট্র্যাক অর্ডার
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
-            </div>
-          }
-        >
-          <OrderSuccessModal
-            isOpen={isSuccessModalOpen}
-            onClose={() => setIsSuccessModalOpen(false)}
-            order={successOrder}
-            onTrackOrder={(order) => {
-              setSelectedTrackOrder(order);
-              setCurrentView('track');
-              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }
+          >
+            <OrderSuccessModal
+              isOpen={isSuccessModalOpen}
+              onClose={() => setIsSuccessModalOpen(false)}
+              order={successOrder}
+              onTrackOrder={(order) => {
+                setSelectedTrackOrder(order);
+                setCurrentView('track');
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+              }}
+              onContinueShopping={() => {
+                setCurrentView('shop');
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+              }}
+            />
+          </ErrorBoundary>
+        )}
+
+        {/* AI Assistant Modal (Gemini 2.5 with Fast & Deep Thinking Modes) */}
+        {isAIAssistantOpen && (
+          <AIAssistantModal
+            isOpen={isAIAssistantOpen}
+            onClose={() => setIsAIAssistantOpen(false)}
+            products={products}
+            onSelectProduct={(p) => {
+              handleOpenProductDetail(p);
+              setIsAIAssistantOpen(false);
             }}
-            onContinueShopping={() => {
-              setCurrentView('shop');
-              window.scrollTo({ top: 0, behavior: 'smooth' });
+            onAddToCart={(p) => handleAddToCart(p, 1)}
+            onBuyNow={(p, qty) => handleBuyNow(p, qty || 1, undefined, undefined, 'chatbot')}
+          />
+        )}
+
+        {/* Customer & Staff Authentication Modal (Unified Login / Register) */}
+        {isCustomerAuthOpen && (
+          <CustomerAuthModal
+            isOpen={isCustomerAuthOpen}
+            onClose={() => setIsCustomerAuthOpen(false)}
+            initialTab={customerAuthInitialTab}
+            onCustomerLogin={(customer) => {
+              setCurrentCustomer(customer);
+              localStorage.setItem('kenax_current_customer', JSON.stringify(customer));
+              if (customer.cart && Array.isArray(customer.cart)) {
+                const cleanCart = sanitizeCart(customer.cart);
+                setCart(cleanCart);
+                localStorage.setItem('kenax_cart', JSON.stringify(cleanCart));
+              }
+              if (customer.wishlist && Array.isArray(customer.wishlist)) {
+                setWishlist(customer.wishlist);
+                localStorage.setItem('kenax_wishlist', JSON.stringify(customer.wishlist));
+              }
+              const addrs = customer.addresses || customer.savedAddresses;
+              if (addrs && Array.isArray(addrs) && addrs.length > 0) {
+                setSavedAddresses(addrs);
+                localStorage.setItem('kenax_saved_addresses', JSON.stringify(addrs));
+              }
+              setIsCustomerAuthOpen(false);
             }}
           />
-        </ErrorBoundary>
-      )}
+        )}
 
-      {/* AI Assistant Modal (Gemini 2.5 with Fast & Deep Thinking Modes) */}
-      {isAIAssistantOpen && (
-        <AIAssistantModal
-          isOpen={isAIAssistantOpen}
-          onClose={() => setIsAIAssistantOpen(false)}
-          products={products}
-          onSelectProduct={(p) => {
-            handleOpenProductDetail(p);
-            setIsAIAssistantOpen(false);
-          }}
-          onAddToCart={(p) => handleAddToCart(p, 1)}
-          onBuyNow={(p, qty) => handleBuyNow(p, qty || 1, undefined, undefined, 'chatbot')}
-        />
-      )}
-
-      {/* Customer & Staff Authentication Modal (Unified Login / Register) */}
-      {isCustomerAuthOpen && (
-        <CustomerAuthModal
-          isOpen={isCustomerAuthOpen}
-          onClose={() => setIsCustomerAuthOpen(false)}
-          initialTab={customerAuthInitialTab}
-          onCustomerLogin={(customer) => {
-            setCurrentCustomer(customer);
-            localStorage.setItem('kenax_current_customer', JSON.stringify(customer));
-            if (customer.cart && Array.isArray(customer.cart)) {
-              const cleanCart = sanitizeCart(customer.cart);
-              setCart(cleanCart);
-              localStorage.setItem('kenax_cart', JSON.stringify(cleanCart));
-            }
-            if (customer.wishlist && Array.isArray(customer.wishlist)) {
-              setWishlist(customer.wishlist);
-              localStorage.setItem('kenax_wishlist', JSON.stringify(customer.wishlist));
-            }
-            const addrs = customer.addresses || customer.savedAddresses;
-            if (addrs && Array.isArray(addrs) && addrs.length > 0) {
-              setSavedAddresses(addrs);
-              localStorage.setItem('kenax_saved_addresses', JSON.stringify(addrs));
-            }
-            setIsCustomerAuthOpen(false);
-          }}
-        />
-      )}
-
-      {/* Dedicated Staff & RBAC Authentication Portal Modal */}
-      {isAdminLoginOpen && (
-        <AdminLoginModal
-          isOpen={isAdminLoginOpen}
-          onClose={() => setIsAdminLoginOpen(false)}
-          onLoginSuccess={(staff) => {
-            setCurrentStaff(staff);
-            setCurrentRole(staff.role);
-            setIsAdminPortalAuthenticated(true);
-            localStorage.setItem('kenax_current_staff', JSON.stringify(staff));
-            localStorage.setItem('kenax_authenticated_staff', JSON.stringify(staff));
-            localStorage.setItem('kenax_authenticated_role', staff.role);
-            setIsAdminLoginOpen(false);
-            setCurrentView('admin-dashboard');
-          }}
-          staffList={staffList}
-        />
-      )}
+        {/* Dedicated Staff & RBAC Authentication Portal Modal */}
+        {isAdminLoginOpen && (
+          <AdminLoginModal
+            isOpen={isAdminLoginOpen}
+            onClose={() => setIsAdminLoginOpen(false)}
+            onLoginSuccess={(staff) => {
+              setCurrentStaff(staff);
+              setCurrentRole(staff.role);
+              setIsAdminPortalAuthenticated(true);
+              localStorage.setItem('kenax_current_staff', JSON.stringify(staff));
+              localStorage.setItem('kenax_authenticated_staff', JSON.stringify(staff));
+              localStorage.setItem('kenax_authenticated_role', staff.role);
+              setIsAdminLoginOpen(false);
+              setCurrentView('admin-dashboard');
+            }}
+            staffList={staffList}
+          />
+        )}
+      </React.Suspense>
 
       {/* 4. Footer with Policy Triggers (English Only, Trade License Removed) */}
       <Footer
@@ -4185,26 +4267,28 @@ export default function App() {
         siteSettings={siteSettings}
       />
 
-      {/* 5. Customer Policy & FAQ Help Center Modal (Optional Fallback) */}
-      {isPolicyModalOpen && (
-        <PolicyModal
-          isOpen={isPolicyModalOpen}
-          onClose={() => setIsPolicyModalOpen(false)}
-          initialTab={policyPageTab}
-          privacyPolicyText={siteSettings.privacyPolicy}
-          termsOfServiceText={siteSettings.termsOfService}
-          refundPolicyText={siteSettings.refundPolicy}
-          faqs={siteSettings.faqs}
-        />
-      )}
+      {/* 5. Customer Policy & FAQ Help Center Modal & Maintenance Mode Modal */}
+      <React.Suspense fallback={null}>
+        {isPolicyModalOpen && (
+          <PolicyModal
+            isOpen={isPolicyModalOpen}
+            onClose={() => setIsPolicyModalOpen(false)}
+            initialTab={policyPageTab}
+            privacyPolicyText={siteSettings.privacyPolicy}
+            termsOfServiceText={siteSettings.termsOfService}
+            refundPolicyText={siteSettings.refundPolicy}
+            faqs={siteSettings.faqs}
+          />
+        )}
 
-      {/* 6. Global Maintenance Mode Modal Popup for Public Visitors */}
-      {isMaintenanceActive && !isStaffUser && currentView !== 'admin-dashboard' && (
-        <MaintenanceModal
-          siteSettings={siteSettings}
-          onOpenAdminLogin={() => setIsAdminLoginOpen(true)}
-        />
-      )}
+        {/* 6. Global Maintenance Mode Modal Popup for Public Visitors */}
+        {isMaintenanceActive && !isStaffUser && currentView !== 'admin-dashboard' && (
+          <MaintenanceModal
+            siteSettings={siteSettings}
+            onOpenAdminLogin={() => setIsAdminLoginOpen(true)}
+          />
+        )}
+      </React.Suspense>
 
       {/* 7. Mobile Bottom Navigation Bar (Visible exclusively on mobile storefront) */}
       {currentView !== 'admin-dashboard' && (
@@ -4230,39 +4314,40 @@ export default function App() {
         />
       )}
 
-      {/* Customer Floating Support Chat (KenaX AI Bot, WhatsApp, Telegram, Messenger) */}
-      {currentView !== 'admin-dashboard' && (
-        <CustomerFloatingChat
-          currentCustomer={currentCustomer}
-          siteSettings={siteSettings}
-          onAddOrder={handleAddOrder}
-          products={products}
-          onOpenProductDetail={handleOpenProductDetail}
-          orders={orders}
-          wishlist={wishlist}
-          cart={cart}
-        />
-      )}
+      {/* Deferred Storefront Floating Widgets (Chat & Promotional Offer Popup) */}
+      {deferredStorefrontWidgetsReady && currentView !== 'admin-dashboard' && (
+        <React.Suspense fallback={null}>
+          {/* Customer Floating Support Chat (KenaX AI Bot, WhatsApp, Telegram, Messenger) */}
+          <CustomerFloatingChat
+            currentCustomer={currentCustomer}
+            siteSettings={siteSettings}
+            onAddOrder={handleAddOrder}
+            products={products}
+            onOpenProductDetail={handleOpenProductDetail}
+            orders={orders}
+            wishlist={wishlist}
+            cart={cart}
+          />
 
-      {/* Promotional Campaign & Visitor Offer Popup Modal (Manageable via Admin > Get Offers) */}
-      {currentView !== 'admin-dashboard' && (
-        <OfferPopupModal
-          popupSettings={siteSettings.offerPopup}
-          onNavigate={handleNavigate}
-          onSelectCategory={(cat) => {
-            setSelectedCategory(cat);
-            setSelectedSubcategory('All');
-            handleNavigate('shop');
-          }}
-          onSelectProduct={(productId) => {
-            const prod = products.find((p) => p.id === productId);
-            if (prod) {
-              handleOpenProductDetail(prod);
-            } else {
+          {/* Promotional Campaign & Visitor Offer Popup Modal (Manageable via Admin > Get Offers) */}
+          <OfferPopupModal
+            popupSettings={siteSettings.offerPopup}
+            onNavigate={handleNavigate}
+            onSelectCategory={(cat) => {
+              setSelectedCategory(cat);
+              setSelectedSubcategory('All');
               handleNavigate('shop');
-            }
-          }}
-        />
+            }}
+            onSelectProduct={(productId) => {
+              const prod = products.find((p) => p.id === productId);
+              if (prod) {
+                handleOpenProductDetail(prod);
+              } else {
+                handleNavigate('shop');
+              }
+            }}
+          />
+        </React.Suspense>
       )}
     </div>
   );

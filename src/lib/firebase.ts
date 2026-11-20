@@ -2758,7 +2758,8 @@ export async function getActivityLogsFromDB(): Promise<ActivityLog[]> {
       let serverItems: ActivityLog[] = [];
       try {
         const res = await fetch('/api/activity-logs');
-        if (res.ok) {
+        const ct = (res.headers.get('content-type') || '').toLowerCase();
+        if (res.ok && ct.includes('application/json')) {
           const parsed = await res.json();
           if (Array.isArray(parsed)) serverItems = parsed;
         }
@@ -2773,7 +2774,8 @@ export async function getActivityLogsFromDB(): Promise<ActivityLog[]> {
 
   try {
     const res = await fetch('/api/activity-logs');
-    if (res.ok) {
+    const ct = (res.headers.get('content-type') || '').toLowerCase();
+    if (res.ok && ct.includes('application/json')) {
       const serverItems = await res.json();
       if (Array.isArray(serverItems)) {
         const cleaned = serverItems.filter((l: ActivityLog) => !isLegacyFakeActivityLog(l));
@@ -2872,7 +2874,10 @@ export function subscribeToActivityLogs(onLogsChanged: (logs: ActivityLog[]) => 
           if (!isLegacyFakeActivityLog(d)) items.push(d);
         });
         fetch('/api/activity-logs')
-          .then((r) => (r.ok ? r.json() : []))
+          .then((r) => {
+            const ct = (r.headers.get('content-type') || '').toLowerCase();
+            return r.ok && ct.includes('application/json') ? r.json() : [];
+          })
           .then((serverItems) => {
             const merged = mergeActivityLogLists(Array.isArray(serverItems) ? serverItems : [], items);
             safeSetLocalStorage('kenax_activity_logs_cache', JSON.stringify(merged));
