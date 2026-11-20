@@ -36,6 +36,8 @@ import {
   RotateCcw,
 } from 'lucide-react';
 import { StaffUser, Order, OrderStatus, UserRole, ActivityLog } from '../../types';
+import { ClickableOrderId } from '../common/ClickableOrderId';
+import { SaasDonutChart, SaasBarChart } from './charts/AdminCharts';
 
 interface AdminMyDashboardProps {
   orders: Order[];
@@ -55,6 +57,8 @@ interface AdminMyDashboardProps {
   onSelectTab?: (tab: any) => void;
 }
 
+import { useLanguage } from '../../context/LanguageContext';
+
 type TimeRangeFilter = 'all' | 'today' | 'yesterday' | '7days' | '30days' | 'this_month';
 type HandledTab = 'delivered' | 'cancelled' | 'returned';
 
@@ -68,11 +72,11 @@ export const AdminMyDashboard: React.FC<AdminMyDashboardProps> = ({
   onPrintInvoice,
   onSelectTab,
 }) => {
-  // Super admin permission check: only super_admin can inspect other staff dashboards
+  const { language } = useLanguage();
+  const isBn = language === 'bn';
+  // Super admin permission check
   const isSuperAdmin = currentRole === 'super_admin';
 
-  // Staff Selection (Super Admin can switch to inspect; staff are strictly locked to their own view)
-  const [selectedStaffId, setSelectedStaffId] = useState<string>('me');
   const [timeRange, setTimeRange] = useState<TimeRangeFilter>('all');
   const [handledTab, setHandledTab] = useState<HandledTab>('delivered');
   const [searchQuery, setSearchQuery] = useState('');
@@ -106,30 +110,52 @@ export const AdminMyDashboard: React.FC<AdminMyDashboardProps> = ({
     };
   }, [currentStaff, currentRole]);
 
-  // Selected Target Staff Profile: non-super-admins are strictly locked to their own profile
+  // Staff Profile: strictly locked to the logged-in staff member for their personal dashboard
   const effectiveStaff = useMemo(() => {
-    if (!isSuperAdmin || selectedStaffId === 'me') {
-      return superAdminProfile;
-    }
-    if (selectedStaffId === 'all') {
-      return {
-        id: 'all',
-        name: 'All Staff (Combined Team)',
-        role: 'team',
-        email: 'team@kenax.com',
-      };
-    }
-    const found = staffList.find((s) => s.id === selectedStaffId);
-    if (found) {
-      return {
-        id: found.id,
-        name: found.name,
-        role: found.role,
-        email: found.email,
-      };
-    }
     return superAdminProfile;
-  }, [isSuperAdmin, selectedStaffId, staffList, superAdminProfile]);
+  }, [superAdminProfile]);
+
+  const getRoleLabel = (role: string) => {
+    if (!isBn) return role.replace(/_/g, ' ').toUpperCase();
+    switch (role.toLowerCase()) {
+      case 'super_admin':
+        return 'সুপার অ্যাডমিন';
+      case 'admin':
+        return 'অ্যাডমিন';
+      case 'manager':
+        return 'ম্যানেজার';
+      case 'moderator':
+        return 'মডারেটর';
+      case 'staff':
+        return 'স্টাফ';
+      case 'accounts':
+        return 'অ্যাকাউন্টস';
+      default:
+        return role.replace(/_/g, ' ');
+    }
+  };
+
+  const getOrderStatusLabel = (status: OrderStatus) => {
+    if (!isBn) return status;
+    switch (status) {
+      case 'Pending':
+        return 'অপেক্ষমাণ';
+      case 'Payment Verification':
+        return 'পেমেন্ট যাচাই';
+      case 'Confirmed':
+        return 'নিশ্চিতকৃত';
+      case 'Processing':
+        return 'প্রক্রিয়াধীন';
+      case 'Delivered':
+        return 'ডেলিভারি সম্পন্ন';
+      case 'Cancelled':
+        return 'বাতিলকৃত';
+      case 'Returned':
+        return 'ফেরতকৃত';
+      default:
+        return status;
+    }
+  };
 
   // Date range filter helper
   const isWithinTimeRange = (dateStr?: string): boolean => {
@@ -347,42 +373,6 @@ export const AdminMyDashboard: React.FC<AdminMyDashboardProps> = ({
     return ((staffProcessingOrders.length / totalHandledCount) * 100).toFixed(1);
   }, [totalHandledCount, staffProcessingOrders]);
 
-  // Team Member Breakdown for Super Admin Overview
-  const teamPerformanceSummary = useMemo(() => {
-    const allMembers = [
-      superAdminProfile,
-      ...staffList.filter((s) => s.id !== superAdminProfile.id),
-    ];
-
-    return allMembers.map((member) => {
-      const confOrders = orders.filter((o) => isOrderConfirmedByStaff(o, member));
-      const delOrders = confOrders.filter((o) => o.orderStatus === 'Delivered');
-      const procOrders = confOrders.filter((o) => isOrderInProcessing(o));
-      const cancOrders = confOrders.filter((o) => isOrderCancelled(o));
-      const retOrders = confOrders.filter((o) => isOrderReturned(o));
-      const rev = delOrders.reduce((acc, o) => acc + (o.totalAmount || 0), 0);
-      const total = confOrders.length;
-      const succRate = total > 0 ? ((delOrders.length / total) * 100).toFixed(1) : '0.0';
-      const cRate = total > 0 ? ((cancOrders.length / total) * 100).toFixed(1) : '0.0';
-      const rRate = total > 0 ? ((retOrders.length / total) * 100).toFixed(1) : '0.0';
-
-      return {
-        id: member.id,
-        name: member.name,
-        role: member.role,
-        confirmedCount: total,
-        deliveredCount: delOrders.length,
-        processingCount: procOrders.length,
-        cancelledCount: cancOrders.length,
-        returnedCount: retOrders.length,
-        deliveredRevenue: rev,
-        successRate: succRate,
-        cancelRate: cRate,
-        returnRate: rRate,
-      };
-    });
-  }, [orders, staffList, superAdminProfile]);
-
   // Recent activity logs for target staff
   const staffRecentLogs = useMemo(() => {
     if (effectiveStaff.id === 'all') {
@@ -431,7 +421,11 @@ export const AdminMyDashboard: React.FC<AdminMyDashboardProps> = ({
     );
 
     setIsActionModalOpen(false);
-    setActionSuccessMsg(`Order #${selectedOrderForAction.id} marked as ${actionTargetStatus}!`);
+    setActionSuccessMsg(
+      isBn
+        ? `অর্ডার #${selectedOrderForAction.id} সফলভাবে "${getOrderStatusLabel(actionTargetStatus)}" করা হয়েছে!`
+        : `Order #${selectedOrderForAction.id} marked as ${actionTargetStatus}!`
+    );
     setTimeout(() => setActionSuccessMsg(null), 3000);
   };
 
@@ -449,9 +443,9 @@ export const AdminMyDashboard: React.FC<AdminMyDashboardProps> = ({
       if (confirmEvent?.updatedBy) return confirmEvent.updatedBy;
     }
     if (order.orderStatus !== 'Pending' && order.orderStatus !== 'Payment Verification') {
-      return 'Super Admin';
+      return isBn ? 'সুপার অ্যাডমিন' : 'Super Admin';
     }
-    return 'Pending Review';
+    return isBn ? 'অপেক্ষমাণ পর্যালোচনা' : 'Pending Review';
   };
 
   // Helper: generate WhatsApp link with greeting and order details
@@ -524,62 +518,45 @@ export const AdminMyDashboard: React.FC<AdminMyDashboardProps> = ({
             <div>
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-blue-50 dark:bg-blue-950/80 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
-                  {effectiveStaff.role.replace('_', ' ')}
+                  {getRoleLabel(effectiveStaff.role)}
                 </span>
                 <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-600 dark:text-emerald-400">
                   <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                  {isSuperAdmin ? 'Super Admin Authorized' : 'Personal Dashboard'}
+                  {isSuperAdmin
+                    ? isBn
+                      ? 'সুপার অ্যাডমিন অনুমোদিত'
+                      : 'Super Admin Authorized'
+                    : isBn
+                    ? 'ব্যক্তিগত ড্যাশবোর্ড'
+                    : 'Personal Dashboard'}
                 </span>
               </div>
               <h1 className="text-xl sm:text-2xl font-black mt-1 text-slate-900 dark:text-white tracking-tight flex items-center gap-2">
                 <span>{effectiveStaff.name}</span>
                 <span className="text-slate-400 font-normal">|</span>
-                <span className="text-blue-600 dark:text-blue-400">My Dashboard</span>
+                <span className="text-blue-600 dark:text-blue-400">
+                  {isBn ? 'আমার ড্যাশবোর্ড' : 'My Dashboard'}
+                </span>
               </h1>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 font-medium">
-                {isSuperAdmin && selectedStaffId !== 'me'
-                  ? `Inspecting order handling throughput and performance for ${effectiveStaff.name}`
+                {isBn
+                  ? 'ব্যক্তিগত অর্ডার নিশ্চিতকরণ, প্রক্রিয়াকরণ ও ডেলিভারি আয়ের হিসাব'
                   : 'Personal order confirmation, processing throughput & delivered revenue ledger'}
               </p>
             </div>
           </div>
 
-          {/* Right Controls: Staff Switcher (Super Admin Only) & Time Filter */}
+          {/* Right Controls: Time Filter */}
           <div className="flex flex-wrap items-center gap-2.5 w-full lg:w-auto">
-            {/* Staff Selector (Super Admin Exclusive Inspection Control) */}
-            {isSuperAdmin && (
-              <div className="flex items-center gap-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-700 dark:text-slate-200 shadow-xs">
-                <User className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0" />
-                <div className="flex flex-col">
-                  <span className="text-[9px] text-slate-400 dark:text-slate-400 font-semibold uppercase tracking-wider leading-none">
-                    Inspect Staff Dashboard:
-                  </span>
-                  <select
-                    value={selectedStaffId}
-                    onChange={(e) => setSelectedStaffId(e.target.value)}
-                    className="bg-transparent border-none text-xs font-bold text-slate-900 dark:text-white focus:outline-hidden cursor-pointer mt-0.5"
-                  >
-                    <option value="me" className="dark:bg-slate-800 dark:text-white">My Handled Orders (Super Admin)</option>
-                    <option value="all" className="dark:bg-slate-800 dark:text-white">All Staff Combined (Team Overview)</option>
-                    {staffList.map((s) => (
-                      <option key={s.id} value={s.id} className="dark:bg-slate-800 dark:text-white">
-                        {s.name} ({s.role.replace('_', ' ')})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-            )}
-
             {/* Time Range Selector */}
             <div className="flex items-center bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-1 text-xs">
               {(
                 [
-                  { id: 'all', label: 'All Time' },
-                  { id: 'today', label: 'Today' },
-                  { id: 'yesterday', label: 'Yesterday' },
-                  { id: '7days', label: '7 Days' },
-                  { id: '30days', label: '30 Days' },
+                  { id: 'all', labelEn: 'All Time', labelBn: 'সর্বমোট' },
+                  { id: 'today', labelEn: 'Today', labelBn: 'আজ' },
+                  { id: 'yesterday', labelEn: 'Yesterday', labelBn: 'গতকাল' },
+                  { id: '7days', labelEn: '7 Days', labelBn: '৭ দিন' },
+                  { id: '30days', labelEn: '30 Days', labelBn: '৩০ দিন' },
                 ] as const
               ).map((tr) => (
                 <button
@@ -591,7 +568,7 @@ export const AdminMyDashboard: React.FC<AdminMyDashboardProps> = ({
                       : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
                   }`}
                 >
-                  {tr.label}
+                  {isBn ? tr.labelBn : tr.labelEn}
                 </button>
               ))}
             </div>
@@ -606,10 +583,12 @@ export const AdminMyDashboard: React.FC<AdminMyDashboardProps> = ({
           <div className="flex items-start justify-between gap-2">
             <div>
               <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-100 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
-                Delivered Revenue
+                {isBn ? 'ডেলিভারি রাজস্ব' : 'Delivered Revenue'}
               </span>
               <p className="text-xs text-slate-500 dark:text-slate-400 font-semibold mt-2">
-                Revenue from confirmed orders now successfully delivered
+                {isBn
+                  ? 'নিশ্চিত অর্ডারের সফল ডেলিভারি থেকে প্রাপ্ত মোট আয়'
+                  : 'Revenue from confirmed orders now successfully delivered'}
               </p>
             </div>
             <div className="w-10 h-10 rounded-xl bg-emerald-50 dark:bg-emerald-950/80 text-emerald-600 dark:text-emerald-300 flex items-center justify-center shrink-0 border border-emerald-100 dark:border-emerald-800">
@@ -621,9 +600,12 @@ export const AdminMyDashboard: React.FC<AdminMyDashboardProps> = ({
               ৳{deliveredRevenue.toLocaleString()}
             </div>
             <div className="flex items-center justify-between mt-1 text-[11px] font-bold text-slate-600 dark:text-slate-300">
-              <span>{staffDeliveredOrders.length} delivered orders</span>
+              <span>
+                {staffDeliveredOrders.length}{' '}
+                {isBn ? 'টি ডেলিভারিকৃত অর্ডার' : 'delivered orders'}
+              </span>
               <span className="px-2 py-0.5 rounded-md bg-emerald-50 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300 font-extrabold border border-emerald-200 dark:border-emerald-800">
-                {deliverySuccessRate}% Success
+                {deliverySuccessRate}% {isBn ? 'সফল' : 'Success'}
               </span>
             </div>
           </div>
@@ -634,10 +616,12 @@ export const AdminMyDashboard: React.FC<AdminMyDashboardProps> = ({
           <div className="flex items-start justify-between gap-2">
             <div>
               <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700">
-                Total Confirmed
+                {isBn ? 'মোট নিশ্চিতকৃত' : 'Total Confirmed'}
               </span>
               <p className="text-xs text-slate-500 dark:text-slate-400 font-semibold mt-2">
-                Total value of all orders confirmed by this staff member
+                {isBn
+                  ? 'এই স্টাফের মাধ্যমে নিশ্চিত সমস্ত অর্ডারের মোট মূল্য'
+                  : 'Total value of all orders confirmed by this staff member'}
               </p>
             </div>
             <div className="w-10 h-10 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 flex items-center justify-center shrink-0 border border-slate-200 dark:border-slate-700">
@@ -649,8 +633,13 @@ export const AdminMyDashboard: React.FC<AdminMyDashboardProps> = ({
               ৳{confirmedTotalAmount.toLocaleString()}
             </div>
             <div className="flex items-center justify-between mt-1 text-[11px] font-bold text-slate-600 dark:text-slate-300">
-              <span>{staffConfirmedOrders.length} confirmed orders</span>
-              <span className="text-[10px] font-semibold text-slate-400 dark:text-slate-500">Attributed Ledger</span>
+              <span>
+                {staffConfirmedOrders.length}{' '}
+                {isBn ? 'টি নিশ্চিতকৃত অর্ডার' : 'confirmed orders'}
+              </span>
+              <span className="text-[10px] font-semibold text-slate-400 dark:text-slate-500">
+                {isBn ? 'নির্ধারিত হিসাব' : 'Attributed Ledger'}
+              </span>
             </div>
           </div>
         </div>
@@ -660,10 +649,12 @@ export const AdminMyDashboard: React.FC<AdminMyDashboardProps> = ({
           <div className="flex items-start justify-between gap-2">
             <div>
               <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-blue-100 dark:bg-blue-950/80 text-blue-800 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
-                Processing & Shipping
+                {isBn ? 'প্রক্রিয়াধীন ও শিপিং' : 'Processing & Shipping'}
               </span>
               <p className="text-xs text-slate-500 dark:text-slate-400 font-semibold mt-2">
-                Orders currently in transit or packaging at fulfillment
+                {isBn
+                  ? 'বর্তমানে ট্রানজিট বা প্যাকেজিংয়ে থাকা সক্রিয় অর্ডার'
+                  : 'Orders currently in transit or packaging at fulfillment'}
               </p>
             </div>
             <div className="w-10 h-10 rounded-xl bg-blue-50 dark:bg-blue-950/80 text-blue-600 dark:text-blue-300 flex items-center justify-center shrink-0 border border-blue-100 dark:border-blue-800">
@@ -673,12 +664,16 @@ export const AdminMyDashboard: React.FC<AdminMyDashboardProps> = ({
           <div className="mt-4 pt-3 border-t border-blue-50 dark:border-blue-950/60">
             <div className="text-2xl sm:text-3xl font-black text-blue-600 dark:text-blue-400 tracking-tight">
               {staffProcessingOrders.length}{' '}
-              <span className="text-sm font-bold text-slate-500 dark:text-slate-400">Orders</span>
+              <span className="text-sm font-bold text-slate-500 dark:text-slate-400">
+                {isBn ? 'টি অর্ডার' : 'Orders'}
+              </span>
             </div>
             <div className="flex items-center justify-between mt-1 text-[11px] font-bold text-slate-600 dark:text-slate-300">
-              <span>Pipeline: ৳{processingTotalAmount.toLocaleString()}</span>
+              <span>
+                {isBn ? 'পাইপলাইন:' : 'Pipeline:'} ৳{processingTotalAmount.toLocaleString()}
+              </span>
               <span className="px-2 py-0.5 rounded-md bg-blue-50 dark:bg-blue-950/80 text-blue-700 dark:text-blue-300 font-extrabold border border-blue-200 dark:border-blue-800">
-                {processingRate}% Processing
+                {processingRate}% {isBn ? 'প্রক্রিয়াধীন' : 'Processing'}
               </span>
             </div>
           </div>
@@ -689,10 +684,12 @@ export const AdminMyDashboard: React.FC<AdminMyDashboardProps> = ({
           <div className="flex items-start justify-between gap-2">
             <div>
               <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-amber-100 dark:bg-amber-950/80 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
-                Pending Queue
+                {isBn ? 'অপেক্ষমাণ কিউ' : 'Pending Queue'}
               </span>
               <p className="text-xs text-slate-500 dark:text-slate-400 font-semibold mt-2">
-                New unconfirmed orders available to verify and claim
+                {isBn
+                  ? 'যাচাই ও গ্রহণের জন্য অপেক্ষমাণ নতুন কাস্টমার অর্ডার'
+                  : 'New unconfirmed orders available to verify and claim'}
               </p>
             </div>
             <div className="w-10 h-10 rounded-xl bg-amber-50 dark:bg-amber-950/80 text-amber-600 dark:text-amber-300 flex items-center justify-center shrink-0 border border-amber-100 dark:border-amber-800">
@@ -702,15 +699,19 @@ export const AdminMyDashboard: React.FC<AdminMyDashboardProps> = ({
           <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800">
             <div className="text-2xl sm:text-3xl font-black text-slate-900 dark:text-white tracking-tight">
               {pendingPoolOrders.length}{' '}
-              <span className="text-sm font-bold text-slate-500 dark:text-slate-400">Pending</span>
+              <span className="text-sm font-bold text-slate-500 dark:text-slate-400">
+                {isBn ? 'টি অপেক্ষমাণ' : 'Pending'}
+              </span>
             </div>
             <div className="flex items-center justify-between mt-1 text-[11px] font-bold text-slate-600 dark:text-slate-300">
-              <span>Queue Value: ৳{pendingPoolTotalAmount.toLocaleString()}</span>
+              <span>
+                {isBn ? 'কিউ মূল্য:' : 'Queue Value:'} ৳{pendingPoolTotalAmount.toLocaleString()}
+              </span>
               <a
                 href="#recent-incoming-queue"
                 className="text-[11px] font-bold text-blue-600 dark:text-blue-400 hover:text-blue-800 cursor-pointer flex items-center gap-1"
               >
-                <span>View Queue</span>
+                <span>{isBn ? 'কিউ দেখুন' : 'View Queue'}</span>
                 <span>&darr;</span>
               </a>
             </div>
@@ -724,10 +725,16 @@ export const AdminMyDashboard: React.FC<AdminMyDashboardProps> = ({
           <div>
             <h2 className="text-base font-black text-slate-900 dark:text-white flex items-center gap-2">
               <TrendingUp className="w-5 h-5 text-blue-600 dark:text-blue-400" />
-              <span>Order Handling & Delivery to Customer</span>
+              <span>
+                {isBn
+                  ? 'অর্ডার পরিচালনা ও গ্রাহকের ডেলিভারি'
+                  : 'Order Handling & Delivery to Customer'}
+              </span>
             </h2>
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 font-medium">
-              Conversion throughput from order confirmation to final customer receipt
+              {isBn
+                ? 'অর্ডার নিশ্চিতকরণ থেকে গ্রাহকের প্রাপ্তি পর্যন্ত অগ্রগতি'
+                : 'Conversion throughput from order confirmation to final customer receipt'}
             </p>
           </div>
 
@@ -735,28 +742,36 @@ export const AdminMyDashboard: React.FC<AdminMyDashboardProps> = ({
           <div className="flex flex-wrap items-center gap-2.5">
             <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/80 border border-emerald-200 dark:border-emerald-800 text-xs">
               <span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
-              <span className="font-bold text-slate-700 dark:text-slate-200">Delivery Success:</span>
+              <span className="font-bold text-slate-700 dark:text-slate-200">
+                {isBn ? 'ডেলিভারি সাফল্য:' : 'Delivery Success:'}
+              </span>
               <span className="font-black text-emerald-700 dark:text-emerald-300">{deliverySuccessRate}%</span>
               <span className="text-[10px] text-slate-400">({staffDeliveredOrders.length})</span>
             </div>
 
             <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-amber-50 dark:bg-amber-950/80 border border-amber-200 dark:border-amber-800 text-xs">
               <span className="w-2.5 h-2.5 rounded-full bg-amber-500"></span>
-              <span className="font-bold text-slate-700 dark:text-slate-200">Return Rate:</span>
+              <span className="font-bold text-slate-700 dark:text-slate-200">
+                {isBn ? 'ফেরতের হার:' : 'Return Rate:'}
+              </span>
               <span className="font-black text-amber-700 dark:text-amber-300">{returnRate}%</span>
               <span className="text-[10px] text-slate-400">({staffReturnedOrders.length})</span>
             </div>
 
             <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-rose-50 dark:bg-rose-950/80 border border-rose-200 dark:border-rose-800 text-xs">
               <span className="w-2.5 h-2.5 rounded-full bg-rose-500"></span>
-              <span className="font-bold text-slate-700 dark:text-slate-200">Cancel Rate:</span>
+              <span className="font-bold text-slate-700 dark:text-slate-200">
+                {isBn ? 'বাতিলের হার:' : 'Cancel Rate:'}
+              </span>
               <span className="font-black text-rose-700 dark:text-rose-300">{cancelRate}%</span>
               <span className="text-[10px] text-slate-400">({staffCancelledOrders.length})</span>
             </div>
 
             <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-blue-50 dark:bg-blue-950/80 border border-blue-200 dark:border-blue-800 text-xs">
               <span className="w-2.5 h-2.5 rounded-full bg-blue-600"></span>
-              <span className="font-bold text-slate-700 dark:text-slate-200">Processing:</span>
+              <span className="font-bold text-slate-700 dark:text-slate-200">
+                {isBn ? 'প্রক্রিয়াধীন:' : 'Processing:'}
+              </span>
               <span className="font-black text-blue-600 dark:text-blue-300">{processingRate}%</span>
               <span className="text-[10px] text-slate-400">({staffProcessingOrders.length})</span>
             </div>
@@ -769,173 +784,83 @@ export const AdminMyDashboard: React.FC<AdminMyDashboardProps> = ({
             <div
               style={{ width: `${Math.min(100, Math.max(0, Number(deliverySuccessRate)))}%` }}
               className="bg-emerald-500 h-full transition-all duration-500"
-              title={`Delivered: ${staffDeliveredOrders.length} orders (${deliverySuccessRate}%)`}
+              title={`${isBn ? 'ডেলিভারি সম্পন্ন' : 'Delivered'}: ${staffDeliveredOrders.length} (${deliverySuccessRate}%)`}
             />
             <div
               style={{ width: `${Math.min(100, Math.max(0, Number(processingRate)))}%` }}
               className="bg-blue-600 h-full transition-all duration-500"
-              title={`Processing / In-Transit: ${staffProcessingOrders.length} orders (${processingRate}%)`}
+              title={`${isBn ? 'প্রক্রিয়াধীন' : 'Processing / In-Transit'}: ${staffProcessingOrders.length} (${processingRate}%)`}
             />
             <div
               style={{ width: `${Math.min(100, Math.max(0, Number(returnRate)))}%` }}
               className="bg-amber-500 h-full transition-all duration-500"
-              title={`Returned: ${staffReturnedOrders.length} orders (${returnRate}%)`}
+              title={`${isBn ? 'ফেরতকৃত' : 'Returned'}: ${staffReturnedOrders.length} (${returnRate}%)`}
             />
             <div
               style={{ width: `${Math.min(100, Math.max(0, Number(cancelRate)))}%` }}
               className="bg-rose-500 h-full transition-all duration-500"
-              title={`Cancelled: ${staffCancelledOrders.length} orders (${cancelRate}%)`}
+              title={`${isBn ? 'বাতিলকৃত' : 'Cancelled'}: ${staffCancelledOrders.length} (${cancelRate}%)`}
             />
           </div>
 
           <div className="flex items-center justify-between text-[11px] font-semibold text-slate-500 dark:text-slate-400 px-1 pt-1 flex-wrap gap-2">
             <div className="flex items-center gap-1.5 text-emerald-700 dark:text-emerald-400">
               <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-              <span>Delivered ({deliverySuccessRate}%)</span>
+              <span>{isBn ? 'ডেলিভারি সম্পন্ন' : 'Delivered'} ({deliverySuccessRate}%)</span>
             </div>
             <div className="flex items-center gap-1.5 text-blue-600 dark:text-blue-400">
               <span className="w-2 h-2 rounded-full bg-blue-600"></span>
-              <span>Processing ({processingRate}%)</span>
+              <span>{isBn ? 'প্রক্রিয়াধীন' : 'Processing'} ({processingRate}%)</span>
             </div>
             <div className="flex items-center gap-1.5 text-amber-700 dark:text-amber-400">
               <span className="w-2 h-2 rounded-full bg-amber-500"></span>
-              <span>Returned ({returnRate}%)</span>
+              <span>{isBn ? 'ফেরতকৃত' : 'Returned'} ({returnRate}%)</span>
             </div>
             <div className="flex items-center gap-1.5 text-rose-600 dark:text-rose-400">
               <span className="w-2 h-2 rounded-full bg-rose-500"></span>
-              <span>Cancelled ({cancelRate}%)</span>
+              <span>{isBn ? 'বাতিলকৃত' : 'Cancelled'} ({cancelRate}%)</span>
             </div>
             <div className="text-slate-400 dark:text-slate-500 font-normal">
-              Total Handled: {totalHandledCount}
+              {isBn ? 'মোট পরিচালিত:' : 'Total Handled:'} {totalHandledCount}
             </div>
           </div>
         </div>
       </div>
 
-      {/* 4. Super Admin Staff Performance Table (Only Super Admin Can View & Inspect Other Staff) */}
-      {isSuperAdmin && (
-        <div className="p-6 rounded-2xl bg-white border border-slate-200 shadow-sm">
-          <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-100">
-            <div>
-              <h3 className="text-sm font-black text-slate-900 flex items-center gap-2">
-                <Users className="w-4 h-4 text-blue-600" />
-                <span>Staff Order Handling Ledger & Attribution (Super Admin Inspection)</span>
-              </h3>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Live performance comparison: delivered revenue, cancellations, and return rates per team member
-              </p>
-            </div>
-            <span className="text-[11px] font-bold text-slate-400">
-              {teamPerformanceSummary.length} Active Staff Accounts
-            </span>
-          </div>
+      {/* 3B. Personal Visual Charts (Outcome Mix + Pipeline Value) */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <SaasDonutChart
+          title={isBn ? 'ব্যক্তিগত অর্ডার ফলাফল বিভাজন' : 'My Order Outcome Distribution'}
+          subtitle={`${totalHandledCount} ${isBn ? 'টি পরিচালিত অর্ডার' : 'handled orders'}`}
+          centerLabel={isBn ? 'মোট' : 'Handled'}
+          onSelectSlice={(slice) => {
+            if (slice.id === 'delivered' || slice.id === 'cancelled' || slice.id === 'returned') {
+              setHandledTab(slice.id);
+            }
+          }}
+          data={[
+            { id: 'delivered', label: isBn ? 'ডেলিভারি সম্পন্ন' : 'Delivered', value: staffDeliveredOrders.length, color: '#059669' },
+            { id: 'processing', label: isBn ? 'প্রক্রিয়াধীন' : 'Processing', value: staffProcessingOrders.length, color: '#2563EB' },
+            { id: 'returned', label: isBn ? 'ফেরতকৃত' : 'Returned', value: staffReturnedOrders.length, color: '#D97706' },
+            { id: 'cancelled', label: isBn ? 'বাতিলকৃত' : 'Cancelled', value: staffCancelledOrders.length, color: '#E11D48' },
+          ]}
+        />
 
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead className="bg-slate-50 text-slate-600 font-bold border-b border-slate-200 uppercase text-[10px] tracking-wider">
-                <tr>
-                  <th className="py-3 px-4">Staff Member</th>
-                  <th className="py-3 px-4">Role</th>
-                  <th className="py-3 px-4">Confirmed</th>
-                  <th className="py-3 px-4 text-blue-600">Processing</th>
-                  <th className="py-3 px-4 text-emerald-600">Delivered</th>
-                  <th className="py-3 px-4 text-rose-600">Cancelled</th>
-                  <th className="py-3 px-4 text-amber-600">Returned</th>
-                  <th className="py-3 px-4">Success Rate</th>
-                  <th className="py-3 px-4">Return Rate</th>
-                  <th className="py-3 px-4">Delivered Revenue</th>
-                  <th className="py-3 px-4 text-right">Action</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 font-medium text-slate-800">
-                {teamPerformanceSummary.map((staff) => {
-                  const isSelected =
-                    effectiveStaff.id === staff.id ||
-                    (selectedStaffId === 'me' && staff.id === superAdminProfile.id);
+        <SaasBarChart
+          title={isBn ? 'অবস্থা অনুযায়ী অর্ডার মূল্য (৳)' : 'Order Value by Stage'}
+          subtitle={isBn ? 'ডেলিভারি আয় বনাম পাইপলাইন' : 'Delivered revenue vs active pipeline'}
+          valueFormat="currency"
+          data={[
+            { label: isBn ? 'ডেলিভারি' : 'Delivered', value: deliveredRevenue, color: '#059669' },
+            { label: isBn ? 'প্রক্রিয়াধীন' : 'Processing', value: processingTotalAmount, color: '#2563EB' },
+            { label: isBn ? 'অপেক্ষমাণ' : 'Pending Queue', value: pendingPoolTotalAmount, color: '#D97706' },
+            { label: isBn ? 'ফেরত' : 'Returned', value: returnedTotalAmount, color: '#EA580C' },
+            { label: isBn ? 'বাতিল' : 'Cancelled', value: cancelledTotalAmount, color: '#E11D48' },
+          ]}
+        />
+      </div>
 
-                  return (
-                    <tr
-                      key={staff.id}
-                      className={`hover:bg-slate-50 transition-colors ${
-                        isSelected ? 'bg-blue-50/50' : ''
-                      }`}
-                    >
-                      <td className="py-3.5 px-4 font-bold text-slate-900">
-                        <div className="flex items-center gap-2">
-                          <div className="w-7 h-7 rounded-lg bg-blue-600 text-white flex items-center justify-center font-bold text-xs">
-                            {staff.name.charAt(0).toUpperCase()}
-                          </div>
-                          <div>
-                            <div>{staff.name}</div>
-                            {staff.id === superAdminProfile.id && (
-                              <span className="text-[10px] font-semibold text-blue-600">
-                                (Super Admin - You)
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                      </td>
-                      <td className="py-3.5 px-4">
-                        <span className="px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider bg-slate-100 text-slate-700 border border-slate-200">
-                          {staff.role.replace('_', ' ')}
-                        </span>
-                      </td>
-                      <td className="py-3.5 px-4 font-bold text-slate-900">
-                        {staff.confirmedCount}
-                      </td>
-                      <td className="py-3.5 px-4 font-bold text-blue-600">
-                        {staff.processingCount}
-                      </td>
-                      <td className="py-3.5 px-4 font-bold text-emerald-600">
-                        {staff.deliveredCount}
-                      </td>
-                      <td className="py-3.5 px-4 font-bold text-rose-600">
-                        {staff.cancelledCount}
-                      </td>
-                      <td className="py-3.5 px-4 font-bold text-amber-600">
-                        {staff.returnedCount}
-                      </td>
-                      <td className="py-3.5 px-4">
-                        <span className="font-extrabold text-emerald-700">
-                          {staff.successRate}%
-                        </span>
-                      </td>
-                      <td className="py-3.5 px-4">
-                        <span className="font-extrabold text-amber-700">
-                          {staff.returnRate}%
-                        </span>
-                      </td>
-                      <td className="py-3.5 px-4 font-black text-slate-900">
-                        ৳{staff.deliveredRevenue.toLocaleString()}
-                      </td>
-                      <td className="py-3.5 px-4 text-right">
-                        <button
-                          onClick={() => {
-                            if (staff.id === superAdminProfile.id) {
-                              setSelectedStaffId('me');
-                            } else {
-                              setSelectedStaffId(staff.id);
-                            }
-                          }}
-                          className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                            isSelected
-                              ? 'bg-blue-600 text-white shadow-xs'
-                              : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-100'
-                          }`}
-                        >
-                          {isSelected ? 'Active View' : 'Inspect'}
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-      {/* 5. Orders Explorer: Handled Orders with 3 Clean Outcome Tabs (Delivered, Cancelled, Returned) */}
+      {/* 4. Orders Explorer: Handled Orders with 3 Clean Outcome Tabs (Delivered, Cancelled, Returned) */}
       <div className="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
         {/* Header with Title, Search, and 3 Outcome Tabs */}
         <div className="p-4 sm:p-5 border-b border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-800/80 space-y-4">
@@ -943,10 +868,18 @@ export const AdminMyDashboard: React.FC<AdminMyDashboardProps> = ({
             <div>
               <h3 className="text-base font-black text-slate-900 dark:text-white flex items-center gap-2">
                 <UserCheck className="w-5 h-5 text-blue-600 dark:text-blue-400" />
-                <span>Handled Orders (হ্যান্ডেল করা অর্ডার)</span>
+                <span>{isBn ? 'সম্পাদিত অর্ডারসমূহ' : 'Handled Orders'}</span>
               </h3>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                Orders handled by <strong className="text-slate-800 dark:text-slate-200">{effectiveStaff.name}</strong> ({effectiveStaff.role.replace('_', ' ')}) classified by final fulfillment outcome
+                {isBn ? (
+                  <span>
+                    <strong className="text-slate-800 dark:text-slate-200">{effectiveStaff.name}</strong> কর্তৃক পরিচালিত অর্ডারসমূহ ফলাফল অনুযায়ী শ্রেণীবদ্ধ
+                  </span>
+                ) : (
+                  <span>
+                    Orders handled by <strong className="text-slate-800 dark:text-slate-200">{effectiveStaff.name}</strong> ({effectiveStaff.role.replace(/_/g, ' ')}) classified by final fulfillment outcome
+                  </span>
+                )}
               </p>
             </div>
 
@@ -957,7 +890,7 @@ export const AdminMyDashboard: React.FC<AdminMyDashboardProps> = ({
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search order ID, customer, phone, courier..."
+                placeholder={isBn ? 'অর্ডার আইডি, গ্রাহকের নাম, ফোন দিয়ে খুঁজুন...' : 'Search order ID, customer, phone, courier...'}
                 className="w-full pl-9 pr-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-xs bg-white dark:bg-slate-900 text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-hidden focus:ring-2 focus:ring-blue-500"
               />
             </div>
@@ -975,7 +908,7 @@ export const AdminMyDashboard: React.FC<AdminMyDashboardProps> = ({
               }`}
             >
               <CheckCircle2 className="w-4 h-4" />
-              <span>Delivered (ডেলিভারিড)</span>
+              <span>{isBn ? 'ডেলিভারি সম্পন্ন' : 'Delivered'}</span>
               <span
                 className={`px-2 py-0.5 rounded-full text-[10px] font-black ${
                   handledTab === 'delivered'
@@ -990,7 +923,7 @@ export const AdminMyDashboard: React.FC<AdminMyDashboardProps> = ({
                   handledTab === 'delivered' ? 'text-emerald-100' : 'text-emerald-600 dark:text-emerald-400'
                 }`}
               >
-                ({deliverySuccessRate}% Success)
+                ({deliverySuccessRate}% {isBn ? 'সফল' : 'Success'})
               </span>
             </button>
 
@@ -1004,7 +937,7 @@ export const AdminMyDashboard: React.FC<AdminMyDashboardProps> = ({
               }`}
             >
               <XCircle className="w-4 h-4" />
-              <span>Cancelled (ক্যানসেল)</span>
+              <span>{isBn ? 'বাতিলকৃত' : 'Cancelled'}</span>
               <span
                 className={`px-2 py-0.5 rounded-full text-[10px] font-black ${
                   handledTab === 'cancelled'
@@ -1019,7 +952,7 @@ export const AdminMyDashboard: React.FC<AdminMyDashboardProps> = ({
                   handledTab === 'cancelled' ? 'text-rose-100' : 'text-rose-600 dark:text-rose-400'
                 }`}
               >
-                ({cancelRate}% Cancel)
+                ({cancelRate}% {isBn ? 'বাতিল' : 'Cancelled'})
               </span>
             </button>
 
@@ -1033,7 +966,7 @@ export const AdminMyDashboard: React.FC<AdminMyDashboardProps> = ({
               }`}
             >
               <RotateCcw className="w-4 h-4" />
-              <span>Returned (রিটার্ন)</span>
+              <span>{isBn ? 'ফেরতকৃত' : 'Returned'}</span>
               <span
                 className={`px-2 py-0.5 rounded-full text-[10px] font-black ${
                   handledTab === 'returned'
@@ -1048,7 +981,7 @@ export const AdminMyDashboard: React.FC<AdminMyDashboardProps> = ({
                   handledTab === 'returned' ? 'text-amber-100' : 'text-amber-700 dark:text-amber-400'
                 }`}
               >
-                ({returnRate}% Return Rate)
+                ({returnRate}% {isBn ? 'ফেরত' : 'Returned'})
               </span>
             </button>
           </div>
@@ -1060,25 +993,44 @@ export const AdminMyDashboard: React.FC<AdminMyDashboardProps> = ({
             <Activity className="w-3.5 h-3.5 text-slate-400" />
             {handledTab === 'delivered' && (
               <span>
-                <b>Delivered Orders:</b> Orders confirmed by {effectiveStaff.name} that were successfully received by customers. Total Realized Revenue:{' '}
-                <strong className="text-emerald-700 font-bold">৳{deliveredRevenue.toLocaleString()}</strong> ({deliverySuccessRate}% Delivery Success).
+                <b>{isBn ? 'ডেলিভারি সম্পন্ন অর্ডার:' : 'Delivered Orders:'}</b>{' '}
+                {isBn
+                  ? `${effectiveStaff.name} কর্তৃক নিশ্চিতকৃত সফলভাবে গ্রাহকের কাছে পৌঁছানো অর্ডার। মোট বাস্তবায়িত আয়: `
+                  : `Orders confirmed by ${effectiveStaff.name} that were successfully received by customers. Total Realized Revenue: `}
+                <strong className="text-emerald-700 font-bold">৳{deliveredRevenue.toLocaleString()}</strong>{' '}
+                ({deliverySuccessRate}% {isBn ? 'ডেলিভারি সাফল্য' : 'Delivery Success'}).
               </span>
             )}
             {handledTab === 'cancelled' && (
               <span>
-                <b>Cancelled Orders:</b> Orders that were cancelled from pending or after confirmation. Total Cancelled Value:{' '}
-                <strong className="text-rose-700 font-bold">৳{cancelledTotalAmount.toLocaleString()}</strong> ({cancelRate}% Cancel Rate).
+                <b>{isBn ? 'বাতিলকৃত অর্ডার:' : 'Cancelled Orders:'}</b>{' '}
+                {isBn
+                  ? `পেন্ডিং থেকে বা নিশ্চিতকরণের পরে বাতিল হওয়া অর্ডার। মোট বাতিলকৃত মূল্য: `
+                  : `Orders that were cancelled from pending or after confirmation. Total Cancelled Value: `}
+                <strong className="text-rose-700 font-bold">৳{cancelledTotalAmount.toLocaleString()}</strong>{' '}
+                ({cancelRate}% {isBn ? 'বাতিলের হার' : 'Cancel Rate'}).
               </span>
             )}
             {handledTab === 'returned' && (
               <span>
-                <b>Returned Orders:</b> Orders dispatched to courier that returned undelivered. Total Returned Value:{' '}
-                <strong className="text-amber-700 font-bold">৳{returnedTotalAmount.toLocaleString()}</strong> ({returnRate}% Return Rate).
+                <b>{isBn ? 'ফেরতকৃত অর্ডার:' : 'Returned Orders:'}</b>{' '}
+                {isBn
+                  ? `কুরিয়ারে প্রেরণের পর ডেলিভারি না হয়ে ফেরত আসা অর্ডার। মোট ফেরত মূল্য: `
+                  : `Orders dispatched to courier that returned undelivered. Total Returned Value: `}
+                <strong className="text-amber-700 font-bold">৳{returnedTotalAmount.toLocaleString()}</strong>{' '}
+                ({returnRate}% {isBn ? 'ফেরতের হার' : 'Return Rate'}).
               </span>
             )}
           </div>
           <span className="font-bold text-slate-700">
-            {currentDisplayedOrders.length} {handledTab} order(s)
+            {currentDisplayedOrders.length}{' '}
+            {isBn
+              ? handledTab === 'delivered'
+                ? 'টি ডেলিভারিকৃত অর্ডার'
+                : handledTab === 'cancelled'
+                ? 'টি বাতিলকৃত অর্ডার'
+                : 'টি ফেরতকৃত অর্ডার'
+              : `${handledTab} order(s)`}
           </span>
         </div>
 
@@ -1087,28 +1039,39 @@ export const AdminMyDashboard: React.FC<AdminMyDashboardProps> = ({
           <div className="p-12 text-center text-slate-500">
             <Package className="w-10 h-10 mx-auto text-slate-300 mb-2" />
             <p className="text-sm font-bold text-slate-700">
-              No {handledTab} orders found
+              {isBn
+                ? `কোনো ${handledTab === 'delivered' ? 'ডেলিভারিকৃত' : handledTab === 'cancelled' ? 'বাতিলকৃত' : 'ফেরতকৃত'} অর্ডার পাওয়া যায়নি`
+                : `No ${handledTab} orders found`}
             </p>
             <p className="text-xs text-slate-400 mt-1">
-              {handledTab === 'delivered' && 'No delivered orders recorded for this staff member yet.'}
-              {handledTab === 'cancelled' && 'Great! No cancelled orders on record for this staff member.'}
-              {handledTab === 'returned' && 'Excellent! Zero returned parcels on record for this staff member.'}
+              {handledTab === 'delivered' &&
+                (isBn
+                  ? 'এই স্টাফের জন্য এখনো কোনো ডেলিভারিকৃত অর্ডার নেই।'
+                  : 'No delivered orders recorded for this staff member yet.')}
+              {handledTab === 'cancelled' &&
+                (isBn
+                  ? 'চমৎকার! এই স্টাফের কোনো বাতিলকৃত অর্ডার নেই।'
+                  : 'Great! No cancelled orders on record for this staff member.')}
+              {handledTab === 'returned' &&
+                (isBn
+                  ? 'দারুণ! এই স্টাফের কোনো ফেরত আসা পার্সেল নেই।'
+                  : 'Excellent! Zero returned parcels on record for this staff member.')}
             </p>
           </div>
         ) : (
           <>
             {/* Desktop Table View */}
             <div className="hidden md:block overflow-x-auto">
-              <table className="w-full text-left text-xs">
+              <table className="w-full text-left text-xs min-w-[850px]">
                 <thead className="bg-slate-50 dark:bg-slate-800/90 text-slate-600 dark:text-slate-300 font-bold border-b border-slate-200 dark:border-slate-700 uppercase text-[10px] tracking-wider">
                   <tr>
-                    <th className="py-3 px-4">Order ID & Date</th>
-                    <th className="py-3 px-4">Handled By</th>
-                    <th className="py-3 px-4">Customer Details</th>
-                    <th className="py-3 px-4">Items & Destination</th>
-                    <th className="py-3 px-4">Amount & Payment</th>
-                    <th className="py-3 px-4">Status & Courier</th>
-                    <th className="py-3 px-4 text-right">Actions</th>
+                    <th className="py-3 px-4">{isBn ? 'অর্ডার আইডি ও তারিখ' : 'Order ID & Date'}</th>
+                    <th className="py-3 px-4">{isBn ? 'পরিচালনাকারী' : 'Handled By'}</th>
+                    <th className="py-3 px-4">{isBn ? 'গ্রাহকের বিবরণ' : 'Customer Details'}</th>
+                    <th className="py-3 px-4">{isBn ? 'আইটেম ও গন্তব্য' : 'Items & Destination'}</th>
+                    <th className="py-3 px-4">{isBn ? 'মূল্য ও পেমেন্ট' : 'Amount & Payment'}</th>
+                    <th className="py-3 px-4">{isBn ? 'স্ট্যাটাস ও কুরিয়ার' : 'Status & Courier'}</th>
+                    <th className="py-3 px-4 text-right">{isBn ? 'পদক্ষেপ' : 'Actions'}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800 font-medium text-slate-800 dark:text-slate-200">
@@ -1125,24 +1088,14 @@ export const AdminMyDashboard: React.FC<AdminMyDashboardProps> = ({
                       <tr key={order.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/80 transition-colors">
                         {/* 1. Order ID & Date */}
                         <td className="py-3.5 px-4 align-top">
-                          <div className="flex items-center gap-1.5 font-mono font-bold text-slate-900 dark:text-white">
-                            <span>#{order.id}</span>
-                            <button
-                              onClick={() => handleCopy(order.id, `ord-${order.id}`)}
-                              className="text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 p-0.5 rounded cursor-pointer"
-                              title="Copy Order ID"
-                            >
-                              {copiedId === `ord-${order.id}` ? (
-                                <Check className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-                              ) : (
-                                <Copy className="w-3.5 h-3.5" />
-                              )}
-                            </button>
-                          </div>
+                          <ClickableOrderId
+                            orderId={order.id}
+                            className="font-mono font-bold text-slate-900 dark:text-white hover:text-sky-600 dark:hover:text-sky-400 text-xs cursor-pointer inline-flex items-center"
+                          />
                           <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 flex items-center gap-1">
                             <Calendar className="w-3 h-3 text-slate-400 dark:text-slate-500" />
                             <span>
-                              {new Date(order.createdAt).toLocaleDateString('en-US', {
+                              {new Date(order.createdAt).toLocaleDateString(isBn ? 'bn-BD' : 'en-US', {
                                 month: 'short',
                                 day: 'numeric',
                                 year: 'numeric',
@@ -1156,7 +1109,7 @@ export const AdminMyDashboard: React.FC<AdminMyDashboardProps> = ({
                           {isPending ? (
                             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-50 dark:bg-amber-950/80 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
                               <Clock className="w-3 h-3" />
-                              Pending Claim
+                              {isBn ? 'গ্রহণের অপেক্ষায়' : 'Pending Claim'}
                             </span>
                           ) : (
                             <div className="flex flex-col items-start gap-0.5">
@@ -1166,7 +1119,7 @@ export const AdminMyDashboard: React.FC<AdminMyDashboardProps> = ({
                               </span>
                               {order.confirmedAt && (
                                 <span className="text-[10px] text-slate-400 dark:text-slate-500">
-                                  {new Date(order.confirmedAt).toLocaleDateString('en-US', {
+                                  {new Date(order.confirmedAt).toLocaleDateString(isBn ? 'bn-BD' : 'en-US', {
                                     month: 'short',
                                     day: 'numeric',
                                   })}
@@ -1179,7 +1132,7 @@ export const AdminMyDashboard: React.FC<AdminMyDashboardProps> = ({
                         {/* 3. Customer Details */}
                         <td className="py-3.5 px-4 align-top">
                           <div className="font-bold text-slate-900 dark:text-white">
-                            {order.deliveryName || order.customerName || 'Customer'}
+                            {order.deliveryName || order.customerName || (isBn ? 'গ্রাহক' : 'Customer')}
                           </div>
                           <div className="flex items-center gap-1.5 text-slate-600 dark:text-slate-300 mt-1 font-mono text-[11px]">
                             <Phone className="w-3 h-3 text-slate-400 shrink-0" />
@@ -1198,7 +1151,7 @@ export const AdminMyDashboard: React.FC<AdminMyDashboardProps> = ({
                               target="_blank"
                               rel="noreferrer"
                               className="text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 dark:hover:text-emerald-300 p-0.5"
-                              title="Chat on WhatsApp"
+                              title={isBn ? 'হোয়াটসঅ্যাপে চ্যাট করুন' : 'Chat on WhatsApp'}
                             >
                               <MessageSquare className="w-3 h-3" />
                             </a>
@@ -1208,7 +1161,7 @@ export const AdminMyDashboard: React.FC<AdminMyDashboardProps> = ({
                         {/* 4. Items & Destination */}
                         <td className="py-3.5 px-4 align-top">
                           <div className="text-slate-900 dark:text-white font-bold">
-                            {order.items?.length || 1} item(s)
+                            {order.items?.length || 1} {isBn ? 'টি পণ্য' : 'item(s)'}
                           </div>
                           <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 line-clamp-1 max-w-[180px]">
                             {order.items?.map((it) => it.productName || it.name).join(', ')}
@@ -1216,7 +1169,7 @@ export const AdminMyDashboard: React.FC<AdminMyDashboardProps> = ({
                           <div className="flex items-center gap-1 text-[11px] text-slate-600 dark:text-slate-300 mt-1 font-medium">
                             <MapPin className="w-3 h-3 text-slate-400 shrink-0" />
                             <span className="truncate max-w-[160px]">
-                              {order.district || order.division || 'Bangladesh'}
+                              {order.district || order.division || (isBn ? 'বাংলাদেশ' : 'Bangladesh')}
                             </span>
                           </div>
                         </td>
@@ -1227,12 +1180,12 @@ export const AdminMyDashboard: React.FC<AdminMyDashboardProps> = ({
                             ৳{(order.totalAmount || 0).toLocaleString()}
                           </div>
                           <div className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 mt-0.5">
-                            {order.paymentMethod || 'Cash on Delivery'}
+                            {order.paymentMethod || (isBn ? 'ক্যাশ অন ডেলিভারি' : 'Cash on Delivery')}
                           </div>
                           {isDelivered && (
                             <span className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded text-[9px] font-bold bg-emerald-100 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300 mt-1 border border-emerald-200 dark:border-emerald-800">
                               <Check className="w-2.5 h-2.5" />
-                              Delivered Revenue
+                              {isBn ? 'অর্জিত আয়' : 'Delivered Revenue'}
                             </span>
                           )}
                         </td>
@@ -1255,17 +1208,17 @@ export const AdminMyDashboard: React.FC<AdminMyDashboardProps> = ({
                                   : 'bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700'
                               }`}
                             >
-                              {order.orderStatus}
+                              {getOrderStatusLabel(order.orderStatus)}
                             </span>
                           </div>
                           {order.courierName && (
                             <div className="text-[10px] text-slate-600 dark:text-slate-300 font-semibold mt-1">
-                              Courier: {order.courierName}
+                              {isBn ? 'কুরিয়ার:' : 'Courier:'} {order.courierName}
                             </div>
                           )}
                           {order.trackingNumber && (
                             <div className="text-[10px] text-blue-700 dark:text-blue-400 font-mono font-bold mt-0.5">
-                              Track: {order.trackingNumber}
+                              {isBn ? 'ট্র্যাকিং:' : 'Track:'} {order.trackingNumber}
                             </div>
                           )}
                         </td>
@@ -1279,7 +1232,7 @@ export const AdminMyDashboard: React.FC<AdminMyDashboardProps> = ({
                                 className="px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-xs cursor-pointer flex items-center gap-1 transition-all"
                               >
                                 <BadgeCheck className="w-3.5 h-3.5" />
-                                <span>Confirm & Claim</span>
+                                <span>{isBn ? 'নিশ্চিত ও গ্রহণ' : 'Confirm & Claim'}</span>
                               </button>
                             )}
 
@@ -1289,7 +1242,7 @@ export const AdminMyDashboard: React.FC<AdminMyDashboardProps> = ({
                                 className="px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-xs cursor-pointer flex items-center gap-1 transition-all"
                               >
                                 <Truck className="w-3.5 h-3.5" />
-                                <span>To Processing</span>
+                                <span>{isBn ? 'প্রক্রিয়াধীন করুন' : 'To Processing'}</span>
                               </button>
                             )}
 
@@ -1299,7 +1252,7 @@ export const AdminMyDashboard: React.FC<AdminMyDashboardProps> = ({
                                 className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-xs cursor-pointer flex items-center gap-1 transition-all"
                               >
                                 <CheckCircle2 className="w-3.5 h-3.5" />
-                                <span>Mark Delivered</span>
+                                <span>{isBn ? 'ডেলিভারি সম্পন্ন' : 'Mark Delivered'}</span>
                               </button>
                             )}
 
@@ -1307,7 +1260,7 @@ export const AdminMyDashboard: React.FC<AdminMyDashboardProps> = ({
                               <button
                                 onClick={() => onPrintInvoice(order)}
                                 className="p-1.5 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
-                                title="Print Invoice"
+                                title={isBn ? 'চালান প্রিন্ট' : 'Print Invoice'}
                               >
                                 <Printer className="w-3.5 h-3.5" />
                               </button>
@@ -1336,19 +1289,10 @@ export const AdminMyDashboard: React.FC<AdminMyDashboardProps> = ({
                   <div key={order.id} className="p-4 space-y-3 bg-white dark:bg-slate-900">
                     {/* Header Row */}
                     <div className="flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-1.5 font-mono font-bold text-slate-900 dark:text-white text-xs">
-                        <span>#{order.id}</span>
-                        <button
-                          onClick={() => handleCopy(order.id, `ord-${order.id}`)}
-                          className="text-slate-400 p-0.5"
-                        >
-                          {copiedId === `ord-${order.id}` ? (
-                            <Check className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-                          ) : (
-                            <Copy className="w-3.5 h-3.5" />
-                          )}
-                        </button>
-                      </div>
+                      <ClickableOrderId
+                        orderId={order.id}
+                        className="font-mono font-bold text-slate-900 dark:text-white hover:text-sky-600 dark:hover:text-sky-400 text-xs cursor-pointer inline-flex items-center"
+                      />
                       <span
                         className={`px-2 py-0.5 rounded-md text-[10px] font-extrabold uppercase ${
                           isDelivered
@@ -1364,21 +1308,23 @@ export const AdminMyDashboard: React.FC<AdminMyDashboardProps> = ({
                             : 'bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700'
                         }`}
                       >
-                        {order.orderStatus}
+                        {getOrderStatusLabel(order.orderStatus)}
                       </span>
                     </div>
 
                     {/* Handled By & Date */}
                     <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400">
                       <span>
-                        {new Date(order.createdAt).toLocaleDateString('en-US', {
+                        {new Date(order.createdAt).toLocaleDateString(isBn ? 'bn-BD' : 'en-US', {
                           month: 'short',
                           day: 'numeric',
                           year: 'numeric',
                         })}
                       </span>
                       {isPending ? (
-                        <span className="text-amber-600 dark:text-amber-400 font-bold">Unassigned (Pending)</span>
+                        <span className="text-amber-600 dark:text-amber-400 font-bold">
+                          {isBn ? 'অনির্ধারিত (অপেক্ষমাণ)' : 'Unassigned (Pending)'}
+                        </span>
                       ) : (
                         <span className="text-blue-700 dark:text-blue-400 font-bold flex items-center gap-1">
                           <UserCheck className="w-3 h-3" />
@@ -1391,20 +1337,20 @@ export const AdminMyDashboard: React.FC<AdminMyDashboardProps> = ({
                     <div className="p-3 bg-slate-50 dark:bg-slate-800/80 rounded-xl border border-slate-100 dark:border-slate-700 flex items-center justify-between gap-3">
                       <div>
                         <div className="font-bold text-slate-900 dark:text-white text-xs">
-                          {order.deliveryName || order.customerName || 'Customer'}
+                          {order.deliveryName || order.customerName || (isBn ? 'গ্রাহক' : 'Customer')}
                         </div>
                         <div className="text-[11px] text-slate-500 dark:text-slate-400 font-mono">
                           {order.deliveryMobile || order.customerMobile}
                         </div>
                         <div className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">
-                          {order.district || order.division || 'Bangladesh'}
+                          {order.district || order.division || (isBn ? 'বাংলাদেশ' : 'Bangladesh')}
                         </div>
                       </div>
                       <div className="flex items-center gap-1.5 shrink-0">
                         <a
                           href={`tel:${order.deliveryMobile || order.customerMobile}`}
                           className="p-2 rounded-lg bg-blue-50 dark:bg-blue-950/80 text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-900 cursor-pointer"
-                          title="Call Customer"
+                          title={isBn ? 'কল করুন' : 'Call Customer'}
                         >
                           <Phone className="w-4 h-4" />
                         </a>
@@ -1417,7 +1363,7 @@ export const AdminMyDashboard: React.FC<AdminMyDashboardProps> = ({
                           target="_blank"
                           rel="noreferrer"
                           className="p-2 rounded-lg bg-emerald-50 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-900 cursor-pointer"
-                          title="WhatsApp"
+                          title={isBn ? 'হোয়াটসঅ্যাপ' : 'WhatsApp'}
                         >
                           <MessageSquare className="w-4 h-4" />
                         </a>
@@ -1431,12 +1377,12 @@ export const AdminMyDashboard: React.FC<AdminMyDashboardProps> = ({
                           ৳{(order.totalAmount || 0).toLocaleString()}
                         </div>
                         <div className="text-[10px] text-slate-400 dark:text-slate-500">
-                          {order.items?.length || 1} item(s) • {order.paymentMethod || 'COD'}
+                          {order.items?.length || 1} {isBn ? 'টি পণ্য' : 'item(s)'} • {order.paymentMethod || (isBn ? 'ক্যাশ অন ডেলিভারি' : 'COD')}
                         </div>
                       </div>
                       {isDelivered && (
                         <span className="text-[10px] font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/80 px-2 py-0.5 rounded border border-emerald-200 dark:border-emerald-800">
-                          Revenue Realized
+                          {isBn ? 'অর্জিত আয়' : 'Revenue Realized'}
                         </span>
                       )}
                     </div>
@@ -1449,7 +1395,7 @@ export const AdminMyDashboard: React.FC<AdminMyDashboardProps> = ({
                           className="flex-1 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs"
                         >
                           <BadgeCheck className="w-3.5 h-3.5" />
-                          <span>Confirm & Claim</span>
+                          <span>{isBn ? 'নিশ্চিত ও গ্রহণ' : 'Confirm & Claim'}</span>
                         </button>
                       )}
 
@@ -1459,7 +1405,7 @@ export const AdminMyDashboard: React.FC<AdminMyDashboardProps> = ({
                           className="flex-1 py-2 rounded-xl bg-blue-600 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs"
                         >
                           <Truck className="w-3.5 h-3.5" />
-                          <span>To Processing</span>
+                          <span>{isBn ? 'প্রক্রিয়াধীন করুন' : 'To Processing'}</span>
                         </button>
                       )}
 
@@ -1469,7 +1415,7 @@ export const AdminMyDashboard: React.FC<AdminMyDashboardProps> = ({
                           className="flex-1 py-2 rounded-xl bg-emerald-600 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs"
                         >
                           <CheckCircle2 className="w-3.5 h-3.5" />
-                          <span>Mark Delivered</span>
+                          <span>{isBn ? 'ডেলিভারি সম্পন্ন' : 'Mark Delivered'}</span>
                         </button>
                       )}
 
@@ -1477,7 +1423,7 @@ export const AdminMyDashboard: React.FC<AdminMyDashboardProps> = ({
                         <button
                           onClick={() => onPrintInvoice(order)}
                           className="p-2 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-100"
-                          title="Invoice"
+                          title={isBn ? 'চালান' : 'Invoice'}
                         >
                           <Printer className="w-4 h-4" />
                         </button>
@@ -1500,13 +1446,15 @@ export const AdminMyDashboard: React.FC<AdminMyDashboardProps> = ({
             </div>
             <div>
               <h3 className="text-sm font-black text-slate-900 flex items-center gap-2">
-                <span>Recent Incoming Orders (রিসেন্ট পেন্ডিং অর্ডার কিউ)</span>
+                <span>{isBn ? 'নতুন অপেক্ষমাণ অর্ডারসমূহ' : 'Recent Incoming Orders'}</span>
                 <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-amber-100 text-amber-800">
-                  {pendingPoolOrders.length} Pending
+                  {pendingPoolOrders.length} {isBn ? 'টি অপেক্ষমাণ' : 'Pending'}
                 </span>
               </h3>
               <p className="text-[11px] text-slate-500 mt-0.5">
-                Newly placed customer orders awaiting phone confirmation. Call customer and click "Confirm & Claim" to take ownership.
+                {isBn
+                  ? 'গ্রাহকদের সদ্য করা নতুন অর্ডার যা ফোনে নিশ্চিতকরণের অপেক্ষায় রয়েছে। গ্রাহককে কল করে "নিশ্চিত ও গ্রহণ" করুন।'
+                  : 'Newly placed customer orders awaiting phone confirmation. Call customer and click "Confirm & Claim" to take ownership.'}
               </p>
             </div>
           </div>
@@ -1516,7 +1464,15 @@ export const AdminMyDashboard: React.FC<AdminMyDashboardProps> = ({
               onClick={() => setShowAllPending(!showAllPending)}
               className="px-3 py-1.5 rounded-xl border border-amber-300 text-amber-800 bg-amber-50 hover:bg-amber-100 text-xs font-bold transition-all flex items-center gap-1 cursor-pointer shrink-0"
             >
-              <span>{showAllPending ? 'Show Top 6 Only' : `Show All (${pendingPoolOrders.length}) Pending`}</span>
+              <span>
+                {showAllPending
+                  ? isBn
+                    ? 'প্রথম ৬টি দেখুন'
+                    : 'Show Top 6 Only'
+                  : isBn
+                  ? `সবগুলো (${pendingPoolOrders.length}টি) দেখুন`
+                  : `Show All (${pendingPoolOrders.length}) Pending`}
+              </span>
               <ArrowUpRight className="w-3.5 h-3.5" />
             </button>
           )}
@@ -1525,8 +1481,14 @@ export const AdminMyDashboard: React.FC<AdminMyDashboardProps> = ({
         {pendingPoolOrders.length === 0 ? (
           <div className="py-8 text-center text-slate-400 text-xs">
             <CheckCircle2 className="w-8 h-8 mx-auto text-emerald-400 mb-1.5" />
-            <p className="font-bold text-slate-700">All caught up!</p>
-            <p className="text-[11px] mt-0.5">No pending orders waiting for confirmation right now.</p>
+            <p className="font-bold text-slate-700">
+              {isBn ? 'সব অর্ডার সম্পন্ন!' : 'All caught up!'}
+            </p>
+            <p className="text-[11px] mt-0.5">
+              {isBn
+                ? 'বর্তমানে নিশ্চিতকরণের জন্য কোনো নতুন অপেক্ষমাণ অর্ডার নেই।'
+                : 'No pending orders waiting for confirmation right now.'}
+            </p>
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -1541,12 +1503,12 @@ export const AdminMyDashboard: React.FC<AdminMyDashboardProps> = ({
                     <div className="flex items-center justify-between">
                       <span className="font-mono font-bold text-slate-900 text-xs">#{ord.id}</span>
                       <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800">
-                        {ord.orderStatus}
+                        {getOrderStatusLabel(ord.orderStatus)}
                       </span>
                     </div>
                     <div>
                       <div className="font-bold text-slate-900 text-xs">
-                        {ord.deliveryName || ord.customerName || 'Customer'}
+                        {ord.deliveryName || ord.customerName || (isBn ? 'গ্রাহক' : 'Customer')}
                       </div>
                       <div className="text-[11px] text-slate-600 font-mono mt-0.5 flex items-center gap-2">
                         <span>{custPhone}</span>
@@ -1555,7 +1517,7 @@ export const AdminMyDashboard: React.FC<AdminMyDashboardProps> = ({
                             <a
                               href={`tel:${custPhone}`}
                               className="text-slate-400 hover:text-blue-600 p-0.5"
-                              title="Call Customer"
+                              title={isBn ? 'গ্রাহককে কল করুন' : 'Call Customer'}
                             >
                               <Phone className="w-3 h-3" />
                             </a>
@@ -1564,7 +1526,7 @@ export const AdminMyDashboard: React.FC<AdminMyDashboardProps> = ({
                               target="_blank"
                               rel="noopener noreferrer"
                               className="text-slate-400 hover:text-emerald-600 p-0.5"
-                              title="WhatsApp Customer"
+                              title={isBn ? 'হোয়াটসঅ্যাপে যোগাযোগ' : 'WhatsApp Customer'}
                             >
                               <MessageSquare className="w-3 h-3" />
                             </a>
@@ -1572,7 +1534,7 @@ export const AdminMyDashboard: React.FC<AdminMyDashboardProps> = ({
                         )}
                       </div>
                       <div className="text-[10px] text-slate-400 mt-0.5">
-                        {ord.district || ord.division || 'Bangladesh'} • {ord.items?.length || 1} item(s)
+                        {ord.district || ord.division || (isBn ? 'বাংলাদেশ' : 'Bangladesh')} • {ord.items?.length || 1} {isBn ? 'টি পণ্য' : 'item(s)'}
                       </div>
                     </div>
                   </div>
@@ -1586,7 +1548,7 @@ export const AdminMyDashboard: React.FC<AdminMyDashboardProps> = ({
                       className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold flex items-center gap-1 shadow-xs cursor-pointer"
                     >
                       <BadgeCheck className="w-3.5 h-3.5" />
-                      <span>Confirm & Claim</span>
+                      <span>{isBn ? 'নিশ্চিত ও গ্রহণ' : 'Confirm & Claim'}</span>
                     </button>
                   </div>
                 </div>
@@ -1602,9 +1564,11 @@ export const AdminMyDashboard: React.FC<AdminMyDashboardProps> = ({
           <div className="flex items-center justify-between mb-4 pb-2 border-b border-slate-100">
             <h3 className="text-xs font-black text-slate-900 uppercase tracking-wider flex items-center gap-1.5">
               <Activity className="w-4 h-4 text-blue-600" />
-              <span>Recent Activity Audit Trail</span>
+              <span>{isBn ? 'সাম্প্রতিক কার্যকলাপ অডিট ট্রেইল' : 'Recent Activity Audit Trail'}</span>
             </h3>
-            <span className="text-[11px] text-slate-400 font-medium">Realtime Ledger</span>
+            <span className="text-[11px] text-slate-400 font-medium">
+              {isBn ? 'রিয়েলটাইম লেজার' : 'Realtime Ledger'}
+            </span>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
             {staffRecentLogs.map((log) => (
@@ -1618,7 +1582,7 @@ export const AdminMyDashboard: React.FC<AdminMyDashboardProps> = ({
                       {log.action}
                     </span>
                     <span>
-                      {new Date(log.timestamp).toLocaleTimeString('en-US', {
+                      {new Date(log.timestamp).toLocaleTimeString(isBn ? 'bn-BD' : 'en-US', {
                         hour: '2-digit',
                         minute: '2-digit',
                       })}
@@ -1629,7 +1593,7 @@ export const AdminMyDashboard: React.FC<AdminMyDashboardProps> = ({
                   </p>
                 </div>
                 <div className="text-[10px] text-slate-400 mt-2 font-mono">
-                  Target: {log.targetId}
+                  {isBn ? 'টার্গেট:' : 'Target:'} {log.targetId}
                 </div>
               </div>
             ))}
@@ -1645,11 +1609,13 @@ export const AdminMyDashboard: React.FC<AdminMyDashboardProps> = ({
               <div>
                 <h4 className="text-base font-black text-slate-900 flex items-center gap-1.5">
                   <BadgeCheck className="w-5 h-5 text-blue-600" />
-                  <span>Update Order Status & Courier</span>
+                  <span>
+                    {isBn ? 'অর্ডার স্ট্যাটাস ও কুরিয়ার পরিবর্তন' : 'Update Order Status & Courier'}
+                  </span>
                 </h4>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  Order #{selectedOrderForAction.id} -{' '}
-                  {selectedOrderForAction.customerName || selectedOrderForAction.deliveryName}
+                  {isBn ? 'অর্ডার #' : 'Order #'}{selectedOrderForAction.id} -{' '}
+                  {selectedOrderForAction.customerName || selectedOrderForAction.deliveryName || (isBn ? 'গ্রাহক' : 'Customer')}
                 </p>
               </div>
               <button
@@ -1663,7 +1629,7 @@ export const AdminMyDashboard: React.FC<AdminMyDashboardProps> = ({
             {/* Target Status Selection */}
             <div>
               <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                Select New Status:
+                {isBn ? 'নতুন স্ট্যাটাস নির্বাচন করুন:' : 'Select New Status:'}
               </label>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
                 {(['Confirmed', 'Processing', 'Delivered', 'Cancelled'] as OrderStatus[]).map(
@@ -1684,7 +1650,7 @@ export const AdminMyDashboard: React.FC<AdminMyDashboardProps> = ({
                           : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
                       }`}
                     >
-                      {st}
+                      {getOrderStatusLabel(st)}
                     </button>
                   )
                 )}
@@ -1694,7 +1660,7 @@ export const AdminMyDashboard: React.FC<AdminMyDashboardProps> = ({
             {/* Courier Selection */}
             <div>
               <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                Courier Service:
+                {isBn ? 'কুরিয়ার সার্ভিস:' : 'Courier Service:'}
               </label>
               <select
                 value={actionCourier}
@@ -1713,7 +1679,7 @@ export const AdminMyDashboard: React.FC<AdminMyDashboardProps> = ({
             {/* Tracking Code */}
             <div>
               <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                Courier Tracking ID (Optional):
+                {isBn ? 'কুরিয়ার ট্র্যাকিং আইডি (ঐচ্ছিক):' : 'Courier Tracking ID (Optional):'}
               </label>
               <input
                 type="text"
@@ -1727,13 +1693,17 @@ export const AdminMyDashboard: React.FC<AdminMyDashboardProps> = ({
             {/* Note */}
             <div>
               <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                Staff Note (Optional):
+                {isBn ? 'স্টাফ নোট (ঐচ্ছিক):' : 'Staff Note (Optional):'}
               </label>
               <textarea
                 value={actionNote}
                 onChange={(e) => setActionNote(e.target.value)}
                 rows={2}
-                placeholder="e.g. Phone confirmed with customer, ready for pickup..."
+                placeholder={
+                  isBn
+                    ? 'যেমন: ফোনে গ্রাহকের সাথে নিশ্চিত করা হয়েছে, পার্সেল পিকআপের জন্য প্রস্তুত...'
+                    : 'e.g. Phone confirmed with customer, ready for pickup...'
+                }
                 className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-blue-500"
               />
             </div>
@@ -1745,7 +1715,7 @@ export const AdminMyDashboard: React.FC<AdminMyDashboardProps> = ({
                 onClick={() => setIsActionModalOpen(false)}
                 className="px-4 py-2 rounded-xl border border-slate-200 text-slate-600 font-bold text-xs hover:bg-slate-100 cursor-pointer"
               >
-                Cancel
+                {isBn ? 'বাতিল' : 'Cancel'}
               </button>
               <button
                 type="button"
@@ -1753,7 +1723,7 @@ export const AdminMyDashboard: React.FC<AdminMyDashboardProps> = ({
                 className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-xs cursor-pointer flex items-center gap-1.5"
               >
                 <Check className="w-4 h-4" />
-                <span>Save Status</span>
+                <span>{isBn ? 'স্ট্যাটাস সংরক্ষণ' : 'Save Status'}</span>
               </button>
             </div>
           </div>

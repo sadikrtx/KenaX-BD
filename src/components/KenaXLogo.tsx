@@ -13,6 +13,7 @@ interface KenaXLogoProps {
 
 export const KenaXLogo: React.FC<KenaXLogoProps> = ({
   size = 'md',
+  variant = 'horizontal',
   theme = 'auto',
   className = '',
   customLogoUrl,
@@ -87,9 +88,7 @@ export const KenaXLogo: React.FC<KenaXLogoProps> = ({
         <img
           src={activeLogo}
           alt="KenaX BD"
-          className={`${heightClasses} w-auto object-contain max-w-[180px] sm:max-w-[240px] ${
-            isDark ? 'brightness-125 contrast-110 drop-shadow-[0_0_8px_rgba(255,255,255,0.4)]' : ''
-          }`}
+          className={`${heightClasses} w-auto object-contain max-w-[180px] sm:max-w-[240px]`}
         />
       </div>
     );
@@ -100,11 +99,82 @@ export const KenaXLogo: React.FC<KenaXLogoProps> = ({
   const cartFrameColor = isDark ? '#FFFFFF' : '#0B192C';
   const accentCyanColor = isDark ? '#38BDF8' : '#00A8FF';
 
+  // EMBLEM ONLY (Zero text: Cart + Dynamic Stylized X icon only)
+  if (variant === 'emblem') {
+    const emblemSizes = {
+      xs: 'w-5 h-5 sm:w-6 sm:h-6',
+      sm: 'w-7 h-7 sm:w-8 sm:h-8',
+      md: 'w-9 h-9 sm:w-10 sm:h-10',
+      lg: 'w-11 h-11 sm:w-12 sm:h-12',
+      xl: 'w-14 h-14 sm:w-16 sm:h-16',
+    }[size];
+
+    return (
+      <div className={`inline-flex items-center justify-center select-none ${className}`} title="KenaX BD">
+        <svg
+          viewBox="0 0 100 100"
+          className={`${emblemSizes} transition-transform duration-200 hover:scale-105`}
+          fill="none"
+          xmlns="http://www.w3.org/2000/svg"
+          shapeRendering="geometricPrecision"
+        >
+          <defs>
+            <linearGradient id={`emblemXGrad-${themeKey}`} x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stopColor="#0066FF" />
+              <stop offset="50%" stopColor="#00A8FF" />
+              <stop offset="100%" stopColor="#00E5FF" />
+            </linearGradient>
+            <linearGradient id={`emblemSwooshGrad-${themeKey}`} x1="0%" y1="100%" x2="100%" y2="0%">
+              <stop offset="0%" stopColor="#00E5FF" />
+              <stop offset="60%" stopColor="#38BDF8" />
+              <stop offset="100%" stopColor="#FFFFFF" />
+            </linearGradient>
+          </defs>
+
+          {/* Speed Shopping Cart (Top) */}
+          <g transform="translate(-18, 0) scale(0.9)">
+            <line x1="38" y1="14" x2="52" y2="14" stroke={accentCyanColor} strokeWidth="2.8" strokeLinecap="round" />
+            <line x1="32" y1="20" x2="49" y2="20" stroke={accentCyanColor} strokeWidth="3" strokeLinecap="round" />
+            <line x1="36" y1="26" x2="52" y2="26" stroke={accentCyanColor} strokeWidth="2.8" strokeLinecap="round" />
+
+            <path
+              d="M54 10 L61 10 L67 26 L92 26 L96 14 L64 14"
+              stroke={cartFrameColor}
+              strokeWidth="3"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+            <line x1="66" y1="20" x2="93" y2="20" stroke={cartFrameColor} strokeWidth="2" strokeLinecap="round" />
+            <circle cx="71" cy="31" r="3.2" fill={accentCyanColor} stroke={cartFrameColor} strokeWidth="1.5" />
+            <circle cx="88" cy="31" r="3.2" fill={accentCyanColor} stroke={cartFrameColor} strokeWidth="1.5" />
+          </g>
+
+          {/* Stylized Dynamic Electric X (Center / Bottom) */}
+          <g transform="translate(20, 36) scale(0.95)">
+            <path
+              d="M6 3 L19 3 L32 24 L45 3 L58 3 L39 29 L60 48 L47 48 L32 34 L17 48 L4 48 L25 27 Z"
+              fill={`url(#emblemXGrad-${themeKey})`}
+            />
+            <path
+              d="M-5 28 C12 28, 22 23, 40 12 C48 7, 56 3, 63 1 C55 7, 36 21, 24 27 C16 31, 6 32, -5 30 Z"
+              fill={`url(#emblemSwooshGrad-${themeKey})`}
+            />
+            <path
+              d="M0 27.5 C16 27.5, 30 20, 52 7 C40 15, 22 26, 0 27.5 Z"
+              fill="#FFFFFF"
+              opacity="0.95"
+            />
+          </g>
+        </svg>
+      </div>
+    );
+  }
+
   return (
     <div className={`inline-flex items-center select-none ${className}`} title="KenaX BD - Smart Shopping">
       <svg
         viewBox="0 0 250 105"
-        className={`${heightClasses} w-auto max-w-full drop-shadow-xs transition-transform duration-200 hover:scale-[1.02]`}
+        className={`${heightClasses} w-auto max-w-full transition-transform duration-200 hover:scale-[1.02]`}
         fill="none"
         xmlns="http://www.w3.org/2000/svg"
         shapeRendering="geometricPrecision"
@@ -124,10 +194,6 @@ export const KenaXLogo: React.FC<KenaXLogoProps> = ({
             <stop offset="60%" stopColor="#38BDF8" />
             <stop offset="100%" stopColor="#FFFFFF" />
           </linearGradient>
-
-          <filter id={`subtleGlow-${themeKey}`} x="-10%" y="-10%" width="120%" height="120%">
-            <feDropShadow dx="0" dy="1" stdDeviation={isDark ? "2.5" : "1.5"} floodColor={isDark ? "#38BDF8" : "#00A8FF"} floodOpacity={isDark ? "0.6" : "0.35"} />
-          </filter>
         </defs>
 
         {/* 1. SPEED SHOPPING CART (Top Centered) */}
@@ -174,7 +240,6 @@ export const KenaXLogo: React.FC<KenaXLogoProps> = ({
             <path
               d="M6 3 L19 3 L32 24 L45 3 L58 3 L39 29 L60 48 L47 48 L32 34 L17 48 L4 48 L25 27 Z"
               fill={`url(#kenaxXGrad-${themeKey})`}
-              filter={`url(#subtleGlow-${themeKey})`}
             />
             {/* Dynamic cyan & white aerodynamic wave swoosh passing across the X */}
             <path

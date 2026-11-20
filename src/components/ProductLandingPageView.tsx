@@ -32,6 +32,7 @@ import {
   PackageCheck,
   Headphones,
   FileText,
+  Copy,
 } from 'lucide-react';
 import {
   Product,
@@ -49,6 +50,10 @@ import {
 import { getOptimizedImageUrl, handleImageError } from '../utils/imageOptimizer';
 import { FormattedText } from './FormattedText';
 import { ProductVideoPlayer, detectVideoAspectRatio } from './ProductVideoPlayer';
+import { useLanguage } from '../context/LanguageContext';
+import { getAttributionForOrder } from '../utils/attribution';
+import { trackPixelViewContent, trackPixelInitiateCheckout } from '../utils/pixelTracker';
+import { OrderRestrictionModal, RestrictionReason } from './OrderRestrictionModal';
 
 interface ProductLandingPageViewProps {
   product: Product;
@@ -184,9 +189,20 @@ export const ProductLandingPageView: React.FC<ProductLandingPageViewProps> = ({
   isPreviewMode = false,
   onBackToStore,
 }) => {
+  const { language } = useLanguage();
+  const isBn = language === 'bn';
   const lp = (product.landingPage || {}) as LandingPageConfig;
   const themeKey = lp.accentColor || 'emerald';
   const theme = THEME_STYLES[themeKey] || THEME_STYLES.emerald;
+
+  // Track Meta / Google / TikTok ViewContent on Landing Page visit
+  useEffect(() => {
+    if (product && product.id) {
+      try {
+        trackPixelViewContent(product, siteSettings);
+      } catch {}
+    }
+  }, [product?.id]);
 
   // Helper to determine if hex is light for readable icons
   const isLightColor = (hex?: string) => {
@@ -324,6 +340,48 @@ export const ProductLandingPageView: React.FC<ProductLandingPageViewProps> = ({
   const [formError, setFormError] = useState<string | null>(null);
   const [orderSuccess, setOrderSuccess] = useState(false);
 
+  // Restriction Contact Modal State
+  const [restrictionModal, setRestrictionModal] = useState<{
+    isOpen: boolean;
+    reason: RestrictionReason;
+    customMessage?: string;
+    customerPhone?: string;
+  }>({
+    isOpen: false,
+    reason: 'blocked_ip',
+  });
+
+  // Landing Page Payment Options Configuration
+  const isCodAllowed = lp.allowCashOnDelivery !== false && (siteSettings?.lpEnableCod ?? true);
+  const isDeliveryAdvanceAllowed = lp.allowDeliveryAdvance === true || (lp.allowDeliveryAdvance !== false && siteSettings?.lpEnableDeliveryAdvance === true);
+  const isFullAdvanceAllowed = lp.allowFullAdvance === true || (lp.allowFullAdvance !== false && siteSettings?.lpEnableFullAdvance === true);
+
+  const effectiveCodAllowed = isCodAllowed || (!isDeliveryAdvanceAllowed && !isFullAdvanceAllowed);
+  const effectiveDeliveryAllowed = isDeliveryAdvanceAllowed;
+  const effectiveFullAllowed = isFullAdvanceAllowed;
+
+  const showPaymentSelection = effectiveDeliveryAllowed || effectiveFullAllowed;
+
+  const [paymentOptionType, setPaymentOptionType] = useState<'cod' | 'delivery_only' | 'full'>('cod');
+  const [selectedGateway, setSelectedGateway] = useState<'bkash' | 'nagad' | 'rocket'>('bkash');
+  const [senderMobile, setSenderMobile] = useState('');
+  const [transactionId, setTransactionId] = useState('');
+  const [copiedNumber, setCopiedNumber] = useState(false);
+
+  // Auto-switch payment option if current is not allowed
+  useEffect(() => {
+    if (paymentOptionType === 'cod' && !effectiveCodAllowed) {
+      if (effectiveDeliveryAllowed) setPaymentOptionType('delivery_only');
+      else if (effectiveFullAllowed) setPaymentOptionType('full');
+    } else if (paymentOptionType === 'delivery_only' && !effectiveDeliveryAllowed) {
+      if (effectiveCodAllowed) setPaymentOptionType('cod');
+      else if (effectiveFullAllowed) setPaymentOptionType('full');
+    } else if (paymentOptionType === 'full' && !effectiveFullAllowed) {
+      if (effectiveCodAllowed) setPaymentOptionType('cod');
+      else if (effectiveDeliveryAllowed) setPaymentOptionType('delivery_only');
+    }
+  }, [effectiveCodAllowed, effectiveDeliveryAllowed, effectiveFullAllowed, paymentOptionType]);
+
   const orderFormRef = useRef<HTMLDivElement>(null);
 
   // Gallery Images
@@ -428,7 +486,7 @@ export const ProductLandingPageView: React.FC<ProductLandingPageViewProps> = ({
   const activeVideoRatio = (configuredVideoRatio && configuredVideoRatio !== 'auto') ? configuredVideoRatio : detectedLpRatio;
 
   // Handle direct 1-click order submission
-  const handleSubmitOrder = (e: React.FormEvent) => {
+  const handleSubmitOrder = async (e: React.FormEvent) => {
     e.preventDefault();
     setFormError(null);
 
@@ -437,32 +495,99 @@ export const ProductLandingPageView: React.FC<ProductLandingPageViewProps> = ({
     const cleanAddress = customerAddress.trim();
 
     if (!cleanName) {
-      setFormError('অনুগ্রহ করে আপনার পুরো নাম লিখুন');
+      setFormError(isBn ? 'অনুগ্রহ করে আপনার পুরো নাম লিখুন' : 'Please enter your full name');
       return;
     }
 
-    const phoneValidation = validateBangladeshMobile(cleanPhone, { lang: 'bn' });
+    const phoneValidation = validateBangladeshMobile(cleanPhone, { lang: isBn ? 'bn' : 'en' });
     if (!phoneValidation.isValid) {
-      setFormError(phoneValidation.error || 'সঠিক মোবাইল নম্বর দিন।');
+      setFormError(phoneValidation.error || (isBn ? 'সঠিক মোবাইল নম্বর দিন।' : 'Please enter a valid 11-digit mobile number.'));
       return;
     }
 
     if (!cleanAddress || cleanAddress.length < 5) {
-      setFormError('অনুগ্রহ করে আপনার সম্পূর্ণ ডেলিভারি ঠিকানা (বাসা/রোড/এলাকা/থানা/জেলা) লিখুন');
+      setFormError(isBn ? 'অনুগ্রহ করে আপনার সম্পূর্ণ ডেলিভারি ঠিকানা (বাসা/রোড/এলাকা/থানা/জেলা) লিখুন' : 'Please enter your complete delivery address (House/Road/Area/District)');
       return;
     }
 
     if (availableColors.length > 0 && !selectedColor) {
-      setFormError('⚠️ অনুগ্রহ করে প্রোডাক্টের কালার সিলেক্ট করুন!');
+      setFormError(isBn ? '⚠️ অনুগ্রহ করে প্রোডাক্টের কালার সিলেক্ট করুন!' : '⚠️ Please select a product color!');
       return;
     }
 
     if (availableSizes.length > 0 && !selectedVariant) {
-      setFormError('⚠️ অনুগ্রহ করে প্রোডাক্টের সাইজ বা ভেরিয়েশন সিলেক্ট করুন!');
+      setFormError(isBn ? '⚠️ অনুগ্রহ করে প্রোডাক্টের সাইজ বা ভেরিয়েশন সিলেক্ট করুন!' : '⚠️ Please select a product size or variation!');
       return;
     }
 
+    // Validate Advance Payment details if advance is selected
+    if (paymentOptionType !== 'cod') {
+      if (!senderMobile || senderMobile.trim().length < 11) {
+        setFormError(isBn ? '⚠️ অনুগ্রহ করে পেমেন্ট প্রেরক মোবাইল নম্বর (১১ ডিজিট) প্রদান করুন!' : '⚠️ Please enter the 11-digit sender mobile number!');
+        return;
+      }
+      if (!transactionId || transactionId.trim().length < 4) {
+        setFormError(isBn ? '⚠️ অনুগ্রহ করে পেমেন্টের সঠিক Transaction ID (TrxID) লিখুন!' : '⚠️ Please enter the valid Transaction ID (TrxID)!');
+        return;
+      }
+    }
+
+    // Check duplicate order restriction
+    const secSettings = siteSettings?.orderSecuritySettings;
+    if (secSettings?.duplicateOrderBlock && cleanPhone) {
+      const blockMinutes = secSettings.duplicateOrderBlockMinutes || 15;
+      const lastPlacedTime = localStorage.getItem(`kenax_last_order_time_${cleanPhone}`);
+      if (lastPlacedTime) {
+        const elapsedMinutes = (Date.now() - parseInt(lastPlacedTime, 10)) / (1000 * 60);
+        if (elapsedMinutes < blockMinutes) {
+          setRestrictionModal({
+            isOpen: true,
+            reason: 'duplicate_order',
+            customerPhone: cleanPhone,
+            customMessage: `এই নম্বর (${cleanPhone}) থেকে ইতিমধ্যে একটি সাম্প্রতিক অর্ডার করা হয়েছে। দয়া করে নিচে মেসেঞ্জারে, হোয়াটসঅ্যাপে বা টেলিগ্রামে আমাদের প্রতিনিধিকে সরাসরি মেসেজ দিন।`,
+          });
+          return;
+        }
+      }
+    }
+
     setIsSubmittingOrder(true);
+
+    // Check IP restriction before placing order
+    try {
+      const ipCheckRes = await fetch('/api/ip-management/check', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      if (ipCheckRes.ok) {
+        const ipCheckData = await ipCheckRes.json();
+        if (ipCheckData?.isBlocked) {
+          setIsSubmittingOrder(false);
+          setRestrictionModal({
+            isOpen: true,
+            reason: 'blocked_ip',
+            customMessage: 'আপনার আইপি অ্যাড্রেস থেকে অটোমেটিক অর্ডার করার চেষ্টা সাময়িকভাবে স্থগিত রাখা হয়েছে। অনুগ্রহ করে মেসেঞ্জারে, হোয়াটসঅ্যাপে বা টেলিগ্রামে আমাদের সাথে সরাসরি কথা বলুন।',
+          });
+          return;
+        }
+      }
+    } catch (e) {}
+
+    const paidAmount =
+      paymentOptionType === 'full'
+        ? totalPayable
+        : paymentOptionType === 'delivery_only'
+        ? currentDeliveryCharge
+        : 0;
+
+    const dueAmount = Math.max(0, totalPayable - paidAmount);
+
+    let resolvedPaymentMethod = 'Cash on Delivery';
+    if (paymentOptionType === 'delivery_only') {
+      resolvedPaymentMethod = selectedGateway === 'bkash' ? 'bKash (Delivery Advance)' : selectedGateway === 'nagad' ? 'Nagad (Delivery Advance)' : 'Delivery Charge Only';
+    } else if (paymentOptionType === 'full') {
+      resolvedPaymentMethod = selectedGateway === 'bkash' ? 'bKash (Full Payment)' : selectedGateway === 'nagad' ? 'Nagad (Full Payment)' : 'Full Advance';
+    }
 
     const orderItem: OrderItem = {
       productId: product.id,
@@ -498,23 +623,31 @@ export const ProductLandingPageView: React.FC<ProductLandingPageViewProps> = ({
       subtotal: subtotal,
       deliveryCharge: currentDeliveryCharge,
       discount: 0,
-      paymentMethod: 'Cash on Delivery',
-      paymentStatus: 'Pending',
+      paymentMethod: resolvedPaymentMethod as any,
+      paymentOptionType: paymentOptionType,
+      paymentStatus: paymentOptionType === 'cod' ? 'Pending' : 'Pending',
       status: 'Pending',
       orderStatus: 'Pending',
+      senderMobileNumber: paymentOptionType !== 'cod' ? senderMobile.trim() : undefined,
+      transactionId: paymentOptionType !== 'cod' ? transactionId.trim() : undefined,
+      paidAmount: paidAmount,
+      dueAmount: dueAmount,
+      advancePaidVerified: false,
       orderDate: new Date().toISOString(),
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       customerNotes: customerNote || undefined,
-      source: 'Landing Page Direct (FB Ads)',
-      orderSource: 'manual',
+      source: 'Landing Page',
+      orderSource: 'landing_page',
       sourceChannel: 'Landing Page Direct',
       isAiBotOrder: false,
+      landingPageSlug: lp.slug || product.slug || product.id,
+      attribution: getAttributionForOrder(),
       timeline: [
         {
           status: 'Pending',
           timestamp: new Date().toISOString(),
-          note: 'Direct 1-Click Order placed from Facebook Ads Landing Page',
+          note: `Direct 1-Click Order placed from Landing Page [${product.name}] (Payment: ${paymentOptionType === 'cod' ? 'Cash on Delivery' : paymentOptionType === 'delivery_only' ? `Delivery Advance ৳${currentDeliveryCharge}` : `Full Advance ৳${totalPayable}`})`,
         },
       ],
     };
@@ -542,10 +675,10 @@ export const ProductLandingPageView: React.FC<ProductLandingPageViewProps> = ({
       >
         <Flame className="w-4 h-4 text-amber-300 fill-amber-300 animate-bounce shrink-0" />
         <span className="tracking-wide">
-          {lp.topBannerText || '🔥 ধামাকা অফার! সীমিত সময়ের জন্য বিশেষ ছাড় চলছে'}
+          {lp.topBannerText || (isBn ? '🔥 ধামাকা অফার! সীমিত সময়ের জন্য বিশেষ ছাড় চলছে' : '🔥 Mega Deal! Limited Time Special Discount Available')}
         </span>
         <span className="hidden md:inline bg-white/20 px-2.5 py-0.5 rounded-full text-[11px] font-bold">
-          সারা বাংলাদেশে ক্যাশ অন ডেলিভারি
+          {isBn ? 'সারা বাংলাদেশে ক্যাশ অন ডেলিভারি' : 'Cash on Delivery Nationwide'}
         </span>
       </div>
 
@@ -554,7 +687,7 @@ export const ProductLandingPageView: React.FC<ProductLandingPageViewProps> = ({
         {/* TOP CALLOUT HEADLINE */}
         <div className="text-center px-1 max-w-4xl mx-auto overflow-hidden">
           <h1 className="text-base sm:text-2xl md:text-3xl lg:text-4xl font-black text-white font-bangla tracking-tight leading-normal">
-            {lp.headline || 'সীমিত সময়ের স্পেশাল অফার! আজই অর্ডার করুন'}
+            {lp.headline || (isBn ? 'সীমিত সময়ের স্পেশাল অফার! আজই অর্ডার করুন' : 'Limited Time Special Offer! Order Yours Today')}
           </h1>
         </div>
 
@@ -606,7 +739,7 @@ export const ProductLandingPageView: React.FC<ProductLandingPageViewProps> = ({
               {/* Category & Brand Header */}
               <div className="flex items-center justify-center lg:justify-start gap-2">
                 <span className="px-3 py-1 rounded-lg bg-sky-500/20 text-sky-300 border border-sky-500/40 text-xs font-black uppercase tracking-wider font-bangla">
-                  {product.category || 'General'}
+                  {product.category || (isBn ? 'সাধারণ' : 'General')}
                 </span>
                 {product.brand && (
                   <span className="text-xs font-bold text-slate-300 font-bangla bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60">
@@ -618,9 +751,9 @@ export const ProductLandingPageView: React.FC<ProductLandingPageViewProps> = ({
               {/* 1. Product Title */}
               <div className="text-center lg:text-left space-y-1">
                 <h2 className="text-xl sm:text-2xl lg:text-3xl font-black text-white leading-snug font-bangla">
-                  {product.banglaName || product.name}
+                  {isBn ? (product.banglaName || product.name) : product.name}
                 </h2>
-                {product.banglaName && product.name && product.banglaName !== product.name && (
+                {isBn && product.banglaName && product.name && product.banglaName !== product.name && (
                   <p className="text-xs sm:text-sm font-semibold text-slate-300 font-bangla">{product.name}</p>
                 )}
               </div>
@@ -629,7 +762,7 @@ export const ProductLandingPageView: React.FC<ProductLandingPageViewProps> = ({
               <div className="p-4 sm:p-5 rounded-2xl sm:rounded-3xl bg-slate-950 border border-slate-800 flex items-center justify-between gap-4">
                 <div>
                   <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block font-bangla">
-                    {lp.priceSectionTitle || 'অফার মূল্য:'}
+                    {lp.priceSectionTitle || (isBn ? 'অফার মূল্য:' : 'Offer Price:')}
                   </span>
                   <div className="flex items-baseline gap-3 mt-1">
                     <span className="text-2xl sm:text-3xl lg:text-4xl font-black text-emerald-400 font-mono">
@@ -646,7 +779,7 @@ export const ProductLandingPageView: React.FC<ProductLandingPageViewProps> = ({
                 {savings > 0 && (
                   <div className="text-right">
                     <span className="inline-block px-3 py-1.5 rounded-xl bg-rose-500/20 text-rose-300 border border-rose-500/30 text-xs font-black font-bangla">
-                      {lp.savingsBadgeText ? `৳${savings.toLocaleString()} ${lp.savingsBadgeText}` : `৳${savings.toLocaleString()} সাশ্রয়!`}
+                      {lp.savingsBadgeText ? `৳${savings.toLocaleString()} ${lp.savingsBadgeText}` : (isBn ? `৳${savings.toLocaleString()} সাশ্রয়!` : `Save ৳${savings.toLocaleString()}!`)}
                     </span>
                   </div>
                 )}
@@ -663,14 +796,14 @@ export const ProductLandingPageView: React.FC<ProductLandingPageViewProps> = ({
                   <span>
                     {lp.customButtonText && !lp.customButtonText.includes('ক্যাশ অন ডেলিভারিতে')
                       ? lp.customButtonText
-                      : 'অর্ডার কনফার্ম করুন'}
+                      : (isBn ? 'অর্ডার কনফার্ম করুন' : 'Confirm Order Now')}
                   </span>
                   <ArrowRight className="w-4 h-4" />
                 </button>
 
                 <div className="flex items-center justify-center gap-2 text-[11px] sm:text-xs font-semibold text-slate-400 font-bangla">
                   <Lock className="w-3.5 h-3.5 text-emerald-400" />
-                  <span>{lp.orderSecurityNotice || 'পণ্য হাতে পেয়ে দেখে ডেলিভারি ম্যানকে মূল্য পরিশোধ করুন'}</span>
+                  <span>{lp.orderSecurityNotice || (isBn ? 'পণ্য হাতে পেয়ে দেখে ডেলিভারি ম্যানকে মূল্য পরিশোধ করুন' : 'Inspect the parcel and pay the delivery agent in cash upon receipt')}</span>
                 </div>
               </div>
 
@@ -684,10 +817,10 @@ export const ProductLandingPageView: React.FC<ProductLandingPageViewProps> = ({
                       </div>
                       <div>
                         <h3 className="text-xs sm:text-sm font-black text-white font-bangla">
-                          {lp.countdownTitle || 'স্পেশাল অফারটি শেষ হতে বাকি:'}
+                          {lp.countdownTitle || (isBn ? 'স্পেশাল অফারটি শেষ হতে বাকি:' : 'Special Offer Ends In:')}
                         </h3>
                         <p className="text-[10px] sm:text-[11px] text-amber-300 font-bangla">
-                          {lp.countdownSubtitle || 'অফার শেষ হলে পূর্বের মূল্যে ফিরে যাবে'}
+                          {lp.countdownSubtitle || (isBn ? 'অফার শেষ হলে পূর্বের মূল্যে ফিরে যাবে' : 'Price reverts to original after timer ends')}
                         </p>
                       </div>
                     </div>
@@ -698,21 +831,21 @@ export const ProductLandingPageView: React.FC<ProductLandingPageViewProps> = ({
                         <span className="text-lg sm:text-xl font-black text-amber-400">
                           {String(timeLeft.hours).padStart(2, '0')}
                         </span>
-                        <p className="text-[8px] text-slate-400 font-sans uppercase font-bold">ঘণ্টা</p>
+                        <p className="text-[8px] text-slate-400 font-sans uppercase font-bold">{isBn ? 'ঘণ্টা' : 'Hours'}</p>
                       </div>
                       <span className="text-base font-bold text-amber-400">:</span>
                       <div className="bg-slate-950 border border-slate-700/80 rounded-xl px-2.5 py-1.5 min-w-[50px] text-center shadow-md">
                         <span className="text-lg sm:text-xl font-black text-amber-400">
                           {String(timeLeft.minutes).padStart(2, '0')}
                         </span>
-                        <p className="text-[8px] text-slate-400 font-sans uppercase font-bold">মিনিট</p>
+                        <p className="text-[8px] text-slate-400 font-sans uppercase font-bold">{isBn ? 'মিনিট' : 'Minutes'}</p>
                       </div>
                       <span className="text-base font-bold text-amber-400">:</span>
                       <div className="bg-slate-950 border border-slate-700/80 rounded-xl px-2.5 py-1.5 min-w-[50px] text-center shadow-md">
                         <span className="text-lg sm:text-xl font-black text-amber-400">
                           {String(timeLeft.seconds).padStart(2, '0')}
                         </span>
-                        <p className="text-[8px] text-slate-400 font-sans uppercase font-bold">সেকেন্ড</p>
+                        <p className="text-[8px] text-slate-400 font-sans uppercase font-bold">{isBn ? 'সেকেন্ড' : 'Seconds'}</p>
                       </div>
                     </div>
                   </div>
@@ -723,19 +856,19 @@ export const ProductLandingPageView: React.FC<ProductLandingPageViewProps> = ({
               <div className="grid grid-cols-2 gap-2.5 pt-1">
                 <div className="p-3 rounded-2xl bg-slate-950 border border-slate-800 flex items-center gap-2.5 font-bangla">
                   <Truck className="w-4 h-4 text-emerald-400 shrink-0" />
-                  <span className="text-[11px] font-bold text-slate-200">ক্যাশ অন ডেলিভারি</span>
+                  <span className="text-[11px] font-bold text-slate-200">{isBn ? 'ক্যাশ অন ডেলিভারি' : 'Cash on Delivery'}</span>
                 </div>
                 <div className="p-3 rounded-2xl bg-slate-950 border border-slate-800 flex items-center gap-2.5 font-bangla">
                   <RotateCcw className="w-4 h-4 text-indigo-400 shrink-0" />
-                  <span className="text-[11px] font-bold text-slate-200">৭ দিনের রিপ্লেসমেন্ট</span>
+                  <span className="text-[11px] font-bold text-slate-200">{isBn ? '৭ দিনের রিপ্লেসমেন্ট' : '7 Days Replacement'}</span>
                 </div>
                 <div className="p-3 rounded-2xl bg-slate-950 border border-slate-800 flex items-center gap-2.5 font-bangla">
                   <ShieldCheck className="w-4 h-4 text-amber-400 shrink-0" />
-                  <span className="text-[11px] font-bold text-slate-200">১০০% অরিজিনাল পণ্য</span>
+                  <span className="text-[11px] font-bold text-slate-200">{isBn ? '১০০% অরিজিনাল পণ্য' : '100% Original Product'}</span>
                 </div>
                 <div className="p-3 rounded-2xl bg-slate-950 border border-slate-800 flex items-center gap-2.5 font-bangla">
                   <Zap className="w-4 h-4 text-rose-400 shrink-0" />
-                  <span className="text-[11px] font-bold text-slate-200">দ্রুততম হোম ডেলিভারি</span>
+                  <span className="text-[11px] font-bold text-slate-200">{isBn ? 'দ্রুততম হোম ডেলিভারি' : 'Express Home Delivery'}</span>
                 </div>
               </div>
             </div>
@@ -753,13 +886,13 @@ export const ProductLandingPageView: React.FC<ProductLandingPageViewProps> = ({
             <div className="text-center space-y-3 max-w-2xl mx-auto relative z-10">
               <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-emerald-500/15 text-emerald-400 text-xs font-bold border border-emerald-500/30 shadow-inner">
                 <FileText className="w-3.5 h-3.5" />
-                <span>{lp.descriptionSectionSubtitle || 'প্রোডাক্ট পরিচিতি ও ওভারভিউ'}</span>
+                <span>{lp.descriptionSectionSubtitle || (isBn ? 'প্রোডাক্ট পরিচিতি ও ওভারভিউ' : 'Product Overview & Specifications')}</span>
               </div>
               <h3 className="text-xl sm:text-2xl lg:text-3xl font-black text-white leading-tight">
-                {lp.descriptionSectionTitle || 'প্রোডাক্টের বিস্তারিত বিবরণ ও গুরুত্বপূর্ণ তথ্য'}
+                {lp.descriptionSectionTitle || (isBn ? 'প্রোডাক্টের বিস্তারিত বিবরণ ও গুরুত্বপূর্ণ তথ্য' : 'Detailed Product Description & Information')}
               </h3>
               <p className="text-xs sm:text-sm text-slate-400 font-medium">
-                অর্ডার কনফার্ম করার পূর্বে প্রোডাক্টের সাইজ, মেটেরিয়াল এবং প্রয়োজনীয় ফিচারগুলো বিস্তারিত দেখে নিন
+                {isBn ? 'অর্ডার কনফার্ম করার পূর্বে প্রোডাক্টের সাইজ, মেটেরিয়াল এবং প্রয়োজনীয় ফিচারগুলো বিস্তারিত দেখে নিন' : 'Please review product sizing, materials, and features before confirming your order'}
               </p>
             </div>
 
@@ -776,7 +909,7 @@ export const ProductLandingPageView: React.FC<ProductLandingPageViewProps> = ({
                   <div className="bg-slate-950/80 rounded-2xl sm:rounded-3xl p-5 sm:p-7 border border-slate-800/90 shadow-inner space-y-4">
                     <div className="flex items-center gap-2.5 pb-3 border-b border-slate-800 text-white font-bold text-sm sm:text-base">
                       <Sparkles className="w-4 h-4 text-emerald-400" />
-                      <span>বিস্তারিত বৈশিষ্ট্য ও গুণাগুণ</span>
+                      <span>{isBn ? 'বিস্তারিত বৈশিষ্ট্য ও গুণাগুণ' : 'Key Specifications & Highlights'}</span>
                     </div>
 
                     <div className="space-y-3 pt-1">
@@ -849,7 +982,7 @@ export const ProductLandingPageView: React.FC<ProductLandingPageViewProps> = ({
                 {product.brand && (
                   <div className="p-3.5 sm:p-4 rounded-2xl bg-slate-950/70 border border-slate-800/90 text-center space-y-1">
                     <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
-                      ব্র্যান্ড
+                      {isBn ? 'ব্র্যান্ড' : 'Brand'}
                     </span>
                     <strong className="text-xs sm:text-sm font-bold text-white block truncate">
                       {product.brand}
@@ -860,7 +993,7 @@ export const ProductLandingPageView: React.FC<ProductLandingPageViewProps> = ({
                 {product.sku && (
                   <div className="p-3.5 sm:p-4 rounded-2xl bg-slate-950/70 border border-slate-800/90 text-center space-y-1">
                     <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
-                      প্রোডাক্ট কোড
+                      {isBn ? 'প্রোডাক্ট কোড' : 'SKU / Code'}
                     </span>
                     <strong className="text-xs sm:text-sm font-bold text-emerald-400 font-mono block truncate">
                       {product.sku}
@@ -870,19 +1003,19 @@ export const ProductLandingPageView: React.FC<ProductLandingPageViewProps> = ({
 
                 <div className="p-3.5 sm:p-4 rounded-2xl bg-slate-950/70 border border-slate-800/90 text-center space-y-1">
                   <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
-                    স্টক স্ট্যাটাস
+                    {isBn ? 'স্টক স্ট্যাটাস' : 'Stock Status'}
                   </span>
                   <strong className="text-xs sm:text-sm font-bold text-emerald-400 block truncate">
-                    {product.stock > 0 ? 'রেডি ইন স্টক' : 'লিমিটেড অফার'}
+                    {product.stock > 0 ? (isBn ? 'রেডি ইন স্টক' : 'In Stock') : (isBn ? 'লিমিটেড অফার' : 'Limited Stock')}
                   </strong>
                 </div>
 
                 <div className="p-3.5 sm:p-4 rounded-2xl bg-slate-950/70 border border-slate-800/90 text-center space-y-1">
                   <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
-                    নিশ্চয়তা
+                    {isBn ? 'নিশ্চয়তা' : 'Warranty / Quality'}
                   </span>
                   <strong className="text-xs sm:text-sm font-bold text-amber-300 block truncate">
-                    {product.warranty || '১০০% অরিজিনাল'}
+                    {product.warranty || (isBn ? '১০০% অরিজিনাল' : '100% Genuine')}
                   </strong>
                 </div>
               </div>
@@ -894,9 +1027,9 @@ export const ProductLandingPageView: React.FC<ProductLandingPageViewProps> = ({
                     <PackageCheck className="w-5 h-5" />
                   </div>
                   <div className="space-y-0.5">
-                    <h4 className="text-xs sm:text-sm font-bold text-white">প্যাকেজে যা যা পাচ্ছেন</h4>
+                    <h4 className="text-xs sm:text-sm font-bold text-white">{isBn ? 'প্যাকেজে যা যা পাচ্ছেন' : 'What You Get in Package'}</h4>
                     <p className="text-[11px] text-slate-400 leading-snug">
-                      ইনট্যাক্ট প্যাকেটজাত ১০০% অরিজিনাল পণ্য ও নিরাপদ বক্স প্যাকিং।
+                      {isBn ? 'ইনট্যাক্ট প্যাকেটজাত ১০০% অরিজিনাল পণ্য ও নিরাপদ বক্স প্যাকিং।' : '100% genuine intact original product in secure packaging.'}
                     </p>
                   </div>
                 </div>
@@ -906,9 +1039,9 @@ export const ProductLandingPageView: React.FC<ProductLandingPageViewProps> = ({
                     <ShieldCheck className="w-5 h-5" />
                   </div>
                   <div className="space-y-0.5">
-                    <h4 className="text-xs sm:text-sm font-bold text-white">কোয়ালিটি গ্যারান্টি</h4>
+                    <h4 className="text-xs sm:text-sm font-bold text-white">{isBn ? 'কোয়ালিটি গ্যারান্টি' : 'Quality Guarantee'}</h4>
                     <p className="text-[11px] text-slate-400 leading-snug">
-                      ডেলিভারির পূর্বে মান যাচাইকৃত এবং কোনো ত্রুটি থাকলে সহজ রিপ্লেসমেন্ট।
+                      {isBn ? 'ডেলিভারির পূর্বে মান যাচাইকৃত এবং কোনো ত্রুটি থাকলে সহজ রিপ্লেসমেন্ট।' : 'Quality inspected before delivery with hassle-free replacement policy.'}
                     </p>
                   </div>
                 </div>
@@ -918,9 +1051,9 @@ export const ProductLandingPageView: React.FC<ProductLandingPageViewProps> = ({
                     <Truck className="w-5 h-5" />
                   </div>
                   <div className="space-y-0.5">
-                    <h4 className="text-xs sm:text-sm font-bold text-white">হোম ডেলিভারি সুবিধা</h4>
+                    <h4 className="text-xs sm:text-sm font-bold text-white">{isBn ? 'হোম ডেলিভারি সুবিধা' : 'Home Delivery Service'}</h4>
                     <p className="text-[11px] text-slate-400 leading-snug">
-                      কুরিয়ার ম্যানের সামনে চেক করে দেখে নিশ্চিত হয়ে মূল্য পরিশোধ করুন।
+                      {isBn ? 'কুরিয়ার ম্যানের সামনে চেক করে দেখে নিশ্চিত হয়ে মূল্য পরিশোধ করুন।' : 'Inspect package in front of delivery agent and pay in cash.'}
                     </p>
                   </div>
                 </div>
@@ -934,7 +1067,7 @@ export const ProductLandingPageView: React.FC<ProductLandingPageViewProps> = ({
                   className={`w-full sm:w-auto inline-flex items-center justify-center gap-2.5 px-8 py-3.5 rounded-2xl font-black text-xs sm:text-sm shadow-xl hover:scale-[1.02] active:scale-[0.98] transition-all cursor-pointer ${theme.btnGradient}`}
                 >
                   <ShoppingBag className="w-4 h-4" />
-                  <span>পছন্দ হয়েছে? এখনই ক্যাশ অন ডেলিভারিতে অর্ডার করুন</span>
+                  <span>{isBn ? 'পছন্দ হয়েছে? এখনই ক্যাশ অন ডেলিভারিতে অর্ডার করুন' : 'Like it? Order with Cash on Delivery Now'}</span>
                   <ArrowRight className="w-4 h-4" />
                 </button>
               </div>
@@ -957,10 +1090,10 @@ export const ProductLandingPageView: React.FC<ProductLandingPageViewProps> = ({
           >
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-500/20 text-indigo-300 text-xs font-bold border border-indigo-500/30 font-bangla">
               <Play className="w-3.5 h-3.5 fill-indigo-300" />
-              <span>{lp.videoSubtitle || 'প্রোডাক্ট লাইভ ভিডিও ও আনবক্সিং'}</span>
+              <span>{lp.videoSubtitle || (isBn ? 'প্রোডাক্ট লাইভ ভিডিও ও আনবক্সিং' : 'Live Product Unboxing Video')}</span>
             </div>
             <h3 className="text-lg sm:text-2xl font-black text-white font-bangla">
-              {lp.videoTitle || 'প্রোডাক্টটির আসল কোয়ালিটি ও আনবক্সিং ভিডিও দেখে নিন'}
+              {lp.videoTitle || (isBn ? 'প্রোডাক্টটির আসল কোয়ালিটি ও আনবক্সিং ভিডিও দেখে নিন' : 'Watch Product Real Quality & Unboxing Video')}
             </h3>
 
             <div
@@ -994,10 +1127,10 @@ export const ProductLandingPageView: React.FC<ProductLandingPageViewProps> = ({
           <div className="space-y-6">
             <div className="text-center space-y-2 max-w-xl mx-auto">
               <span className="text-xs font-black uppercase tracking-wider text-emerald-400 font-bangla">
-                {lp.featuresSectionSubtitle || 'কেন এটি আপনার জন্য সেরা?'}
+                {lp.featuresSectionSubtitle || (isBn ? 'কেন এটি আপনার জন্য সেরা?' : 'Why Is This The Best Choice?')}
               </span>
               <h3 className="text-xl sm:text-3xl font-black text-white font-bangla">
-                {lp.featuresSectionTitle || 'প্রোডাক্টের বিশেষ ফিচার ও আকর্ষণীয় সুবিধাসমূহ'}
+                {lp.featuresSectionTitle || (isBn ? 'প্রোডাক্টের বিশেষ ফিচার ও আকর্ষণীয় সুবিধাসমূহ' : 'Key Product Features & Highlights')}
               </h3>
             </div>
 
@@ -1007,7 +1140,7 @@ export const ProductLandingPageView: React.FC<ProductLandingPageViewProps> = ({
                 : (product.keyHighlights || []).map((kh, idx) => ({
                     id: `kh-${idx}`,
                     title: kh.text,
-                    desc: 'প্রিমিয়াম কোয়ালিটি উপাদান ও নির্ভরযোগ্য পারফরম্যান্স।',
+                    desc: isBn ? 'প্রিমিয়াম কোয়ালিটি উপাদান ও নির্ভরযোগ্য পারফরম্যান্স।' : 'Premium quality materials and reliable performance.',
                     icon: 'check-circle',
                   }))
               ).map((feature, fIdx) => (
@@ -1030,21 +1163,27 @@ export const ProductLandingPageView: React.FC<ProductLandingPageViewProps> = ({
         <div className="bg-gradient-to-br from-slate-900 via-indigo-950/40 to-slate-900 rounded-3xl p-6 sm:p-10 border border-slate-800 shadow-2xl space-y-6">
           <div className="text-center space-y-2 max-w-xl mx-auto">
             <span className="text-xs font-black uppercase tracking-wider text-amber-400 font-bangla">
-              {lp.whyUsSectionSubtitle || 'নিরাপদ অনলাইন শপিং'}
+              {lp.whyUsSectionSubtitle || (isBn ? 'নিরাপদ অনলাইন শপিং' : '100% Safe Online Shopping')}
             </span>
             <h3 className="text-xl sm:text-3xl font-black text-white font-bangla">
-              {lp.whyUsSectionTitle || 'কেন আমাদের থেকেই অর্ডার করবেন?'}
+              {lp.whyUsSectionTitle || (isBn ? 'কেন আমাদের থেকেই অর্ডার করবেন?' : 'Why Choose To Buy From Us?')}
             </h3>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5 max-w-3xl mx-auto">
-            {(lp.whyChooseUs || [
+            {(lp.whyChooseUs || (isBn ? [
               '১০০% অরিজিনাল ও ইনস্পেক্টেড কোয়ালিটি পণ্য',
               'সারা বাংলাদেশে ক্যাশ অন ডেলিভারি সুবিধা (পণ্য দেখে পেমেন্ট)',
               'দ্রুততম সময়ে হোম ডেলিভারি সার্ভিস',
               '৭ দিনের সহজ রিপ্লেসমেন্ট ও রিটার্ন গ্যারান্টি',
               'সার্বক্ষণিক কাস্টমার সাপোর্ট ও আন্তরিক বিক্রয়োত্তর সেবা',
-            ]).map((point, pIdx) => (
+            ] : [
+              '100% original & quality-inspected products',
+              'Cash on delivery across all Bangladesh (Inspect before payment)',
+              'Super-fast express home delivery service',
+              '7-day easy replacement & return guarantee',
+              '24/7 friendly customer support and after-sales service',
+            ])).map((point, pIdx) => (
               <div
                 key={pIdx}
                 className="p-4 rounded-2xl bg-slate-950/80 border border-slate-800 flex items-center gap-3.5 shadow-sm font-bangla"
@@ -1069,10 +1208,10 @@ export const ProductLandingPageView: React.FC<ProductLandingPageViewProps> = ({
           <div className="space-y-6">
             <div className="text-center space-y-2 max-w-xl mx-auto">
               <span className="text-xs font-black uppercase tracking-wider text-amber-400 font-bangla">
-                {lp.reviewsSectionSubtitle || 'কাস্টমারদের মতামত'}
+                {lp.reviewsSectionSubtitle || (isBn ? 'কাস্টমারদের মতামত' : 'Customer Feedback')}
               </span>
               <h3 className="text-xl sm:text-3xl font-black text-white font-bangla">
-                {lp.reviewsSectionTitle || 'আমাদের সম্মানিত ক্রেতাদের অভিজ্ঞতা'}
+                {lp.reviewsSectionTitle || (isBn ? 'আমাদের সম্মানিত ক্রেতাদের অভিজ্ঞতা' : 'Verified Customer Reviews')}
               </h3>
             </div>
 
@@ -1100,7 +1239,7 @@ export const ProductLandingPageView: React.FC<ProductLandingPageViewProps> = ({
                     <div className="min-w-0 flex-1">
                       <h5 className="text-xs font-bold text-white truncate font-bangla">{rev.name}</h5>
                       <p className="text-[10px] text-slate-400 truncate font-bangla">
-                        {rev.location || 'ভেরিফাইড ক্রেতা'} • {rev.date || 'সম্প্রতি'}
+                        {rev.location || (isBn ? 'ভেরিফাইড ক্রেতা' : 'Verified Buyer')} • {rev.date || (isBn ? 'সম্প্রতি' : 'Recent')}
                       </p>
                     </div>
                   </div>
@@ -1122,14 +1261,14 @@ export const ProductLandingPageView: React.FC<ProductLandingPageViewProps> = ({
           <div className="text-center space-y-2.5 max-w-2xl mx-auto relative z-10">
             <div className="inline-flex items-center gap-2 px-3.5 py-1 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-xs font-black font-bangla">
               <ShoppingBag className="w-4 h-4" />
-              <span>{lp.orderFormBadgeText || '১০০% ক্যাশ অন ডেলিভারি'}</span>
+              <span>{lp.orderFormBadgeText || (isBn ? '১০০% ক্যাশ অন ডেলিভারি' : '100% Cash on Delivery')}</span>
             </div>
             <h2 className="text-xl sm:text-3xl font-black text-white font-bangla">
-              {lp.customOrderTitle || 'অর্ডার করতে নিচের ফর্মটি সঠিক তথ্য দিয়ে পূরণ করুন'}
+              {lp.customOrderTitle || (isBn ? 'অর্ডার করতে নিচের ফর্মটি সঠিক তথ্য দিয়ে পূরণ করুন' : 'Fill Out the Form Below with Accurate Information')}
             </h2>
             <p className="text-xs sm:text-sm text-slate-300 font-medium font-bangla">
               {lp.customOrderSubtitle ||
-                'পণ্য হাতে পেয়ে দেখে ডেলিভারি ম্যানের কাছে পেমেন্ট করার ১০০% নিশ্চয়তা'}
+                (isBn ? 'পণ্য হাতে পেয়ে দেখে ডেলিভারি ম্যানের কাছে পেমেন্ট করার ১০০% নিশ্চয়তা' : 'Inspect package in front of courier before paying • 100% Guaranteed')}
             </p>
           </div>
 
@@ -1139,11 +1278,11 @@ export const ProductLandingPageView: React.FC<ProductLandingPageViewProps> = ({
                 <Check className="w-8 h-8 stroke-[3]" />
               </div>
               <h3 className="text-xl font-black text-white font-bangla">
-                {lp.orderSuccessTitle || 'আপনার অর্ডারটি সফলভাবে গ্রহণ করা হয়েছে!'}
+                {lp.orderSuccessTitle || (isBn ? 'আপনার অর্ডারটি সফলভাবে গ্রহণ করা হয়েছে!' : 'Your Order Has Been Placed Successfully!')}
               </h3>
               <p className="text-xs text-slate-300 leading-relaxed font-bangla">
                 {lp.orderSuccessSubtitle ||
-                  'আমাদের প্রতিনিধি শীঘ্রই আপনার সাথে ফোনে যোগাযোগ করে অর্ডার কনফার্ম করবেন এবং দ্রুত পার্সেল পাঠানো হবে।'}
+                  (isBn ? 'আমাদের প্রতিনিধি শীঘ্রই আপনার সাথে ফোনে যোগাযোগ করে অর্ডার কনফার্ম করবেন এবং দ্রুত পার্সেল পাঠানো হবে।' : 'Our representative will call you shortly to confirm and dispatch your parcel quickly.')}
               </p>
               <button
                 onClick={() => {
@@ -1152,7 +1291,7 @@ export const ProductLandingPageView: React.FC<ProductLandingPageViewProps> = ({
                 }}
                 className="mt-2 px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all cursor-pointer font-bangla"
               >
-                আরো শপিং করুন
+                {isBn ? 'আরো শপিং করুন' : 'Continue Shopping'}
               </button>
             </div>
           ) : (
@@ -1169,10 +1308,10 @@ export const ProductLandingPageView: React.FC<ProductLandingPageViewProps> = ({
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-2.5 sm:pb-3 border-b border-slate-800/80 gap-1.5 sm:gap-2">
                   <h4 className="text-xs sm:text-base font-black uppercase tracking-wider text-emerald-400 flex items-center gap-2 font-bangla">
                     <span className="w-5 h-5 sm:w-6 sm:h-6 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center text-[10px] sm:text-xs font-black border border-emerald-500/30">১</span>
-                    <span>{lp.step1Title || 'কালার, সাইজ ও অর্ডারের পরিমাণ সিলেক্ট করুন'}</span>
+                    <span>{lp.step1Title || (isBn ? 'কালার, সাইজ ও অর্ডারের পরিমাণ সিলেক্ট করুন' : 'Select Color, Size & Quantity')}</span>
                   </h4>
                   <div className="text-[11px] sm:text-sm font-bold text-slate-300 font-bangla">
-                    মোট প্রডাক্ট মূল্য: <span className="text-emerald-400 font-black text-xs sm:text-base font-mono">৳{(currentPrice * quantity).toLocaleString()}</span>
+                    {isBn ? 'মোট প্রডাক্ট মূল্য: ' : 'Product Total: '}<span className="text-emerald-400 font-black text-xs sm:text-base font-mono">৳{(currentPrice * quantity).toLocaleString()}</span>
                   </div>
                 </div>
 
@@ -1186,23 +1325,23 @@ export const ProductLandingPageView: React.FC<ProductLandingPageViewProps> = ({
                     />
                   </div>
                   <div className="min-w-0">
-                    <p className="text-xs sm:text-base font-black text-white line-clamp-1 font-bangla">{product.name}</p>
+                    <p className="text-xs sm:text-base font-black text-white line-clamp-1 font-bangla">{isBn ? (product.banglaName || product.name) : product.name}</p>
                     <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 mt-0.5 sm:mt-1">
                       <span className="text-xs sm:text-sm font-black text-emerald-400 font-mono">
                         ৳{currentPrice.toLocaleString()}
                       </span>
                       {selectedColor && (
                         <span className="text-[10px] sm:text-xs font-bold px-1.5 sm:px-2 py-0.5 rounded-md bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 font-bangla">
-                          কালার: {selectedColor.name}
+                          {isBn ? 'কালার: ' : 'Color: '}{selectedColor.name}
                         </span>
                       )}
                       {selectedVariant && (
                         <span className="text-[10px] sm:text-xs font-bold px-1.5 sm:px-2 py-0.5 rounded-md bg-sky-500/15 border border-sky-500/30 text-sky-300 font-bangla">
-                          সাইজ: {selectedVariant}
+                          {isBn ? 'সাইজ: ' : 'Size: '}{selectedVariant}
                         </span>
                       )}
                       <span className="text-[10px] sm:text-xs font-bold px-1.5 sm:px-2 py-0.5 rounded-md bg-amber-500/15 border border-amber-500/30 text-amber-300 font-bangla">
-                        পরিমাণ: {quantity} টি
+                        {isBn ? `পরিমাণ: ${quantity} টি` : `Qty: ${quantity}`}
                       </span>
                     </div>
                   </div>
@@ -1214,11 +1353,11 @@ export const ProductLandingPageView: React.FC<ProductLandingPageViewProps> = ({
                     <div className="flex items-center justify-between">
                       <label className="text-xs sm:text-base font-black text-white font-bangla flex items-center gap-1.5 sm:gap-2">
                         <Sparkles className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-emerald-400" />
-                        <span>আপনার পছন্দের কালারটি সিলেক্ট করুন:</span>
+                        <span>{isBn ? 'আপনার পছন্দের কালারটি সিলেক্ট করুন:' : 'Select Your Preferred Color:'}</span>
                       </label>
                       {selectedColor && (
                         <span className="text-[10px] sm:text-xs font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/25 px-2 py-0.5 rounded-full font-bangla">
-                          সিলেক্টেড: {selectedColor.name}
+                          {isBn ? `সিলেক্টেড: ${selectedColor.name}` : `Selected: ${selectedColor.name}`}
                         </span>
                       )}
                     </div>
@@ -1272,7 +1411,7 @@ export const ProductLandingPageView: React.FC<ProductLandingPageViewProps> = ({
                                   {color.name}
                                 </p>
                                 <p className="text-[10px] sm:text-xs text-slate-400 font-bangla mt-0.5">
-                                  {color.name} কালার
+                                  {color.name} {isBn ? 'কালার' : 'Color'}
                                 </p>
                               </div>
                             </div>
@@ -1301,11 +1440,11 @@ export const ProductLandingPageView: React.FC<ProductLandingPageViewProps> = ({
                     <div className="flex items-center justify-between">
                       <label className="text-xs sm:text-base font-black text-white font-bangla flex items-center gap-1.5 sm:gap-2">
                         <Tag className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-sky-400" />
-                        <span>আপনার সাইজটি সিলেক্ট করুন:</span>
+                        <span>{isBn ? 'আপনার সাইজটি সিলেক্ট করুন:' : 'Select Your Size:'}</span>
                       </label>
                       {selectedVariant && (
                         <span className="text-[10px] sm:text-xs font-bold text-sky-400 bg-sky-500/10 border border-sky-500/30 px-2 py-0.5 rounded-full font-bangla">
-                          সিলেক্টেড: {selectedVariant}
+                          {isBn ? `সিলেক্টেড: ${selectedVariant}` : `Selected: ${selectedVariant}`}
                         </span>
                       )}
                     </div>
@@ -1339,10 +1478,10 @@ export const ProductLandingPageView: React.FC<ProductLandingPageViewProps> = ({
                     <div>
                       <label className="text-xs sm:text-base font-black text-white font-bangla flex items-center gap-1.5 sm:gap-2">
                         <Layers className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-amber-400" />
-                        <span>অর্ডারের পরিমাণ (Quantity) সিলেক্ট করুন:</span>
+                        <span>{isBn ? 'অর্ডারের পরিমাণ (Quantity) সিলেক্ট করুন:' : 'Select Quantity:'}</span>
                       </label>
                       <p className="text-[11px] sm:text-xs text-slate-400 font-bangla mt-0.5 sm:mt-1">
-                        প্রতিটির মূল্য ৳{currentPrice.toLocaleString()} • সর্বমোট: <span className="font-black text-emerald-400 text-xs sm:text-base font-mono">৳{(currentPrice * quantity).toLocaleString()}</span>
+                        {isBn ? `প্রতিটির মূল্য ৳${currentPrice.toLocaleString()} • সর্বমোট: ` : `Unit price ৳${currentPrice.toLocaleString()} • Subtotal: `}<span className="font-black text-emerald-400 text-xs sm:text-base font-mono">৳{(currentPrice * quantity).toLocaleString()}</span>
                       </p>
                     </div>
 
@@ -1353,7 +1492,7 @@ export const ProductLandingPageView: React.FC<ProductLandingPageViewProps> = ({
                           type="button"
                           onClick={() => setQuantity((q) => Math.max(1, q - 1))}
                           className="w-9 h-9 sm:w-12 sm:h-12 flex items-center justify-center text-white font-black hover:bg-slate-800 active:scale-90 transition-all cursor-pointer text-base sm:text-xl select-none"
-                          title="কমান"
+                          title={isBn ? 'কমান' : 'Decrease'}
                         >
                           -
                         </button>
@@ -1364,7 +1503,7 @@ export const ProductLandingPageView: React.FC<ProductLandingPageViewProps> = ({
                           type="button"
                           onClick={() => setQuantity((q) => q + 1)}
                           className="w-9 h-9 sm:w-12 sm:h-12 flex items-center justify-center text-white font-black hover:bg-slate-800 active:scale-90 transition-all cursor-pointer text-base sm:text-xl select-none"
-                          title="বাড়ান"
+                          title={isBn ? 'বাড়ান' : 'Increase'}
                         >
                           +
                         </button>
@@ -1377,7 +1516,7 @@ export const ProductLandingPageView: React.FC<ProductLandingPageViewProps> = ({
               {/* Step 2: Delivery Zone */}
               <div className="p-3.5 sm:p-5 rounded-2xl bg-slate-950 border border-slate-800 space-y-2.5 sm:space-y-3">
                 <h4 className="text-[11px] sm:text-xs font-black uppercase tracking-wider text-indigo-400 font-bangla">
-                  {lp.step2Title || '২. আপনার ডেলিভারি এরিয়া সিলেক্ট করুন'}
+                  {lp.step2Title || (isBn ? '২. আপনার ডেলিভারি এরিয়া সিলেক্ট করুন' : '2. Select Your Delivery Area')}
                 </h4>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3">
@@ -1402,11 +1541,11 @@ export const ProductLandingPageView: React.FC<ProductLandingPageViewProps> = ({
                         )}
                       </div>
                       <span className="text-xs sm:text-sm font-bold font-bangla">
-                        {lp.insideDhakaLabel || 'ঢাকার ভেতরে'}
+                        {lp.insideDhakaLabel || (isBn ? 'ঢাকার ভেতরে' : 'Inside Dhaka')}
                       </span>
                     </div>
                     <span className="text-xs sm:text-sm font-black text-emerald-400 font-bangla">
-                      {insideDhakaCharge === 0 ? 'ফ্রি ডেলিভারি' : `৳${insideDhakaCharge}`}
+                      {insideDhakaCharge === 0 ? (isBn ? 'ফ্রি ডেলিভারি' : 'Free Delivery') : `৳${insideDhakaCharge}`}
                     </span>
                   </label>
 
@@ -1431,11 +1570,11 @@ export const ProductLandingPageView: React.FC<ProductLandingPageViewProps> = ({
                         )}
                       </div>
                       <span className="text-xs sm:text-sm font-bold font-bangla">
-                        {lp.outsideDhakaLabel || 'ঢাকার বাইরে'}
+                        {lp.outsideDhakaLabel || (isBn ? 'ঢাকার বাইরে' : 'Outside Dhaka')}
                       </span>
                     </div>
                     <span className="text-xs sm:text-sm font-black text-emerald-400 font-bangla">
-                      {outsideDhakaCharge === 0 ? 'ফ্রি ডেলিভারি' : `৳${outsideDhakaCharge}`}
+                      {outsideDhakaCharge === 0 ? (isBn ? 'ফ্রি ডেলিভারি' : 'Free Delivery') : `৳${outsideDhakaCharge}`}
                     </span>
                   </label>
                 </div>
@@ -1444,21 +1583,21 @@ export const ProductLandingPageView: React.FC<ProductLandingPageViewProps> = ({
               {/* Step 3: Customer Information */}
               <div className="p-3.5 sm:p-5 rounded-2xl bg-slate-950 border border-slate-800 space-y-3 sm:space-y-4">
                 <h4 className="text-[11px] sm:text-xs font-black uppercase tracking-wider text-indigo-400 font-bangla">
-                  {lp.step3Title || '৩. আপনার নাম ও ঠিকানা লিখুন'}
+                  {lp.step3Title || (isBn ? '৩. আপনার নাম ও ঠিকানা লিখুন' : '3. Enter Your Name & Address')}
                 </h4>
 
                 <div className="space-y-2.5 sm:space-y-3.5">
                   <div className="space-y-1 sm:space-y-1.5">
                     <label className="text-xs font-bold text-slate-300 flex items-center gap-1.5 font-bangla">
                       <User className="w-3.5 h-3.5 text-slate-400" />
-                      <span>{lp.nameInputLabel || 'আপনার নাম *'}</span>
+                      <span>{lp.nameInputLabel || (isBn ? 'আপনার নাম *' : 'Your Full Name *')}</span>
                     </label>
                     <input
                       type="text"
                       required
                       value={customerName}
                       onChange={(e) => setCustomerName(e.target.value)}
-                      placeholder={lp.nameInputPlaceholder || 'আপনার পুরো নাম লিখুন'}
+                      placeholder={lp.nameInputPlaceholder || (isBn ? 'আপনার পুরো নাম লিখুন' : 'Enter your full name')}
                       className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 sm:px-4 py-2.5 sm:py-3 text-xs sm:text-sm font-semibold text-white focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent placeholder:text-slate-500 font-bangla"
                     />
                   </div>
@@ -1466,7 +1605,7 @@ export const ProductLandingPageView: React.FC<ProductLandingPageViewProps> = ({
                   <div className="space-y-1 sm:space-y-1.5">
                     <label className="text-xs font-bold text-slate-300 flex items-center gap-1.5 font-bangla">
                       <Phone className="w-3.5 h-3.5 text-slate-400" />
-                      <span>{lp.phoneInputLabel || 'মোবাইল নাম্বার *'}</span>
+                      <span>{lp.phoneInputLabel || (isBn ? 'মোবাইল নাম্বার *' : 'Mobile Number *')}</span>
                     </label>
                     <input
                       type="tel"
@@ -1475,7 +1614,7 @@ export const ProductLandingPageView: React.FC<ProductLandingPageViewProps> = ({
                       required
                       value={customerPhone}
                       onChange={(e) => setCustomerPhone(cleanBDPhoneNumber(e.target.value))}
-                      placeholder={lp.phoneInputPlaceholder || '01XXXXXXXXX (১১ সংখ্যার মোবাইল নম্বর দিন)'}
+                      placeholder={lp.phoneInputPlaceholder || (isBn ? '01XXXXXXXXX (১১ সংখ্যার মোবাইল নম্বর দিন)' : '01XXXXXXXXX (11-digit mobile number)')}
                       className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 sm:px-4 py-2.5 sm:py-3 text-xs sm:text-sm font-semibold text-white focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent placeholder:text-slate-500 font-mono"
                     />
                   </div>
@@ -1483,14 +1622,14 @@ export const ProductLandingPageView: React.FC<ProductLandingPageViewProps> = ({
                   <div className="space-y-1 sm:space-y-1.5">
                     <label className="text-xs font-bold text-slate-300 flex items-center gap-1.5 font-bangla">
                       <MapPin className="w-3.5 h-3.5 text-slate-400" />
-                      <span>{lp.addressInputLabel || 'সম্পূর্ণ ডেলিভারি ঠিকানা *'}</span>
+                      <span>{lp.addressInputLabel || (isBn ? 'সম্পূর্ণ ডেলিভারি ঠিকানা *' : 'Full Delivery Address *')}</span>
                     </label>
                     <textarea
                       rows={2}
                       required
                       value={customerAddress}
                       onChange={(e) => setCustomerAddress(e.target.value)}
-                      placeholder={lp.addressInputPlaceholder || 'বাসা/রোড নাম্বার, গ্রাম/মহল্লা, থানা ও জেলার নাম লিখুন...'}
+                      placeholder={lp.addressInputPlaceholder || (isBn ? 'বাসা/রোড নাম্বার, গ্রাম/মহল্লা, থানা ও জেলার নাম লিখুন...' : 'House/Road no, Area/Village, Thana & District...')}
                       className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 sm:p-3.5 text-xs sm:text-sm font-semibold text-white focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent placeholder:text-slate-500 leading-relaxed font-bangla"
                     />
                   </div>
@@ -1505,7 +1644,7 @@ export const ProductLandingPageView: React.FC<ProductLandingPageViewProps> = ({
                         type="text"
                         value={customerNote}
                         onChange={(e) => setCustomerNote(e.target.value)}
-                        placeholder={lp.noteInputPlaceholder || 'ডেলিভারি সংক্রান্ত কোনো বিশেষ নির্দেশনা থাকলে লিখুন...'}
+                        placeholder={lp.noteInputPlaceholder || (isBn ? 'ডেলিভারি সংক্রান্ত কোনো বিশেষ নির্দেশনা থাকলে লিখুন...' : 'Any special delivery instructions...')}
                         className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 sm:px-4 py-2 sm:py-2.5 text-xs font-semibold text-white focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent placeholder:text-slate-500 font-bangla"
                       />
                     </div>
@@ -1513,20 +1652,201 @@ export const ProductLandingPageView: React.FC<ProductLandingPageViewProps> = ({
                 </div>
               </div>
 
+              {/* Step 4: Payment Options (Only when Delivery Advance or Full Advance is enabled) */}
+              {showPaymentSelection ? (
+                <div className="p-3.5 sm:p-5 rounded-2xl bg-slate-950 border border-slate-800 space-y-3 sm:space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-[11px] sm:text-xs font-black uppercase tracking-wider text-indigo-400 font-bangla flex items-center gap-2">
+                      <CreditCard className="w-3.5 h-3.5 text-indigo-400" />
+                      <span>{isBn ? '৪. পেমেন্ট মেথড সিলেক্ট করুন' : '4. Select Payment Method'}</span>
+                    </h4>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-2.5">
+                    {effectiveCodAllowed && (
+                      <button
+                        type="button"
+                        onClick={() => setPaymentOptionType('cod')}
+                        className={`p-3 rounded-xl sm:rounded-2xl border-2 text-left transition-all cursor-pointer flex flex-col justify-between gap-1.5 ${
+                          paymentOptionType === 'cod'
+                            ? 'border-emerald-500 bg-emerald-500/10 ring-1 ring-emerald-500/30'
+                            : 'border-slate-800 bg-slate-900/80 text-slate-300 hover:border-slate-700'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-black text-white font-bangla">{isBn ? 'ক্যাশ অন ডেলিভারি' : 'Cash on Delivery'}</span>
+                          <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${paymentOptionType === 'cod' ? 'border-emerald-500 bg-emerald-500' : 'border-slate-600'}`}>
+                            {paymentOptionType === 'cod' && <div className="w-1.5 h-1.5 rounded-full bg-slate-950" />}
+                          </div>
+                        </div>
+                        <p className="text-[10.5px] text-slate-400 font-bangla">{isBn ? 'পণ্য হাতে পেয়ে সম্পূর্ণ মূল্য পরিশোধ করুন' : 'Pay full amount in cash upon parcel receipt'}</p>
+                        <span className="text-xs font-black text-emerald-400 font-mono">{isBn ? '৳০ অগ্রিম' : '৳0 Advance'}</span>
+                      </button>
+                    )}
+
+                    {effectiveDeliveryAllowed && (
+                      <button
+                        type="button"
+                        onClick={() => setPaymentOptionType('delivery_only')}
+                        className={`p-3 rounded-xl sm:rounded-2xl border-2 text-left transition-all cursor-pointer flex flex-col justify-between gap-1.5 ${
+                          paymentOptionType === 'delivery_only'
+                            ? 'border-indigo-500 bg-indigo-500/10 ring-1 ring-indigo-500/30'
+                            : 'border-slate-800 bg-slate-900/80 text-slate-300 hover:border-slate-700'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-black text-white font-bangla">{isBn ? 'ডেলিভারি চার্জ অগ্রিম' : 'Delivery Charge Advance'}</span>
+                          <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${paymentOptionType === 'delivery_only' ? 'border-indigo-500 bg-indigo-500' : 'border-slate-600'}`}>
+                            {paymentOptionType === 'delivery_only' && <div className="w-1.5 h-1.5 rounded-full bg-slate-950" />}
+                          </div>
+                        </div>
+                        <p className="text-[10.5px] text-slate-400 font-bangla">{isBn ? `বাকি ৳${subtotal.toLocaleString()} পণ্য পেয়ে দিবেন` : `Pay remaining ৳${subtotal.toLocaleString()} upon delivery`}</p>
+                        <span className="text-xs font-black text-indigo-400 font-mono">৳{currentDeliveryCharge} {isBn ? 'অগ্রিম' : 'Advance'}</span>
+                      </button>
+                    )}
+
+                    {effectiveFullAllowed && (
+                      <button
+                        type="button"
+                        onClick={() => setPaymentOptionType('full')}
+                        className={`p-3 rounded-xl sm:rounded-2xl border-2 text-left transition-all cursor-pointer flex flex-col justify-between gap-1.5 ${
+                          paymentOptionType === 'full'
+                            ? 'border-amber-500 bg-amber-500/10 ring-1 ring-amber-500/30'
+                            : 'border-slate-800 bg-slate-900/80 text-slate-300 hover:border-slate-700'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-black text-white font-bangla">{isBn ? 'ফুল পেমেন্ট অগ্রিম' : 'Full Advance Payment'}</span>
+                          <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${paymentOptionType === 'full' ? 'border-amber-500 bg-amber-500' : 'border-slate-600'}`}>
+                            {paymentOptionType === 'full' && <div className="w-1.5 h-1.5 rounded-full bg-slate-950" />}
+                          </div>
+                        </div>
+                        <p className="text-[10.5px] text-slate-400 font-bangla">{isBn ? 'সম্পূর্ণ অর্ডার মূল্য অগ্রিম পরিশোধ' : 'Pay total order amount in advance'}</p>
+                        <span className="text-xs font-black text-amber-400 font-mono">৳{totalPayable.toLocaleString()} {isBn ? 'পরিশোধ' : 'Paid'}</span>
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Advance Payment Details Input Card */}
+                  {paymentOptionType !== 'cod' && (
+                    <div className="p-3.5 sm:p-4 rounded-xl bg-slate-900/90 border border-slate-800 space-y-3 text-xs animate-in fade-in duration-200">
+                      <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                        <span className="font-bold text-slate-300 font-bangla">{isBn ? 'অগ্রিম প্রদেয় পরিমাণ:' : 'Advance Payable Amount:'}</span>
+                        <span className="font-black text-emerald-400 font-mono text-sm">
+                          ৳{paymentOptionType === 'full' ? totalPayable.toLocaleString() : currentDeliveryCharge.toLocaleString()}
+                        </span>
+                      </div>
+
+                      {/* Gateway Tabs */}
+                      <div className="space-y-1.5">
+                        <label className="text-[11px] font-bold text-slate-400 font-bangla">{isBn ? 'পেমেন্ট গেটওয়ে নির্বাচন করুন:' : 'Select Payment Gateway:'}</label>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setSelectedGateway('bkash')}
+                            className={`flex-1 py-2 px-3 rounded-lg border text-center font-bold text-xs cursor-pointer transition-all ${
+                              selectedGateway === 'bkash'
+                                ? 'bg-pink-600 text-white border-pink-500 shadow-sm'
+                                : 'bg-slate-950 text-slate-400 border-slate-800 hover:text-white'
+                            }`}
+                          >
+                            bKash (বিকাশ)
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setSelectedGateway('nagad')}
+                            className={`flex-1 py-2 px-3 rounded-lg border text-center font-bold text-xs cursor-pointer transition-all ${
+                              selectedGateway === 'nagad'
+                                ? 'bg-orange-600 text-white border-orange-500 shadow-sm'
+                                : 'bg-slate-950 text-slate-400 border-slate-800 hover:text-white'
+                            }`}
+                          >
+                            Nagad (নগদ)
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Payment Number & Copy Button */}
+                      <div className="p-2.5 rounded-lg bg-slate-950 border border-slate-800 flex items-center justify-between gap-2">
+                        <div className="min-w-0">
+                          <span className="text-[10px] text-slate-400 uppercase font-mono block">
+                            {selectedGateway === 'bkash' ? 'bKash Personal / Merchant' : 'Nagad Personal / Merchant'} Number:
+                          </span>
+                          <span className="font-mono font-bold text-white text-xs sm:text-sm tracking-wide">
+                            {selectedGateway === 'bkash'
+                              ? (siteSettings?.bkashNumber || '01700000000')
+                              : (siteSettings?.nagadNumber || '01800000000')}
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const num = selectedGateway === 'bkash'
+                              ? (siteSettings?.bkashNumber || '01700000000')
+                              : (siteSettings?.nagadNumber || '01800000000');
+                            navigator.clipboard.writeText(num);
+                            setCopiedNumber(true);
+                            setTimeout(() => setCopiedNumber(false), 2000);
+                          }}
+                          className="px-2.5 py-1.5 rounded-md bg-slate-800 text-slate-200 hover:bg-slate-700 text-[11px] font-bold shrink-0 flex items-center gap-1 cursor-pointer transition-colors"
+                        >
+                          {copiedNumber ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                          <span>{copiedNumber ? (isBn ? 'কপি হয়েছে' : 'Copied') : (isBn ? 'কপি করুন' : 'Copy')}</span>
+                        </button>
+                      </div>
+
+                      {/* Inputs: Sender Mobile & TrxID */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
+                        <div className="space-y-1">
+                          <label className="text-[11px] font-bold text-slate-300 font-bangla">
+                            {isBn ? 'প্রেরক বিকাশ/নগদ নম্বর *' : 'Sender bKash/Nagad Number *'}
+                          </label>
+                          <input
+                            type="tel"
+                            maxLength={11}
+                            value={senderMobile}
+                            onChange={(e) => setSenderMobile(cleanBDPhoneNumber(e.target.value))}
+                            placeholder="01XXXXXXXXX"
+                            className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs font-mono text-white focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-[11px] font-bold text-slate-300 font-bangla">
+                            Transaction ID (TrxID) *
+                          </label>
+                          <input
+                            type="text"
+                            value={transactionId}
+                            onChange={(e) => setTransactionId(e.target.value)}
+                            placeholder={isBn ? 'যেমন: 9J3K8L2P...' : 'e.g., 9J3K8L2P...'}
+                            className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs font-mono uppercase text-white focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="p-3 rounded-xl bg-slate-950/80 border border-slate-800/80 flex items-center gap-2.5 text-xs text-slate-400 font-bangla">
+                  <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
+                  <span>{isBn ? 'পেমেন্ট মেথড: ' : 'Payment Method: '}<strong className="text-white">{isBn ? 'ক্যাশ অন ডেলিভারি' : 'Cash on Delivery'}</strong> {isBn ? '(পণ্য হাতে পাওয়ার পর মূল্য পরিশোধ করবেন)' : '(Pay when you receive the parcel)'}</span>
+                </div>
+              )}
+
               {/* Summary Breakdown */}
               <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-2 text-xs font-bangla">
                 <div className="flex justify-between text-slate-400">
-                  <span>প্রোডাক্ট সাব-টোটাল ({quantity} টি):</span>
+                  <span>{isBn ? `প্রোডাক্ট সাব-টোটাল (${quantity} টি):` : `Product Subtotal (${quantity} items):`}</span>
                   <span className="font-bold text-white">৳{subtotal.toLocaleString()}</span>
                 </div>
                 <div className="flex justify-between text-slate-400">
-                  <span>ডেলিভারি চার্জ ({deliveryArea === 'inside_dhaka' ? (lp.insideDhakaLabel || 'ঢাকার ভেতরে') : (lp.outsideDhakaLabel || 'ঢাকার বাইরে')}):</span>
+                  <span>{isBn ? `ডেলিভারি চার্জ (${deliveryArea === 'inside_dhaka' ? (lp.insideDhakaLabel || 'ঢাকার ভেতরে') : (lp.outsideDhakaLabel || 'ঢাকার বাইরে')}):` : `Delivery Charge (${deliveryArea === 'inside_dhaka' ? (lp.insideDhakaLabel || 'Inside Dhaka') : (lp.outsideDhakaLabel || 'Outside Dhaka')}):`}</span>
                   <span className="font-bold text-emerald-400">
-                    {currentDeliveryCharge === 0 ? 'ফ্রি' : `৳${currentDeliveryCharge}`}
+                    {currentDeliveryCharge === 0 ? (isBn ? 'ফ্রি' : 'Free') : `৳${currentDeliveryCharge}`}
                   </span>
                 </div>
                 <div className="flex justify-between text-base font-black text-white pt-2 border-t border-slate-800">
-                  <span>সর্বমোট প্রদেয় মূল্য:</span>
+                  <span>{isBn ? 'সর্বমোট প্রদেয় মূল্য:' : 'Grand Total:'}</span>
                   <span className="text-emerald-400">৳{totalPayable.toLocaleString()}</span>
                 </div>
               </div>
@@ -1542,15 +1862,15 @@ export const ProductLandingPageView: React.FC<ProductLandingPageViewProps> = ({
                 <Lock className="w-5 h-5" />
                 <span>
                   {isSubmittingOrder
-                    ? 'অর্ডার প্রসেসিং হচ্ছে...'
+                    ? (isBn ? 'অর্ডার প্রসেসিং হচ্ছে...' : 'Processing Order...')
                     : (lp.customButtonText && !lp.customButtonText.includes('ক্যাশ অন ডেলিভারিতে')
                         ? lp.customButtonText
-                        : 'অর্ডার কনফার্ম করুন')}
+                        : (isBn ? 'অর্ডার কনফার্ম করুন' : 'Confirm Order Now'))}
                 </span>
               </button>
 
               <p className="text-center text-[11px] text-slate-400 font-bangla">
-                {lp.orderSecurityNotice || '🔒 আপনার সকল তথ্য ১০০% সুরক্ষিত এবং ক্যাশ অন ডেলিভারিতে পণ্য হাতে পাওয়ার পর মূল্য পরিশোধ করতে পারবেন।'}
+                {lp.orderSecurityNotice || (isBn ? '🔒 আপনার সকল তথ্য ১০০% সুরক্ষিত এবং ক্যাশ অন ডেলিভারিতে পণ্য হাতে পাওয়ার পর মূল্য পরিশোধ করতে পারবেন।' : '🔒 Your information is 100% secure. You can inspect the item and pay upon delivery.')}
               </p>
             </form>
           )}
@@ -1561,10 +1881,10 @@ export const ProductLandingPageView: React.FC<ProductLandingPageViewProps> = ({
           <div className="space-y-6 pt-4">
             <div className="text-center space-y-2 max-w-xl mx-auto">
               <span className="text-xs font-black uppercase tracking-wider text-indigo-400 font-bangla">
-                {lp.similarSectionSubtitle || 'সম্পর্কিত পণ্যসমূহ'}
+                {lp.similarSectionSubtitle || (isBn ? 'সম্পর্কিত পণ্যসমূহ' : 'Related Products')}
               </span>
               <h3 className="text-xl sm:text-3xl font-black text-white font-bangla">
-                {lp.similarSectionTitle || 'সম্পর্কিত অন্যান্য আকর্ষণীয় পণ্যসমূহ'}
+                {lp.similarSectionTitle || (isBn ? 'সম্পর্কিত অন্যান্য আকর্ষণীয় পণ্যসমূহ' : 'Similar High-Quality Products')}
               </h3>
             </div>
 
@@ -1595,7 +1915,7 @@ export const ProductLandingPageView: React.FC<ProductLandingPageViewProps> = ({
                         {p.name}
                       </h4>
                       <p className="text-[11px] text-slate-400 line-clamp-1 mt-0.5 font-bangla">
-                        {p.banglaName || 'প্রিমিয়াম কালেকশন'}
+                        {p.banglaName || (isBn ? 'প্রিমিয়াম কালেকশন' : 'Premium Collection')}
                       </p>
                     </div>
                   </div>
@@ -1605,7 +1925,7 @@ export const ProductLandingPageView: React.FC<ProductLandingPageViewProps> = ({
                       ৳{p.price.toLocaleString()}
                     </span>
                     <span className="text-[10px] font-bold text-indigo-300 bg-indigo-500/20 px-2 py-0.5 rounded-md">
-                      অর্ডার দেখুন
+                      {isBn ? 'অর্ডার দেখুন' : 'View Order'}
                     </span>
                   </div>
                 </div>
@@ -1625,7 +1945,7 @@ export const ProductLandingPageView: React.FC<ProductLandingPageViewProps> = ({
           />
           <div className="min-w-0">
             <span className="text-[10px] text-slate-400 block truncate">
-              {lp.stickyBarSubtext || 'অফার মূল্য'}
+              {lp.stickyBarSubtext || (isBn ? 'অফার মূল্য' : 'Offer Price')}
             </span>
             <span className="text-sm font-black text-emerald-400">৳{currentPrice.toLocaleString()}</span>
           </div>
@@ -1637,9 +1957,18 @@ export const ProductLandingPageView: React.FC<ProductLandingPageViewProps> = ({
           className={`px-5 py-2.5 rounded-xl font-black text-xs flex items-center gap-1.5 shadow-lg shrink-0 cursor-pointer animate-pulse font-bangla ${theme.btnGradient}`}
         >
           <ShoppingBag className="w-4 h-4" />
-          <span>{lp.stickyBarButtonText || lp.customButtonText || 'অর্ডার করুন'}</span>
+          <span>{lp.stickyBarButtonText || lp.customButtonText || (isBn ? 'অর্ডার করুন' : 'Order Now')}</span>
         </button>
       </div>
+      {/* Order Restriction Contact Popup Modal */}
+      <OrderRestrictionModal
+        isOpen={restrictionModal.isOpen}
+        onClose={() => setRestrictionModal((prev) => ({ ...prev, isOpen: false }))}
+        reason={restrictionModal.reason}
+        customMessage={restrictionModal.customMessage}
+        customerPhone={restrictionModal.customerPhone}
+        siteSettings={siteSettings}
+      />
     </div>
   );
 };

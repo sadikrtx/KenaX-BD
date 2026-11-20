@@ -1,4 +1,4 @@
-import { Order, StaffUser } from '../types/index.ts';
+import type { Order, StaffUser } from '../types/index.ts';
 import { triggerWhatsAppEvent } from './whatsappService.ts';
 import { triggerTelegramFakeOrderAlert } from './telegramBotService.ts';
 

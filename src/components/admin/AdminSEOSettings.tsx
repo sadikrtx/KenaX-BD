@@ -17,6 +17,7 @@ import {
 import { SEOSettings, WebsiteSettings } from '../../types';
 import { DEFAULT_SEO_SETTINGS } from '../../data/initialSettings';
 import { applySEOMetaTags } from '../../utils/seo';
+import { PluginSlotRenderer } from './PluginSlotRenderer';
 
 interface AdminSEOSettingsProps {
   siteSettings: WebsiteSettings;
@@ -106,6 +107,9 @@ export const AdminSEOSettings: React.FC<AdminSEOSettingsProps> = ({
 
   return (
     <div className="space-y-6">
+      {/* Extension Slot: SEO Manager -> Website SEO Settings */}
+      <PluginSlotRenderer slot="admin.seo.settings_panel" />
+
       {/* Top Header Card */}
       <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 rounded-2xl p-6 text-white shadow-xl border border-indigo-900/40">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">

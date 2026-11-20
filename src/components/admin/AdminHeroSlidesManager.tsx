@@ -1,4 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
+import {
+  SaasDonutChart,
+  SaasBarChart,
+  CollapsibleAnalyticsPanel,
+} from './charts/AdminCharts';
 import {
   HeroBannerSlide,
   DEFAULT_HERO_BANNERS,
@@ -136,6 +141,27 @@ export const AdminHeroSlidesManager: React.FC<AdminHeroSlidesManagerProps> = ({
 
   const allExpanded = heroBanners.length > 0 && heroBanners.every((s, i) => Boolean(expandedSlideIds[s.id || `slide-${i}`]));
 
+  const heroChartData = useMemo(() => {
+    const imgCount = heroBanners.filter((s) => (s.mediaType || 'image') === 'image').length;
+    const vidCount = heroBanners.filter((s) => s.mediaType === 'video').length;
+    const ytCount = heroBanners.filter((s) => s.mediaType === 'youtube').length;
+
+    const mediaSlices = [
+      { id: 'image', label: 'Image Banner', value: imgCount, color: '#2563EB' },
+      { id: 'video', label: 'Uploaded Video', value: vidCount, color: '#7C3AED' },
+      { id: 'youtube', label: 'YouTube Embed', value: ytCount, color: '#E11D48' },
+    ];
+
+    const slideBars = heroBanners.map((s, idx) => ({
+      id: s.id || `slide-${idx}`,
+      label: `Slide #${idx + 1}`,
+      value: s.badges?.length || (s.badge ? 1 : 0),
+      secondaryValue: s.buttons?.length || 1,
+    }));
+
+    return { mediaSlices, slideBars };
+  }, [heroBanners]);
+
   return (
     <div id="admin-hero-slides-manager" className="p-3 sm:p-6 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xs space-y-3.5 sm:space-y-4">
       {/* Top Header & Cloud Sync Bar */}
@@ -228,6 +254,30 @@ export const AdminHeroSlidesManager: React.FC<AdminHeroSlidesManagerProps> = ({
           )}
         </div>
       )}
+
+      {/* Hero Slides Analytics */}
+      <CollapsibleAnalyticsPanel title="Hero Carousel Breakdown" defaultOpen={true}>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <SaasDonutChart
+            title="Media Format Mix"
+            subtitle="Image banners vs video & YouTube slides"
+            data={heroChartData.mediaSlices}
+            centerLabel="Slides"
+          />
+          <SaasBarChart
+            title="Badges & CTA Buttons per Slide"
+            subtitle="Click a slide bar to expand its editor"
+            data={heroChartData.slideBars}
+            primaryLabel="Badges"
+            secondaryLabel="CTA Buttons"
+            onSelectBar={(bar) => {
+              if (bar.id) {
+                setExpandedSlideIds((prev) => ({ ...prev, [bar.id!]: true }));
+              }
+            }}
+          />
+        </div>
+      </CollapsibleAnalyticsPanel>
 
       {/* Compact Accordion Slides List */}
       <div className="space-y-3">

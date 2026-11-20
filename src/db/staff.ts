@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { StaffUser } from '../types/index.ts';
+import type { StaffUser } from '../types/index.ts';
 import { normalizeBDPhoneNumber } from '../utils/phoneUtils.ts';
 
 const SERVER_STORE_DIR = path.join(process.cwd(), 'data');

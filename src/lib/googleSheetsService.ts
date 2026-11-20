@@ -2,7 +2,7 @@ import { initializeApp, getApps, getApp } from 'firebase/app';
 import { GoogleAuthProvider, signInWithPopup, User } from 'firebase/auth';
 import { auth } from './firebase.ts';
 import firebaseConfig from '../../firebase-applet-config.json' with { type: 'json' };
-import { CustomerRecord, Order, Product, StaffUser } from '../types/index.ts';
+import type { CustomerRecord, Order, Product, StaffUser } from '../types/index.ts';
 
 // Google OAuth Scopes for Google Sheets & Drive File access (disabled)
 export const GOOGLE_SHEETS_SCOPES: string[] = [];

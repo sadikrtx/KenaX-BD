@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import { CustomerRecord, Product, UserRole } from '../../types';
 import { getOptimizedImageUrl, handleImageError } from '../../utils/imageOptimizer';
+import { SaasDonutChart, SaasBarChart } from './charts/AdminCharts';
 
 interface AdminWishlistActivitiesProps {
   customers: CustomerRecord[];
@@ -195,6 +196,42 @@ export const AdminWishlistActivities: React.FC<AdminWishlistActivitiesProps> = (
             Ready for instant purchase
           </p>
         </div>
+      </div>
+
+      {/* Wishlist Visual Insights */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <SaasDonutChart
+          title="Saved Items Stock Readiness"
+          subtitle="Click a slice to filter by stock status"
+          centerLabel="Saved"
+          onSelectSlice={(s) => {
+            if (s.id === 'in_stock' || s.id === 'out_of_stock') setStockFilter(s.id);
+          }}
+          data={[
+            { id: 'in_stock', label: 'In Stock', value: inStockWishlistCount, color: '#059669' },
+            { id: 'out_of_stock', label: 'Out of Stock', value: Math.max(0, totalSavedProducts - inStockWishlistCount), color: '#E11D48' },
+          ]}
+        />
+
+        <SaasBarChart
+          title="Most Wishlisted Products"
+          subtitle="Top saved products by shopper interest"
+          orientation="horizontal"
+          barColor="#E11D48"
+          data={(() => {
+            const map = new Map<string, number>();
+            customersWithWishlist.forEach((c) => {
+              (c.wishlist || []).forEach((p) => {
+                const name = p.name || 'Product';
+                map.set(name, (map.get(name) || 0) + 1);
+              });
+            });
+            return Array.from(map.entries())
+              .sort((a, b) => b[1] - a[1])
+              .slice(0, 6)
+              .map(([label, value]) => ({ label, value, color: '#E11D48' }));
+          })()}
+        />
       </div>
 
       {/* Search & Filters */}

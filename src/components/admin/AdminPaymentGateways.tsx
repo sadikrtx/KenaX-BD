@@ -1,4 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
+import {
+  SaasDonutChart,
+  SaasBarChart,
+  CollapsibleAnalyticsPanel,
+  SAAS_CHART_COLORS,
+} from './charts/AdminCharts';
 import {
   CreditCard,
   Smartphone,
@@ -425,6 +431,53 @@ export const AdminPaymentGateways: React.FC<AdminPaymentGatewaysProps> = ({
     }
   };
 
+  const gatewayAnalytics = useMemo(() => {
+    const accountMap: Record<string, number> = {};
+    gateways.forEach((g) => {
+      const key = g.accountType || 'Other';
+      accountMap[key] = (accountMap[key] || 0) + 1;
+    });
+    const accountTypeSlices = Object.entries(accountMap).map(([label, value], idx) => ({
+      id: label,
+      label,
+      value,
+      color: SAAS_CHART_COLORS[idx % SAAS_CHART_COLORS.length],
+    }));
+
+    const scopeBuckets: { key: PaymentAssignedCategory; label: string }[] = [
+      { key: 'all', label: 'All Checkouts' },
+      { key: 'full', label: 'Full Payment' },
+      { key: 'delivery_only', label: 'Delivery Fee' },
+      { key: 'cod', label: 'COD Only' },
+    ];
+    const scopeBars = scopeBuckets.map((b) => {
+      const matching = gateways.filter((g) => (g.assignedTo || 'all') === b.key);
+      return {
+        id: b.key,
+        label: b.label,
+        value: matching.filter((g) => g.isEnabled).length,
+        secondaryValue: matching.length,
+      };
+    });
+
+    const statusSlices = [
+      {
+        id: 'enabled',
+        label: 'Enabled',
+        value: gateways.filter((g) => g.isEnabled).length,
+        color: '#059669',
+      },
+      {
+        id: 'disabled',
+        label: 'Disabled',
+        value: gateways.filter((g) => !g.isEnabled).length,
+        color: '#64748B',
+      },
+    ];
+
+    return { accountTypeSlices, scopeBars, statusSlices };
+  }, [gateways]);
+
   return (
     <div className="space-y-6">
       {/* Header Banner */}
@@ -485,6 +538,31 @@ export const AdminPaymentGateways: React.FC<AdminPaymentGatewaysProps> = ({
         </div>
       )}
 
+      {/* Payment Gateway Analytics */}
+      <CollapsibleAnalyticsPanel title="Payment Gateways Overview" defaultOpen={true}>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          <SaasDonutChart
+            title="Gateway Status"
+            subtitle="Active vs disabled methods"
+            data={gatewayAnalytics.statusSlices}
+            centerLabel="Gateways"
+          />
+          <SaasDonutChart
+            title="Account Type Split"
+            subtitle="Configured account categories"
+            data={gatewayAnalytics.accountTypeSlices}
+            centerLabel="Accounts"
+          />
+          <SaasBarChart
+            title="Checkout Scope Coverage"
+            subtitle="Active vs configured per checkout rule"
+            data={gatewayAnalytics.scopeBars}
+            primaryLabel="Enabled"
+            secondaryLabel="Total"
+          />
+        </div>
+      </CollapsibleAnalyticsPanel>
+
       {/* Quick Add Presets Row */}
       <div className="hidden sm:block bg-slate-50 dark:bg-slate-800/80 p-4 rounded-2xl border border-slate-200 dark:border-slate-700 space-y-2">
         <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
@@ -538,7 +616,11 @@ export const AdminPaymentGateways: React.FC<AdminPaymentGatewaysProps> = ({
               <input
                 type="checkbox"
                 checked={enableCod}
-                onChange={(e) => setEnableCod(e.target.checked)}
+                onChange={(e) => {
+                  const val = e.target.checked;
+                  setEnableCod(val);
+                  persistSettings(gateways, val, enableFullPayment, enableDeliveryOnlyPayment, paymentNotice);
+                }}
                 className="w-4 h-4 accent-sky-600 rounded cursor-pointer"
               />
             </div>
@@ -560,7 +642,11 @@ export const AdminPaymentGateways: React.FC<AdminPaymentGatewaysProps> = ({
               <input
                 type="checkbox"
                 checked={enableFullPayment}
-                onChange={(e) => setEnableFullPayment(e.target.checked)}
+                onChange={(e) => {
+                  const val = e.target.checked;
+                  setEnableFullPayment(val);
+                  persistSettings(gateways, enableCod, val, enableDeliveryOnlyPayment, paymentNotice);
+                }}
                 className="w-4 h-4 accent-sky-600 rounded cursor-pointer"
               />
             </div>
@@ -582,7 +668,11 @@ export const AdminPaymentGateways: React.FC<AdminPaymentGatewaysProps> = ({
               <input
                 type="checkbox"
                 checked={enableDeliveryOnlyPayment}
-                onChange={(e) => setEnableDeliveryOnlyPayment(e.target.checked)}
+                onChange={(e) => {
+                  const val = e.target.checked;
+                  setEnableDeliveryOnlyPayment(val);
+                  persistSettings(gateways, enableCod, enableFullPayment, val, paymentNotice);
+                }}
                 className="w-4 h-4 accent-sky-600 rounded cursor-pointer"
               />
             </div>

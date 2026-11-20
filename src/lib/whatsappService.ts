@@ -1,4 +1,4 @@
-import { Order, WhatsAppSettings, WhatsAppTemplate, WhatsAppEventType, WhatsAppMessageRecord, WhatsAppConversation, Product } from '../types/index.ts';
+import type { Order, WhatsAppSettings, WhatsAppTemplate, WhatsAppEventType, WhatsAppMessageRecord, WhatsAppConversation, Product } from '../types/index.ts';
 import { INITIAL_PRODUCTS } from '../data/initialProducts.ts';
 import { db, isQuotaExceededError, markQuotaExceeded, isQuotaExceededFlag } from './firebase.ts';
 import { doc, getDoc, setDoc, onSnapshot, collection, query, orderBy, limit, getDocs } from 'firebase/firestore';
@@ -436,7 +436,7 @@ const LOCAL_STORAGE_KEY = 'kenax_whatsapp_settings';
 
 export async function getWhatsAppSettingsFromDB(): Promise<WhatsAppSettings> {
   try {
-    if (db) {
+    if (db && !isQuotaExceededFlag) {
       const snap = await getDoc(doc(db, 'system_settings', SETTINGS_DOC_ID));
       if (snap.exists()) {
         const data = snap.data() as Partial<WhatsAppSettings>;
@@ -483,7 +483,7 @@ export async function getWhatsAppSettingsFromDB(): Promise<WhatsAppSettings> {
       }
     }
   } catch (err) {
-    console.warn('[WhatsApp Settings DB Read Fallback]:', err);
+    if (isQuotaExceededError(err)) markQuotaExceeded(err);
   }
 
   try {
@@ -1161,16 +1161,22 @@ export function subscribeToWhatsAppCustomNames(callback: (names: Record<string, 
 
   if (db && !isQuotaExceededFlag) {
     try {
-      return onSnapshot(doc(db, 'whatsapp_metadata', 'custom_names'), (snapshot) => {
-        if (!isSubscribed) return;
-        if (snapshot.exists()) {
-          const names = snapshot.data() as Record<string, string>;
-          try {
-            localStorage.setItem('kenax_whatsapp_custom_names', JSON.stringify(names));
-          } catch {}
-          callback(names);
+      return onSnapshot(
+        doc(db, 'whatsapp_metadata', 'custom_names'),
+        (snapshot) => {
+          if (!isSubscribed) return;
+          if (snapshot.exists()) {
+            const names = snapshot.data() as Record<string, string>;
+            try {
+              localStorage.setItem('kenax_whatsapp_custom_names', JSON.stringify(names));
+            } catch {}
+            callback(names);
+          }
+        },
+        (err) => {
+          if (isQuotaExceededError(err)) markQuotaExceeded(err);
         }
-      });
+      );
     } catch {}
   }
 
@@ -1214,7 +1220,8 @@ export async function getWhatsAppPinnedChatsFromDB(): Promise<string[]> {
 
     const cached = localStorage.getItem('kenax_whatsapp_pinned_chats');
     return cached ? JSON.parse(cached).map((p: string) => normalizePhoneNumber(p)) : [];
-  } catch {
+  } catch (err) {
+    if (isQuotaExceededError(err)) markQuotaExceeded(err);
     const cached = localStorage.getItem('kenax_whatsapp_pinned_chats');
     return cached ? JSON.parse(cached).map((p: string) => normalizePhoneNumber(p)) : [];
   }
@@ -1246,7 +1253,9 @@ export async function toggleWhatsAppPinnedChatInDB(phone: string): Promise<strin
           updatedAt: new Date().toISOString(),
         },
         { merge: true }
-      );
+      ).catch((err) => {
+        if (isQuotaExceededError(err)) markQuotaExceeded(err);
+      });
     }
 
     // Persist to server API
@@ -1258,7 +1267,7 @@ export async function toggleWhatsAppPinnedChatInDB(phone: string): Promise<strin
 
     return newList;
   } catch (err) {
-    console.warn('Failed to toggle pinned chat:', err);
+    if (isQuotaExceededError(err)) markQuotaExceeded(err);
     return [];
   }
 }
@@ -1272,19 +1281,25 @@ export function subscribeToWhatsAppPinnedChats(callback: (pinnedList: string[]) 
   let unsubFirestore: (() => void) | null = null;
   if (db && !isQuotaExceededFlag) {
     try {
-      unsubFirestore = onSnapshot(doc(db, 'whatsapp_metadata', 'pinned_chats'), (snapshot) => {
-        if (!isSubscribed) return;
-        if (snapshot.exists()) {
-          const data = snapshot.data();
-          const list: string[] = Array.isArray(data?.list)
-            ? data.list.map((p: string) => normalizePhoneNumber(p))
-            : [];
-          try {
-            localStorage.setItem('kenax_whatsapp_pinned_chats', JSON.stringify(list));
-          } catch {}
-          callback(list);
+      unsubFirestore = onSnapshot(
+        doc(db, 'whatsapp_metadata', 'pinned_chats'),
+        (snapshot) => {
+          if (!isSubscribed) return;
+          if (snapshot.exists()) {
+            const data = snapshot.data();
+            const list: string[] = Array.isArray(data?.list)
+              ? data.list.map((p: string) => normalizePhoneNumber(p))
+              : [];
+            try {
+              localStorage.setItem('kenax_whatsapp_pinned_chats', JSON.stringify(list));
+            } catch {}
+            callback(list);
+          }
+        },
+        (err) => {
+          if (isQuotaExceededError(err)) markQuotaExceeded(err);
         }
-      });
+      );
     } catch {}
   }
 

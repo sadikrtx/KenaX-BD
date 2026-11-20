@@ -107,24 +107,32 @@ export const AdminHeader: React.FC<AdminHeaderProps> = ({
   const unreadCount = notifications.filter((n) => !n.isRead).length;
 
   const getTabTitle = (tab: AdminTab) => {
+    const isBn = language === 'bn';
     switch (tab) {
-      case 'overview': return 'Dashboard Overview';
-      case 'orders': return 'Order Management';
-      case 'products': return 'Product Catalog';
-      case 'categories': return 'Category Management';
-      case 'inventory': return 'Inventory & Stock Control';
-      case 'customers': return 'Customer Management';
-      case 'delivery': return 'Delivery & Courier Logistics';
-      case 'payments': return 'Payments & Transactions';
-      case 'coupons': return 'Coupons & Discounts';
-      case 'reviews': return 'Reviews & Moderation';
-      case 'staff': return 'Staff & RBAC Administration';
-      case 'roles': return 'Role Permissions Matrix';
-      case 'reports': return 'Sales & Financial Reports';
-      case 'logs': return 'Audit & Activity Logs';
-      case 'settings': return 'Website & Store Settings';
-      case 'gmail-alerts': return 'Gmail Alerts & Template Manager';
-      default: return 'Admin Portal';
+      case 'overview': return isBn ? 'ড্যাশবোর্ড ওভারভিউ' : 'Dashboard Overview';
+      case 'my-dashboard': return isBn ? 'আমার ড্যাশবোর্ড' : 'My Dashboard';
+      case 'dealers': return isBn ? 'ডিলার ব্যবস্থাপনা' : 'Dealer Management';
+      case 'dropshipping': return isBn ? 'সরবরাহকারী ব্যবস্থাপনা' : 'Supplier Management';
+      case 'orders': return isBn ? 'অর্ডার ব্যবস্থাপনা' : 'Order Management';
+      case 'products': return isBn ? 'পণ্য ক্যাটালগ' : 'Product Catalog';
+      case 'price-calculator': return isBn ? 'সেলিং প্রাইস ক্যালকুলেটর' : 'Price Calculator';
+      case 'categories': return isBn ? 'ক্যাটাগরি ব্যবস্থাপনা' : 'Category Management';
+      case 'inventory': return isBn ? 'ইনভেন্টরি ও স্টক' : 'Inventory & Stock Control';
+      case 'customers': return isBn ? 'গ্রাহক ব্যবস্থাপনা' : 'Customer Management';
+      case 'delivery': return isBn ? 'ডেলিভারি ও কুরিয়ার' : 'Delivery & Courier Logistics';
+      case 'payments': return isBn ? 'পেমেন্ট ও লেনদেন' : 'Payments & Transactions';
+      case 'coupons': return isBn ? 'কুপন ও ছাড়' : 'Coupons & Discounts';
+      case 'get-offers': return isBn ? 'স্পেশাল অফার ও পপআপ' : 'Get Offers & Visitor Popup';
+      case 'reviews': return isBn ? 'রিভিউ ও মডারেশন' : 'Reviews & Moderation';
+      case 'staff': return isBn ? 'স্টাফ ও আরব্যাক' : 'Staff & RBAC Administration';
+      case 'roles': return isBn ? 'রোল পারমিশন ম্যাট্রিক্স' : 'Role Permissions Matrix';
+      case 'reports': return isBn ? 'বিক্রয় ও আর্থিক রিপোর্ট' : 'Sales & Financial Reports';
+      case 'logs': return isBn ? 'অডিট ও অ্যাক্টিভিটি লগ' : 'Audit & Activity Logs';
+      case 'settings': return isBn ? 'ওয়েবসাইট ও স্টোর সেটিংস' : 'Website & Store Settings';
+      case 'integration-settings': return isBn ? 'Muse AI ইন্টিগ্রেশন ও API Key' : 'Muse AI Integration';
+      case 'storage-settings': return isBn ? 'স্টোরেজ ও ক্লাউড' : 'Storage & Cloud';
+      case 'gmail-alerts': return isBn ? 'ইমেইল অ্যালার্ট ম্যানেজার' : 'Gmail Alerts & Template Manager';
+      default: return isBn ? 'অ্যাডমিন পোর্টাল' : 'Admin Portal';
     }
   };
 
@@ -180,39 +188,39 @@ export const AdminHeader: React.FC<AdminHeaderProps> = ({
           </button>
         )}
 
-        <div>
+        <div className="min-w-0">
           <div className="flex items-center gap-1.5 text-[11px] text-slate-400 dark:text-slate-500 font-medium hidden sm:flex">
             <span>KenaX BD Admin</span>
             <span>/</span>
-            <span className="text-slate-600 dark:text-slate-300 capitalize">{currentTab}</span>
+            <span className="text-slate-600 dark:text-slate-300 capitalize truncate">{currentTab}</span>
           </div>
-          <h1 className="text-base sm:text-lg font-bold text-slate-900 dark:text-white tracking-tight leading-tight">
+          <h1 className="text-sm sm:text-base lg:text-lg font-bold text-slate-900 dark:text-white tracking-tight leading-tight truncate">
             {getTabTitle(currentTab)}
           </h1>
         </div>
       </div>
 
       {/* Right Section: Quick actions & notification center */}
-      <div className="flex items-center gap-2 sm:gap-3">
+      <div className="flex items-center gap-1.5 sm:gap-2 lg:gap-3 shrink-0">
 
         {/* Quick Add Product button if on products or overview */}
         {onOpenAddProduct && (currentTab === 'products' || currentTab === 'overview') && (
           <button
             onClick={onOpenAddProduct}
-            className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-sky-600 hover:bg-sky-700 text-white text-xs font-semibold shadow-xs transition-colors cursor-pointer"
+            className="hidden sm:inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl bg-sky-600 hover:bg-sky-700 text-white text-xs font-semibold shadow-xs transition-colors cursor-pointer shrink-0"
           >
             <Plus className="w-4 h-4" />
-            <span>Add Product</span>
+            <span className="hidden md:inline">Add Product</span>
           </button>
         )}
 
         {/* Live Store link */}
         <button
           onClick={onNavigateToStore}
-          className="hidden md:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-medium transition-colors cursor-pointer border border-transparent dark:border-slate-700"
+          className="hidden md:inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-medium transition-colors cursor-pointer border border-transparent dark:border-slate-700 shrink-0"
         >
           <ExternalLink className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400" />
-          <span>View Store</span>
+          <span className="hidden lg:inline">View Store</span>
         </button>
 
         {/* Day / Night Theme Toggle */}

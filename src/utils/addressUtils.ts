@@ -1,4 +1,4 @@
-import { DeliveryAddress } from '../types/index.ts';
+import type { DeliveryAddress } from '../types/index.ts';
 import { normalizePhoneNumber } from '../lib/firebase.ts';
 
 /**

@@ -50,6 +50,12 @@ import {
   ActivityLog,
   isDemoOtherProfit,
 } from '../../types';
+import {
+  SaasDonutChart,
+  SaasBarChart,
+  SaasLineAreaChart,
+  SAAS_CHART_COLORS,
+} from './charts/AdminCharts';
 
 interface AdminCostsProps {
   expenses: ExpenseRecord[];
@@ -937,6 +943,50 @@ export const AdminCosts: React.FC<AdminCostsProps> = ({
             </div>
           </div>
 
+          {/* Visual Expense Analytics: Category Donut + Daily Spend Trend */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <SaasDonutChart
+              title="Expenses by Category"
+              subtitle="Click a slice to filter table"
+              valueFormat="currency"
+              centerLabel="Total Spend"
+              onSelectSlice={(s) => {
+                if (s.id) setSelectedCategory(selectedCategory === s.id ? 'all' : s.id);
+              }}
+              data={Object.entries(CATEGORY_CONFIG)
+                .map(([key, cfg], idx) => ({
+                  id: key,
+                  label: cfg.label,
+                  value: expenses.filter((e) => e.category === key).reduce((s, e) => s + e.amount, 0),
+                  color: SAAS_CHART_COLORS[idx % SAAS_CHART_COLORS.length],
+                }))
+                .filter((d) => d.value > 0)}
+            />
+
+            <SaasBarChart
+              title="Top Expense Recipients & Couriers"
+              subtitle="Grouped by courier / channel"
+              valueFormat="currency"
+              orientation="horizontal"
+              barColor="#E11D48"
+              data={(() => {
+                const map = new Map<string, number>();
+                filteredExpenses.forEach((e) => {
+                  const key = e.courier || CATEGORY_CONFIG[e.category]?.label || 'General';
+                  map.set(key, (map.get(key) || 0) + e.amount);
+                });
+                return Array.from(map.entries())
+                  .sort((a, b) => b[1] - a[1])
+                  .slice(0, 6)
+                  .map(([label, value], idx) => ({
+                    label,
+                    value,
+                    color: idx === 0 ? '#E11D48' : '#FB7185',
+                  }));
+              })()}
+            />
+          </div>
+
           {/* Filters & Search Toolbar */}
           <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-xs space-y-3">
             <div className="flex flex-col md:flex-row items-center gap-3">
@@ -1368,7 +1418,51 @@ export const AdminCosts: React.FC<AdminCostsProps> = ({
             </div>
           </div>
 
+          {/* Visual Extra Profit Charts */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <SaasDonutChart
+              title="Others Profit by Source Category"
+              subtitle="Click a slice to filter records"
+              valueFormat="currency"
+              centerLabel="Extra Profit"
+              onSelectSlice={(s) => {
+                if (s.id) setSelectedProfitSource(selectedProfitSource === s.id ? 'all' : s.id);
+              }}
+              data={Object.entries(OTHER_PROFIT_SOURCE_CONFIG)
+                .map(([key, cfg], idx) => ({
+                  id: key,
+                  label: cfg.label,
+                  value: cleanOtherProfits
+                    .filter((p) => p.sourceCategory === key)
+                    .reduce((s, p) => s + p.amount, 0),
+                  color: SAAS_CHART_COLORS[idx % SAAS_CHART_COLORS.length],
+                }))
+                .filter((d) => d.value > 0)}
+            />
 
+            <SaasBarChart
+              title="Top Income Origins"
+              subtitle="Extra profit contribution by partner/origin"
+              valueFormat="currency"
+              orientation="horizontal"
+              barColor="#059669"
+              data={(() => {
+                const map = new Map<string, number>();
+                filteredProfits.forEach((p) => {
+                  const origin = p.sourceOrigin || 'Direct Source';
+                  map.set(origin, (map.get(origin) || 0) + p.amount);
+                });
+                return Array.from(map.entries())
+                  .sort((a, b) => b[1] - a[1])
+                  .slice(0, 6)
+                  .map(([label, value]) => ({
+                    label,
+                    value,
+                    color: '#059669',
+                  }));
+              })()}
+            />
+          </div>
 
           {/* Filters & Search Toolbar for Others Profit */}
           <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-xs space-y-3">
@@ -1815,6 +1909,59 @@ export const AdminCosts: React.FC<AdminCostsProps> = ({
                 Others Profit minus Operational Costs
               </p>
             </div>
+          </div>
+
+          {/* Ledger Visual Comparison: Income vs Expense Trend & Category Breakdown */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+            <SaasLineAreaChart
+              title="Others Profit vs Operational Expense Trend"
+              subtitle="Chronological cashflow comparison by date"
+              primaryLabel="Others Profit (+)"
+              secondaryLabel="Expenses (-)"
+              primaryFormat="currency"
+              secondaryFormat="currency"
+              primaryColor="#059669"
+              secondaryColor="#E11D48"
+              data={(() => {
+                const map = new Map<string, { primary: number; secondary: number; sortKey: number }>();
+                cleanOtherProfits.forEach((p) => {
+                  const raw = p.date || p.createdAt;
+                  if (!raw) return;
+                  const dt = new Date(raw);
+                  if (isNaN(dt.getTime())) return;
+                  const key = dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                  const cur = map.get(key) || { primary: 0, secondary: 0, sortKey: new Date(dt.toDateString()).getTime() };
+                  cur.primary += p.amount || 0;
+                  map.set(key, cur);
+                });
+                expenses.forEach((e) => {
+                  const raw = e.date || e.createdAt;
+                  if (!raw) return;
+                  const dt = new Date(raw);
+                  if (isNaN(dt.getTime())) return;
+                  const key = dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                  const cur = map.get(key) || { primary: 0, secondary: 0, sortKey: new Date(dt.toDateString()).getTime() };
+                  cur.secondary += e.amount || 0;
+                  map.set(key, cur);
+                });
+                return Array.from(map.entries())
+                  .sort((a, b) => a[1].sortKey - b[1].sortKey)
+                  .slice(-10)
+                  .map(([label, v]) => ({ label, primary: v.primary, secondary: v.secondary }));
+              })()}
+            />
+
+            <SaasBarChart
+              title="Inflow vs Outflow Financial Summary"
+              subtitle="Gross extra inflow vs total operating costs"
+              valueFormat="currency"
+              data={[
+                { label: 'Others Profit', value: profitStats.totalProfit, color: '#059669' },
+                { label: 'Delivery Cost', value: expenseStats.totalDelivery, color: '#0284C7' },
+                { label: 'Packaging', value: expenseStats.totalPackaging, color: '#D97706' },
+                { label: 'Other Costs', value: expenseStats.totalOther, color: '#E11D48' },
+              ]}
+            />
           </div>
 
           {/* Source Breakdown vs Expense Categories */}

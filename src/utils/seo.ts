@@ -1,4 +1,4 @@
-import { SEOSettings, Product } from '../types/index.ts';
+import type { SEOSettings, Product } from '../types/index.ts';
 
 export function applySEOMetaTags(seo?: SEOSettings) {
   if (!seo || typeof document === 'undefined') return;

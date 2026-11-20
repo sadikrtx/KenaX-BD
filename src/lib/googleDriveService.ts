@@ -1,4 +1,4 @@
-import { auth, db } from './firebase.ts';
+import { auth, db, isQuotaExceededError, markQuotaExceeded, isQuotaExceededFlag } from './firebase.ts';
 import {
   GoogleAuthProvider,
   signInWithPopup,
@@ -78,24 +78,28 @@ export const hydrateGoogleDriveState = async (): Promise<{ token: string | null;
   } catch {}
 
   // 4. Try Firestore doc settings/google_drive
-  try {
-    const snap = await getDoc(doc(db, 'settings', 'google_drive'));
-    if (snap.exists()) {
-      const data = snap.data();
-      if (data?.permanentKey) cachedPermanentKey = data.permanentKey;
-      if (data?.token) cachedAccessToken = data.token;
-      cachedUser = data.user || cachedUser;
-      if (data.folderId) cachedFolderId = data.folderId;
-      if (typeof window !== 'undefined') {
-        try {
-          if (data.permanentKey) localStorage.setItem('kenax_google_drive_permanent_key', data.permanentKey);
-          if (data.token) localStorage.setItem('kenax_google_drive_token', data.token);
-          if (data.user) localStorage.setItem('kenax_google_drive_user', JSON.stringify(data.user));
-          if (data.folderId) localStorage.setItem('kenax_google_drive_folder_id', data.folderId);
-        } catch {}
+  if (!isQuotaExceededFlag) {
+    try {
+      const snap = await getDoc(doc(db, 'settings', 'google_drive'));
+      if (snap.exists()) {
+        const data = snap.data();
+        if (data?.permanentKey) cachedPermanentKey = data.permanentKey;
+        if (data?.token) cachedAccessToken = data.token;
+        cachedUser = data.user || cachedUser;
+        if (data.folderId) cachedFolderId = data.folderId;
+        if (typeof window !== 'undefined') {
+          try {
+            if (data.permanentKey) localStorage.setItem('kenax_google_drive_permanent_key', data.permanentKey);
+            if (data.token) localStorage.setItem('kenax_google_drive_token', data.token);
+            if (data.user) localStorage.setItem('kenax_google_drive_user', JSON.stringify(data.user));
+            if (data.folderId) localStorage.setItem('kenax_google_drive_folder_id', data.folderId);
+          } catch {}
+        }
       }
+    } catch (err) {
+      if (isQuotaExceededError(err)) markQuotaExceeded(err);
     }
-  } catch {}
+  }
 
   return { token: cachedPermanentKey || cachedAccessToken, user: cachedUser, permanentKey: cachedPermanentKey };
 };
@@ -131,22 +135,25 @@ export const saveGoogleDrivePermanentKey = async (
   }).catch(() => {});
 
   // Persist to Firestore
-  try {
-    await setDoc(
-      doc(db, 'settings', 'google_drive'),
-      {
-        permanentKey: cleanKey,
-        token: cleanKey,
-        user: cachedUser,
-        updatedAt: new Date().toISOString(),
-      },
-      { merge: true }
-    );
-    return true;
-  } catch (err) {
-    console.warn('[Google Drive] Firestore permanent key save notice:', err);
-    return true;
+  if (!isQuotaExceededFlag) {
+    try {
+      await setDoc(
+        doc(db, 'settings', 'google_drive'),
+        {
+          permanentKey: cleanKey,
+          token: cleanKey,
+          user: cachedUser,
+          updatedAt: new Date().toISOString(),
+        },
+        { merge: true }
+      );
+      return true;
+    } catch (err) {
+      if (isQuotaExceededError(err)) markQuotaExceeded(err);
+      return true;
+    }
   }
+  return true;
 };
 
 // Auto hydrate immediately

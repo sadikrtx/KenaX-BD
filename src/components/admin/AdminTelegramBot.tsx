@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Bot,
   Send,
@@ -64,6 +64,12 @@ import {
   triggerTelegramProductDiscountWorkflow,
 } from '../../lib/telegramBotService';
 import { hasPermission } from '../../lib/permissions';
+import {
+  SaasDonutChart,
+  SaasBarChart,
+  CollapsibleAnalyticsPanel,
+  SAAS_CHART_COLORS,
+} from './charts/AdminCharts';
 
 interface AdminTelegramBotProps {
   currentRole: UserRole;
@@ -213,6 +219,54 @@ export const AdminTelegramBot: React.FC<AdminTelegramBotProps> = ({
     const data = await getTelegramLogsFromDB();
     setLogs(data);
   };
+
+  const telegramAnalytics = useMemo(() => {
+    const sentCount = logs.filter((l) => l.status === 'sent').length;
+    const failedCount = logs.filter((l) => l.status !== 'sent').length;
+    const dispatchSlices = [
+      { id: 'sent', label: 'Sent Successfully', value: sentCount, color: '#059669' },
+      { id: 'failed', label: 'Failed Delivery', value: failedCount, color: '#E11D48' },
+    ].filter((s) => s.value > 0);
+
+    const statusEntries = Object.entries(settings.customerNotifyStatuses || {});
+    const enabledTriggers = statusEntries.filter(([, v]) => Boolean(v)).length;
+    const disabledTriggers = Math.max(0, statusEntries.length - enabledTriggers);
+    const triggerSlices = [
+      { id: 'enabled', label: 'Enabled Triggers', value: enabledTriggers, color: '#0284C7' },
+      { id: 'disabled', label: 'Disabled Triggers', value: disabledTriggers, color: '#64748B' },
+    ].filter((s) => s.value > 0);
+
+    const eventMap = new Map<string, { sent: number; failed: number }>();
+    logs.forEach((lg) => {
+      const ev = (lg.eventType || 'other').replace(/_/g, ' ');
+      const cur = eventMap.get(ev) || { sent: 0, failed: 0 };
+      if (lg.status === 'sent') cur.sent += 1;
+      else cur.failed += 1;
+      eventMap.set(ev, cur);
+    });
+
+    const eventBars = Array.from(eventMap.entries())
+      .map(([ev, counts]) => ({
+        id: ev,
+        label: ev.replace(/\b\w/g, (c) => c.toUpperCase()),
+        value: counts.sent,
+        secondaryValue: counts.failed,
+        color: '#0284C7',
+        secondaryColor: '#E11D48',
+      }))
+      .sort((a, b) => b.value + (b.secondaryValue || 0) - (a.value + (a.secondaryValue || 0)))
+      .slice(0, 8);
+
+    return {
+      dispatchSlices,
+      triggerSlices,
+      eventBars,
+      sentCount,
+      failedCount,
+      enabledTriggers,
+      totalTriggers: statusEntries.length,
+    };
+  }, [logs, settings.customerNotifyStatuses]);
 
   const handleTestConnection = async () => {
     if (!settings.botToken.trim()) {
@@ -764,6 +818,51 @@ export const AdminTelegramBot: React.FC<AdminTelegramBotProps> = ({
           )}
         </div>
       </div>
+
+      {/* Telegram Automation & Dispatch Analytics */}
+      <CollapsibleAnalyticsPanel
+        title={`Telegram Bot Analytics (${logs.length} Dispatches • ${telegramAnalytics.enabledTriggers}/${telegramAnalytics.totalTriggers} Triggers Active)`}
+      >
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          <SaasDonutChart
+            title="Dispatch Delivery Status"
+            subtitle="Sent vs failed Telegram alerts from audit logs"
+            data={telegramAnalytics.dispatchSlices}
+            centerLabel="Dispatches"
+            emptyText="No Telegram dispatches logged yet"
+            onSelectSlice={() => {
+              if (canViewTelegram) {
+                setActiveSubTab('logs');
+                loadLogs();
+              }
+            }}
+          />
+          <SaasDonutChart
+            title="Order Status Trigger Coverage"
+            subtitle="Active vs muted customer status alerts"
+            data={telegramAnalytics.triggerSlices}
+            centerLabel="Status Triggers"
+            emptyText="No trigger statuses configured"
+            onSelectSlice={() => {
+              if (canManageTelegramSettings) setActiveSubTab('settings');
+            }}
+          />
+          <SaasBarChart
+            title="Dispatches by Event Type"
+            subtitle="Sent vs failed count across notification templates"
+            data={telegramAnalytics.eventBars}
+            primaryLabel="Sent"
+            secondaryLabel="Failed"
+            orientation="horizontal"
+            barColor="#0284C7"
+            secondaryColor="#E11D48"
+            emptyText="No event dispatch records yet"
+            onSelectBar={() => {
+              if (canViewTelegram) setActiveSubTab('logs');
+            }}
+          />
+        </div>
+      </CollapsibleAnalyticsPanel>
 
       {/* SUB-TAB 1: BOT SETUP & CHAT IDS */}
       {activeSubTab === 'settings' && (

@@ -51,6 +51,7 @@ import {
   listReviewFolderFiles,
 } from '../../lib/googleDriveService';
 import type { User } from 'firebase/auth';
+import { SaasBarChart, SaasDonutChart, CollapsibleAnalyticsPanel } from './charts/AdminCharts';
 
 interface AdminReviewsProps {
   reviews: Review[];
@@ -455,6 +456,22 @@ function handleListFiles() {
       demo,
     };
   }, [reviews]);
+
+  const reviewAnalytics = useMemo(() => {
+    const statusSlices = [
+      { id: 'approved', label: 'অনুমোদিত (Approved)', value: counts.approved, color: '#059669' },
+      { id: 'pending', label: 'পেন্ডিং (Pending)', value: counts.pending, color: '#D97706' },
+      { id: 'hidden', label: 'হাইড (Hidden)', value: counts.hidden, color: '#64748B' },
+    ];
+
+    const starBuckets = [5, 4, 3, 2, 1].map((star) => ({
+      label: `${star} ★`,
+      value: (reviews || []).filter((r) => Math.round(r.rating || 5) === star).length,
+      color: star >= 4 ? '#059669' : star === 3 ? '#D97706' : '#E11D48',
+    }));
+
+    return { statusSlices, starBuckets };
+  }, [reviews, counts]);
 
   const filteredReviews = useMemo(() => {
     return (reviews || []).filter((r) => {
@@ -1284,6 +1301,28 @@ function handleListFiles() {
           </div>
         </div>
       )}
+
+      <CollapsibleAnalyticsPanel title="রিভিউ মডারেশন ও রেটিং বিশ্লেষণ" defaultOpen={true}>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <SaasDonutChart
+            title="রিভিউ মডারেশন স্ট্যাটাস"
+            subtitle="স্লাইসে ক্লিক করে ফিল্টার করুন"
+            data={reviewAnalytics.statusSlices}
+            centerLabel="মোট রিভিউ"
+            onSelectSlice={(item) => {
+              if (item.id === 'approved' || item.id === 'pending' || item.id === 'hidden') {
+                setStatusFilter((prev) => (prev === item.id ? 'all' : item.id!));
+              }
+            }}
+          />
+          <SaasBarChart
+            title="স্টার রেটিং ডিস্ট্রিবিউশন (১★ – ৫★)"
+            subtitle="সকল কাস্টমার রিভিউয়ের রেটিং বিন্যাস"
+            data={reviewAnalytics.starBuckets}
+            barColor="#9333EA"
+          />
+        </div>
+      </CollapsibleAnalyticsPanel>
 
       {/* 4. COMPACT SEGMENTED FILTER BAR & SEARCH (Responsive on Mobile & Desktop) */}
       <div className="p-3 sm:p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-3">

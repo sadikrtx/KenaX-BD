@@ -1,4 +1,4 @@
-import { OrderItem } from '../types/index.ts';
+import type { OrderItem } from '../types/index.ts';
 
 /**
  * Deduplicates and consolidates cart items by productId and normalized variant/color.

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   MessageSquare,
   Send,
@@ -47,6 +47,13 @@ import {
   getSMSLogsFromDB,
   subscribeToSMSLogs,
 } from '../../lib/firebase';
+import {
+  SaasDonutChart,
+  SaasBarChart,
+  SaasLineAreaChart,
+  CollapsibleAnalyticsPanel,
+  SAAS_CHART_COLORS,
+} from './charts/AdminCharts';
 
 interface AdminSMSGatewayProps {
   currentRole: UserRole;
@@ -219,6 +226,58 @@ export const AdminSMSGateway: React.FC<AdminSMSGatewayProps> = ({
     return matchesSearch && matchesStatus;
   });
 
+  const smsAnalytics = useMemo(() => {
+    const sentCount = logs.filter((l) => l.status === 'sent' || l.status === 'simulated').length;
+    const failedCount = logs.filter((l) => l.status === 'failed').length;
+    const statusSlices = [
+      { id: 'sent', label: 'Sent / Delivered', value: sentCount, color: '#059669' },
+      { id: 'failed', label: 'Failed', value: failedCount, color: '#E11D48' },
+    ].filter((s) => s.value > 0);
+
+    const eventMap = new Map<string, { sent: number; failed: number }>();
+    const dateMap = new Map<string, { sent: number; failed: number }>();
+
+    logs.forEach((l) => {
+      const ev = (l.eventType || 'custom').replace(/_/g, ' ');
+      const curEv = eventMap.get(ev) || { sent: 0, failed: 0 };
+      const isOk = l.status === 'sent' || l.status === 'simulated';
+      if (isOk) curEv.sent += 1;
+      else curEv.failed += 1;
+      eventMap.set(ev, curEv);
+
+      const d = new Date(l.timestamp);
+      if (!isNaN(d.getTime())) {
+        const key = d.toISOString().slice(0, 10);
+        const curDate = dateMap.get(key) || { sent: 0, failed: 0 };
+        if (isOk) curDate.sent += 1;
+        else curDate.failed += 1;
+        dateMap.set(key, curDate);
+      }
+    });
+
+    const eventBars = Array.from(eventMap.entries())
+      .map(([ev, c]) => ({
+        id: ev,
+        label: ev.replace(/\b\w/g, (ch) => ch.toUpperCase()),
+        value: c.sent,
+        secondaryValue: c.failed,
+        color: '#0284C7',
+        secondaryColor: '#E11D48',
+      }))
+      .sort((a, b) => b.value + (b.secondaryValue || 0) - (a.value + (a.secondaryValue || 0)));
+
+    const dailyTrend = Array.from(dateMap.entries())
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .slice(-14)
+      .map(([iso, c]) => ({
+        label: new Date(iso).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }),
+        primary: c.sent,
+        secondary: c.failed,
+      }));
+
+    return { statusSlices, eventBars, dailyTrend, sentCount, failedCount };
+  }, [logs]);
+
   return (
     <div className="space-y-6">
       {/* Top Banner Header */}
@@ -320,6 +379,49 @@ export const AdminSMSGateway: React.FC<AdminSMSGatewayProps> = ({
           </button>
         </div>
       </div>
+
+      {/* SMS Dispatch Analytics */}
+      <CollapsibleAnalyticsPanel
+        title={`SMS Gateway Analytics (${smsAnalytics.sentCount} Sent • ${smsAnalytics.failedCount} Failed)`}
+      >
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          <SaasDonutChart
+            title="SMS Delivery Status"
+            subtitle="Click a slice to filter SMS delivery logs"
+            data={smsAnalytics.statusSlices}
+            centerLabel="Total SMS"
+            emptyText="No SMS dispatches logged yet"
+            onSelectSlice={(slice) => {
+              setStatusFilter(slice.id === 'failed' ? 'failed' : 'sent');
+              setActiveSubTab('logs');
+            }}
+          />
+          <SaasBarChart
+            title="SMS Volume by Event Type"
+            subtitle="Delivered vs failed per notification trigger"
+            data={smsAnalytics.eventBars}
+            primaryLabel="Sent"
+            secondaryLabel="Failed"
+            orientation="horizontal"
+            barColor="#0284C7"
+            secondaryColor="#E11D48"
+            emptyText="No SMS event history yet"
+            onSelectBar={() => setActiveSubTab('logs')}
+          />
+          <SaasLineAreaChart
+            title="Daily SMS Throughput"
+            subtitle="Sent vs failed messages across active dates"
+            data={smsAnalytics.dailyTrend}
+            primaryLabel="Sent"
+            secondaryLabel="Failed"
+            primaryFormat="number"
+            secondaryFormat="number"
+            primaryColor="#059669"
+            secondaryColor="#E11D48"
+            emptyText="No daily SMS timeline data"
+          />
+        </div>
+      </CollapsibleAnalyticsPanel>
 
       {saveSuccess && (
         <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 flex items-center gap-3 animate-in fade-in">

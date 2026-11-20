@@ -1,4 +1,4 @@
-import { Product, Order } from '../types/index.ts';
+import type { Product, Order } from '../types/index.ts';
 import { safeSetLocalStorage } from '../lib/storage.ts';
 
 export interface ProductInteractionStats {

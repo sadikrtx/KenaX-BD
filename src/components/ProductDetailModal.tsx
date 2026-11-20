@@ -14,10 +14,11 @@ import {
   Heart,
   Check,
   Sparkles,
-  ZoomIn,
   AlertTriangle,
+  Phone,
+  PhoneCall,
 } from 'lucide-react';
-import { Product, UserRole, ColorVariation } from '../types';
+import { Product, UserRole, ColorVariation, SiteSettings } from '../types';
 import { getProductStockStatus, getStockStatusInfo } from '../utils/stockUtils';
 import { FormattedText } from './FormattedText';
 import { HighlightIcon } from './HighlightIcon';
@@ -25,6 +26,7 @@ import { DEFAULT_PRODUCT_HIGHLIGHTS } from '../utils/highlightConstants';
 import { NEUTRAL_PRODUCT_PLACEHOLDER, getOptimizedImageUrl, markImageLoaded, preloadImage, getVideoThumbnail } from '../utils/imageOptimizer';
 import { ProductVideoPlayer } from './ProductVideoPlayer';
 import { useLanguage } from '../context/LanguageContext';
+import { trackPixelViewContent } from '../utils/pixelTracker';
 
 interface ProductDetailModalProps {
   product: Product | null;
@@ -37,6 +39,9 @@ interface ProductDetailModalProps {
   currentRole: UserRole;
   isLoggedIn?: boolean;
   onOpenCustomerAuth?: () => void;
+  siteSettings?: SiteSettings;
+  helplinePhone?: string;
+  whatsappNumber?: string;
 }
 
 export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
@@ -48,6 +53,9 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
   onToggleWishlist,
   isWishlisted,
   currentRole,
+  siteSettings,
+  helplinePhone,
+  whatsappNumber,
 }) => {
   const { t } = useLanguage();
   const [selectedImageIndex, setSelectedImageIndex] = useState(0);
@@ -109,8 +117,15 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
 
       // 4-second hold on initial load
       setHoldUntil(Date.now() + 4000);
+
+      // Track Meta / Google / TikTok ViewContent
+      if (isOpen && product && product.id) {
+        try {
+          trackPixelViewContent(product, siteSettings);
+        } catch {}
+      }
     }
-  }, [product]);
+  }, [product, isOpen]);
 
   // Auto-Slide carousel: 4s hold on initial load / color switch, 3s for images. 
   // Pauses completely when video is playing so the video plays for its full duration before sliding to images.
@@ -189,6 +204,17 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
   const marginPercent = product.costPrice
     ? Math.round((profitBDT / activeUnitPrice) * 100)
     : 0;
+
+  // Contact Phone and WhatsApp computations
+  const effectiveCallPhone = (helplinePhone || siteSettings?.phone || siteSettings?.helplines?.[0] || '01719143897').trim();
+  const cleanCallPhone = effectiveCallPhone.replace(/[^0-9+]/g, '');
+
+  const effectiveWhatsApp = (whatsappNumber || siteSettings?.officialWhatsAppAgentNumber || siteSettings?.whatsappNumber || '01719143897').trim();
+  const cleanWhatsApp = effectiveWhatsApp.replace(/[^0-9]/g, '');
+  const intlWhatsApp = cleanWhatsApp.startsWith('88') ? cleanWhatsApp : `88${cleanWhatsApp.startsWith('0') ? cleanWhatsApp : '0' + cleanWhatsApp}`;
+  const whatsappUrl = `https://wa.me/${intlWhatsApp}?text=${encodeURIComponent(
+    `আসসালামু আলাইকুম! আমি "${product.name}" প্রোডাক্টটি সম্পর্কে জানতে চাচ্ছি।\nমূল্য: ৳${(activeUnitPrice * quantity).toLocaleString('en-BD')}\nলিঙ্ক: ${typeof window !== 'undefined' ? `${window.location.origin}/?product=${product.id}` : ''}`
+  )}`;
 
   // Handle color selection
   const handleSelectColor = (color: ColorVariation) => {
@@ -358,17 +384,26 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
                       }}
                       className="w-full h-full object-contain p-0 sm:p-2.5 will-change-transform pointer-events-none drop-shadow-sm"
                     />
-                    {/* Subtle hover zoom guide badge */}
-                    <div
-                      className={`pointer-events-none absolute bottom-2.5 right-2.5 px-2.5 py-1 rounded-lg bg-slate-900/80 dark:bg-slate-950/80 text-white backdrop-blur-xs flex items-center gap-1.5 text-[10px] font-bold shadow-md transition-opacity duration-200 z-10 border border-slate-700/50 ${
-                        isZooming ? 'opacity-0' : 'opacity-80 group-hover:opacity-100'
-                      }`}
-                    >
-                      <ZoomIn className="w-3 h-3 text-sky-400" />
-                      <span>{t('হোভার জুম', 'Hover to Zoom')}</span>
-                    </div>
                   </div>
                 )}
+
+                {/* Wishlist Button - Top Right of Image */}
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onToggleWishlist(product);
+                  }}
+                  className={`absolute top-2.5 right-2.5 z-20 w-8 h-8 sm:w-9 sm:h-9 rounded-full flex items-center justify-center transition-all cursor-pointer hover:scale-110 active:scale-90 shadow-md ${
+                    isWishlisted
+                      ? 'bg-rose-500 text-white shadow-rose-500/30'
+                      : 'bg-white/90 dark:bg-slate-850/90 text-slate-600 dark:text-slate-300 hover:text-rose-500 dark:hover:text-rose-400 hover:bg-white dark:hover:bg-slate-800 border border-slate-200/80 dark:border-slate-700/80'
+                  }`}
+                  title={isWishlisted ? t('উইশলিস্ট থেকে মুছুন', 'Remove from Wishlist') : t('উইশলিস্টে যোগ করুন', 'Add to Wishlist')}
+                  aria-label="Wishlist"
+                >
+                  <Heart className={`w-4 h-4 sm:w-4.5 sm:h-4.5 ${isWishlisted ? 'fill-white text-white' : ''}`} />
+                </button>
 
                 {/* Color preview badge if active */}
                 {activeColorImage && (
@@ -414,7 +449,7 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
                       setActiveColorImage(null);
                       setHoldUntil(Date.now() + 4000);
                     }}
-                    className="absolute top-2.5 right-2.5 px-2.5 py-1 rounded-lg bg-slate-900/80 hover:bg-slate-900 text-white text-[11px] font-semibold backdrop-blur-xs flex items-center gap-1.5 shadow-md cursor-pointer transition-colors z-20"
+                    className="absolute bottom-2.5 left-2.5 px-2.5 py-1 rounded-lg bg-slate-900/80 hover:bg-slate-900 text-white text-[11px] font-semibold backdrop-blur-xs flex items-center gap-1.5 shadow-md cursor-pointer transition-colors z-20"
                   >
                     <Play className="w-3 h-3 text-sky-400 fill-sky-400" />
                     <span>Video</span>
@@ -1032,7 +1067,30 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
                   );
                 }
                 return (
-                  <div className="grid grid-cols-2 gap-2 sm:gap-3 min-w-0">
+                  <div className="flex items-center gap-1.5 sm:gap-2.5 min-w-0">
+                    {/* Direct Call Button (Opens Dialpad) */}
+                    <a
+                      href={`tel:${cleanCallPhone}`}
+                      title={t(`সরাসরি কল দিন (${effectiveCallPhone})`, `Call us directly (${effectiveCallPhone})`)}
+                      className="h-10 sm:h-11 w-10 sm:w-11 shrink-0 rounded-xl bg-emerald-50 hover:bg-emerald-100 active:bg-emerald-200 dark:bg-emerald-950/60 dark:hover:bg-emerald-900/80 border border-emerald-300 dark:border-emerald-700/80 text-emerald-700 dark:text-emerald-300 flex items-center justify-center transition-all cursor-pointer shadow-2xs hover:scale-105 active:scale-95 group"
+                    >
+                      <Phone className="w-4 h-4 sm:w-5 sm:h-5 text-emerald-600 dark:text-emerald-400 group-hover:rotate-12 transition-transform" />
+                    </a>
+
+                    {/* Official WhatsApp Button (Opens WhatsApp Chat with product info) */}
+                    <a
+                      href={whatsappUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      title={t(`অফিসিয়াল হোয়াটসঅ্যাপে মেসেজ দিন (${effectiveWhatsApp})`, `Chat on Official WhatsApp (${effectiveWhatsApp})`)}
+                      className="h-10 sm:h-11 w-10 sm:w-11 shrink-0 rounded-xl bg-[#25D366] hover:bg-[#20bd5a] active:bg-[#1da850] text-white flex items-center justify-center transition-all cursor-pointer shadow-2xs hover:scale-105 active:scale-95"
+                    >
+                      <svg className="w-4.5 h-4.5 sm:w-5 sm:h-5 fill-current" viewBox="0 0 24 24">
+                        <path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946.003-6.556 5.338-11.891 11.893-11.891 3.181.001 6.167 1.24 8.413 3.488 2.245 2.248 3.481 5.236 3.48 8.414-.003 6.557-5.338 11.892-11.893 11.892-1.99-.001-3.951-.5-5.688-1.448l-6.305 1.654zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-5.462-4.415-9.89-9.881-9.892-5.452 0-9.887 4.434-9.889 9.884-.001 2.225.651 3.891 1.746 5.634l-.999 3.648 3.742-.981zm11.387-5.464c-.074-.124-.272-.198-.57-.347-.297-.149-1.758-.868-2.031-.967-.272-.099-.47-.149-.669.149-.198.297-.768.967-.941 1.165-.173.198-.347.223-.644.074-.297-.149-1.255-.462-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.297-.347.446-.521.151-.172.2-.296.3-.495.099-.198.05-.372-.025-.521-.075-.148-.669-1.611-.916-2.206-.242-.579-.487-.501-.669-.51l-.57-.01c-.198 0-.52.074-.792.372s-1.04 1.016-1.04 2.479 1.065 2.876 1.213 3.074c.149.198 2.095 3.2 5.076 4.487.709.306 1.263.489 1.694.626.712.226 1.36.194 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.695.248-1.29.173-1.414z" />
+                      </svg>
+                    </a>
+
+                    {/* Add to Cart Button */}
                     <button
                       type="button"
                       onClick={() => {
@@ -1047,12 +1105,13 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
                         onAddToCart(customProduct, quantity, variantStr, chosenImg);
                         onClose();
                       }}
-                      className="w-full py-2.5 sm:py-3 px-2 sm:px-4 rounded-xl bg-slate-900 hover:bg-slate-800 active:bg-black dark:bg-slate-800 dark:hover:bg-slate-700 dark:border dark:border-slate-700 text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-1.5 sm:gap-2 transition-all cursor-pointer shadow-xs active:scale-98 min-w-0 overflow-hidden"
+                      className="flex-1 py-2.5 sm:py-3 px-2 sm:px-3 rounded-xl bg-slate-900 hover:bg-slate-800 active:bg-black dark:bg-slate-800 dark:hover:bg-slate-700 dark:border dark:border-slate-700 text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-xs active:scale-98 min-w-0 overflow-hidden"
                     >
                       <ShoppingCart className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
-                      <span className="truncate">Add to Cart</span>
+                      <span className="truncate">{t('কার্ট', 'Add to Cart')}</span>
                     </button>
 
+                    {/* Buy Now Button */}
                     <button
                       type="button"
                       onClick={() => {
@@ -1067,10 +1126,10 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
                         onBuyNow(customProduct, quantity, variantStr, chosenImg);
                         onClose();
                       }}
-                      className="w-full py-2.5 sm:py-3 px-2 sm:px-4 rounded-xl bg-gradient-to-r from-sky-600 to-blue-600 hover:from-sky-500 hover:to-blue-500 text-white font-black text-xs sm:text-sm flex items-center justify-center gap-1.5 sm:gap-2 transition-all cursor-pointer shadow-md shadow-sky-600/20 active:scale-98 min-w-0 overflow-hidden"
+                      className="flex-1 py-2.5 sm:py-3 px-2 sm:px-3 rounded-xl bg-gradient-to-r from-sky-600 to-blue-600 hover:from-sky-500 hover:to-blue-500 text-white font-black text-xs sm:text-sm flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-md shadow-sky-600/20 active:scale-98 min-w-0 overflow-hidden"
                     >
                       <Zap className="w-3.5 h-3.5 sm:w-4 sm:h-4 fill-amber-300 text-amber-300 shrink-0" />
-                      <span className="truncate">Buy Now • ৳{(activeUnitPrice * quantity).toLocaleString('en-BD')}</span>
+                      <span className="truncate">{t('অর্ডার করুন', 'Buy Now')}</span>
                     </button>
                   </div>
                 );

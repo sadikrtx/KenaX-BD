@@ -1,4 +1,4 @@
-import { Product, Category } from '../types/index.ts';
+import type { Product, Category } from '../types/index.ts';
 
 export interface PageOption {
   key: string; // e.g. 'home', 'shop', 'category:Smartphones', 'tag:Trending'

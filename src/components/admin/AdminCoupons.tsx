@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   Tag,
   Plus,
@@ -11,6 +11,7 @@ import {
   X,
 } from 'lucide-react';
 import { Coupon, UserRole, StaffUser } from '../../types';
+import { SaasBarChart, SaasDonutChart, CollapsibleAnalyticsPanel } from './charts/AdminCharts';
 
 interface AdminCouponsProps {
   coupons: Coupon[];
@@ -38,6 +39,36 @@ export const AdminCoupons: React.FC<AdminCouponsProps> = ({
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 4000);
   };
+
+  const couponAnalytics = useMemo(() => {
+    const todayIso = new Date().toISOString().slice(0, 10);
+    let activeCount = 0;
+    let expiredCount = 0;
+    let inactiveCount = 0;
+
+    coupons.forEach((c) => {
+      if (!c.isActive) inactiveCount += 1;
+      else if (c.validUntil && c.validUntil < todayIso) expiredCount += 1;
+      else activeCount += 1;
+    });
+
+    const statusSlices = [
+      { label: 'Active Coupons', value: activeCount, color: '#059669' },
+      { label: 'Expired', value: expiredCount, color: '#D97706' },
+      { label: 'Inactive', value: inactiveCount, color: '#64748B' },
+    ];
+
+    const couponBars = [...coupons]
+      .sort((a, b) => (b.usageCount || 0) - (a.usageCount || 0) || (b.discountPercent || 0) - (a.discountPercent || 0))
+      .slice(0, 8)
+      .map((c) => ({
+        label: c.code,
+        value: c.discountPercent || 0,
+        secondaryValue: c.usageCount || 0,
+      }));
+
+    return { statusSlices, couponBars };
+  }, [coupons]);
 
   const handleCreate = (e: React.FormEvent) => {
     e.preventDefault();
@@ -98,6 +129,30 @@ export const AdminCoupons: React.FC<AdminCouponsProps> = ({
           <span>New Coupon</span>
         </button>
       </div>
+
+      <CollapsibleAnalyticsPanel title="Coupon Performance & Status Overview" defaultOpen={true}>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <SaasDonutChart
+            title="Coupon Activation Status"
+            subtitle="Active vs expired & disabled codes"
+            data={couponAnalytics.statusSlices}
+            centerLabel="Coupons"
+            emptyText="No coupons created yet"
+          />
+          <SaasBarChart
+            title="Discount Rate vs Redemptions"
+            subtitle="Discount (%) compared with total usage count"
+            data={couponAnalytics.couponBars}
+            valueFormat="percent"
+            secondaryFormat="number"
+            primaryLabel="Discount %"
+            secondaryLabel="Times Used"
+            barColor="#0284C7"
+            secondaryColor="#059669"
+            emptyText="Create coupons to view usage charts"
+          />
+        </div>
+      </CollapsibleAnalyticsPanel>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {coupons.map((c) => (

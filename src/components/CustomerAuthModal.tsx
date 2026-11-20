@@ -34,6 +34,7 @@ import {
   getBDPhoneValidationError,
 } from '../utils/phoneUtils';
 import { isValidEmailFormat, getEmailValidationError, isSuperAdminEmail } from '../utils/emailValidator';
+import { trackPixelCompleteRegistration } from '../utils/pixelTracker';
 
 interface CustomerAuthModalProps {
   isOpen: boolean;
@@ -85,141 +86,7 @@ export const CustomerAuthModal: React.FC<CustomerAuthModalProps> = ({
       const cleanInput = rawInput.toLowerCase();
       const cleanDigits = normalizePhoneNumber(rawInput);
 
-      // 1. Gather all known staff synchronously from props + local cache (filtering out any deleted staff)
-      const deletedStaffIds = new Set<string>();
-      const deletedStaffEmails = new Set<string>();
-      try {
-        const cachedDeletedStaff = localStorage.getItem('kenax_deleted_staff_cache');
-        if (cachedDeletedStaff) {
-          const parsed = JSON.parse(cachedDeletedStaff);
-          if (Array.isArray(parsed)) {
-            parsed.forEach((item) => {
-              if (typeof item === 'string') deletedStaffIds.add(item);
-              else if (item && typeof item === 'object') {
-                if (item.id) deletedStaffIds.add(item.id);
-                if (item.email) deletedStaffEmails.add(item.email.toLowerCase());
-              }
-            });
-          }
-        }
-      } catch {}
-
-      const cachedStaff: StaffUser[] = [];
-      const readStaffKeys = ['kenax_staff_cache', 'preview_kenax_staff_cache', 'kenax_current_staff', 'kenax_authenticated_staff'];
-      for (const k of readStaffKeys) {
-        try {
-          const raw = localStorage.getItem(k);
-          if (raw) {
-            const parsed = JSON.parse(raw);
-            if (Array.isArray(parsed)) cachedStaff.push(...parsed);
-            else if (parsed && typeof parsed === 'object' && (parsed.id || parsed.email)) cachedStaff.push(parsed);
-          }
-        } catch {}
-      }
-
-      const staffMap = new Map<string, StaffUser>();
-
-      INITIAL_STAFF.forEach((s) => {
-        const key = (s.email || s.id).toLowerCase();
-        staffMap.set(key, {
-          id: s.id,
-          name: s.name,
-          email: s.email,
-          phone: s.phone,
-          password: s.password || 'sadik@1234',
-          role: s.role as UserRole,
-          permissions: s.permissions,
-          isActive: s.status === 'active',
-          status: s.status,
-          createdAt: s.createdAt,
-          lastLogin: s.lastLogin,
-        });
-      });
-
-      if (Array.isArray(cachedStaff)) {
-        cachedStaff.forEach((s) => {
-          if (s && (s.id || s.email)) {
-            const key = (s.email || s.id).toLowerCase();
-            const existing = staffMap.get(key) || {};
-            staffMap.set(key, { ...existing, ...s });
-          }
-        });
-      }
-
-      if (Array.isArray(staffList)) {
-        staffList.forEach((s) => {
-          if (s && (s.id || s.email)) {
-            const key = (s.email || s.id).toLowerCase();
-            const existing = staffMap.get(key) || {};
-            staffMap.set(key, { ...existing, ...s });
-          }
-        });
-      }
-
-      const combinedStaff = Array.from(staffMap.values()).filter(
-        (s) =>
-          s &&
-          !deletedStaffIds.has(s.id) &&
-          (!s.email || !deletedStaffEmails.has(s.email.toLowerCase()))
-      );
-
-      // Check all staff roles (Super Admin, Manager, Moderator, Admin)
-      const foundStaff = combinedStaff.find((s) => {
-        const emailMatch = Boolean(s.email && s.email.trim().toLowerCase() === cleanInput);
-        const superAdminEmailMatch = isSuperAdminEmail(cleanInput) && (s.role === 'super_admin' || s.email?.toLowerCase().includes('super'));
-        const staffDigits = normalizePhoneNumber(s.phone || '');
-        const phoneMatch = Boolean(
-          cleanDigits.length >= 7 && (
-            staffDigits === cleanDigits ||
-            (cleanDigits.length >= 10 && staffDigits.endsWith(cleanDigits.slice(-10))) ||
-            (staffDigits.length >= 10 && cleanDigits.endsWith(staffDigits.slice(-10)))
-          )
-        );
-        const roleAliasMatch =
-          ((cleanInput === 'admin' || cleanInput === 'superadmin' || cleanInput === 'sadik') &&
-            (s.role === 'super_admin' || s.role === 'admin')) ||
-          (cleanInput === 'manager' && s.role === 'manager') ||
-          (cleanInput === 'moderator' && s.role === 'moderator');
-
-        return emailMatch || superAdminEmailMatch || phoneMatch || roleAliasMatch;
-      });
-
-      if (foundStaff) {
-        if (foundStaff.status === 'suspended' || foundStaff.isActive === false) {
-          setErrorMessage('Your staff account is currently inactive. Please contact the Super Admin.');
-          setIsLoading(false);
-          return;
-        }
-
-        const expectedPassword =
-          foundStaff.password ||
-          (foundStaff.role === 'super_admin' ? 'sadik@1234' : '123456');
-
-        if (password !== expectedPassword) {
-          setErrorMessage('Incorrect password. Access denied.');
-          setIsLoading(false);
-          return;
-        }
-
-        const roleTitle =
-          foundStaff.role === 'super_admin'
-            ? 'Super Admin'
-            : foundStaff.role === 'manager'
-            ? 'Manager'
-            : foundStaff.role === 'moderator'
-            ? 'Moderator'
-            : 'Admin';
-
-        setIsLoading(false);
-        setSuccessMessage(`${roleTitle} sign in successful! Opening dashboard...`);
-        if (onStaffLogin) {
-          onStaffLogin(foundStaff);
-        }
-        onClose();
-        return;
-      }
-
-      // 2. Regular Customer Check (Unified Email OR Mobile Number Login)
+      // Regular Customer Check (Unified Email OR Mobile Number Login)
       // Use a timeout protection so customer lookup never hangs if offline
       const timeoutPromise = new Promise<CustomerRecord[]>((_, reject) =>
         setTimeout(() => reject(new Error('timeout')), 3000)
@@ -326,30 +193,6 @@ export const CustomerAuthModal: React.FC<CustomerAuthModalProps> = ({
     setIsLoading(true);
     try {
       const cleanEmail = email.trim().toLowerCase();
-
-      // Check if user is registering with Admin Password or Super Admin Email
-      const isSuperAdminPassword = password === 'sadik@1234' || password === 'sadik@12334';
-      const isSuperAdminEmailIdent = isSuperAdminEmail(cleanEmail);
-      if ((isSuperAdminPassword && isSuperAdminEmailIdent) || isSuperAdminEmailIdent) {
-        const superAdminStaff: StaffUser = staffList.find(
-          (s) => (s.email && s.email.toLowerCase() === cleanEmail) || s.role === 'super_admin'
-        ) || {
-          id: 'staff-super-2',
-          name: 'Super Admin',
-          email: cleanEmail || 'super@kenaxbd.com',
-          phone: mobile.trim() || '+880 1700-123456',
-          role: 'super_admin',
-          permissions: ['*'],
-          isActive: true,
-          createdAt: new Date().toISOString(),
-        };
-        setIsLoading(false);
-        if (onStaffLogin) {
-          onStaffLogin(superAdminStaff);
-        }
-        onClose();
-        return;
-      }
 
       // Load customers from DB and Cache (excluding any deleted customer tombstones)
       const deletedCustomerIds = new Set<string>();
@@ -462,6 +305,16 @@ export const CustomerAuthModal: React.FC<CustomerAuthModalProps> = ({
         console.warn('[WhatsApp User Registration Alert Warning]:', waErr);
       });
 
+      // Dispatch Meta / Google / TikTok CompleteRegistration
+      try {
+        trackPixelCompleteRegistration({
+          id: newCustomer.id,
+          name: newCustomer.name,
+          phone: newCustomer.mobile,
+          email: newCustomer.email,
+        });
+      } catch {}
+
       setIsLoading(false);
       setSuccessMessage('Account created successfully!');
       
@@ -551,7 +404,7 @@ export const CustomerAuthModal: React.FC<CustomerAuthModalProps> = ({
                     required
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
-                    placeholder="yourname@gmail.com, super@kenaxbd.com or 017..."
+                    placeholder="yourname@gmail.com or 017XXXXXXXX"
                     className="w-full pl-9 pr-3 py-2.5 rounded-xl border border-slate-300 text-xs text-slate-900 placeholder:text-slate-400 focus:outline-hidden focus:ring-2 focus:ring-sky-500"
                   />
                 </div>

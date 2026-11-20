@@ -49,6 +49,14 @@ import {
 } from '../../types';
 import { AdminTab } from './AdminSidebar';
 import { getOptimizedImageUrl, handleImageError } from '../../utils/imageOptimizer';
+import { useLanguage } from '../../context/LanguageContext';
+import {
+  SaasDonutChart,
+  SaasBarChart,
+  SaasLineAreaChart,
+  SAAS_CHART_COLORS,
+} from './charts/AdminCharts';
+import { computeStoreSalesSummary, getCanonicalOrderBucket } from '../../utils/salesAnalytics';
 
 interface AdminOverviewProps {
   orders: Order[];
@@ -63,6 +71,7 @@ interface AdminOverviewProps {
   onPrintInvoice: (order: Order) => void;
   currentRole: UserRole;
   currentStaff?: StaffUser | null;
+  lowStockThreshold?: number;
 }
 
 export const AdminOverview: React.FC<AdminOverviewProps> = ({
@@ -78,7 +87,10 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
   onPrintInvoice,
   currentRole,
   currentStaff,
+  lowStockThreshold = 5,
 }) => {
+  const { language } = useLanguage();
+  const isBn = language === 'bn';
   const [analyticsPeriod, setAnalyticsPeriod] = useState<
     'today' | 'yesterday' | '7d' | '30d' | 'month' | 'year'
   >('7d');
@@ -105,16 +117,16 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
   const getFinTimeframeLabel = (tf: 'all' | 'today' | '7d' | '30d' | '1y') => {
     switch (tf) {
       case 'today':
-        return 'Today';
+        return isBn ? 'আজ' : 'Today';
       case '7d':
-        return 'Last 7 Days';
+        return isBn ? 'বিগত ৭ দিন' : 'Last 7 Days';
       case '30d':
-        return 'Last 30 Days';
+        return isBn ? 'বিগত ৩০ দিন' : 'Last 30 Days';
       case '1y':
-        return 'Last 1 Year';
+        return isBn ? 'বিগত ১ বছর' : 'Last 1 Year';
       case 'all':
       default:
-        return 'All Days';
+        return isBn ? 'সব দিন' : 'All Days';
     }
   };
 
@@ -309,12 +321,19 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
   );
   const upcomingShippedAmount = upcomingShippedOrders.reduce((sum, o) => sum + (o.totalAmount || 0), 0);
 
-  // Standard operational counts
-  const totalOrdersCount = orders.length;
-  const pendingOrders = orders.filter((o) => o.orderStatus === 'Pending' || o.orderStatus === 'Payment Verification');
-  const processingOrders = orders.filter((o) => o.orderStatus === 'Processing' || o.orderStatus === 'Packed' || o.orderStatus === 'Shipped');
-  const cancelledOrders = orders.filter((o) => o.orderStatus === 'Cancelled');
-  const lowStockProducts = products.filter((p) => p.stock <= 10);
+  // Shared Single-Source-of-Truth Sales Summary (identical to Report & Analytics and /api/integration/sales-summary)
+  const finSalesSummary = computeStoreSalesSummary(finFilteredOrders, products);
+  const allSalesSummary = computeStoreSalesSummary(orders, products);
+
+  // Standard operational counts (exact canonical buckets matching AdminOrders tabs)
+  const totalOrdersCount = allSalesSummary.totalOrders;
+  const pendingOrders = orders.filter((o) => getCanonicalOrderBucket(o) === 'pending');
+  const processingOrders = orders.filter((o) => {
+    const b = getCanonicalOrderBucket(o);
+    return b === 'confirmed' || b === 'processing' || b === 'ready_to_ship' || b === 'in_transit';
+  });
+  const cancelledOrders = orders.filter((o) => getCanonicalOrderBucket(o) === 'cancelled');
+  const lowStockProducts = products.filter((p) => Number(p.stock || 0) <= lowStockThreshold);
 
   // Today's Delivered & Today's Stats
   const todayStr = new Date().toISOString().split('T')[0];
@@ -339,16 +358,8 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
   // Realized Net Profit for Today (Including Today's Others Profit)
   const todayNetRevenue = todayMoneyReceived + todayOtherProfits - todayDeliveredCost - todayExpenses;
 
-  // Average Order Value (AOV)
-  const averageOrderValue =
-    deliveredOrders.length > 0
-      ? Math.round(totalMoneyReceived / deliveredOrders.length)
-      : orders.filter((o) => o.orderStatus !== 'Cancelled').length > 0
-      ? Math.round(
-          orders.reduce((sum, o) => sum + (o.orderStatus !== 'Cancelled' ? o.totalAmount : 0), 0) /
-            orders.filter((o) => o.orderStatus !== 'Cancelled').length
-        )
-      : 0;
+  // Average Order Value (AOV) — unified with Reports & Muse Integration API
+  const averageOrderValue = finSalesSummary.averageOrderValue;
 
   // Best selling products based on orders
   const productSalesMap = new Map<string, { product: Product; quantity: number; revenue: number }>();
@@ -1196,11 +1207,32 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
       <div className="space-y-4">
         <div className="space-y-2.5 pb-3 border-b border-slate-200/80 dark:border-slate-800">
           {/* Title & Active Timeframe Tag - Kept strictly on a single line on Desktop */}
-          <div className="flex items-center gap-2 sm:gap-2.5 flex-wrap md:flex-nowrap">
+          <div className="flex items-center justify-between gap-2 sm:gap-2.5 flex-wrap">
             <h2 className="text-sm sm:text-base md:text-lg font-black text-slate-900 dark:text-white flex items-center gap-1.5 whitespace-normal md:whitespace-nowrap shrink-0">
               <Banknote className="w-4 h-4 sm:w-5 sm:h-5 text-emerald-600 dark:text-emerald-400 shrink-0" />
-              <span>Financial Performance &amp; Revenue Overview</span>
+              <span>
+                {isBn
+                  ? 'আর্থিক বিবরণ ও রাজস্ব ওভারভিউ'
+                  : 'Financial Performance & Revenue Overview'}
+              </span>
             </h2>
+            <div className="flex flex-wrap items-center gap-2 text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+              <span>
+                Gross Sales: <strong className="text-slate-800 dark:text-slate-100">৳{finSalesSummary.grossSales.toLocaleString('en-BD')}</strong>
+              </span>
+              <span>·</span>
+              <span>
+                Net Product Sales: <strong className="text-slate-800 dark:text-slate-100">৳{finSalesSummary.netProductSales.toLocaleString('en-BD')}</strong>
+              </span>
+              <span>·</span>
+              <span>
+                Pending COD: <strong className="text-amber-700 dark:text-amber-300">৳{finSalesSummary.pendingCOD.toLocaleString('en-BD')}</strong>
+              </span>
+              <span>·</span>
+              <span className="text-slate-400 dark:text-slate-500">
+                Last updated: {new Date(finSalesSummary.calculatedAt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+              </span>
+            </div>
           </div>
 
           {/* Sub-row: Timeframe Filter Pills and Actions directly below the title */}
@@ -1210,11 +1242,11 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
               <div className="inline-flex items-center p-1 bg-slate-100/90 dark:bg-slate-800/90 rounded-xl border border-slate-200/80 dark:border-slate-700 shadow-2xs whitespace-nowrap min-w-max">
                 {(
                   [
-                    { id: 'all', label: 'All Days', shortLabel: 'All Days' },
-                    { id: 'today', label: 'Today', shortLabel: 'Today' },
-                    { id: '7d', label: 'Last 7 Days', shortLabel: '7 Days' },
-                    { id: '30d', label: 'Last 30 Days', shortLabel: '30 Days' },
-                    { id: '1y', label: 'Last 1 Year', shortLabel: '1 Year' },
+                    { id: 'all', labelEn: 'All Days', labelBn: 'সব দিন' },
+                    { id: 'today', labelEn: 'Today', labelBn: 'আজ' },
+                    { id: '7d', labelEn: 'Last 7 Days', labelBn: 'বিগত ৭ দিন' },
+                    { id: '30d', labelEn: 'Last 30 Days', labelBn: 'বিগত ৩০ দিন' },
+                    { id: '1y', labelEn: 'Last 1 Year', labelBn: 'বিগত ১ বছর' },
                   ] as const
                 ).map((tf) => (
                   <button
@@ -1227,8 +1259,7 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
                         : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-200/60 dark:hover:bg-slate-700'
                     }`}
                   >
-                    <span className="hidden sm:inline">{tf.label}</span>
-                    <span className="sm:hidden">{tf.shortLabel}</span>
+                    <span>{isBn ? tf.labelBn : tf.labelEn}</span>
                   </button>
                 ))}
               </div>
@@ -1245,7 +1276,15 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
                   title={`Download official HD Statement Receipt for ${getFinTimeframeLabel(finTimeframe)}`}
                 >
                   <Download className="w-3.5 h-3.5 text-sky-400 shrink-0" />
-                  <span>{isGeneratingReceipt ? 'Generating...' : 'Download Receipt'}</span>
+                  <span>
+                    {isGeneratingReceipt
+                      ? isBn
+                        ? 'তৈরি হচ্ছে...'
+                        : 'Generating...'
+                      : isBn
+                      ? 'রসিদ ডাউনলোড'
+                      : 'Download Receipt'}
+                  </span>
                 </button>
                 <button
                   type="button"
@@ -1254,7 +1293,7 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
                   title="Preview official Financial Statement Receipt with Seal & Signature"
                 >
                   <Receipt className="w-3.5 h-3.5 text-sky-600 shrink-0" />
-                  <span>View Receipt</span>
+                  <span>{isBn ? 'রসিদ দেখুন' : 'View Receipt'}</span>
                 </button>
                 <button
                   type="button"
@@ -1262,7 +1301,7 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
                   className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold shadow-xs transition-all cursor-pointer whitespace-nowrap shrink-0"
                 >
                   <Plus className="w-3.5 h-3.5 shrink-0" />
-                  <span>Log Cost</span>
+                  <span>{isBn ? 'খরচ যুক্ত' : 'Log Cost'}</span>
                 </button>
                 <button
                   type="button"
@@ -1270,7 +1309,11 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
                   className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition-all cursor-pointer whitespace-nowrap shrink-0 shadow-2xs border border-slate-200/60"
                 >
                   <TrendingDown className="w-3.5 h-3.5 shrink-0" />
-                  <span>All Costs ({expenses.length})</span>
+                  <span>
+                    {isBn
+                      ? `সব খরচ (${expenses.length})`
+                      : `All Costs (${expenses.length})`}
+                  </span>
                 </button>
               </div>
             </div>
@@ -1288,11 +1331,11 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
                     <Wallet className="w-3.5 h-3.5 text-emerald-700 dark:text-emerald-300" />
                   </div>
                   <span className="text-xs font-extrabold uppercase tracking-wide text-emerald-950 dark:text-emerald-200 whitespace-nowrap">
-                    Money Received
+                    {isBn ? 'প্রাপ্ত নগদ টাকা' : 'Money Received'}
                   </span>
                 </div>
                 <span className="px-2.5 py-0.5 rounded-full text-[11px] font-black bg-emerald-100/90 dark:bg-emerald-900/60 text-emerald-800 dark:text-emerald-300 whitespace-nowrap shrink-0 border border-emerald-200 dark:border-emerald-700">
-                  {deliveredOrders.length} Delivered
+                  {deliveredOrders.length} {isBn ? 'টি ডেলিভার্ড' : 'Delivered'}
                 </span>
               </div>
               <div className="mt-3.5">
@@ -1303,15 +1346,23 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
                   <ArrowUpRight className="w-3.5 h-3.5 shrink-0" />
                   <span>
                     {finTimeframe === 'today'
-                      ? `All Today Delivered: ৳${totalMoneyReceived?.toLocaleString('en-BD')}`
+                      ? isBn
+                        ? `আজকের মোট ডেলিভারি: ৳${totalMoneyReceived?.toLocaleString('en-BD')}`
+                        : `All Today Delivered: ৳${totalMoneyReceived?.toLocaleString('en-BD')}`
+                      : isBn
+                      ? `আজকের প্রাপ্ত: ৳${todayMoneyReceived?.toLocaleString('en-BD')}`
                       : `Today Collected: ৳${todayMoneyReceived?.toLocaleString('en-BD')}`}
                   </span>
                 </p>
               </div>
             </div>
             <div className="mt-4 pt-2.5 border-t border-emerald-100/80 dark:border-emerald-900/50 flex items-center justify-between text-xs text-slate-600 dark:text-slate-400">
-              <span className="text-slate-500 dark:text-slate-400 font-medium">Delivered Customer Cash</span>
-              <span className="font-bold text-emerald-700 dark:text-emerald-400">Cash In Hand</span>
+              <span className="text-slate-500 dark:text-slate-400 font-medium">
+                {isBn ? 'ডেলিভারিকৃত কাস্টমার ক্যাশ' : 'Delivered Customer Cash'}
+              </span>
+              <span className="font-bold text-emerald-700 dark:text-emerald-400">
+                {isBn ? 'হাতে নগদ' : 'Cash In Hand'}
+              </span>
             </div>
           </div>
 
@@ -1324,11 +1375,11 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
                     <Receipt className="w-3.5 h-3.5 text-amber-700 dark:text-amber-300" />
                   </div>
                   <span className="text-xs font-extrabold uppercase tracking-wide text-amber-950 dark:text-amber-200 whitespace-nowrap">
-                    Product Costs
+                    {isBn ? 'পণ্যের ক্রয়মূল্য' : 'Product Costs'}
                   </span>
                 </div>
                 <span className="px-2.5 py-0.5 rounded-full text-[11px] font-black bg-amber-100/90 dark:bg-amber-900/60 text-amber-800 dark:text-amber-300 whitespace-nowrap shrink-0 border border-amber-200 dark:border-amber-700">
-                  Supplier Sourcing
+                  {isBn ? 'সাপ্লায়ার সোর্সিং' : 'Supplier Sourcing'}
                 </span>
               </div>
               <div className="mt-3.5">
@@ -1338,15 +1389,23 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
                 <p className="text-xs text-amber-700 dark:text-amber-400 font-bold mt-1.5 flex items-center gap-1">
                   <span>
                     {finTimeframe === 'today'
-                      ? `Today Sourcing Cost: ৳${totalDeliveredCost?.toLocaleString('en-BD')}`
+                      ? isBn
+                        ? `আজকের সোর্সিং খরচ: ৳${totalDeliveredCost?.toLocaleString('en-BD')}`
+                        : `Today Sourcing Cost: ৳${totalDeliveredCost?.toLocaleString('en-BD')}`
+                      : isBn
+                      ? `আজকের ক্রয় খরচ: ৳${todayDeliveredCost?.toLocaleString('en-BD')}`
                       : `Today Purchase Cost: ৳${todayDeliveredCost?.toLocaleString('en-BD')}`}
                   </span>
                 </p>
               </div>
             </div>
             <div className="mt-4 pt-2.5 border-t border-amber-100/80 dark:border-amber-900/50 flex items-center justify-between text-xs text-slate-600 dark:text-slate-400">
-              <span className="text-slate-500 dark:text-slate-400 font-medium">Delivered Item Sourcing</span>
-              <span className="font-bold text-amber-700 dark:text-amber-400">Supplier Base</span>
+              <span className="text-slate-500 dark:text-slate-400 font-medium">
+                {isBn ? 'ডেলিভারিকৃত পণ্যের পাইকারি খরচ' : 'Delivered Item Sourcing'}
+              </span>
+              <span className="font-bold text-amber-700 dark:text-amber-400">
+                {isBn ? 'সাপ্লায়ার বেস' : 'Supplier Base'}
+              </span>
             </div>
           </div>
 
@@ -1359,11 +1418,11 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
                     <DollarSign className="w-3.5 h-3.5 text-teal-700 dark:text-teal-300" />
                   </div>
                   <span className="text-xs font-extrabold uppercase tracking-wide text-teal-950 dark:text-teal-200 whitespace-nowrap">
-                    Product Profit
+                    {isBn ? 'পণ্যের মোট লাভ' : 'Product Profit'}
                   </span>
                 </div>
                 <span className="px-2.5 py-0.5 rounded-full text-[11px] font-black bg-teal-100/90 dark:bg-teal-900/60 text-teal-800 dark:text-teal-300 whitespace-nowrap shrink-0 border border-teal-200 dark:border-teal-700">
-                  Gross {productProfitMarginPercent}%
+                  {isBn ? `গ্রস ${productProfitMarginPercent}%` : `Gross ${productProfitMarginPercent}%`}
                 </span>
               </div>
               <div className="mt-3.5">
@@ -1374,15 +1433,23 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
                   <Sparkles className="w-3.5 h-3.5 shrink-0 text-teal-600 dark:text-teal-400" />
                   <span>
                     {finTimeframe === 'today'
-                      ? `Today Gross: ৳${totalProductProfit?.toLocaleString('en-BD')}`
+                      ? isBn
+                        ? `আজকের মোট গ্রস: ৳${totalProductProfit?.toLocaleString('en-BD')}`
+                        : `Today Gross: ৳${totalProductProfit?.toLocaleString('en-BD')}`
+                      : isBn
+                      ? `আজকের মোট গ্রস: ৳${todayProductProfit?.toLocaleString('en-BD')}`
                       : `Today Gross: ৳${todayProductProfit?.toLocaleString('en-BD')}`}
                   </span>
                 </p>
               </div>
             </div>
             <div className="mt-4 pt-2.5 border-t border-teal-100/80 dark:border-teal-900/50 flex items-center justify-between text-xs text-slate-600 dark:text-slate-400">
-              <span className="text-slate-500 dark:text-slate-400 font-medium">Product Markup Margin</span>
-              <span className="font-bold text-teal-700 dark:text-teal-400">Gross Profit</span>
+              <span className="text-slate-500 dark:text-slate-400 font-medium">
+                {isBn ? 'প্রোডাক্ট সেলস মার্জিন' : 'Product Markup Margin'}
+              </span>
+              <span className="font-bold text-teal-700 dark:text-teal-400">
+                {isBn ? 'গ্রস প্রফিট' : 'Gross Profit'}
+              </span>
             </div>
           </div>
 
@@ -1395,11 +1462,11 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
                     <TrendingDown className="w-3.5 h-3.5" />
                   </div>
                   <span className="text-xs font-black uppercase tracking-wide text-rose-950 dark:text-rose-200 whitespace-nowrap">
-                    Total Expenses
+                    {isBn ? 'মোট খরচ' : 'Total Expenses'}
                   </span>
                 </div>
                 <span className="px-2.5 py-0.5 rounded-full text-[11px] font-black bg-rose-100 dark:bg-rose-900/60 text-rose-800 dark:text-rose-300 whitespace-nowrap shrink-0 border border-rose-200 dark:border-rose-700">
-                  {finFilteredExpenses.length} Records
+                  {finFilteredExpenses.length} {isBn ? 'টি রেকর্ড' : 'Records'}
                 </span>
               </div>
               <div className="mt-3.5">
@@ -1407,18 +1474,24 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
                   ৳{totalAllExpenses?.toLocaleString('en-BD')}
                 </h3>
                 <p className="text-xs text-rose-600 dark:text-rose-400 font-bold mt-1.5 flex items-center gap-1">
-                  <span>Delivery: ৳{totalDeliveryExpenses?.toLocaleString('en-BD')} • Others: ৳{totalOtherExpenses?.toLocaleString('en-BD')}</span>
+                  <span>
+                    {isBn
+                      ? `ডেলিভারি: ৳${totalDeliveryExpenses?.toLocaleString('en-BD')} • অন্যান্য: ৳${totalOtherExpenses?.toLocaleString('en-BD')}`
+                      : `Delivery: ৳${totalDeliveryExpenses?.toLocaleString('en-BD')} • Others: ৳${totalOtherExpenses?.toLocaleString('en-BD')}`}
+                  </span>
                 </p>
               </div>
             </div>
             <div className="mt-4 pt-2.5 border-t border-rose-100/80 dark:border-rose-900/50 flex items-center justify-between text-xs text-slate-600 dark:text-slate-400">
-              <span className="text-slate-500 dark:text-slate-400 font-medium">All Business Expenses</span>
+              <span className="text-slate-500 dark:text-slate-400 font-medium">
+                {isBn ? 'সকল ব্যবসায়িক ব্যয়' : 'All Business Expenses'}
+              </span>
               <button
                 type="button"
                 onClick={() => onSelectTab('costs')}
                 className="font-bold text-rose-700 dark:text-rose-400 hover:text-rose-900 dark:hover:text-rose-300 flex items-center gap-0.5 whitespace-nowrap cursor-pointer"
               >
-                <span>Manage Costs</span>
+                <span>{isBn ? 'খরচ ব্যবস্থাপনা' : 'Manage Costs'}</span>
                 <ChevronRight className="w-3.5 h-3.5" />
               </button>
             </div>
@@ -1433,11 +1506,17 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
                     <Truck className="w-3.5 h-3.5 text-orange-700 dark:text-orange-300" />
                   </div>
                   <span className="text-xs font-extrabold uppercase tracking-wide text-orange-950 dark:text-orange-200 whitespace-nowrap">
-                    Delivery Costs
+                    {isBn ? 'ডেলিভারি খরচ' : 'Delivery Costs'}
                   </span>
                 </div>
                 <span className="px-2.5 py-0.5 rounded-full text-[11px] font-black bg-orange-100/90 dark:bg-orange-900/60 text-orange-800 dark:text-orange-300 whitespace-nowrap shrink-0 border border-orange-200 dark:border-orange-700">
-                  {freeDeliveryDeliveredCount > 0 ? `${freeDeliveryDeliveredCount} Free Del` : 'Courier Spent'}
+                  {freeDeliveryDeliveredCount > 0
+                    ? isBn
+                      ? `${freeDeliveryDeliveredCount} টি ফ্রি ডেলিভারি`
+                      : `${freeDeliveryDeliveredCount} Free Del`
+                    : isBn
+                    ? 'কুরিয়ার ব্যয়'
+                    : 'Courier Spent'}
                 </span>
               </div>
               <div className="mt-3.5">
@@ -1445,18 +1524,24 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
                   ৳{totalDeliveryExpenses?.toLocaleString('en-BD')}
                 </h3>
                 <p className="text-xs text-orange-600 dark:text-orange-400 font-bold mt-1.5 flex items-center gap-1">
-                  <span>Collected from Customers: ৳{totalDeliveredDeliveryChargesCollected?.toLocaleString('en-BD')}</span>
+                  <span>
+                    {isBn
+                      ? `গ্রাহকের নিকট থেকে আদায়কৃত: ৳${totalDeliveredDeliveryChargesCollected?.toLocaleString('en-BD')}`
+                      : `Collected from Customers: ৳${totalDeliveredDeliveryChargesCollected?.toLocaleString('en-BD')}`}
+                  </span>
                 </p>
               </div>
             </div>
             <div className="mt-4 pt-2.5 border-t border-orange-100/80 dark:border-orange-900/50 flex items-center justify-between text-xs text-slate-600 dark:text-slate-400">
-              <span className="text-slate-500 dark:text-slate-400 font-medium">Courier &amp; Packaging</span>
+              <span className="text-slate-500 dark:text-slate-400 font-medium">
+                {isBn ? 'কুরিয়ার ও প্যাকেজিং' : 'Courier & Packaging'}
+              </span>
               <button
                 type="button"
                 onClick={() => onSelectTab('costs')}
                 className="font-bold text-orange-700 dark:text-orange-400 hover:text-orange-900 dark:hover:text-orange-300 flex items-center gap-0.5 whitespace-nowrap cursor-pointer"
               >
-                <span>Details</span>
+                <span>{isBn ? 'বিস্তারিত' : 'Details'}</span>
                 <ChevronRight className="w-3.5 h-3.5" />
               </button>
             </div>
@@ -1471,11 +1556,11 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
                     <Coins className="w-3.5 h-3.5 text-violet-700 dark:text-violet-300" />
                   </div>
                   <span className="text-xs font-extrabold uppercase tracking-wide text-violet-950 dark:text-violet-200 whitespace-nowrap">
-                    Other Profit
+                    {isBn ? 'অন্যান্য লাভ' : 'Other Profit'}
                   </span>
                 </div>
                 <span className="px-2.5 py-0.5 rounded-full text-[11px] font-black bg-violet-100/90 dark:bg-violet-900/60 text-violet-800 dark:text-violet-300 whitespace-nowrap shrink-0 border border-violet-200 dark:border-violet-700">
-                  {finFilteredOtherProfits.length} Records
+                  {finFilteredOtherProfits.length} {isBn ? 'টি রেকর্ড' : 'Records'}
                 </span>
               </div>
               <div className="mt-3.5">
@@ -1486,20 +1571,26 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
                   <Sparkles className="w-3.5 h-3.5 shrink-0 text-violet-600 dark:text-violet-400" />
                   <span>
                     {finTimeframe === 'today'
-                      ? `Today Added: ৳${totalOtherProfits?.toLocaleString('en-BD')}`
+                      ? isBn
+                        ? `আজ যুক্ত হয়েছে: ৳${totalOtherProfits?.toLocaleString('en-BD')}`
+                        : `Today Added: ৳${totalOtherProfits?.toLocaleString('en-BD')}`
+                      : isBn
+                      ? `আজ যুক্ত হয়েছে: ৳${todayOtherProfits?.toLocaleString('en-BD')}`
                       : `Today Added: ৳${todayOtherProfits?.toLocaleString('en-BD')}`}
                   </span>
                 </p>
               </div>
             </div>
             <div className="mt-4 pt-2.5 border-t border-violet-100/80 dark:border-violet-900/50 flex items-center justify-between text-xs text-slate-600 dark:text-slate-400">
-              <span className="text-slate-500 dark:text-slate-400 font-medium">Extra Non-Order Profit</span>
+              <span className="text-slate-500 dark:text-slate-400 font-medium">
+                {isBn ? 'অতিরিক্ত নন-অর্ডার লাভ' : 'Extra Non-Order Profit'}
+              </span>
               <button
                 type="button"
                 onClick={() => onSelectTab('costs')}
                 className="font-bold text-violet-700 dark:text-violet-400 hover:text-violet-900 dark:hover:text-violet-300 flex items-center gap-0.5 whitespace-nowrap cursor-pointer"
               >
-                <span>Manage</span>
+                <span>{isBn ? 'ব্যবস্থাপনা' : 'Manage'}</span>
                 <ChevronRight className="w-3.5 h-3.5" />
               </button>
             </div>
@@ -1514,11 +1605,11 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
                     <ShieldCheck className="w-3.5 h-3.5 text-indigo-700 dark:text-indigo-300" />
                   </div>
                   <span className="text-xs font-extrabold uppercase tracking-wide text-indigo-950 dark:text-indigo-200 whitespace-nowrap">
-                    Advance Payment
+                    {isBn ? 'অগ্রিম পেমেন্ট' : 'Advance Payment'}
                   </span>
                 </div>
                 <span className="px-2.5 py-0.5 rounded-full text-[11px] font-black bg-indigo-100/90 dark:bg-indigo-900/60 text-indigo-800 dark:text-indigo-300 whitespace-nowrap shrink-0 border border-indigo-200 dark:border-indigo-700">
-                  {verifiedAdvanceOrders.length} Approved
+                  {verifiedAdvanceOrders.length} {isBn ? 'টি অনুমোদিত' : 'Approved'}
                 </span>
               </div>
               <div className="mt-3.5">
@@ -1529,7 +1620,11 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
                   <ArrowUpRight className="w-3.5 h-3.5 shrink-0" />
                   <span>
                     {finTimeframe === 'today'
-                      ? `Today Verified: ৳${totalVerifiedDeliveryAdvance?.toLocaleString('en-BD')}`
+                      ? isBn
+                        ? `আজকের অনুমোদিত: ৳${totalVerifiedDeliveryAdvance?.toLocaleString('en-BD')}`
+                        : `Today Verified: ৳${totalVerifiedDeliveryAdvance?.toLocaleString('en-BD')}`
+                      : isBn
+                      ? `আজকের অনুমোদিত: ৳${todayVerifiedDeliveryAdvance?.toLocaleString('en-BD')}`
                       : `Today Approved: ৳${todayVerifiedDeliveryAdvance?.toLocaleString('en-BD')}`}
                   </span>
                 </p>
@@ -1539,8 +1634,10 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
               <span className="text-slate-500 dark:text-slate-400 font-medium">
                 {pendingAdvanceOrders.length > 0 ? (
                   <span className="text-amber-600 dark:text-amber-400 font-bold">
-                    {pendingAdvanceOrders.length} Pending (৳{totalPendingDeliveryAdvance?.toLocaleString('en-BD')})
+                    {pendingAdvanceOrders.length} {isBn ? 'টি অপেক্ষমাণ' : 'Pending'} (৳{totalPendingDeliveryAdvance?.toLocaleString('en-BD')})
                   </span>
+                ) : isBn ? (
+                  'অনুমোদিত ডেলিভারি অগ্রিম'
                 ) : (
                   'Approved Delivery Advance'
                 )}
@@ -1550,7 +1647,7 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
                 onClick={() => onSelectTab('delivery-advance')}
                 className="font-bold text-indigo-700 dark:text-indigo-400 hover:text-indigo-900 dark:hover:text-indigo-300 flex items-center gap-0.5 whitespace-nowrap cursor-pointer"
               >
-                <span>View All</span>
+                <span>{isBn ? 'সব দেখুন' : 'View All'}</span>
                 <ChevronRight className="w-3.5 h-3.5" />
               </button>
             </div>
@@ -1565,11 +1662,11 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
                     <TrendingUp className="w-3.5 h-3.5" />
                   </div>
                   <span className="text-xs font-black uppercase tracking-wide text-emerald-950 dark:text-emerald-200 whitespace-nowrap">
-                    Real Net Profit
+                    {isBn ? 'প্রকৃত নিট লাভ' : 'Real Net Profit'}
                   </span>
                 </div>
                 <span className="px-2.5 py-0.5 rounded-full text-[11px] font-black bg-emerald-100 dark:bg-emerald-900/80 text-emerald-900 dark:text-emerald-200 whitespace-nowrap shrink-0 border border-emerald-300 dark:border-emerald-700">
-                  Margin {netProfitMarginPercent}%
+                  {isBn ? `মার্জিন ${netProfitMarginPercent}%` : `Margin ${netProfitMarginPercent}%`}
                 </span>
               </div>
               <div className="mt-3.5">
@@ -1580,7 +1677,11 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
                   <Sparkles className="w-3.5 h-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
                   <span>
                     {finTimeframe === 'today'
-                      ? `Today Net: ৳${totalNetRevenue?.toLocaleString('en-BD')}`
+                      ? isBn
+                        ? `আজকের নিট: ৳${totalNetRevenue?.toLocaleString('en-BD')}`
+                        : `Today Net: ৳${totalNetRevenue?.toLocaleString('en-BD')}`
+                      : isBn
+                      ? `আজকের নিট: ৳${todayNetRevenue?.toLocaleString('en-BD')}`
                       : `Today Net: ৳${todayNetRevenue?.toLocaleString('en-BD')}`}
                   </span>
                 </p>
@@ -1588,9 +1689,14 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
             </div>
             <div className="mt-4 pt-2.5 border-t border-emerald-100/90 dark:border-emerald-900/50 flex items-center justify-between text-xs">
               <span className="text-slate-600 dark:text-slate-300 font-medium">
-                Includes Others Profit: <strong className="text-emerald-700 dark:text-emerald-400 font-bold">+৳{totalOtherProfits?.toLocaleString('en-BD')}</strong>
+                {isBn ? 'অন্যান্য লাভ অন্তর্ভুক্ত:' : 'Includes Others Profit:'}{' '}
+                <strong className="text-emerald-700 dark:text-emerald-400 font-bold">
+                  +৳{totalOtherProfits?.toLocaleString('en-BD')}
+                </strong>
               </span>
-              <span className="font-black text-emerald-800 dark:text-emerald-300 bg-emerald-100/80 dark:bg-emerald-900/60 px-2 py-0.5 rounded-md">Realized</span>
+              <span className="font-black text-emerald-800 dark:text-emerald-300 bg-emerald-100/80 dark:bg-emerald-900/60 px-2 py-0.5 rounded-md">
+                {isBn ? 'অর্জিত' : 'Realized'}
+              </span>
             </div>
           </div>
 
@@ -1603,11 +1709,11 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
                     <Clock className="w-3.5 h-3.5 text-purple-700 dark:text-purple-300" />
                   </div>
                   <span className="text-xs font-extrabold uppercase tracking-wide text-purple-950 dark:text-purple-200 whitespace-nowrap">
-                    Pipeline Forecast
+                    {isBn ? 'পাইপলাইন ফোরকাস্ট' : 'Pipeline Forecast'}
                   </span>
                 </div>
                 <span className="px-2.5 py-0.5 rounded-full text-[11px] font-black bg-purple-100/90 dark:bg-purple-900/60 text-purple-800 dark:text-purple-300 whitespace-nowrap shrink-0 border border-purple-200 dark:border-purple-700">
-                  {upcomingOrders.length} In Progress
+                  {upcomingOrders.length} {isBn ? 'টি চলমান' : 'In Progress'}
                 </span>
               </div>
               <div className="mt-3.5">
@@ -1616,22 +1722,108 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
                 </h3>
                 <p className="text-xs text-purple-700 dark:text-purple-400 font-bold mt-1.5 flex items-center gap-1">
                   <ArrowUpRight className="w-3.5 h-3.5 shrink-0" />
-                  <span>Expected Margin: ৳{upcomingExpectedProfit?.toLocaleString('en-BD')}</span>
+                  <span>
+                    {isBn
+                      ? `প্রত্যাশিত লাভ: ৳${upcomingExpectedProfit?.toLocaleString('en-BD')}`
+                      : `Expected Margin: ৳${upcomingExpectedProfit?.toLocaleString('en-BD')}`}
+                  </span>
                 </p>
               </div>
             </div>
             <div className="mt-4 pt-2.5 border-t border-purple-100/80 dark:border-purple-900/50 flex items-center justify-between text-xs text-slate-600 dark:text-slate-400">
-              <span className="text-slate-500 dark:text-slate-400 font-medium">On Order Delivery</span>
+              <span className="text-slate-500 dark:text-slate-400 font-medium">
+                {isBn ? 'অর্ডার ডেলিভারির পর অর্জিত হবে' : 'On Order Delivery'}
+              </span>
               <button
                 type="button"
                 onClick={() => onSelectTab('orders')}
                 className="font-bold text-purple-700 dark:text-purple-400 hover:text-purple-900 dark:hover:text-purple-300 flex items-center gap-0.5 cursor-pointer whitespace-nowrap"
               >
-                <span>Orders</span>
+                <span>{isBn ? 'অর্ডারসমূহ' : 'Orders'}</span>
                 <ChevronRight className="w-3.5 h-3.5" />
               </button>
             </div>
           </div>
+        </div>
+
+        {/* 1B. Interactive Financial & Order Status Charts (100% Real Data) */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          <SaasBarChart
+            title={isBn ? 'আর্থিক সারসংক্ষেপ তুলনা' : 'Financial Breakdown'}
+            subtitle={getFinTimeframeLabel(finTimeframe)}
+            valueFormat="currency"
+            data={[
+              { label: isBn ? 'প্রাপ্ত টাকা' : 'Received', value: Math.max(0, totalMoneyReceived), color: '#059669' },
+              { label: isBn ? 'পণ্য খরচ' : 'Prod Cost', value: Math.max(0, totalDeliveredCost), color: '#D97706' },
+              { label: isBn ? 'অন্যান্য খরচ' : 'Expenses', value: Math.max(0, totalAllExpenses), color: '#E11D48' },
+              { label: isBn ? 'অন্যান্য লাভ' : 'Other Profit', value: Math.max(0, totalOtherProfits), color: '#7C3AED' },
+              { label: isBn ? 'নিট লাভ' : 'Net Profit', value: Math.max(0, totalNetRevenue), color: '#0D9488' },
+            ]}
+          />
+
+          <SaasDonutChart
+            title={isBn ? 'অর্ডার স্ট্যাটাস বিভাজন' : 'Order Status Mix'}
+            subtitle={`${finFilteredOrders.length} ${isBn ? 'টি অর্ডার' : 'orders'}`}
+            centerLabel={isBn ? 'মোট অর্ডার' : 'Orders'}
+            onSelectSlice={() => onSelectTab('orders')}
+            data={[
+              {
+                label: isBn ? 'অপেক্ষমাণ' : 'Pending',
+                value: finFilteredOrders.filter((o) => o.orderStatus === 'Pending' || o.orderStatus === 'Payment Verification').length,
+                color: '#D97706',
+              },
+              {
+                label: isBn ? 'নিশ্চিত ও প্যাকিং' : 'Confirmed & Packing',
+                value: finFilteredOrders.filter((o) => o.orderStatus === 'Confirmed' || o.orderStatus === 'Processing' || o.orderStatus === 'Packed').length,
+                color: '#2563EB',
+              },
+              {
+                label: isBn ? 'ট্রানজিটে' : 'In Transit',
+                value: finFilteredOrders.filter((o) => o.orderStatus === 'Shipped' || o.orderStatus === 'Out for Delivery').length,
+                color: '#7C3AED',
+              },
+              {
+                label: isBn ? 'ডেলিভার্ড' : 'Delivered',
+                value: deliveredOrders.length,
+                color: '#059669',
+              },
+              {
+                label: isBn ? 'বাতিল / ফেরত' : 'Cancelled / Returned',
+                value: finFilteredOrders.filter((o) => o.orderStatus === 'Cancelled' || o.orderStatus === 'Returned').length,
+                color: '#E11D48',
+              },
+            ]}
+          />
+
+          <SaasDonutChart
+            title={isBn ? 'পেমেন্ট মাধ্যম বিভাজন' : 'Payment Method Split'}
+            subtitle={`${finFilteredOrders.length} ${isBn ? 'টি চেকআউট' : 'checkouts'}`}
+            centerLabel={isBn ? 'চেকআউট' : 'Checkouts'}
+            onSelectSlice={() => onSelectTab('payments')}
+            data={(() => {
+              const map = new Map<string, number>();
+              finFilteredOrders.forEach((o) => {
+                const raw = (o.paymentMethod || 'Cash on Delivery').trim();
+                const label = raw.toLowerCase().includes('bkash')
+                  ? 'bKash'
+                  : raw.toLowerCase().includes('nagad')
+                  ? 'Nagad'
+                  : raw.toLowerCase().includes('rocket')
+                  ? 'Rocket'
+                  : raw.toLowerCase().includes('delivery')
+                  ? isBn ? 'ক্যাশ অন ডেলিভারি' : 'Cash on Delivery'
+                  : raw;
+                map.set(label, (map.get(label) || 0) + 1);
+              });
+              return Array.from(map.entries())
+                .sort((a, b) => b[1] - a[1])
+                .map(([label, value], idx) => ({
+                  label,
+                  value,
+                  color: SAAS_CHART_COLORS[idx % SAAS_CHART_COLORS.length],
+                }));
+            })()}
+          />
         </div>
 
         {/* 2. Pipeline Progression Stages Banner */}
@@ -1643,11 +1835,35 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
                   <Clock className="w-4 h-4" />
                 </div>
                 <h3 className="text-base sm:text-lg font-bold text-white">
-                  Order Fulfillment &amp; Cash-Inflow Pipeline
+                  {isBn
+                    ? 'অর্ডার পূরণ ও ক্যাশ-ইনফ্লো পাইপলাইন'
+                    : 'Order Fulfillment & Cash-Inflow Pipeline'}
                 </h3>
               </div>
               <p className="text-xs sm:text-sm text-slate-300 mt-1">
-                Currently <strong className="text-sky-300">{upcomingOrders.length} customer orders</strong> are progressing through verification, packing, and courier transit with an estimated revenue of <strong className="text-emerald-300">৳{upcomingTotalAmount?.toLocaleString('en-BD')}</strong>.
+                {isBn ? (
+                  <>
+                    বর্তমানে{' '}
+                    <strong className="text-sky-300">
+                      {upcomingOrders.length} টি গ্রাহক অর্ডার
+                    </strong>{' '}
+                    ভেরিফিকেশন, প্যাকিং ও কুরিয়ার ট্রানজিটে রয়েছে যার আনুমানিক রাজস্ব{' '}
+                    <strong className="text-emerald-300">
+                      ৳{upcomingTotalAmount?.toLocaleString('en-BD')}
+                    </strong>।
+                  </>
+                ) : (
+                  <>
+                    Currently{' '}
+                    <strong className="text-sky-300">
+                      {upcomingOrders.length} customer orders
+                    </strong>{' '}
+                    are progressing through verification, packing, and courier transit with an estimated revenue of{' '}
+                    <strong className="text-emerald-300">
+                      ৳{upcomingTotalAmount?.toLocaleString('en-BD')}
+                    </strong>.
+                  </>
+                )}
               </p>
             </div>
 
@@ -1656,7 +1872,7 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
               onClick={() => onSelectTab('orders')}
               className="px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5 self-start lg:self-auto shrink-0 shadow-xs"
             >
-              <span>Manage Orders</span>
+              <span>{isBn ? 'অর্ডার পরিচালনা' : 'Manage Orders'}</span>
               <ArrowRight className="w-3.5 h-3.5" />
             </button>
           </div>
@@ -1671,14 +1887,16 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
               <div className="flex items-center justify-between">
                 <span className="text-[11px] font-bold text-amber-300 flex items-center gap-1.5">
                   <Clock className="w-3.5 h-3.5" />
-                  <span>1. Pending &amp; Verification</span>
+                  <span>{isBn ? '১. অপেক্ষমাণ ও যাচাইকরণ' : '1. Pending & Verification'}</span>
                 </span>
                 <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-amber-400/20 text-amber-200 border border-amber-400/30">
                   {upcomingPendingOrders.length}
                 </span>
               </div>
               <p className="text-xl font-black text-white mt-2">৳{upcomingPendingAmount?.toLocaleString('en-BD')}</p>
-              <p className="text-[10px] text-slate-300 mt-1">Awaiting verification phone call</p>
+              <p className="text-[10px] text-slate-300 mt-1">
+                {isBn ? 'ভেরিফিকেশন ফোন কলের অপেক্ষায়' : 'Awaiting verification phone call'}
+              </p>
             </div>
 
             {/* Stage 2: Processing & Packaging */}
@@ -1689,14 +1907,16 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
               <div className="flex items-center justify-between">
                 <span className="text-[11px] font-bold text-indigo-300 flex items-center gap-1.5">
                   <Package className="w-3.5 h-3.5" />
-                  <span>2. Confirmed &amp; Processing</span>
+                  <span>{isBn ? '২. নিশ্চিত ও প্রক্রিয়াধীন' : '2. Confirmed & Processing'}</span>
                 </span>
                 <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-indigo-400/20 text-indigo-200 border border-indigo-400/30">
                   {upcomingProcessingOrders.length}
                 </span>
               </div>
               <p className="text-xl font-black text-white mt-2">৳{upcomingProcessingAmount?.toLocaleString('en-BD')}</p>
-              <p className="text-[10px] text-slate-300 mt-1">Packing &amp; courier handover</p>
+              <p className="text-[10px] text-slate-300 mt-1">
+                {isBn ? 'প্যাকিং এবং কুরিয়ারে হস্তান্তর' : 'Packing & courier handover'}
+              </p>
             </div>
 
             {/* Stage 3: In Courier Transit */}
@@ -1707,14 +1927,16 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
               <div className="flex items-center justify-between">
                 <span className="text-[11px] font-bold text-sky-300 flex items-center gap-1.5">
                   <Truck className="w-3.5 h-3.5" />
-                  <span>3. Shipped / In Transit</span>
+                  <span>{isBn ? '৩. প্রেরিত / ট্রানজিটে' : '3. Shipped / In Transit'}</span>
                 </span>
                 <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-sky-400/20 text-sky-200 border border-sky-400/30">
                   {upcomingShippedOrders.length}
                 </span>
               </div>
               <p className="text-xl font-black text-white mt-2">৳{upcomingShippedAmount?.toLocaleString('en-BD')}</p>
-              <p className="text-[10px] text-slate-300 mt-1">Courier parcel on way to customer</p>
+              <p className="text-[10px] text-slate-300 mt-1">
+                {isBn ? 'কুরিয়ার পার্সেল গ্রাহকের পথে' : 'Courier parcel on way to customer'}
+              </p>
             </div>
 
             {/* Stage 4: Delivered & Realized Result */}
@@ -1725,14 +1947,18 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
               <div className="flex items-center justify-between">
                 <span className="text-[11px] font-bold text-emerald-300 flex items-center gap-1.5">
                   <CheckCircle2 className="w-3.5 h-3.5" />
-                  <span>4. Delivered &amp; Cash In</span>
+                  <span>{isBn ? '৪. ডেলিভার্ড ও নগদ প্রাপ্তি' : '4. Delivered & Cash In'}</span>
                 </span>
                 <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-400/20 text-emerald-200 border border-emerald-400/30">
-                  {deliveredOrders.length} Completed
+                  {deliveredOrders.length} {isBn ? 'টি সম্পন্ন' : 'Completed'}
                 </span>
               </div>
               <p className="text-xl font-black text-emerald-300 mt-2">৳{totalMoneyReceived?.toLocaleString('en-BD')}</p>
-              <p className="text-[10px] text-emerald-200 mt-1">Real profit ৳{totalNetRevenue?.toLocaleString('en-BD')} realized</p>
+              <p className="text-[10px] text-emerald-200 mt-1">
+                {isBn
+                  ? `প্রকৃত লাভ ৳${totalNetRevenue?.toLocaleString('en-BD')} অর্জিত`
+                  : `Real profit ৳${totalNetRevenue?.toLocaleString('en-BD')} realized`}
+              </p>
             </div>
           </div>
         </div>
@@ -1742,7 +1968,9 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
           {/* Total Orders */}
           <div className="p-3.5 sm:p-4 rounded-xl sm:rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xs flex flex-col justify-between hover:border-slate-300 dark:hover:border-slate-700 transition-colors">
             <div className="flex items-center justify-between gap-1">
-              <span className="text-[10px] sm:text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider truncate">Total Orders</span>
+              <span className="text-[10px] sm:text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider truncate">
+                {isBn ? 'মোট অর্ডার' : 'Total Orders'}
+              </span>
               <div className="w-7 h-7 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 flex items-center justify-center shrink-0">
                 <ShoppingCart className="w-3.5 h-3.5" />
               </div>
@@ -1750,7 +1978,10 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
             <div className="mt-2">
               <h4 className="text-lg sm:text-xl font-black text-slate-900 dark:text-white">{totalOrdersCount}</h4>
               <p className="text-[10px] sm:text-xs text-slate-500 dark:text-slate-400 mt-0.5 truncate">
-                Today: <strong className="text-slate-800 dark:text-slate-200">{todayOrders.length} new orders</strong>
+                {isBn ? 'আজ:' : 'Today:'}{' '}
+                <strong className="text-slate-800 dark:text-slate-200">
+                  {todayOrders.length} {isBn ? 'টি নতুন অর্ডার' : 'new orders'}
+                </strong>
               </p>
             </div>
           </div>
@@ -1758,7 +1989,9 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
           {/* Total Customers */}
           <div className="p-3.5 sm:p-4 rounded-xl sm:rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xs flex flex-col justify-between hover:border-slate-300 dark:hover:border-slate-700 transition-colors">
             <div className="flex items-center justify-between gap-1">
-              <span className="text-[10px] sm:text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider truncate">Total Customers</span>
+              <span className="text-[10px] sm:text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider truncate">
+                {isBn ? 'মোট গ্রাহক' : 'Total Customers'}
+              </span>
               <div className="w-7 h-7 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 flex items-center justify-center shrink-0">
                 <Users className="w-3.5 h-3.5" />
               </div>
@@ -1766,7 +1999,7 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
             <div className="mt-2">
               <h4 className="text-lg sm:text-xl font-black text-slate-900 dark:text-white">{customers.length}</h4>
               <p className="text-[10px] sm:text-xs text-emerald-600 dark:text-emerald-400 font-semibold mt-0.5 truncate">
-                Registered database accounts
+                {isBn ? 'নিবন্ধিত ডেটাবেস অ্যাকাউন্ট' : 'Registered database accounts'}
               </p>
             </div>
           </div>
@@ -1774,7 +2007,9 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
           {/* Avg Order Value */}
           <div className="p-3.5 sm:p-4 rounded-xl sm:rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xs flex flex-col justify-between hover:border-slate-300 dark:hover:border-slate-700 transition-colors">
             <div className="flex items-center justify-between gap-1">
-              <span className="text-[10px] sm:text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider truncate">Avg Order Value</span>
+              <span className="text-[10px] sm:text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider truncate">
+                {isBn ? 'গড় অর্ডার মূল্য' : 'Avg Order Value'}
+              </span>
               <div className="w-7 h-7 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 flex items-center justify-center shrink-0">
                 <TrendingUp className="w-3.5 h-3.5" />
               </div>
@@ -1782,7 +2017,7 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
             <div className="mt-2">
               <h4 className="text-lg sm:text-xl font-black text-slate-900 dark:text-white">৳{averageOrderValue?.toLocaleString('en-BD')}</h4>
               <p className="text-[10px] sm:text-xs text-slate-500 dark:text-slate-400 mt-0.5 truncate">
-                Average per delivered order
+                {isBn ? 'প্রতি ডেলিভারিকৃত অর্ডারে গড়' : 'Average per delivered order'}
               </p>
             </div>
           </div>
@@ -1793,15 +2028,19 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
             className="p-3.5 sm:p-4 rounded-xl sm:rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xs flex flex-col justify-between hover:border-rose-300 dark:hover:border-rose-700 cursor-pointer transition-colors"
           >
             <div className="flex items-center justify-between gap-1">
-              <span className="text-[10px] sm:text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider truncate">Low Stock SKUs</span>
+              <span className="text-[10px] sm:text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider truncate">
+                {isBn ? 'কম স্টক এসকেইউ' : 'Low Stock SKUs'}
+              </span>
               <div className="w-7 h-7 rounded-lg bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 flex items-center justify-center shrink-0">
                 <AlertTriangle className="w-3.5 h-3.5" />
               </div>
             </div>
             <div className="mt-2">
-              <h4 className="text-lg sm:text-xl font-black text-rose-600 dark:text-rose-400">{lowStockProducts.length} items</h4>
+              <h4 className="text-lg sm:text-xl font-black text-rose-600 dark:text-rose-400">
+                {lowStockProducts.length} {isBn ? 'টি পণ্য' : 'items'}
+              </h4>
               <p className="text-[10px] sm:text-xs text-rose-600 dark:text-rose-400 font-semibold mt-0.5 truncate">
-                Stock below 10 units
+                {isBn ? 'স্টক ১০ ইউনিটের নিচে' : 'Stock below 10 units'}
               </p>
             </div>
           </div>
@@ -1816,11 +2055,15 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
           className="p-3 sm:p-4 rounded-xl bg-amber-50/70 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 text-left hover:bg-amber-100/70 dark:hover:bg-amber-900/40 transition-colors cursor-pointer"
         >
           <div className="flex items-center justify-between">
-            <span className="text-[11px] sm:text-xs font-bold text-amber-900 dark:text-amber-200">Pending Orders</span>
+            <span className="text-[11px] sm:text-xs font-bold text-amber-900 dark:text-amber-200">
+              {isBn ? 'অপেক্ষমাণ অর্ডার' : 'Pending Orders'}
+            </span>
             <Clock className="w-4 h-4 text-amber-600 dark:text-amber-400" />
           </div>
           <p className="text-lg sm:text-xl font-extrabold text-amber-950 dark:text-white mt-1">{pendingOrders.length}</p>
-          <p className="text-[10px] sm:text-[11px] text-amber-700 dark:text-amber-400 mt-0.5">Needs phone verification</p>
+          <p className="text-[10px] sm:text-[11px] text-amber-700 dark:text-amber-400 mt-0.5">
+            {isBn ? 'ফোন ভেরিফিকেশন প্রয়োজন' : 'Needs phone verification'}
+          </p>
         </button>
 
         <button
@@ -1829,11 +2072,15 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
           className="p-3 sm:p-4 rounded-xl bg-sky-50/70 dark:bg-sky-950/40 border border-sky-200 dark:border-sky-800/60 text-left hover:bg-sky-100/70 dark:hover:bg-sky-900/40 transition-colors cursor-pointer"
         >
           <div className="flex items-center justify-between">
-            <span className="text-[11px] sm:text-xs font-bold text-sky-900 dark:text-sky-200">Processing &amp; Shipped</span>
+            <span className="text-[11px] sm:text-xs font-bold text-sky-900 dark:text-sky-200">
+              {isBn ? 'প্রক্রিয়াধীন ও ট্রানজিটে' : 'Processing & Shipped'}
+            </span>
             <Package className="w-4 h-4 text-sky-600 dark:text-sky-400" />
           </div>
           <p className="text-lg sm:text-xl font-extrabold text-sky-950 dark:text-white mt-1">{processingOrders.length}</p>
-          <p className="text-[10px] sm:text-[11px] text-sky-700 dark:text-sky-400 mt-0.5">In packing &amp; transit</p>
+          <p className="text-[10px] sm:text-[11px] text-sky-700 dark:text-sky-400 mt-0.5">
+            {isBn ? 'প্যাকিং ও কুরিয়ার ট্রানজিটে' : 'In packing & transit'}
+          </p>
         </button>
 
         <button
@@ -1842,11 +2089,15 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
           className="p-3 sm:p-4 rounded-xl bg-emerald-50/70 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/60 text-left hover:bg-emerald-100/70 dark:hover:bg-emerald-900/40 transition-colors cursor-pointer"
         >
           <div className="flex items-center justify-between">
-            <span className="text-[11px] sm:text-xs font-bold text-emerald-900 dark:text-emerald-200">Delivered</span>
+            <span className="text-[11px] sm:text-xs font-bold text-emerald-900 dark:text-emerald-200">
+              {isBn ? 'ডেলিভার্ড' : 'Delivered'}
+            </span>
             <CheckCircle className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
           </div>
           <p className="text-lg sm:text-xl font-extrabold text-emerald-950 dark:text-white mt-1">{deliveredOrders.length}</p>
-          <p className="text-[10px] sm:text-[11px] text-emerald-700 dark:text-emerald-400 mt-0.5">Successfully collected</p>
+          <p className="text-[10px] sm:text-[11px] text-emerald-700 dark:text-emerald-400 mt-0.5">
+            {isBn ? 'সফলভাবে ক্যাশ আদায়কৃত' : 'Successfully collected'}
+          </p>
         </button>
 
         <button
@@ -1855,11 +2106,15 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
           className="p-3 sm:p-4 rounded-xl bg-rose-50/70 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800/60 text-left hover:bg-rose-100/70 dark:hover:bg-rose-900/40 transition-colors cursor-pointer"
         >
           <div className="flex items-center justify-between">
-            <span className="text-[11px] sm:text-xs font-bold text-rose-900 dark:text-rose-200">Low Stock SKUs</span>
+            <span className="text-[11px] sm:text-xs font-bold text-rose-900 dark:text-rose-200">
+              {isBn ? 'কম স্টক এসকেইউ' : 'Low Stock SKUs'}
+            </span>
             <AlertTriangle className="w-4 h-4 text-rose-600 dark:text-rose-400" />
           </div>
           <p className="text-lg sm:text-xl font-extrabold text-rose-950 dark:text-white mt-1">{lowStockProducts.length}</p>
-          <p className="text-[10px] sm:text-[11px] text-rose-700 dark:text-rose-400 mt-0.5">Restock required</p>
+          <p className="text-[10px] sm:text-[11px] text-rose-700 dark:text-rose-400 mt-0.5">
+            {isBn ? 'পুনরায় স্টক করা প্রয়োজন' : 'Restock required'}
+          </p>
         </button>
       </div>
 
@@ -1869,8 +2124,14 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
         <div className="lg:col-span-2 p-4 sm:p-6 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xs">
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pb-4 border-b border-slate-100 dark:border-slate-800">
             <div>
-              <h2 className="text-sm sm:text-base font-bold text-slate-900 dark:text-white">Sales &amp; Revenue Analytics</h2>
-              <p className="text-xs text-slate-500 dark:text-slate-400">Real-time Bangladesh order trends and turnover</p>
+              <h2 className="text-sm sm:text-base font-bold text-slate-900 dark:text-white">
+                {isBn ? 'বিক্রয় ও রাজস্ব অ্যানালিটিক্স' : 'Sales & Revenue Analytics'}
+              </h2>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                {isBn
+                  ? 'লাইভ বাংলাদেশ অর্ডার ট্রেন্ড ও টার্নওভার'
+                  : 'Real-time Bangladesh order trends and turnover'}
+              </p>
             </div>
 
             {/* Period Filters - Scrollable Single Row on Mobile */}
@@ -1878,12 +2139,12 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
               <div className="inline-flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl text-xs font-semibold whitespace-nowrap min-w-max border border-slate-200/60 dark:border-slate-700">
                 {(
                   [
-                    { id: 'today', label: 'Today', shortLabel: 'Today' },
-                    { id: 'yesterday', label: 'Yesterday', shortLabel: 'Yest' },
-                    { id: '7d', label: 'Last 7 Days', shortLabel: '7 Days' },
-                    { id: '30d', label: '30 Days', shortLabel: '30 Days' },
-                    { id: 'month', label: 'This Month', shortLabel: 'Month' },
-                    { id: 'year', label: 'Year', shortLabel: 'Year' },
+                    { id: 'today', labelEn: 'Today', labelBn: 'আজ', shortLabelEn: 'Today', shortLabelBn: 'আজ' },
+                    { id: 'yesterday', labelEn: 'Yesterday', labelBn: 'গতকাল', shortLabelEn: 'Yest', shortLabelBn: 'গতকাল' },
+                    { id: '7d', labelEn: 'Last 7 Days', labelBn: 'বিগত ৭ দিন', shortLabelEn: '7 Days', shortLabelBn: '৭ দিন' },
+                    { id: '30d', labelEn: '30 Days', labelBn: '৩০ দিন', shortLabelEn: '30 Days', shortLabelBn: '৩০ দিন' },
+                    { id: 'month', labelEn: 'This Month', labelBn: 'চলতি মাস', shortLabelEn: 'Month', shortLabelBn: 'মাস' },
+                    { id: 'year', labelEn: 'Year', labelBn: 'বছর', shortLabelEn: 'Year', shortLabelBn: 'বছর' },
                   ] as const
                 ).map((p) => (
                   <button
@@ -1896,56 +2157,54 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
                         : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                     }`}
                   >
-                    <span className="hidden sm:inline">{p.label}</span>
-                    <span className="sm:hidden">{p.shortLabel}</span>
+                    <span className="hidden sm:inline">{isBn ? p.labelBn : p.labelEn}</span>
+                    <span className="sm:hidden">{isBn ? p.shortLabelBn : p.shortLabelEn}</span>
                   </button>
                 ))}
               </div>
             </div>
           </div>
 
-          {/* Bar Visual Representation */}
-          <div className="pt-6">
-            <div className="h-52 flex items-end gap-2 sm:gap-4 justify-between px-1 sm:px-2">
-              {chartData.map((d, i) => {
-                const heightPercent = maxPeriodRevenue > 0 ? Math.max(12, Math.round((d.revenue / maxPeriodRevenue) * 100)) : 12;
-                return (
-                  <div key={i} className="flex-1 flex flex-col items-center gap-2 group relative">
-                    {/* Hover Tooltip */}
-                    <div className="absolute -top-10 z-10 bg-slate-900 text-white text-[10px] font-bold px-2 py-1 rounded-md opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap shadow-md">
-                      {d.fullLabel}: ৳{d.revenue?.toLocaleString()} ({d.orders} orders)
-                    </div>
-
-                    <div className="text-[9px] sm:text-[10px] font-bold text-slate-600 dark:text-slate-300 opacity-80 group-hover:opacity-100 transition-opacity">
-                      {d.revenue >= 1000 ? `৳${(d.revenue / 1000).toFixed(1)}k` : `৳${d.revenue}`}
-                    </div>
-                    <div className="w-full max-w-[48px] bg-slate-100 dark:bg-slate-800 rounded-t-xl overflow-hidden h-36 sm:h-40 flex items-end">
-                      <div
-                        style={{ height: `${heightPercent}%` }}
-                        className="w-full bg-linear-to-t from-sky-600 to-sky-400 rounded-t-xl transition-all duration-500 group-hover:from-sky-500 group-hover:to-sky-300"
-                      />
-                    </div>
-                    <span className="text-[10px] sm:text-xs font-semibold text-slate-600 dark:text-slate-400 truncate max-w-full" title={d.fullLabel}>
-                      {d.label}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
+          {/* Line/Area Trend + Bar Chart Representation */}
+          <div className="pt-5 space-y-5">
+            <SaasLineAreaChart
+              title={isBn ? 'বিক্রয় ও অর্ডার ট্রেন্ড লাইন' : 'Revenue & Order Volume Trend'}
+              subtitle={isBn ? 'নির্বাচিত সময়কালের লাইভ গ্রাফ' : 'Live time-series performance'}
+              primaryLabel={isBn ? 'রাজস্ব (৳)' : 'Revenue'}
+              secondaryLabel={isBn ? 'অর্ডার সংখ্যা' : 'Orders'}
+              primaryFormat="currency"
+              secondaryFormat="number"
+              primaryColor="#0284C7"
+              secondaryColor="#EA580C"
+              className="border-0 p-0! bg-transparent!"
+              data={chartData.map((d) => ({
+                label: d.label,
+                primary: d.revenue,
+                secondary: d.orders,
+              }))}
+            />
           </div>
 
           {/* Bottom Chart Stats */}
-          <div className="mt-6 pt-4 border-t border-slate-100 dark:border-slate-800 grid grid-cols-3 text-center text-xs gap-1">
+          <div className="mt-5 pt-4 border-t border-slate-100 dark:border-slate-800 grid grid-cols-3 text-center text-xs gap-1 tabular-nums">
             <div>
-              <p className="text-slate-500 dark:text-slate-400 text-[11px] sm:text-xs">Period Sales</p>
+              <p className="text-slate-500 dark:text-slate-400 text-[11px] sm:text-xs">
+                {isBn ? 'সময়কালের বিক্রয়' : 'Period Sales'}
+              </p>
               <p className="font-bold text-slate-900 dark:text-white text-xs sm:text-sm mt-0.5">৳{periodRevenue?.toLocaleString()}</p>
             </div>
             <div>
-              <p className="text-slate-500 dark:text-slate-400 text-[11px] sm:text-xs">Orders Count</p>
-              <p className="font-bold text-slate-900 dark:text-white text-xs sm:text-sm mt-0.5">{periodOrdersCount} orders</p>
+              <p className="text-slate-500 dark:text-slate-400 text-[11px] sm:text-xs">
+                {isBn ? 'অর্ডারের সংখ্যা' : 'Orders Count'}
+              </p>
+              <p className="font-bold text-slate-900 dark:text-white text-xs sm:text-sm mt-0.5">
+                {periodOrdersCount} {isBn ? 'টি অর্ডার' : 'orders'}
+              </p>
             </div>
             <div>
-              <p className="text-slate-500 dark:text-slate-400 text-[11px] sm:text-xs">Period AOV</p>
+              <p className="text-slate-500 dark:text-slate-400 text-[11px] sm:text-xs">
+                {isBn ? 'সময়কালের গড় অর্ডার' : 'Period AOV'}
+              </p>
               <p className="font-bold text-sky-600 dark:text-sky-400 text-xs sm:text-sm mt-0.5">
                 ৳{periodOrdersCount > 0 ? Math.round(periodRevenue / periodOrdersCount)?.toLocaleString() : 0}
               </p>
@@ -1953,53 +2212,45 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
           </div>
         </div>
 
-        {/* Top Categories & Quick Stats */}
-        <div className="p-5 sm:p-6 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xs flex flex-col justify-between">
-          <div>
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
-              <h2 className="text-sm sm:text-base font-bold text-slate-900 dark:text-white">Top Categories</h2>
-              <button
-                type="button"
-                onClick={() => onSelectTab('categories')}
-                className="text-xs font-semibold text-sky-600 dark:text-sky-400 hover:text-sky-700 dark:hover:text-sky-300 flex items-center gap-1 cursor-pointer"
-              >
-                <span>View All</span>
-                <ChevronRight className="w-3.5 h-3.5" />
-              </button>
-            </div>
+        {/* Top Categories Donut & Live Payment Stats */}
+        <div className="flex flex-col gap-4">
+          <SaasDonutChart
+            title={isBn ? 'শীর্ষ ক্যাটাগরি অনুপাত' : 'Catalog by Category'}
+            subtitle={`${products.length} ${isBn ? 'টি পণ্য' : 'products'}`}
+            centerLabel={isBn ? 'মোট পণ্য' : 'Products'}
+            onSelectSlice={() => onSelectTab('categories')}
+            data={topCategories.map(([catName, count], idx) => ({
+              label: catName,
+              value: count,
+              color: SAAS_CHART_COLORS[idx % SAAS_CHART_COLORS.length],
+            }))}
+          />
 
-            <div className="mt-4 space-y-3.5">
-              {topCategories.map(([catName, count], idx) => {
-                const totalProds = products.length || 1;
-                const percentage = Math.round((count / totalProds) * 100);
-                return (
-                  <div key={idx} className="space-y-1">
-                    <div className="flex justify-between text-xs font-medium">
-                      <span className="text-slate-800 dark:text-slate-200 font-semibold">{catName}</span>
-                      <span className="text-slate-500 dark:text-slate-400">{count} products ({percentage}%)</span>
-                    </div>
-                    <div className="h-2 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
-                      <div
-                        style={{ width: `${percentage}%` }}
-                        className={`h-full rounded-full ${
-                          idx === 0 ? 'bg-sky-600' : idx === 1 ? 'bg-indigo-500' : idx === 2 ? 'bg-purple-500' : 'bg-slate-400'
-                        }`}
-                      />
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          <div className="mt-6 p-4 rounded-xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200/80 dark:border-slate-700">
+          <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200/80 dark:border-slate-700">
             <div className="flex items-center gap-2 text-xs font-bold text-slate-800 dark:text-slate-200 mb-1">
               <Sparkles className="w-4 h-4 text-sky-600 dark:text-sky-400" />
-              <span>Payment Preferences in BD</span>
+              <span>{isBn ? 'লাইভ পেমেন্ট অনুপাত' : 'Live Payment Share'}</span>
             </div>
-            <p className="text-xs text-slate-600 dark:text-slate-300">
-              bKash &amp; Nagad account for <strong className="text-slate-800 dark:text-white">58%</strong> of completed prepaid orders; Cash on Delivery accounts for <strong className="text-slate-800 dark:text-white">42%</strong>.
-            </p>
+            {(() => {
+              const totalOrd = orders.length;
+              const mobileWalletCount = orders.filter((o) => {
+                const pm = (o.paymentMethod || '').toLowerCase();
+                return pm.includes('bkash') || pm.includes('nagad') || pm.includes('rocket') || pm.includes('upay');
+              }).length;
+              const walletPct = totalOrd > 0 ? Math.round((mobileWalletCount / totalOrd) * 100) : 0;
+              const codPct = totalOrd > 0 ? 100 - walletPct : 0;
+              return (
+                <p className="text-xs text-slate-600 dark:text-slate-300 tabular-nums">
+                  {totalOrd === 0
+                    ? isBn
+                      ? 'এখনো কোনো অর্ডার রেকর্ড হয়নি।'
+                      : 'No orders recorded yet.'
+                    : isBn
+                    ? `মোবাইল ওয়ালেট (bKash/Nagad): ${walletPct}% এবং ক্যাশ অন ডেলিভারি: ${codPct}% (মোট ${totalOrd} অর্ডার)।`
+                    : `Mobile Wallets (bKash/Nagad): ${walletPct}% and Cash on Delivery: ${codPct}% across ${totalOrd} orders.`}
+                </p>
+              );
+            })()}
           </div>
         </div>
       </div>
@@ -2010,15 +2261,21 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
         <div className="lg:col-span-2 p-5 sm:p-6 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xs">
           <div className="flex items-center justify-between pb-4 border-b border-slate-100 dark:border-slate-800">
             <div>
-              <h2 className="text-sm sm:text-base font-bold text-slate-900 dark:text-white">Recent Customer Orders</h2>
-              <p className="text-xs text-slate-500 dark:text-slate-400">Live order stream across Bangladesh</p>
+              <h2 className="text-sm sm:text-base font-bold text-slate-900 dark:text-white">
+                {isBn ? 'সাম্প্রতিক গ্রাহক অর্ডার' : 'Recent Customer Orders'}
+              </h2>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                {isBn
+                  ? 'বাংলাদেশ জুড়ে লাইভ অর্ডার প্রবাহ'
+                  : 'Live order stream across Bangladesh'}
+              </p>
             </div>
             <button
               type="button"
               onClick={() => onSelectTab('orders')}
               className="text-xs font-semibold text-sky-600 dark:text-sky-400 hover:text-sky-700 dark:hover:text-sky-300 flex items-center gap-1 cursor-pointer"
             >
-              <span>Manage All Orders</span>
+              <span>{isBn ? 'সকল অর্ডার পরিচালনা' : 'Manage All Orders'}</span>
               <ChevronRight className="w-3.5 h-3.5" />
             </button>
           </div>
@@ -2027,13 +2284,13 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
             <table className="w-full text-left text-xs">
               <thead>
                 <tr className="border-b border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 uppercase text-[10px] tracking-wider">
-                  <th className="py-2.5 px-2">Order ID</th>
-                  <th className="py-2.5 px-2">Customer</th>
-                  <th className="py-2.5 px-2">Items</th>
-                  <th className="py-2.5 px-2">Amount</th>
-                  <th className="py-2.5 px-2">Payment</th>
-                  <th className="py-2.5 px-2">Status</th>
-                  <th className="py-2.5 px-2 text-right">Action</th>
+                  <th className="py-2.5 px-2">{isBn ? 'অর্ডার আইডি' : 'Order ID'}</th>
+                  <th className="py-2.5 px-2">{isBn ? 'গ্রাহক' : 'Customer'}</th>
+                  <th className="py-2.5 px-2">{isBn ? 'আইটেম' : 'Items'}</th>
+                  <th className="py-2.5 px-2">{isBn ? 'মোট টাকা' : 'Amount'}</th>
+                  <th className="py-2.5 px-2">{isBn ? 'পেমেন্ট' : 'Payment'}</th>
+                  <th className="py-2.5 px-2">{isBn ? 'স্ট্যাটাস' : 'Status'}</th>
+                  <th className="py-2.5 px-2 text-right">{isBn ? 'অ্যাকশন' : 'Action'}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -2045,7 +2302,7 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
                       <p className="text-[11px] text-slate-400 dark:text-slate-500">{order.customerMobile}</p>
                     </td>
                     <td className="py-3 px-2 text-slate-600 dark:text-slate-300">
-                      {order?.items?.reduce((sum, item) => sum + (item.quantity || 1), 0) || 0} items
+                      {order?.items?.reduce((sum, item) => sum + (item.quantity || 1), 0) || 0} {isBn ? 'টি আইটেম' : 'items'}
                     </td>
                     <td className="py-3 px-2 font-bold text-slate-900 dark:text-white">
                       ৳{order.totalAmount?.toLocaleString()}
@@ -2067,7 +2324,25 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
                             : 'bg-sky-100 dark:bg-sky-950/80 text-sky-800 dark:text-sky-300'
                         }`}
                       >
-                        {order.orderStatus}
+                        {isBn
+                          ? order.orderStatus === 'Delivered'
+                            ? 'ডেলিভার্ড'
+                            : order.orderStatus === 'Cancelled'
+                            ? 'বাতিল'
+                            : order.orderStatus === 'Pending'
+                            ? 'অপেক্ষমাণ'
+                            : order.orderStatus === 'Payment Verification'
+                            ? 'পেমেন্ট যাচাই'
+                            : order.orderStatus === 'Processing'
+                            ? 'প্রক্রিয়াধীন'
+                            : order.orderStatus === 'Packed'
+                            ? 'প্যাক করা হয়েছে'
+                            : order.orderStatus === 'Shipped'
+                            ? 'প্রেরিত'
+                            : order.orderStatus === 'Out for Delivery'
+                            ? 'ডেলিভারির পথে'
+                            : order.orderStatus
+                          : order.orderStatus}
                       </span>
                     </td>
                     <td className="py-3 px-2 text-right">
@@ -2076,7 +2351,7 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
                           type="button"
                           onClick={() => onViewOrder(order)}
                           className="p-1.5 rounded-lg text-slate-600 dark:text-slate-300 hover:text-sky-600 dark:hover:text-sky-400 hover:bg-sky-50 dark:hover:bg-slate-800 transition-colors cursor-pointer"
-                          title="View Details"
+                          title={isBn ? 'বিস্তারিত দেখুন' : 'View Details'}
                         >
                           <Eye className="w-4 h-4" />
                         </button>
@@ -2084,7 +2359,7 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
                           type="button"
                           onClick={() => onPrintInvoice(order)}
                           className="p-1.5 rounded-lg text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
-                          title="Print Invoice"
+                          title={isBn ? 'ইনভয়েস প্রিন্ট' : 'Print Invoice'}
                         >
                           <Printer className="w-4 h-4" />
                         </button>
@@ -2101,15 +2376,21 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
         <div className="p-5 sm:p-6 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xs">
           <div className="flex items-center justify-between pb-4 border-b border-slate-100 dark:border-slate-800">
             <div>
-              <h2 className="text-sm sm:text-base font-bold text-slate-900 dark:text-white">Best Sellers</h2>
-              <p className="text-xs text-slate-500 dark:text-slate-400">Top revenue generating items</p>
+              <h2 className="text-sm sm:text-base font-bold text-slate-900 dark:text-white">
+                {isBn ? 'শীর্ষ বিক্রিত পণ্য' : 'Best Sellers'}
+              </h2>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                {isBn
+                  ? 'সর্বোচ্চ রাজস্ব উৎপাদনকারী পণ্য'
+                  : 'Top revenue generating items'}
+              </p>
             </div>
             <button
               type="button"
               onClick={() => onSelectTab('products')}
               className="text-xs font-semibold text-sky-600 dark:text-sky-400 hover:text-sky-700 dark:hover:text-sky-300 flex items-center gap-1 cursor-pointer"
             >
-              <span>Catalog</span>
+              <span>{isBn ? 'ক্যাটালগ' : 'Catalog'}</span>
               <ChevronRight className="w-3.5 h-3.5" />
             </button>
           </div>
@@ -2131,7 +2412,7 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
                 </div>
                 <div className="text-right shrink-0">
                   <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-sky-50 dark:bg-sky-950/80 text-sky-700 dark:text-sky-300">
-                    {item.quantity} sold
+                    {item.quantity} {isBn ? 'টি বিক্রিত' : 'sold'}
                   </span>
                 </div>
               </div>
@@ -2143,14 +2424,16 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
             <div className="mt-6 p-3.5 rounded-xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800 flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <AlertTriangle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0" />
-                <span className="text-xs font-bold text-rose-900 dark:text-rose-200">{lowStockProducts.length} items low on stock</span>
+                <span className="text-xs font-bold text-rose-900 dark:text-rose-200">
+                  {lowStockProducts.length} {isBn ? 'টি পণ্যের স্টক কম' : 'items low on stock'}
+                </span>
               </div>
               <button
                 type="button"
                 onClick={() => onSelectTab('inventory')}
                 className="text-xs font-bold text-rose-700 dark:text-rose-400 hover:text-rose-900 dark:hover:text-rose-300 cursor-pointer underline"
               >
-                Reorder
+                {isBn ? 'পুনরায় অর্ডার' : 'Reorder'}
               </button>
             </div>
           )}
@@ -2167,9 +2450,13 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
                   <Truck className="w-5 h-5" />
                 </div>
                 <div>
-                  <h3 className="font-black text-base text-white">Record Delivery Expense</h3>
+                  <h3 className="font-black text-base text-white">
+                    {isBn ? 'ডেলিভারি খরচ সংরক্ষণ' : 'Record Delivery Expense'}
+                  </h3>
                   <p className="text-xs text-slate-300">
-                    Saves to Cloud Firestore and permanent Activity Logs
+                    {isBn
+                      ? 'ক্লাউড ফায়ারস্টোর ও স্থায়ী অ্যাক্টিভিটি লগে সংরক্ষিত হয়'
+                      : 'Saves to Cloud Firestore and permanent Activity Logs'}
                   </p>
                 </div>
               </div>
@@ -2191,11 +2478,17 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
               )}
 
               <div>
-                <label className="block font-bold text-slate-700 mb-1.5">Expense Title / Description *</label>
+                <label className="block font-bold text-slate-700 mb-1.5">
+                  {isBn ? 'খরচের শিরোনাম / বিবরণ *' : 'Expense Title / Description *'}
+                </label>
                 <input
                   type="text"
                   required
-                  placeholder="e.g. Steadfast Courier Charges for Dispatch Batch #12"
+                  placeholder={
+                    isBn
+                      ? 'যেমন: ডেলিভারি ব্যাচ #১২ এর জন্য কুরিয়ার বিল'
+                      : 'e.g. Steadfast Courier Charges for Dispatch Batch #12'
+                  }
                   value={deliveryFormData.title}
                   onChange={(e) => setDeliveryFormData({ ...deliveryFormData, title: e.target.value })}
                   className="w-full py-2.5 px-3 rounded-xl border border-slate-300 focus:border-rose-500 focus:ring-2 focus:ring-rose-200 text-xs text-slate-800"
@@ -2204,7 +2497,9 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1.5">Amount Spent (৳ BDT) *</label>
+                  <label className="block font-bold text-slate-700 mb-1.5">
+                    {isBn ? 'খরচের পরিমাণ (৳ টাকা) *' : 'Amount Spent (৳ BDT) *'}
+                  </label>
                   <div className="relative">
                     <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 font-bold">৳</span>
                     <input
@@ -2221,7 +2516,9 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
                 </div>
 
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1.5">Date *</label>
+                  <label className="block font-bold text-slate-700 mb-1.5">
+                    {isBn ? 'তারিখ *' : 'Date *'}
+                  </label>
                   <input
                     type="date"
                     required
@@ -2234,7 +2531,9 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1.5">Courier Provider</label>
+                  <label className="block font-bold text-slate-700 mb-1.5">
+                    {isBn ? 'কুরিয়ার প্রতিষ্ঠান' : 'Courier Provider'}
+                  </label>
                   <select
                     value={deliveryFormData.courier}
                     onChange={(e) => setDeliveryFormData({ ...deliveryFormData, courier: e.target.value })}
@@ -2251,10 +2550,12 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
                 </div>
 
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1.5">Delivery Location / Area</label>
+                  <label className="block font-bold text-slate-700 mb-1.5">
+                    {isBn ? 'ডেলিভারি এলাকা / লোকেশন' : 'Delivery Location / Area'}
+                  </label>
                   <input
                     type="text"
-                    placeholder="e.g. Inside Dhaka, Dhanmondi Hub"
+                    placeholder={isBn ? 'যেমন: ঢাকা সিটির ভেতর, ধানমন্ডি হাব' : 'e.g. Inside Dhaka, Dhanmondi Hub'}
                     value={deliveryFormData.location}
                     onChange={(e) => setDeliveryFormData({ ...deliveryFormData, location: e.target.value })}
                     className="w-full py-2.5 px-3 rounded-xl border border-slate-300 focus:border-rose-500 focus:ring-2 focus:ring-rose-200 text-xs text-slate-800"
@@ -2264,11 +2565,15 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
 
               <div>
                 <label className="block font-bold text-slate-700 mb-1.5">
-                  Side Note / Breakdown Notes
+                  {isBn ? 'মন্তব্য / বিস্তারিত নোট' : 'Side Note / Breakdown Notes'}
                 </label>
                 <textarea
                   rows={3}
-                  placeholder="Add specific details, consignment numbers, or voucher notes..."
+                  placeholder={
+                    isBn
+                      ? 'কনসাইনমেন্ট নম্বর বা ভাউচার নোট ইত্যাদি লিখুন...'
+                      : 'Add specific details, consignment numbers, or voucher notes...'
+                  }
                   value={deliveryFormData.note}
                   onChange={(e) => setDeliveryFormData({ ...deliveryFormData, note: e.target.value })}
                   className="w-full p-3 rounded-xl border border-slate-300 focus:border-rose-500 focus:ring-2 focus:ring-rose-200 text-xs text-slate-800 resize-none"
@@ -2281,13 +2586,13 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
                   onClick={() => setIsDeliveryModalOpen(false)}
                   className="px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold transition-colors"
                 >
-                  Cancel
+                  {isBn ? 'বাতিল' : 'Cancel'}
                 </button>
                 <button
                   type="submit"
                   className="px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-black shadow-sm shadow-rose-600/30 transition-all"
                 >
-                  Save Delivery Cost
+                  {isBn ? 'ডেলিভারি খরচ সংরক্ষণ' : 'Save Delivery Cost'}
                 </button>
               </div>
             </form>
@@ -2306,8 +2611,12 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
                   <Receipt className="w-5 h-5" />
                 </div>
                 <div>
-                  <h3 className="text-sm sm:text-base font-black">Official Financial Performance Statement</h3>
-                  <p className="text-xs text-sky-300">Audited Financial &amp; Revenue Overview Receipt</p>
+                  <h3 className="text-sm sm:text-base font-black">
+                    {isBn ? 'অফিসিয়াল আর্থিক বিবরণী স্টেটমেন্ট' : 'Official Financial Performance Statement'}
+                  </h3>
+                  <p className="text-xs text-sky-300">
+                    {isBn ? 'নিরীক্ষিত আর্থিক ও রাজস্ব ওভারভিউ রসিদ' : 'Audited Financial & Revenue Overview Receipt'}
+                  </p>
                 </div>
               </div>
               <div className="flex items-center gap-2">
@@ -2318,7 +2627,15 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
                   className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-sky-500 hover:bg-sky-400 text-slate-950 font-black text-xs shadow-md transition-all cursor-pointer disabled:opacity-50"
                 >
                   <Download className="w-3.5 h-3.5" />
-                  <span>{isGeneratingReceipt ? 'Generating...' : 'Download PNG Receipt'}</span>
+                  <span>
+                    {isGeneratingReceipt
+                      ? isBn
+                        ? 'তৈরি হচ্ছে...'
+                        : 'Generating...'
+                      : isBn
+                      ? 'পিএনজি রসিদ ডাউনলোড'
+                      : 'Download PNG Receipt'}
+                  </span>
                 </button>
                 <button
                   type="button"
@@ -2342,14 +2659,17 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
                     </div>
                     <div>
                       <span className="px-2.5 py-0.5 rounded-md bg-sky-100 text-sky-800 text-[11px] font-black uppercase tracking-wider border border-sky-200">
-                        OFFICIAL REPORT
+                        {isBn ? 'অফিসিয়াল রিপোর্ট' : 'OFFICIAL REPORT'}
                       </span>
-                      <p className="text-xs text-slate-500 mt-1">Authorized Executive Balance Statement</p>
+                      <p className="text-xs text-slate-500 mt-1">
+                        {isBn ? 'অনুমোদিত নির্বাহী ব্যালেন্স স্টেটমেন্ট' : 'Authorized Executive Balance Statement'}
+                      </p>
                     </div>
                   </div>
                   <div className="text-left sm:text-right space-y-1">
                     <p className="text-xs text-slate-500 font-medium">
-                      Date: <strong className="text-slate-800">{new Date().toLocaleDateString('en-US', { dateStyle: 'long' })}</strong>
+                      {isBn ? 'তারিখ:' : 'Date:'}{' '}
+                      <strong className="text-slate-800">{new Date().toLocaleDateString('en-US', { dateStyle: 'long' })}</strong>
                     </p>
                     <p className="text-xs text-slate-500 font-mono">
                       Ref: <span className="font-bold text-slate-800">KENAX-FIN-{finTimeframe.toUpperCase()}-{Date.now().toString(36).toUpperCase()}</span>
@@ -2361,18 +2681,24 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
                 <div className="bg-slate-900 rounded-xl p-5 text-white flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                   <div>
                     <div className="flex items-center gap-2">
-                      <h4 className="text-base sm:text-lg font-black">Financial Performance &amp; Revenue Statement</h4>
+                      <h4 className="text-base sm:text-lg font-black">
+                        {isBn ? 'আর্থিক বিবরণ ও রাজস্ব স্টেটমেন্ট' : 'Financial Performance & Revenue Statement'}
+                      </h4>
                       <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase bg-sky-500 text-slate-950">
                         {getFinTimeframeLabel(finTimeframe)}
                       </span>
                     </div>
                     <span className="text-xs text-slate-400 mt-1 block font-mono">
-                      Real-Time Audited Financial &amp; Profit Report
+                      {isBn
+                        ? 'রিয়েল-টাইম নিরীক্ষিত আর্থিক ও লাভ রিপোর্ট'
+                        : 'Real-Time Audited Financial & Profit Report'}
                     </span>
                   </div>
                   <div className="flex items-center gap-5">
                     <div className="text-right">
-                      <span className="text-xs text-emerald-400 font-bold block uppercase tracking-wide">Real Net Profit</span>
+                      <span className="text-xs text-emerald-400 font-bold block uppercase tracking-wide">
+                        {isBn ? 'প্রকৃত নিট লাভ' : 'Real Net Profit'}
+                      </span>
                       <span className="text-2xl font-black text-emerald-300">৳{totalNetRevenue?.toLocaleString('en-BD')}</span>
                     </div>
                     <div className="flex items-center">
@@ -2384,51 +2710,91 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
                 {/* Key Metrics Table Grid (9 Cards) */}
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                   <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200">
-                    <span className="text-[11px] font-bold text-slate-500 uppercase block">Money Received</span>
+                    <span className="text-[11px] font-bold text-slate-500 uppercase block">
+                      {isBn ? 'প্রাপ্ত নগদ টাকা' : 'Money Received'}
+                    </span>
                     <p className="text-lg font-black text-emerald-700 mt-0.5">৳{totalMoneyReceived?.toLocaleString('en-BD')}</p>
-                    <span className="text-[10px] text-slate-400">{deliveredOrders.length} Delivered Orders</span>
+                    <span className="text-[10px] text-slate-400">
+                      {deliveredOrders.length} {isBn ? 'টি ডেলিভার্ড অর্ডার' : 'Delivered Orders'}
+                    </span>
                   </div>
                   <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200">
-                    <span className="text-[11px] font-bold text-slate-500 uppercase block">Product Costs</span>
+                    <span className="text-[11px] font-bold text-slate-500 uppercase block">
+                      {isBn ? 'পণ্যের ক্রয়মূল্য' : 'Product Costs'}
+                    </span>
                     <p className="text-lg font-black text-amber-700 mt-0.5">৳{totalDeliveredCost?.toLocaleString('en-BD')}</p>
-                    <span className="text-[10px] text-slate-400">Wholesale Sourcing</span>
+                    <span className="text-[10px] text-slate-400">
+                      {isBn ? 'পাইকারি সোর্সিং' : 'Wholesale Sourcing'}
+                    </span>
                   </div>
                   <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200">
-                    <span className="text-[11px] font-bold text-slate-500 uppercase block">Product Profit</span>
+                    <span className="text-[11px] font-bold text-slate-500 uppercase block">
+                      {isBn ? 'পণ্যের মোট লাভ' : 'Product Profit'}
+                    </span>
                     <p className="text-lg font-black text-sky-700 mt-0.5">৳{totalProductProfit?.toLocaleString('en-BD')}</p>
-                    <span className="text-[10px] text-slate-400">Gross Margin {productProfitMarginPercent}%</span>
+                    <span className="text-[10px] text-slate-400">
+                      {isBn ? `গ্রস মার্জিন ${productProfitMarginPercent}%` : `Gross Margin ${productProfitMarginPercent}%`}
+                    </span>
                   </div>
                   <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200">
-                    <span className="text-[11px] font-bold text-slate-500 uppercase block">Total Expenses</span>
+                    <span className="text-[11px] font-bold text-slate-500 uppercase block">
+                      {isBn ? 'মোট খরচ' : 'Total Expenses'}
+                    </span>
                     <p className="text-lg font-black text-rose-700 mt-0.5">৳{totalAllExpenses?.toLocaleString('en-BD')}</p>
-                    <span className="text-[10px] text-slate-400">Delivery: ৳{totalDeliveryExpenses?.toLocaleString('en-BD')} • Others: ৳{totalOtherExpenses?.toLocaleString('en-BD')}</span>
+                    <span className="text-[10px] text-slate-400">
+                      {isBn
+                        ? `ডেলিভারি: ৳${totalDeliveryExpenses?.toLocaleString('en-BD')} • অন্যান্য: ৳${totalOtherExpenses?.toLocaleString('en-BD')}`
+                        : `Delivery: ৳${totalDeliveryExpenses?.toLocaleString('en-BD')} • Others: ৳${totalOtherExpenses?.toLocaleString('en-BD')}`}
+                    </span>
                   </div>
                   <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200">
-                    <span className="text-[11px] font-bold text-slate-500 uppercase block">Delivery Costs</span>
+                    <span className="text-[11px] font-bold text-slate-500 uppercase block">
+                      {isBn ? 'ডেলিভারি খরচ' : 'Delivery Costs'}
+                    </span>
                     <p className="text-lg font-black text-orange-700 mt-0.5">৳{totalDeliveryExpenses?.toLocaleString('en-BD')}</p>
-                    <span className="text-[10px] text-slate-400">Collected: ৳{totalDeliveredDeliveryChargesCollected?.toLocaleString('en-BD')}</span>
+                    <span className="text-[10px] text-slate-400">
+                      {isBn
+                        ? `আদায়কৃত: ৳${totalDeliveredDeliveryChargesCollected?.toLocaleString('en-BD')}`
+                        : `Collected: ৳${totalDeliveredDeliveryChargesCollected?.toLocaleString('en-BD')}`}
+                    </span>
                   </div>
                   <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200">
-                    <span className="text-[11px] font-bold text-slate-500 uppercase block">Other Profit</span>
+                    <span className="text-[11px] font-bold text-slate-500 uppercase block">
+                      {isBn ? 'অন্যান্য লাভ' : 'Other Profit'}
+                    </span>
                     <p className="text-lg font-black text-violet-700 mt-0.5">+৳{totalOtherProfits?.toLocaleString('en-BD')}</p>
-                    <span className="text-[10px] text-slate-400">{finFilteredOtherProfits.length} Records</span>
+                    <span className="text-[10px] text-slate-400">
+                      {finFilteredOtherProfits.length} {isBn ? 'টি রেকর্ড' : 'Records'}
+                    </span>
                   </div>
                   <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200">
-                    <span className="text-[11px] font-bold text-slate-500 uppercase block">Advance Payment</span>
+                    <span className="text-[11px] font-bold text-slate-500 uppercase block">
+                      {isBn ? 'অগ্রিম পেমেন্ট' : 'Advance Payment'}
+                    </span>
                     <p className="text-lg font-black text-indigo-700 mt-0.5">৳{totalVerifiedDeliveryAdvance?.toLocaleString('en-BD')}</p>
-                    <span className="text-[10px] text-slate-400">{verifiedAdvanceOrders.length} Verified</span>
+                    <span className="text-[10px] text-slate-400">
+                      {verifiedAdvanceOrders.length} {isBn ? 'টি অনুমোদিত' : 'Verified'}
+                    </span>
                   </div>
                   <div className="p-3.5 rounded-xl bg-emerald-50 border-2 border-emerald-300">
-                    <span className="text-[11px] font-black text-emerald-800 uppercase block">★ Real Net Profit</span>
+                    <span className="text-[11px] font-black text-emerald-800 uppercase block">
+                      ★ {isBn ? 'প্রকৃত নিট লাভ' : 'Real Net Profit'}
+                    </span>
                     <p className="text-xl font-black text-emerald-900 mt-0.5">৳{totalNetRevenue?.toLocaleString('en-BD')}</p>
                     <span className="text-[10px] text-emerald-700 font-bold block truncate">
-                      Formula: Cash + Other Profit - Costs - Expenses
+                      {isBn
+                        ? 'সূত্র: নগদ + অন্যান্য লাভ - ক্রয়মূল্য - মোট খরচ'
+                        : 'Formula: Cash + Other Profit - Costs - Expenses'}
                     </span>
                   </div>
                   <div className="p-3.5 rounded-xl bg-purple-50/60 border border-purple-200">
-                    <span className="text-[11px] font-bold text-purple-900 uppercase block">Pipeline Forecast</span>
+                    <span className="text-[11px] font-bold text-purple-900 uppercase block">
+                      {isBn ? 'পাইপলাইন ফোরকাস্ট' : 'Pipeline Forecast'}
+                    </span>
                     <p className="text-lg font-black text-purple-900 mt-0.5">৳{upcomingTotalAmount?.toLocaleString('en-BD')}</p>
-                    <span className="text-[10px] text-purple-700">{upcomingOrders.length} In Progress Orders</span>
+                    <span className="text-[10px] text-purple-700">
+                      {upcomingOrders.length} {isBn ? 'টি চলমান অর্ডার' : 'In Progress Orders'}
+                    </span>
                   </div>
                 </div>
 
@@ -2437,13 +2803,15 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
                   <div className="space-y-2 text-left max-w-md">
                     <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 text-xs font-black">
                       <ShieldCheck className="w-3.5 h-3.5" />
-                      <span>OFFICIALLY AUDITED &amp; CERTIFIED</span>
+                      <span>{isBn ? 'অফিসিয়ালি নিরীক্ষিত ও প্রত্যয়িত' : 'OFFICIALLY AUDITED & CERTIFIED'}</span>
                     </div>
                     <p className="text-xs text-slate-600">
-                      This financial receipt is certified with real-time audit integrity of KenaX BD E-Commerce operations.
+                      {isBn
+                        ? 'এই আর্থিক রসিদটি কেনাএক্স বিডি ই-কমার্সের রিয়েল-টাইম অডিট সততার সাথে প্রত্যয়িত।'
+                        : 'This financial receipt is certified with real-time audit integrity of KenaX BD E-Commerce operations.'}
                     </p>
                     <p className="text-[11px] text-slate-400 font-mono">
-                      Security Hash: KENAX-AUTH-{Math.random().toString(36).substring(2, 9).toUpperCase()}
+                      {isBn ? 'নিরাপত্তা হ্যাশ:' : 'Security Hash:'} KENAX-AUTH-{Math.random().toString(36).substring(2, 9).toUpperCase()}
                     </p>
                   </div>
 
@@ -2452,18 +2820,26 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
                     <div className="relative w-36 h-36 rounded-full border-4 border-sky-800 flex items-center justify-center bg-white shadow-inner p-2">
                       <div className="absolute inset-1 rounded-full border border-dashed border-sky-700 pointer-events-none" />
                       <div className="text-center">
-                        <span className="block text-[8px] font-black text-sky-900 uppercase tracking-wider">KENAX BD OFFICIAL SEAL</span>
+                        <span className="block text-[8px] font-black text-sky-900 uppercase tracking-wider">
+                          {isBn ? 'কেনাএক্স বিডি অফিসিয়াল সিল' : 'KENAX BD OFFICIAL SEAL'}
+                        </span>
                         <div className="my-0.5">
                           {/* Authentic Cursive Script for Sadik */}
                           <span className="font-serif italic font-black text-2xl text-sky-900 tracking-wide block" style={{ fontFamily: 'Brush Script MT, cursive, serif' }}>
                             Sadik
                           </span>
                         </div>
-                        <span className="block text-[7px] font-bold text-sky-700 uppercase">AUTHORIZED SIGNATURE</span>
+                        <span className="block text-[7px] font-bold text-sky-700 uppercase">
+                          {isBn ? 'অনুমোদিত স্বাক্ষর' : 'AUTHORIZED SIGNATURE'}
+                        </span>
                       </div>
                     </div>
-                    <span className="text-xs font-bold text-slate-800 mt-2">Authorized Signatory</span>
-                    <span className="text-[10px] text-slate-500">Executive Authority</span>
+                    <span className="text-xs font-bold text-slate-800 mt-2">
+                      {isBn ? 'অনুমোদিত স্বাক্ষরকারী' : 'Authorized Signatory'}
+                    </span>
+                    <span className="text-[10px] text-slate-500">
+                      {isBn ? 'নির্বাহী কর্তৃপক্ষ' : 'Executive Authority'}
+                    </span>
                   </div>
                 </div>
               </div>
@@ -2472,7 +2848,9 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
             {/* Modal Footer */}
             <div className="p-4 bg-white border-t border-slate-200 flex items-center justify-between gap-3 shrink-0">
               <span className="text-xs text-slate-500">
-                KenaX BD Financial Management System • All rights reserved
+                {isBn
+                  ? 'কেনাএক্স বিডি ফিন্যান্সিয়াল ম্যানেজমেন্ট সিস্টেম • সর্বস্বত্ব সংরক্ষিত'
+                  : 'KenaX BD Financial Management System • All rights reserved'}
               </span>
               <div className="flex items-center gap-2">
                 <button
@@ -2480,7 +2858,7 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
                   onClick={() => setIsReceiptModalOpen(false)}
                   className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs transition-colors cursor-pointer"
                 >
-                  Close
+                  {isBn ? 'বন্ধ করুন' : 'Close'}
                 </button>
                 <button
                   type="button"
@@ -2489,7 +2867,15 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
                   className="px-5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-black text-xs shadow-md transition-all cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
                 >
                   <Download className="w-3.5 h-3.5 text-sky-400" />
-                  <span>{isGeneratingReceipt ? 'Generating PNG...' : 'Download Official Receipt'}</span>
+                  <span>
+                    {isGeneratingReceipt
+                      ? isBn
+                        ? 'পিএনজি তৈরি হচ্ছে...'
+                        : 'Generating PNG...'
+                      : isBn
+                      ? 'অফিসিয়াল রসিদ ডাউনলোড'
+                      : 'Download Official Receipt'}
+                  </span>
                 </button>
               </div>
             </div>

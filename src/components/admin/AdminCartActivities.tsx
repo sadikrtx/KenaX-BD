@@ -42,6 +42,7 @@ import {
 import { CartActivity, CartActivityItem, UserRole, StaffUser, Product } from '../../types';
 import { resolveOriginalImageMedia, getSynchronouslyResolvedMedia } from '../../lib/firebase';
 import { getOptimizedImageUrl, NEUTRAL_PRODUCT_PLACEHOLDER } from '../../utils/imageOptimizer';
+import { SaasDonutChart, SaasBarChart } from './charts/AdminCharts';
 
 interface CartActivityProductImageProps {
   item: CartActivityItem;
@@ -599,6 +600,53 @@ export const AdminCartActivities: React.FC<AdminCartActivitiesProps> = ({
           <p className="text-xl sm:text-2xl font-black text-amber-600 mt-2">{abandonedCarts.length}</p>
           <p className="text-[10px] text-amber-700 font-medium mt-1">High recovery opportunity</p>
         </div>
+      </div>
+
+      {/* Live Cart Funnel & Top Carted Products Charts */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <SaasDonutChart
+          title="Cart Session Status Split"
+          subtitle="Click a slice to filter sessions"
+          centerLabel="Carts"
+          onSelectSlice={(s) => {
+            if (s.id) setStatusFilter(s.id as any);
+          }}
+          data={[
+            { id: 'active', label: 'Active', value: activeCarts.length, color: '#059669' },
+            { id: 'contacted', label: 'Followed Up', value: contactedCarts.length, color: '#7C3AED' },
+            { id: 'converted', label: 'Converted', value: convertedCarts.length, color: '#0284C7' },
+            { id: 'abandoned', label: 'Abandoned', value: abandonedCarts.length, color: '#D97706' },
+          ]}
+        />
+
+        <SaasBarChart
+          title="Most Carted Products (Potential Revenue)"
+          subtitle="Live product value across customer carts"
+          valueFormat="currency"
+          orientation="horizontal"
+          barColor="#0284C7"
+          data={(() => {
+            const prodMap = new Map<string, { value: number; count: number }>();
+            validCartActivities.forEach((c) => {
+              (c.items || []).forEach((it) => {
+                const name = it.name || 'Product';
+                const cur = prodMap.get(name) || { value: 0, count: 0 };
+                cur.value += (it.price || 0) * (it.quantity || 1);
+                cur.count += it.quantity || 1;
+                prodMap.set(name, cur);
+              });
+            });
+            return Array.from(prodMap.entries())
+              .sort((a, b) => b[1].value - a[1].value)
+              .slice(0, 6)
+              .map(([label, d]) => ({
+                label,
+                value: d.value,
+                hint: `${d.count} units`,
+                color: '#0284C7',
+              }));
+          })()}
+        />
       </div>
 
       {/* Filter & Search Bar */}

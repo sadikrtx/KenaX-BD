@@ -1,4 +1,4 @@
-import { ChatBotRule, SiteSettings, Product, Category } from '../types/index.ts';
+import type { ChatBotRule, SiteSettings, Product, Category } from '../types/index.ts';
 import { DEFAULT_CHATBOT_RULES } from '../data/defaultChatBotRules.ts';
 
 export interface RuleMatchResult {

@@ -37,9 +37,12 @@ import {
   UserPlus,
   Sun,
   Moon,
+  Shield,
+  Store,
 } from 'lucide-react';
 import { KenaXLogo } from './KenaXLogo';
 import { ThemeToggle } from './ThemeToggle';
+import { SmartSearchBar } from './SmartSearchBar';
 import { UserRole, CustomerRecord, StaffUser, Category, SubCategoryItem, Product, WebsiteSettings } from '../types';
 import { getEffectiveNavItems } from '../data/defaultNavItems';
 import { useLanguage } from '../context/LanguageContext';
@@ -54,7 +57,6 @@ interface HeaderProps {
   onOpenCustomerAuth?: (tab?: 'login' | 'register') => void;
   onCustomerLogout?: () => void;
   currentStaff?: StaffUser | null;
-  onOpenStaffLogin?: () => void;
   onStaffLogout?: () => void;
   onNavigate: (view: string) => void;
   onOpenCart: () => void;
@@ -67,6 +69,9 @@ interface HeaderProps {
   onSelectCategory: (cat: string, subcategory?: string, subSubcategory?: string) => void;
   categories: Category[];
   products?: Product[];
+  onOpenProductDetail?: (product: Product) => void;
+  onAddToCart?: (product: Product, quantity: number) => void;
+  onBuyNow?: (product: Product, quantity: number) => void;
   customLogoUrl?: string;
   siteName?: string;
   siteSettings?: WebsiteSettings;
@@ -81,7 +86,6 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenCustomerAuth,
   onCustomerLogout,
   currentStaff,
-  onOpenStaffLogin,
   onStaffLogout,
   onNavigate,
   onOpenCart,
@@ -94,6 +98,9 @@ export const Header: React.FC<HeaderProps> = ({
   onSelectCategory,
   categories,
   products = [],
+  onOpenProductDetail,
+  onAddToCart,
+  onBuyNow,
   customLogoUrl,
   siteName,
   siteSettings,
@@ -415,6 +422,15 @@ export const Header: React.FC<HeaderProps> = ({
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    const trimmed = searchQuery.trim().toLowerCase();
+    if (trimmed === '/admin' || trimmed === '/admin-dashboard' || trimmed === '/admin-portal') {
+      setSearchQuery('');
+      try {
+        window.history.pushState({}, '', '/admin');
+      } catch {}
+      onNavigate('admin');
+      return;
+    }
     onNavigate('shop');
   };
 
@@ -444,50 +460,43 @@ export const Header: React.FC<HeaderProps> = ({
           />
         </div>
 
-        {/* Desktop Search Bar with Search Button */}
-        <form
-          onSubmit={handleSearchSubmit}
-          className="flex-1 max-w-2xl hidden md:flex items-center relative"
-        >
-          <div className="relative w-full flex items-center">
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder={t('পণ্য, ব্র্যান্ড বা মডেল খুঁজুন...', 'Search for products, brands and more...')}
-              className="w-full pl-4 pr-12 py-2.5 rounded-l-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800/90 focus:outline-hidden focus:ring-2 focus:ring-sky-500 focus:border-sky-500 text-sm text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 shadow-xs"
-            />
-            <button
-              type="submit"
-              className="bg-sky-600 hover:bg-sky-700 active:bg-sky-800 text-white px-6 py-2.5 rounded-r-xl font-medium text-sm transition-colors flex items-center justify-center shrink-0 cursor-pointer shadow-xs"
-            >
-              <Search className="w-4 h-4 mr-1.5" />
-              <span>{t('সার্চ', 'Search')}</span>
-            </button>
-          </div>
-        </form>
+        {/* Desktop Smart Live Search Bar */}
+        <div className="flex-1 max-w-2xl hidden md:flex items-center relative min-w-0">
+          <SmartSearchBar
+            searchQuery={searchQuery}
+            setSearchQuery={setSearchQuery}
+            products={products}
+            categories={categories}
+            onNavigate={onNavigate}
+            onSelectCategory={onSelectCategory}
+            onOpenProductDetail={onOpenProductDetail}
+            onAddToCart={onAddToCart}
+            onBuyNow={onBuyNow}
+            variant="desktop"
+          />
+        </div>
 
         {/* Desktop Right Actions: Account, Wishlist, Cart */}
-        <div className="hidden md:flex items-center gap-2 sm:gap-3">
+        <div className="hidden md:flex items-center gap-1.5 sm:gap-2 lg:gap-3 shrink-0">
           {/* Customer Account or Login / Register for Visitors */}
           {currentCustomer ? (
             <div
               ref={accountDropdownRef}
               onMouseEnter={handleAccountMouseEnter}
               onMouseLeave={handleAccountMouseLeave}
-              className="relative"
+              className="relative shrink-0"
             >
               <button
                 onClick={() => setIsAccountDropdownOpen((prev) => !prev)}
-                className="flex items-center gap-2 p-1.5 sm:px-3 sm:py-2 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors text-slate-700 dark:text-slate-200 text-xs font-medium cursor-pointer"
+                className="flex items-center gap-1.5 lg:gap-2 p-1.5 sm:px-2.5 lg:px-3 sm:py-2 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors text-slate-700 dark:text-slate-200 text-xs font-medium cursor-pointer shrink-0"
                 aria-expanded={isAccountDropdownOpen}
               >
-                <div className="w-8 h-8 rounded-full bg-sky-600 text-white flex items-center justify-center font-bold text-xs shadow-2xs">
+                <div className="w-8 h-8 rounded-full bg-sky-600 text-white flex items-center justify-center font-bold text-xs shadow-2xs shrink-0">
                   {currentCustomer.name.charAt(0).toUpperCase()}
                 </div>
-                <div className="hidden sm:flex flex-col text-left leading-tight">
+                <div className="hidden lg:flex flex-col text-left leading-tight">
                   <span className="text-[10px] text-slate-500 dark:text-slate-400">
-                    {currentStaff ? 'Staff Account' : 'Customer Account'}
+                    Account
                   </span>
                   <span className="text-xs font-semibold text-slate-800 dark:text-slate-100 flex items-center">
                     {currentCustomer.name.split(' ')[0]}
@@ -510,18 +519,6 @@ export const Header: React.FC<HeaderProps> = ({
                   </div>
 
                   <div className="py-1">
-                    {currentStaff && (
-                      <button
-                        onClick={() => {
-                          onNavigate('admin-dashboard');
-                          setIsAccountDropdownOpen(false);
-                        }}
-                        className="w-full text-left px-4 py-2.5 text-xs font-bold text-sky-700 dark:text-sky-400 bg-sky-50 dark:bg-sky-950/50 hover:bg-sky-100 dark:hover:bg-sky-900/50 flex items-center gap-2 cursor-pointer border-b border-sky-100 dark:border-sky-900/40 mb-1"
-                      >
-                        <ShieldCheck className="w-4 h-4 text-sky-600" />
-                        <span>{t('অ্যাডমিন ড্যাশবোর্ড', 'Admin Dashboard')}</span>
-                      </button>
-                    )}
                     <button
                       onClick={() => {
                         onNavigate('customer-dashboard');
@@ -588,33 +585,52 @@ export const Header: React.FC<HeaderProps> = ({
             </div>
           ) : (
             /* Visitor Login / Register Buttons (Right Beside Cart) */
-            <div className="flex items-center gap-1.5">
+            <div className="flex items-center gap-1 lg:gap-1.5 shrink-0">
               <button
                 type="button"
                 onClick={() => onOpenCustomerAuth?.('login')}
-                className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-bold text-xs border border-slate-200 dark:border-slate-700 transition-colors cursor-pointer shadow-2xs active:scale-95"
+                className="flex items-center gap-1 px-2 lg:px-2.5 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-bold text-xs border border-slate-200 dark:border-slate-700 transition-colors cursor-pointer shadow-2xs active:scale-95 shrink-0"
                 title={t('লগইন করুন', 'Sign In')}
               >
                 <LogIn className="w-3.5 h-3.5 text-slate-600 dark:text-slate-300 shrink-0" />
-                <span>{t('লগইন', 'Login')}</span>
+                <span className="hidden lg:inline">{t('লগইন', 'Login')}</span>
               </button>
               <button
                 type="button"
                 onClick={() => onOpenCustomerAuth?.('register')}
-                className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs transition-colors cursor-pointer shadow-2xs active:scale-95"
+                className="flex items-center gap-1 px-2 lg:px-2.5 py-1.5 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs transition-colors cursor-pointer shadow-2xs active:scale-95 shrink-0"
                 title={t('নতুন অ্যাকাউন্ট তৈরি করুন', 'Register New Account')}
               >
                 <UserPlus className="w-3.5 h-3.5 text-sky-100 shrink-0" />
-                <span>{t('রেজিস্টার', 'Register')}</span>
+                <span className="hidden lg:inline">{t('রেজিস্টার', 'Register')}</span>
               </button>
             </div>
           )}
 
+          {/* Desktop Track Order Button (Beside Wishlist, and Cart) */}
+          <button
+            type="button"
+            onClick={() => {
+              onNavigate('track');
+              window.scrollTo({ top: 0, behavior: 'instant' });
+            }}
+            className={`relative p-2 rounded-xl transition-all cursor-pointer flex items-center justify-center shrink-0 ${
+              currentView === 'track'
+                ? 'bg-sky-50 dark:bg-sky-950/70 text-sky-600 dark:text-sky-400 font-bold border border-sky-200 dark:border-sky-800'
+                : 'text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800'
+            }`}
+            title={t('অর্ডার ট্র্যাক করুন', 'Track Your Order')}
+            aria-label="Track Order"
+          >
+            <Truck className="w-5 h-5" />
+          </button>
+
           {/* Desktop Wishlist Button */}
           <button
             onClick={onOpenWishlist}
-            className="relative p-2 rounded-xl text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+            className="relative p-2 rounded-xl text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer shrink-0"
             aria-label="Wishlist"
+            title={t('পছন্দের তালিকা', 'Wishlist')}
           >
             <Heart className="w-5 h-5" />
             {wishlistCount > 0 && (
@@ -627,7 +643,8 @@ export const Header: React.FC<HeaderProps> = ({
           {/* Desktop Cart Button */}
           <button
             onClick={onOpenCart}
-            className="flex items-center gap-2 px-3 py-2 rounded-xl bg-slate-900 dark:bg-slate-800 hover:bg-slate-800 dark:hover:bg-slate-700 text-white font-medium text-xs transition-colors cursor-pointer shadow-xs border border-transparent dark:border-slate-700"
+            className="flex items-center gap-1.5 lg:gap-2 px-2.5 lg:px-3 py-2 rounded-xl bg-slate-900 dark:bg-slate-800 hover:bg-slate-800 dark:hover:bg-slate-700 text-white font-medium text-xs transition-colors cursor-pointer shadow-xs border border-transparent dark:border-slate-700 shrink-0"
+            title={t('শপিং কার্ট', 'Shopping Cart')}
           >
             <div className="relative">
               <ShoppingCart className="w-4 h-4" />
@@ -637,7 +654,7 @@ export const Header: React.FC<HeaderProps> = ({
                 </span>
               )}
             </div>
-            <span className="hidden sm:inline font-semibold">{t('কার্ট', 'Cart')}</span>
+            <span className="hidden lg:inline font-semibold">{t('কার্ট', 'Cart')}</span>
           </button>
 
           {/* Desktop Dark Mode Theme Toggle */}
@@ -755,19 +772,6 @@ export const Header: React.FC<HeaderProps> = ({
                   </div>
 
                   <div className="py-1">
-                    {/* Super Admin / Staff Link if applicable */}
-                    {currentStaff && (
-                      <button
-                        onClick={() => {
-                          onNavigate('admin-dashboard');
-                          setIsMobileAccountOpen(false);
-                        }}
-                        className="w-full text-left px-3.5 py-2 text-xs font-bold text-sky-700 dark:text-sky-400 bg-sky-50 dark:bg-sky-950/40 hover:bg-sky-100 dark:hover:bg-sky-900/40 flex items-center gap-2 cursor-pointer border-b border-sky-100 dark:border-sky-900/40"
-                      >
-                        <ShieldCheck className="w-4 h-4 text-sky-600 shrink-0" />
-                        <span>Admin Dashboard</span>
-                      </button>
-                    )}
 
                     {/* 1. Your Account */}
                     <button
@@ -839,6 +843,22 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
       </div>
 
+      {/* 2. Mobile Header Smart Search Bar */}
+      <div className="md:hidden px-3 pb-2.5 bg-white dark:bg-slate-900">
+        <SmartSearchBar
+          searchQuery={searchQuery}
+          setSearchQuery={setSearchQuery}
+          products={products}
+          categories={categories}
+          onNavigate={onNavigate}
+          onSelectCategory={onSelectCategory}
+          onOpenProductDetail={onOpenProductDetail}
+          onAddToCart={onAddToCart}
+          onBuyNow={onBuyNow}
+          variant="mobile-header"
+        />
+      </div>
+
       {/* 3. Desktop Sub-Navigation Bar (Placed inside sticky header so it never hides when scrolling down on desktop) */}
       <div className="bg-white dark:bg-slate-900 border-t border-slate-100 dark:border-slate-800 hidden md:block">
         <div className="max-w-[1536px] mx-auto px-3 sm:px-6 lg:px-8 flex items-center justify-between">
@@ -868,13 +888,12 @@ export const Header: React.FC<HeaderProps> = ({
               {/* Categories Mega Dropdown */}
               {isCategoryMenuOpen && (
                 <div
-                  className="absolute left-0 top-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-b-2xl shadow-2xl z-50 animate-in fade-in slide-in-from-top-1 duration-150 flex max-h-[80vh] overflow-hidden"
-                  style={{ width: '780px' }}
+                  className="absolute left-0 top-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-b-2xl shadow-2xl z-50 animate-in fade-in slide-in-from-top-1 duration-150 flex max-h-[80vh] overflow-hidden w-[min(780px,calc(100vw-2rem))] max-w-[calc(100vw-2rem)]"
                   onMouseEnter={handleCategoryMouseEnter}
                   onMouseLeave={handleCategoryMouseLeave}
                 >
                   {/* Left Column: Category List */}
-                  <div className="w-64 border-r border-slate-100 dark:border-slate-800 py-2 bg-slate-50/50 dark:bg-slate-850 overflow-y-auto scrollbar-thin max-h-[78vh]">
+                  <div className="w-48 sm:w-64 border-r border-slate-100 dark:border-slate-800 py-2 bg-slate-50/50 dark:bg-slate-850 overflow-y-auto scrollbar-thin max-h-[78vh] shrink-0">
                     <div className="px-3 py-1.5 text-[10px] font-black text-slate-400 uppercase tracking-wider">
                       {t('ক্যাটাগরি', 'Categories')}
                     </div>
@@ -1425,19 +1444,6 @@ export const Header: React.FC<HeaderProps> = ({
                       </button>
                     );
                   })}
-
-                  {currentStaff && (
-                    <button
-                      onClick={() => {
-                        onNavigate('admin-dashboard');
-                        setIsMobileMenuOpen(false);
-                      }}
-                      className="w-full px-3 py-2.5 rounded-xl flex items-center gap-3 text-xs font-black text-left bg-sky-50 dark:bg-sky-950/60 text-sky-700 dark:text-sky-300 border border-sky-200/60 dark:border-sky-800"
-                    >
-                      <ShieldCheck className="w-4 h-4 text-sky-600 dark:text-sky-400" />
-                      <span>Admin Dashboard</span>
-                    </button>
-                  )}
 
                   <button
                     onClick={() => {

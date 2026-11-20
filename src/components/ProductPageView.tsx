@@ -27,7 +27,6 @@ import {
   Send,
   AlertCircle,
   AlertTriangle,
-  ZoomIn,
   X,
   FolderUp,
   Image as ImageIcon,
@@ -36,8 +35,10 @@ import {
   Lock,
   ShieldAlert,
   Plus,
+  Phone,
+  PhoneCall,
 } from 'lucide-react';
-import { Product, UserRole, ColorVariation, Order, CustomerRecord, ProductHistoryEntry } from '../types';
+import { Product, UserRole, ColorVariation, Order, CustomerRecord, ProductHistoryEntry, SiteSettings } from '../types';
 import { FormattedText } from './FormattedText';
 import { ProductCard } from './ProductCard';
 import { applyProductOpenGraphMeta, restoreStoreOpenGraphMeta } from '../utils/seo';
@@ -57,6 +58,7 @@ import { HighlightIcon } from './HighlightIcon';
 import { DEFAULT_PRODUCT_HIGHLIGHTS } from '../utils/highlightConstants';
 import { useLanguage } from '../context/LanguageContext';
 import { safeSetLocalStorage } from '../lib/storage';
+import { trackPixelViewContent } from '../utils/pixelTracker';
 
 export interface CustomerReview {
   id: string;
@@ -83,13 +85,16 @@ interface ProductPageViewProps {
   isLoggedIn?: boolean;
   onOpenCustomerAuth?: () => void;
   onNavigate: (view: string) => void;
-  onSelectCategory?: (category: string) => void;
+  onSelectCategory?: (category: string, subcategory?: string, subSubcategory?: string) => void;
   insideDhakaFee?: number;
   outsideDhakaFee?: number;
   orders?: Order[];
   currentCustomer?: CustomerRecord | null;
   onBack?: () => void;
   previousItem?: ProductHistoryEntry | null;
+  siteSettings?: SiteSettings;
+  helplinePhone?: string;
+  whatsappNumber?: string;
 }
 
 export const ProductPageView: React.FC<ProductPageViewProps> = ({
@@ -112,10 +117,24 @@ export const ProductPageView: React.FC<ProductPageViewProps> = ({
   currentCustomer = null,
   onBack,
   previousItem = null,
+  siteSettings,
+  helplinePhone,
+  whatsappNumber,
 }) => {
   const { t, language } = useLanguage();
   const safeInsideDhaka = (typeof insideDhakaFee === 'number' && !isNaN(insideDhakaFee)) ? insideDhakaFee : 60;
   const safeOutsideDhaka = (typeof outsideDhakaFee === 'number' && !isNaN(outsideDhakaFee)) ? outsideDhakaFee : 120;
+
+  // Contact Phone and WhatsApp computations
+  const effectiveCallPhone = (helplinePhone || siteSettings?.phone || siteSettings?.helplines?.[0] || '01719143897').trim();
+  const cleanCallPhone = effectiveCallPhone.replace(/[^0-9+]/g, '');
+
+  const effectiveWhatsApp = (whatsappNumber || siteSettings?.officialWhatsAppAgentNumber || siteSettings?.whatsappNumber || '01719143897').trim();
+  const cleanWhatsApp = effectiveWhatsApp.replace(/[^0-9]/g, '');
+  const intlWhatsApp = cleanWhatsApp.startsWith('88') ? cleanWhatsApp : `88${cleanWhatsApp.startsWith('0') ? cleanWhatsApp : '0' + cleanWhatsApp}`;
+  const whatsappUrl = `https://wa.me/${intlWhatsApp}?text=${encodeURIComponent(
+    `আসসালামু আলাইকুম! আমি "${product.name}" প্রোডাক্টটি সম্পর্কে জানতে চাচ্ছি।\nমূল্য: ৳${product.price}\nলিঙ্ক: ${typeof window !== 'undefined' ? `${window.location.origin}/?product=${product.id}` : ''}`
+  )}`;
 
   const [selectedImageIndex, setSelectedImageIndex] = useState(0);
   const [showVideo, setShowVideo] = useState(false);
@@ -322,6 +341,13 @@ export const ProductPageView: React.FC<ProductPageViewProps> = ({
 
     // Immediately ensure viewport is at top smoothly without bottom-to-top scroll animation lag
     window.scrollTo({ top: 0, behavior: 'instant' });
+
+    // Track Meta / TikTok / Google ViewContent
+    if (product && product.id) {
+      try {
+        trackPixelViewContent(product, siteSettings);
+      } catch {}
+    }
   }, [product?.id]);
 
   // Dynamically apply individual product OpenGraph Social Preview meta tags
@@ -782,16 +808,16 @@ export const ProductPageView: React.FC<ProductPageViewProps> = ({
     <div className="bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 min-h-screen pb-16 animate-in fade-in duration-200">
       {/* 1. Breadcrumbs and Top Navigation Bar */}
       <div className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 shadow-2xs">
-        <div className="max-w-[1536px] mx-auto px-3 sm:px-6 lg:px-8 py-1.5 sm:py-2 flex flex-wrap items-center justify-between gap-2 text-xs">
-          {/* Breadcrumb path */}
-          <nav className="flex items-center gap-1.5 text-slate-500 dark:text-slate-400 overflow-x-auto py-0.5 scrollbar-none">
+        <div className="max-w-[1536px] mx-auto px-3 sm:px-6 lg:px-8 py-1.5 sm:py-2 flex items-center justify-between gap-2 text-xs">
+          {/* Breadcrumb path (Category/Subcategory only, no product title) */}
+          <nav className="flex items-center gap-1 sm:gap-1.5 text-slate-500 dark:text-slate-400 min-w-0 flex-1 overflow-hidden text-[11px] sm:text-xs">
             <button
               onClick={() => onNavigate('home')}
               className="hover:text-sky-600 dark:hover:text-sky-400 transition-colors font-medium cursor-pointer shrink-0"
             >
               {t('হোম', 'Home')}
             </button>
-            <ChevronRight className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+            <ChevronRight className="w-3 h-3 text-slate-400 shrink-0" />
             <button
               onClick={() => {
                 if (onSelectCategory) onSelectCategory('All');
@@ -801,57 +827,61 @@ export const ProductPageView: React.FC<ProductPageViewProps> = ({
             >
               All Products
             </button>
-            <ChevronRight className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-            <button
-              onClick={() => {
-                if (onSelectCategory) onSelectCategory(product.category);
-                onNavigate('shop');
-              }}
-              className="hover:text-sky-600 dark:hover:text-sky-400 transition-colors font-semibold text-slate-700 dark:text-slate-200 cursor-pointer shrink-0"
-            >
-              {product.category}
-            </button>
+            {product.category && (
+              <>
+                <ChevronRight className="w-3 h-3 text-slate-400 shrink-0" />
+                <button
+                  onClick={() => {
+                    if (onSelectCategory) onSelectCategory(product.category);
+                    onNavigate('shop');
+                  }}
+                  className="hover:text-sky-600 dark:hover:text-sky-400 transition-colors font-semibold text-slate-700 dark:text-slate-200 cursor-pointer shrink-0 truncate max-w-[90px] sm:max-w-none"
+                >
+                  {product.category}
+                </button>
+              </>
+            )}
             {product.subcategory && (
               <>
-                <ChevronRight className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                <span className="text-slate-500 dark:text-slate-400 truncate max-w-[120px] sm:max-w-none">
+                <ChevronRight className="w-3 h-3 text-slate-400 shrink-0" />
+                <button
+                  onClick={() => {
+                    if (onSelectCategory) onSelectCategory(product.category, product.subcategory);
+                    onNavigate('shop');
+                  }}
+                  className="hover:text-sky-600 dark:hover:text-sky-400 transition-colors font-semibold text-sky-700 dark:text-sky-400 cursor-pointer shrink-0 truncate max-w-[90px] sm:max-w-none"
+                >
                   {product.subcategory}
+                </button>
+              </>
+            )}
+            {product.subSubcategory && (
+              <>
+                <ChevronRight className="w-3 h-3 text-slate-400 shrink-0" />
+                <span className="font-semibold text-sky-700 dark:text-sky-400 shrink-0 truncate max-w-[80px] sm:max-w-none">
+                  {product.subSubcategory}
                 </span>
               </>
             )}
-            <ChevronRight className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-            <span className="font-bold text-sky-700 dark:text-sky-400 truncate max-w-[140px] sm:max-w-[260px]">
-              {product.name}
-            </span>
           </nav>
 
-          {/* Quick Back & Share Actions */}
-          <div className="flex items-center gap-2">
-            <button
-              onClick={handleShareClick}
-              className="px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 font-bold flex items-center gap-1.5 transition-colors cursor-pointer text-xs"
-              title={t('লিংক শেয়ার বা কপি করুন', 'Share or Copy Product Link')}
-            >
-              <Share2 className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400" />
-              <span>{copiedLink ? t('লিংক কপি হয়েছে!', 'Copied Link!') : t('শেয়ার', 'Share')}</span>
-            </button>
-            <button
-              onClick={onBack ? onBack : () => onNavigate('shop')}
-              className="px-3.5 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 active:scale-95 text-slate-800 dark:text-slate-200 font-bold flex items-center gap-1.5 transition-all cursor-pointer text-xs shadow-2xs group shrink-0"
-              title={
-                previousItem?.type === 'product' && previousItem.productName
-                  ? t(`আগের প্রোডাক্টে ফিরে যান (${previousItem.productName})`, `Back to previous item (${previousItem.productName})`)
-                  : t('আগের পেজে ফিরে যান', 'Go Back')
-              }
-            >
-              <ArrowLeft className="w-3.5 h-3.5 text-slate-600 dark:text-slate-400 group-hover:-translate-x-0.5 transition-transform shrink-0" />
-              <span className="font-bangla whitespace-nowrap">
-                {previousItem?.type === 'product'
-                  ? t('আগের প্রোডাক্টে ফিরে যান', 'Previous Product')
-                  : t('আগের পেজে ফিরে যান', 'Go Back')}
-              </span>
-            </button>
-          </div>
+          {/* Go Back Action Button (In the same line, share button removed) */}
+          <button
+            onClick={onBack ? onBack : () => onNavigate('shop')}
+            className="px-2.5 sm:px-3.5 py-1 sm:py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 active:scale-95 text-slate-800 dark:text-slate-200 font-bold flex items-center gap-1 sm:gap-1.5 transition-all cursor-pointer text-[11px] sm:text-xs shadow-2xs group shrink-0 ml-auto"
+            title={
+              previousItem?.type === 'product' && previousItem.productName
+                ? t(`আগের প্রোডাক্টে ফিরে যান (${previousItem.productName})`, `Back to previous item (${previousItem.productName})`)
+                : t('আগের পেজে ফিরে যান', 'Go Back')
+            }
+          >
+            <ArrowLeft className="w-3.5 h-3.5 text-slate-600 dark:text-slate-400 group-hover:-translate-x-0.5 transition-transform shrink-0" />
+            <span className="font-bangla whitespace-nowrap">
+              {previousItem?.type === 'product'
+                ? t('আগের প্রোডাক্ট', 'Previous')
+                : t('ফিরে যান', 'Go Back')}
+            </span>
+          </button>
         </div>
       </div>
 
@@ -906,15 +936,6 @@ export const ProductPageView: React.FC<ProductPageViewProps> = ({
                         }}
                         className="w-full h-full object-contain p-0 sm:p-2.5 will-change-transform pointer-events-none drop-shadow-sm"
                       />
-                      {/* Subtle hover zoom guide badge */}
-                      <div
-                        className={`pointer-events-none absolute bottom-2.5 right-2.5 px-2.5 py-1 rounded-lg bg-slate-900/80 dark:bg-slate-950/80 text-white backdrop-blur-xs flex items-center gap-1.5 text-[10px] font-bold shadow-md transition-opacity duration-200 z-10 border border-slate-700/50 ${
-                          isZooming ? 'opacity-0' : 'opacity-80 group-hover:opacity-100'
-                        }`}
-                      >
-                        <ZoomIn className="w-3 h-3 text-sky-400" />
-                        <span>{t('হোভার জুম', 'Hover to Zoom')}</span>
-                      </div>
                     </div>
                   )}
 
@@ -1444,29 +1465,51 @@ export const ProductPageView: React.FC<ProductPageViewProps> = ({
                     );
                   }
                   return (
-                    <div className="grid grid-cols-2 sm:grid-cols-12 gap-2 sm:gap-3 min-w-0">
+                    <div className="flex items-center gap-1.5 sm:gap-2.5 min-w-0">
+                      {/* Direct Call Button (Opens Dialpad) */}
+                      <a
+                        href={`tel:${cleanCallPhone}`}
+                        title={t(`সরাসরি কল দিন (${effectiveCallPhone})`, `Call us directly (${effectiveCallPhone})`)}
+                        className="h-10 sm:h-12 w-10 sm:w-12 shrink-0 rounded-xl sm:rounded-2xl bg-emerald-50 hover:bg-emerald-100 active:bg-emerald-200 dark:bg-emerald-950/60 dark:hover:bg-emerald-900/80 border border-emerald-300 dark:border-emerald-700/80 text-emerald-700 dark:text-emerald-300 flex items-center justify-center transition-all cursor-pointer shadow-2xs hover:scale-105 active:scale-95 group"
+                      >
+                        <Phone className="w-4 h-4 sm:w-5 sm:h-5 text-emerald-600 dark:text-emerald-400 group-hover:rotate-12 transition-transform" />
+                      </a>
+
+                      {/* Official WhatsApp Button (Opens WhatsApp Chat) */}
+                      <a
+                        href={whatsappUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        title={t(`অফিসিয়াল হোয়াটসঅ্যাপে মেসেজ দিন (${effectiveWhatsApp})`, `Chat on Official WhatsApp (${effectiveWhatsApp})`)}
+                        className="h-10 sm:h-12 w-10 sm:w-12 shrink-0 rounded-xl sm:rounded-2xl bg-[#25D366] hover:bg-[#20bd5a] active:bg-[#1da850] text-white flex items-center justify-center transition-all cursor-pointer shadow-2xs hover:scale-105 active:scale-95"
+                      >
+                        <svg className="w-4.5 h-4.5 sm:w-5 sm:h-5 fill-current" viewBox="0 0 24 24">
+                          <path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946.003-6.556 5.338-11.891 11.893-11.891 3.181.001 6.167 1.24 8.413 3.488 2.245 2.248 3.481 5.236 3.48 8.414-.003 6.557-5.338 11.892-11.893 11.892-1.99-.001-3.951-.5-5.688-1.448l-6.305 1.654zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-5.462-4.415-9.89-9.881-9.892-5.452 0-9.887 4.434-9.889 9.884-.001 2.225.651 3.891 1.746 5.634l-.999 3.648 3.742-.981zm11.387-5.464c-.074-.124-.272-.198-.57-.347-.297-.149-1.758-.868-2.031-.967-.272-.099-.47-.149-.669.149-.198.297-.768.967-.941 1.165-.173.198-.347.223-.644.074-.297-.149-1.255-.462-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.297-.347.446-.521.151-.172.2-.296.3-.495.099-.198.05-.372-.025-.521-.075-.148-.669-1.611-.916-2.206-.242-.579-.487-.501-.669-.51l-.57-.01c-.198 0-.52.074-.792.372s-1.04 1.016-1.04 2.479 1.065 2.876 1.213 3.074c.149.198 2.095 3.2 5.076 4.487.709.306 1.263.489 1.694.626.712.226 1.36.194 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.695.248-1.29.173-1.414z" />
+                        </svg>
+                      </a>
+
                       {/* Add to Cart Button */}
                       <button
                         onClick={handleAddToCartClick}
-                        className="col-span-1 sm:col-span-6 py-2.5 sm:py-3.5 px-2 sm:px-6 rounded-xl sm:rounded-2xl bg-slate-900 hover:bg-slate-800 active:bg-black dark:bg-slate-800 dark:hover:bg-slate-700 dark:border dark:border-slate-700 text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-1.5 sm:gap-2.5 transition-all shadow-md cursor-pointer min-w-0 overflow-hidden"
+                        className="flex-1 py-2.5 sm:py-3.5 px-2 sm:px-4 rounded-xl sm:rounded-2xl bg-slate-900 hover:bg-slate-800 active:bg-black dark:bg-slate-800 dark:hover:bg-slate-700 dark:border dark:border-slate-700 text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-1.5 sm:gap-2 transition-all shadow-md cursor-pointer min-w-0 overflow-hidden active:scale-98"
                       >
-                        <ShoppingCart className="w-4 h-4 sm:w-5 sm:h-5 shrink-0" />
-                        <span className="truncate">{t('কার্টে যোগ করুন', 'Add to Cart')}</span>
+                        <ShoppingCart className="w-3.5 h-3.5 sm:w-4.5 sm:h-4.5 shrink-0" />
+                        <span className="truncate">{t('কার্ট', 'Add to Cart')}</span>
                       </button>
 
                       {/* Buy Now Button (Direct checkout) */}
                       <button
                         onClick={handleBuyNowClick}
-                        className="col-span-1 sm:col-span-5 py-2.5 sm:py-3.5 px-2 sm:px-6 rounded-xl sm:rounded-2xl bg-gradient-to-r from-sky-600 to-blue-600 hover:from-sky-500 hover:to-blue-500 text-white font-black text-xs sm:text-sm flex items-center justify-center gap-1.5 sm:gap-2 transition-all shadow-lg shadow-sky-600/20 cursor-pointer min-w-0 overflow-hidden"
+                        className="flex-1 py-2.5 sm:py-3.5 px-2 sm:px-4 rounded-xl sm:rounded-2xl bg-gradient-to-r from-sky-600 to-blue-600 hover:from-sky-500 hover:to-blue-500 text-white font-black text-xs sm:text-sm flex items-center justify-center gap-1.5 sm:gap-2 transition-all shadow-lg shadow-sky-600/20 cursor-pointer min-w-0 overflow-hidden active:scale-98"
                       >
-                        <Zap className="w-4 h-4 sm:w-5 sm:h-5 fill-amber-300 text-amber-300 shrink-0" />
+                        <Zap className="w-3.5 h-3.5 sm:w-4.5 sm:h-4.5 fill-amber-300 text-amber-300 shrink-0" />
                         <span className="truncate">{t('অর্ডার করুন', 'Buy Now')} • ৳{(product.price * quantity).toLocaleString('en-BD')}</span>
                       </button>
 
-                      {/* Wishlist Button */}
+                      {/* Wishlist Button (Desktop only) */}
                       <button
                         onClick={() => onToggleWishlist(product)}
-                        className={`hidden sm:flex sm:col-span-1 p-3.5 rounded-2xl border items-center justify-center transition-all cursor-pointer ${
+                        className={`hidden sm:flex h-12 w-12 shrink-0 rounded-2xl border items-center justify-center transition-all cursor-pointer ${
                           isWishlisted
                             ? 'bg-rose-50 dark:bg-rose-950/80 border-rose-200 dark:border-rose-800 text-rose-600 dark:text-rose-400 shadow-xs'
                             : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700'
@@ -1479,8 +1522,8 @@ export const ProductPageView: React.FC<ProductPageViewProps> = ({
                   );
                 })()}
 
-                {/* Secondary Actions: Share */}
-                <div className="flex items-center justify-end gap-2 pt-1">
+                {/* Secondary Actions: Share (Hidden in mobile view per user request) */}
+                <div className="hidden sm:flex items-center justify-end gap-2 pt-1">
                   <button
                     type="button"
                     onClick={handleShareClick}
@@ -2084,7 +2127,7 @@ export const ProductPageView: React.FC<ProductPageViewProps> = ({
           </div>
 
           {/* Similar Products Grid */}
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3 sm:gap-4">
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-3 sm:gap-4">
             {similarProducts.map((p) => (
               <ProductCard
                 key={p.id}

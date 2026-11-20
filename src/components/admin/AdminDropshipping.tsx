@@ -26,6 +26,7 @@ import { SupplierDirectoryView } from './dropshipping/SupplierDirectoryView';
 import { WholesalerRegisterView } from './dropshipping/WholesalerRegisterView';
 import { SupplierModal } from './dropshipping/SupplierModal';
 import { SourcingLocationModal } from './dropshipping/SourcingLocationModal';
+import { SaasBarChart, SaasDonutChart, CollapsibleAnalyticsPanel, SAAS_CHART_COLORS } from './charts/AdminCharts';
 
 export interface AdminDropshippingProps {
   products: Product[];
@@ -99,6 +100,25 @@ export const AdminDropshipping: React.FC<AdminDropshippingProps> = ({
   const analyticsData: DropshippingAnalyticsData = useMemo(() => {
     return computeDropshippingAnalytics(products, orders, suppliers, orderStatusFilter, sourcingLocationsList);
   }, [products, orders, suppliers, orderStatusFilter, sourcingLocationsList]);
+
+  const supplierChartsData = useMemo(() => {
+    const sorted = [...analyticsData.supplierList].sort((a, b) => b.totalRevenue - a.totalRevenue);
+    const revenueSlices = sorted.slice(0, 6).map((item, idx) => ({
+      id: item.supplier.id,
+      label: item.isOwnStock ? 'Own Stock / Direct' : item.supplier.name,
+      value: item.totalRevenue,
+      color: SAAS_CHART_COLORS[idx % SAAS_CHART_COLORS.length],
+    }));
+
+    const profitBars = sorted.slice(0, 8).map((item) => ({
+      id: item.supplier.id,
+      label: item.isOwnStock ? 'Own Stock' : item.supplier.name,
+      value: item.totalRevenue,
+      secondaryValue: Math.max(0, item.totalProfit),
+    }));
+
+    return { revenueSlices, profitBars };
+  }, [analyticsData]);
 
   // Deep dive analytics item when viewing a specific supplier / own-stock in Dashboard
   const activeAnalyticsItem = useMemo(() => {
@@ -340,14 +360,46 @@ export const AdminDropshipping: React.FC<AdminDropshippingProps> = ({
               onDeleteSourcingLocation={(id) => setSourcingLocationToDeleteId(id)}
             />
           ) : (
-            <SupplierDashboardView
-              analytics={analyticsData}
-              orderStatusFilter={orderStatusFilter}
-              setOrderStatusFilter={setOrderStatusFilter}
-              onSelectSupplierForDetail={(id) => setSelectedAnalyticsSupplierId(id)}
-              onEditProduct={onEditProduct}
-              onAddProductForSupplier={onAddProductForSupplier}
-            />
+            <div className="space-y-5">
+              <CollapsibleAnalyticsPanel title="Supplier Revenue & Profit Charts" defaultOpen={true}>
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                  <SaasDonutChart
+                    title="Revenue Share by Supplier"
+                    subtitle="Click a supplier slice to inspect deep-dive"
+                    data={supplierChartsData.revenueSlices}
+                    valueFormat="currency"
+                    centerLabel="Sales"
+                    emptyText="No supplier sales recorded yet"
+                    onSelectSlice={(item) => {
+                      if (item.id) setSelectedAnalyticsSupplierId(item.id);
+                    }}
+                  />
+                  <SaasBarChart
+                    title="Supplier Revenue vs Net Profit"
+                    subtitle="Click a bar to open supplier breakdown"
+                    data={supplierChartsData.profitBars}
+                    valueFormat="currency"
+                    secondaryFormat="currency"
+                    primaryLabel="Revenue"
+                    secondaryLabel="Net Profit"
+                    barColor="#4F46E5"
+                    secondaryColor="#059669"
+                    emptyText="No supplier profit records yet"
+                    onSelectBar={(item) => {
+                      if (item.id) setSelectedAnalyticsSupplierId(item.id);
+                    }}
+                  />
+                </div>
+              </CollapsibleAnalyticsPanel>
+              <SupplierDashboardView
+                analytics={analyticsData}
+                orderStatusFilter={orderStatusFilter}
+                setOrderStatusFilter={setOrderStatusFilter}
+                onSelectSupplierForDetail={(id) => setSelectedAnalyticsSupplierId(id)}
+                onEditProduct={onEditProduct}
+                onAddProductForSupplier={onAddProductForSupplier}
+              />
+            </div>
           )}
         </>
       )}

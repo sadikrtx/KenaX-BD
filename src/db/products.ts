@@ -1,7 +1,7 @@
 import { db } from './index.ts';
 import { products } from './schema.ts';
 import { eq } from 'drizzle-orm';
-import { Product } from '../types/index.ts';
+import type { Product } from '../types/index.ts';
 import fs from 'fs';
 import path from 'path';
 import { INITIAL_PRODUCTS, PRODUCTION_PRODUCTS, isDemoProductId } from '../data/initialProducts.ts';

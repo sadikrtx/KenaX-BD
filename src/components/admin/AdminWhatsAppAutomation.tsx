@@ -101,6 +101,14 @@ import {
   isPhoneMatch,
 } from '../../lib/whatsappService';
 import { hasPermission } from '../../lib/permissions';
+import { PluginSlotRenderer } from './PluginSlotRenderer';
+import {
+  SaasDonutChart,
+  SaasBarChart,
+  SaasLineAreaChart,
+  CollapsibleAnalyticsPanel,
+  SAAS_CHART_COLORS,
+} from './charts/AdminCharts';
 
 interface AdminWhatsAppAutomationProps {
   currentRole: UserRole;
@@ -270,6 +278,51 @@ export const AdminWhatsAppAutomation: React.FC<AdminWhatsAppAutomationProps> = (
 
     return { all: conversations.length, unread, read, newCount, pinned };
   }, [conversations]);
+
+  const whatsappAnalytics = useMemo(() => {
+    const incomingCount = liveMessages.filter((m) => m.direction === 'incoming').length;
+    const outgoingCount = liveMessages.filter((m) => m.direction !== 'incoming').length;
+    const directionSlices = [
+      { id: 'incoming', label: 'Customer Incoming', value: incomingCount, color: '#0284C7' },
+      { id: 'outgoing', label: 'Staff / Auto Outgoing', value: outgoingCount, color: '#059669' },
+    ].filter((s) => s.value > 0);
+
+    const threadBars = [
+      { id: 'unread', label: 'Unread', value: filterCounts.unread, color: '#D97706' },
+      { id: 'read', label: 'Read', value: filterCounts.read, color: '#059669' },
+      { id: 'new', label: 'New (24h)', value: filterCounts.newCount, color: '#0284C7' },
+      { id: 'pinned', label: 'Pinned', value: filterCounts.pinned, color: '#7C3AED' },
+    ];
+
+    const dateMap = new Map<string, { incoming: number; outgoing: number }>();
+    liveMessages.forEach((m) => {
+      const d = new Date(m.timestamp);
+      if (!isNaN(d.getTime())) {
+        const key = d.toISOString().slice(0, 10);
+        const cur = dateMap.get(key) || { incoming: 0, outgoing: 0 };
+        if (m.direction === 'incoming') cur.incoming += 1;
+        else cur.outgoing += 1;
+        dateMap.set(key, cur);
+      }
+    });
+
+    const dailyTrend = Array.from(dateMap.entries())
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .slice(-14)
+      .map(([iso, c]) => ({
+        label: new Date(iso).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }),
+        primary: c.incoming,
+        secondary: c.outgoing,
+      }));
+
+    return {
+      directionSlices,
+      threadBars,
+      dailyTrend,
+      incomingCount,
+      outgoingCount,
+    };
+  }, [liveMessages, filterCounts]);
 
   // Filtered conversations list based on tab filter & search
   const filteredConversations = useMemo(() => {
@@ -971,6 +1024,13 @@ export const AdminWhatsAppAutomation: React.FC<AdminWhatsAppAutomationProps> = (
 
   return (
     <div className="space-y-6">
+      {/* Extension Slot: WhatsApp Integration -> Communication Menu */}
+      <PluginSlotRenderer
+        slot="admin.whatsapp.communication_panel"
+        userRole={currentRole}
+        orders={orders}
+      />
+
       {/* 1. Header Banner */}
       <div className="bg-gradient-to-r from-slate-900 via-emerald-950 to-slate-900 text-white rounded-3xl p-5 sm:p-7 border border-emerald-900/50 shadow-xl relative overflow-hidden">
         <div className="absolute top-0 right-0 w-96 h-96 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
@@ -1105,6 +1165,52 @@ export const AdminWhatsAppAutomation: React.FC<AdminWhatsAppAutomationProps> = (
           )}
         </div>
       </div>
+
+      {/* WhatsApp Engagement & Thread Analytics */}
+      <CollapsibleAnalyticsPanel
+        title={`WhatsApp Analytics (${conversations.length} Threads • ${whatsappAnalytics.incomingCount} Incoming • ${whatsappAnalytics.outgoingCount} Outgoing)`}
+      >
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          <SaasDonutChart
+            title="Message Direction Mix"
+            subtitle="Incoming customer replies vs outgoing dispatches"
+            data={whatsappAnalytics.directionSlices}
+            centerLabel="Messages"
+            emptyText="No WhatsApp messages recorded yet"
+            onSelectSlice={() => {
+              if (canAccessInbox) setActiveSubTab('inbox');
+            }}
+          />
+          <SaasBarChart
+            title="Inbox Threads by Filter Status"
+            subtitle="Click a bar to open filtered conversations"
+            data={whatsappAnalytics.threadBars}
+            primaryLabel="Conversations"
+            barColor="#059669"
+            emptyText="No active conversation threads"
+            onSelectBar={(bar) => {
+              if (!canAccessInbox) return;
+              const id = bar.id;
+              if (id === 'unread' || id === 'read' || id === 'new' || id === 'pinned') {
+                setInboxFilter(id);
+                setActiveSubTab('inbox');
+              }
+            }}
+          />
+          <SaasLineAreaChart
+            title="Daily Messaging Activity"
+            subtitle="Incoming vs outgoing message volume over time"
+            data={whatsappAnalytics.dailyTrend}
+            primaryLabel="Incoming"
+            secondaryLabel="Outgoing"
+            primaryFormat="number"
+            secondaryFormat="number"
+            primaryColor="#0284C7"
+            secondaryColor="#059669"
+            emptyText="No daily WhatsApp message history"
+          />
+        </div>
+      </CollapsibleAnalyticsPanel>
 
       {/* SUB-TAB 1: LIVE INBOX & TWO-WAY CHAT (MAIN REQUIREMENT) */}
       {activeSubTab === 'inbox' && (

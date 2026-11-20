@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   ClipboardList,
   Search,
@@ -15,6 +15,13 @@ import {
 } from 'lucide-react';
 import { ActivityLog, UserRole, StaffUser } from '../../types';
 import { getActivityLogsFromDB, syncPendingActivityLogs } from '../../lib/firebase';
+import {
+  SaasDonutChart,
+  SaasBarChart,
+  SaasLineAreaChart,
+  CollapsibleAnalyticsPanel,
+  SAAS_CHART_COLORS,
+} from './charts/AdminCharts';
 
 interface AdminActivityLogsProps {
   logs: ActivityLog[];
@@ -88,6 +95,69 @@ export const AdminActivityLogs: React.FC<AdminActivityLogsProps> = ({
     return matchesSearch && matchesModule && matchesRole;
   });
 
+  const logAnalytics = useMemo(() => {
+    const moduleMap = new Map<string, number>();
+    const staffMap = new Map<string, number>();
+    const dateMap = new Map<string, number>();
+
+    const moduleColors: Record<string, string> = {
+      orders: '#0284C7',
+      inventory: '#D97706',
+      payments: '#059669',
+      staff: '#7C3AED',
+      roles: '#7C3AED',
+      products: '#4F46E5',
+      customers: '#E11D48',
+      settings: '#0D9488',
+      delivery: '#2563EB',
+      coupons: '#EA580C',
+      reviews: '#DB2777',
+    };
+
+    logs.forEach((log) => {
+      const mod = (log.module || 'other').toLowerCase();
+      moduleMap.set(mod, (moduleMap.get(mod) || 0) + 1);
+
+      const sName = (log.staffName || 'System').trim();
+      staffMap.set(sName, (staffMap.get(sName) || 0) + 1);
+
+      const d = new Date(log.timestamp);
+      if (!isNaN(d.getTime())) {
+        const dayKey = d.toISOString().slice(0, 10);
+        dateMap.set(dayKey, (dateMap.get(dayKey) || 0) + 1);
+      }
+    });
+
+    const moduleSlices = Array.from(moduleMap.entries())
+      .sort((a, b) => b[1] - a[1])
+      .map(([mod, count], idx) => ({
+        id: mod,
+        label: mod.charAt(0).toUpperCase() + mod.slice(1),
+        value: count,
+        color: moduleColors[mod] || SAAS_CHART_COLORS[idx % SAAS_CHART_COLORS.length],
+      }));
+
+    const topStaffBars = Array.from(staffMap.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 7)
+      .map(([name, count]) => ({
+        id: name,
+        label: name,
+        value: count,
+        color: '#0284C7',
+      }));
+
+    const dailyTrend = Array.from(dateMap.entries())
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .slice(-14)
+      .map(([iso, count]) => ({
+        label: new Date(iso).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }),
+        primary: count,
+      }));
+
+    return { moduleSlices, topStaffBars, dailyTrend };
+  }, [logs]);
+
   const getModuleBadge = (moduleName: string) => {
     switch (moduleName?.toLowerCase()) {
       case 'orders':
@@ -119,6 +189,47 @@ export const AdminActivityLogs: React.FC<AdminActivityLogsProps> = ({
           {syncSuccessMsg}
         </div>
       )}
+
+      {/* Audit & Security Analytics */}
+      <CollapsibleAnalyticsPanel
+        title={`Audit Trail Analytics (${logs.length} Recorded Events)`}
+      >
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          <SaasDonutChart
+            title="Events by Module"
+            subtitle="Click a module slice to filter audit logs"
+            data={logAnalytics.moduleSlices}
+            centerLabel="Total Events"
+            emptyText="No audit events logged yet"
+            onSelectSlice={(slice) => {
+              const mod = slice.id || slice.label.toLowerCase();
+              setModuleFilter((prev) => (prev === mod ? 'all' : mod));
+            }}
+          />
+          <SaasBarChart
+            title="Top Active Team Members"
+            subtitle="Click a bar to search logs by staff member"
+            data={logAnalytics.topStaffBars}
+            primaryLabel="Actions"
+            orientation="horizontal"
+            barColor="#0284C7"
+            emptyText="No staff activity recorded"
+            onSelectBar={(bar) => {
+              const staffName = bar.id || bar.label;
+              setSearchQuery((prev) => (prev === staffName ? '' : staffName));
+            }}
+          />
+          <SaasLineAreaChart
+            title="Daily Audit Activity"
+            subtitle="Events recorded across recent active dates"
+            data={logAnalytics.dailyTrend}
+            primaryLabel="Audit Events"
+            primaryFormat="number"
+            primaryColor="#4F46E5"
+            emptyText="Not enough daily timeline data"
+          />
+        </div>
+      </CollapsibleAnalyticsPanel>
 
       {/* Filter and Search Bar with Action Buttons */}
       <div className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xs flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-4">
@@ -164,6 +275,7 @@ export const AdminActivityLogs: React.FC<AdminActivityLogsProps> = ({
             <option value="admin">Admin</option>
             <option value="manager">Manager</option>
             <option value="moderator">Moderator</option>
+            <option value="integration">Muse AI (Integration)</option>
           </select>
 
           <button
@@ -217,16 +329,29 @@ export const AdminActivityLogs: React.FC<AdminActivityLogsProps> = ({
                       {new Date(log.timestamp).toLocaleString('en-GB')}
                     </td>
                     <td className="py-3.5 px-4">
-                      <p className="font-bold text-slate-900 dark:text-white">{log.staffName}</p>
-                      <span className="text-[10px] text-slate-400 dark:text-slate-500 capitalize font-medium">
+                      <p className="font-bold text-slate-900 dark:text-white flex items-center gap-1.5 flex-wrap">
+                        <span>{log.staffName}</span>
+                        {(log.staffRole === 'integration' || log.source === 'muse_integration') && (
+                          <span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase bg-emerald-100 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+                            Muse AI
+                          </span>
+                        )}
+                      </p>
+                      <span className="text-[10px] text-slate-400 dark:text-slate-500 capitalize font-medium block">
                         {(log.staffRole || 'staff').replace('_', ' ')}
+                        {log.staffEmail ? ` · ${log.staffEmail}` : ''}
                       </span>
                     </td>
                     <td className="py-3.5 px-4">
                       {getModuleBadge(log.module)}
                     </td>
                     <td className="py-3.5 px-4 font-bold text-slate-800 dark:text-slate-200">
-                      {log.action}
+                      <div>{log.action}</div>
+                      {log.fromStatus && log.toStatus && (
+                        <span className="inline-flex items-center gap-1 mt-1 px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-[10px] font-semibold text-slate-600 dark:text-slate-300">
+                          {log.fromStatus} → {log.toStatus}
+                        </span>
+                      )}
                     </td>
                     <td className="py-3.5 px-4 text-slate-600 dark:text-slate-300 max-w-sm">
                       <p className="line-clamp-2 leading-relaxed">{log.details}</p>
@@ -237,7 +362,7 @@ export const AdminActivityLogs: React.FC<AdminActivityLogsProps> = ({
                       )}
                     </td>
                     <td className="py-3.5 px-4 text-[11px] text-slate-400 dark:text-slate-500 font-mono whitespace-nowrap">
-                      {log.ipAddress || '103.145.118.24'}
+                      {log.ipAddress || '—'}
                     </td>
                   </tr>
                 ))

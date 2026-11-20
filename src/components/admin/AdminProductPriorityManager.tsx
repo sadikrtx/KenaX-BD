@@ -1,5 +1,10 @@
 import React, { useState, useMemo } from 'react';
 import {
+  SaasDonutChart,
+  SaasBarChart,
+  CollapsibleAnalyticsPanel,
+} from './charts/AdminCharts';
+import {
   ArrowUpDown,
   Search,
   CheckCircle2,
@@ -102,6 +107,48 @@ export const AdminProductPriorityManager: React.FC<AdminProductPriorityManagerPr
     }
     return getProductPriorityForPage(p, selectedPageKey);
   };
+
+  const priorityAnalytics = useMemo(() => {
+    let rankedCount = 0;
+    let unrankedCount = 0;
+    pageProducts.forEach((p) => {
+      const hasCustom = p.pagePriorities && typeof p.pagePriorities[selectedPageKey] === 'number';
+      if (hasCustom) rankedCount++;
+      else unrankedCount++;
+    });
+
+    const rankingSlices = [
+      { id: 'ranked', label: 'Explicitly Ranked', value: rankedCount, color: '#059669' },
+      { id: 'default', label: 'Default Order', value: unrankedCount, color: '#64748B' },
+    ];
+
+    const contextBars = pageOptions.slice(0, 8).map((opt) => {
+      let count = products.length;
+      if (opt.key.startsWith('category:')) {
+        const cat = opt.key.replace('category:', '').toLowerCase().trim();
+        count = products.filter((p) => (p.category || '').toLowerCase().trim() === cat).length;
+      } else if (opt.key.startsWith('tag:')) {
+        const tag = opt.key.replace('tag:', '').toLowerCase().trim();
+        count = products.filter(
+          (p) =>
+            (p.tags && p.tags.some((t) => t.toLowerCase().trim() === tag)) ||
+            (p.saleBadge && p.saleBadge.toLowerCase().trim() === tag)
+        ).length;
+      }
+      const rankedOnPage = products.filter(
+        (p) => p.pagePriorities && typeof p.pagePriorities[opt.key] === 'number'
+      ).length;
+
+      return {
+        id: opt.key,
+        label: opt.label.replace(/^(Category|Tag):\s*/i, ''),
+        value: count,
+        secondaryValue: rankedOnPage,
+      };
+    });
+
+    return { rankingSlices, contextBars };
+  }, [pageProducts, selectedPageKey, pageOptions, products]);
 
   // Handle priority numeric input change
   const handlePriorityInputChange = (productId: string, valStr: string) => {
@@ -278,6 +325,34 @@ export const AdminProductPriorityManager: React.FC<AdminProductPriorityManagerPr
             />
           </div>
         </div>
+      </div>
+
+      {/* Product Priority Analytics */}
+      <div className="p-4 sm:p-5 border-b border-slate-200 bg-slate-50/40">
+        <CollapsibleAnalyticsPanel title="Ranking Coverage & Page Inventory" defaultOpen={true}>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <SaasDonutChart
+              title={`Ranking Status (${currentPageInfo.label})`}
+              subtitle="Explicit custom ranks vs default sort order"
+              data={priorityAnalytics.rankingSlices}
+              centerLabel="Products"
+            />
+            <SaasBarChart
+              title="Products & Ranked Items by Page"
+              subtitle="Click any bar to switch page context"
+              data={priorityAnalytics.contextBars}
+              primaryLabel="Total Products"
+              secondaryLabel="Ranked"
+              onSelectBar={(bar) => {
+                if (bar.id) {
+                  setSelectedPageKey(bar.id);
+                  setLocalPriorities({});
+                  setHasUnsavedChanges(false);
+                }
+              }}
+            />
+          </div>
+        </CollapsibleAnalyticsPanel>
       </div>
 
       {/* Success Notification Alert */}

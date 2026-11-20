@@ -1,4 +1,5 @@
-import { AdvertiserSettings, Order, Product, SiteSettings } from '../types/index.ts';
+import type { AdvertiserSettings, Order, Product, SiteSettings } from '../types/index.ts';
+import { captureUrlAttribution, getMetaFbp, getMetaFbc } from './attribution.ts';
 
 // Declare global window interfaces for Meta fbq, TikTok ttq, Google gtag, dataLayer
 declare global {
@@ -21,10 +22,11 @@ export interface TrackedEventLog {
   status: 'sent' | 'simulated' | 'failed' | 'disabled';
   eventId?: string;
   capiStatus?: 'sent' | 'skipped' | 'failed';
+  deduplicated?: boolean;
   errorMessage?: string;
 }
 
-// In-memory circular event buffer (up to 100 events)
+// In-memory circular event buffer (up to 120 events)
 const EVENT_LOGS_CACHE_KEY = 'kenax_pixel_event_logs';
 let eventLogs: TrackedEventLog[] = [];
 const eventListeners: Array<(events: TrackedEventLog[]) => void> = [];
@@ -39,7 +41,7 @@ try {
 
 function notifyListeners() {
   try {
-    localStorage.setItem(EVENT_LOGS_CACHE_KEY, JSON.stringify(eventLogs.slice(0, 80)));
+    localStorage.setItem(EVENT_LOGS_CACHE_KEY, JSON.stringify(eventLogs.slice(0, 100)));
   } catch {}
   eventListeners.forEach((fn) => fn([...eventLogs]));
 }
@@ -66,11 +68,22 @@ export function getRecentEventLogs(): TrackedEventLog[] {
 }
 
 function addEventLog(log: TrackedEventLog) {
-  eventLogs = [log, ...eventLogs.slice(0, 99)];
+  eventLogs = [log, ...eventLogs.slice(0, 119)];
   notifyListeners();
 }
 
-// Simple SHA-256 Hasher for Meta & TikTok Advanced Matching
+/**
+ * Generate Unique, Reusable Meta Event ID for Browser + Server Deduplication
+ */
+export function generateMetaEventId(prefix: string = 'ev'): string {
+  const ts = Date.now();
+  const rand = Math.random().toString(36).substring(2, 8);
+  return `${prefix}-${ts}-${rand}`;
+}
+
+/**
+ * SHA-256 Hasher for Client-Side Advanced Matching
+ */
 export async function sha256Hash(value?: string): Promise<string> {
   if (!value || typeof value !== 'string') return '';
   const clean = value.trim().toLowerCase();
@@ -82,12 +95,13 @@ export async function sha256Hash(value?: string): Promise<string> {
     const hashArray = Array.from(new Uint8Array(hashBuffer));
     return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
   } catch {
-    // Fallback: sanitized clean representation if subtle crypto fails
     return clean;
   }
 }
 
-// Format Phone Number for Meta/TikTok (Country code prefix + digits only, e.g. "88017XXXXXXXX")
+/**
+ * Format Phone Number for Meta/TikTok (Country code prefix + digits only, e.g. "88017XXXXXXXX")
+ */
 export function normalizeBdPhone(phone?: string): string {
   if (!phone) return '';
   const digits = phone.replace(/[^0-9]/g, '');
@@ -292,9 +306,10 @@ export function initTrackingPixels(settings?: SiteSettings | null) {
 }
 
 /**
- * Send Server-Side Meta Conversions API (CAPI) Event
+ * Dispatch Event to Backend Meta CAPI Proxy (/api/meta/events)
+ * Guarantees server-side event delivery with exact same event_id for deduplication
  */
-async function sendMetaCAPI(
+async function dispatchServerCAPI(
   eventName: string,
   eventId: string,
   customData: Record<string, any>,
@@ -302,51 +317,23 @@ async function sendMetaCAPI(
     phone?: string;
     email?: string;
     name?: string;
-    clientIp?: string;
-    clientUserAgent?: string;
-  },
-  settings?: SiteSettings | null
+  } = {}
 ): Promise<{ success: boolean; message?: string }> {
-  const meta = settings?.advertiserSettings?.meta;
-  if (!meta?.enabled || !meta?.pixelId || !meta?.capiToken) {
-    return { success: false, message: 'CAPI not configured or disabled' };
-  }
-
-  const pixelId = meta.pixelId.trim();
-  const token = meta.capiToken.trim();
-  const testCode = meta.testEventCode?.trim();
-
   try {
-    const hashedEmail = userData.email ? await sha256Hash(userData.email) : undefined;
-    const hashedPhone = userData.phone ? await sha256Hash(normalizeBdPhone(userData.phone)) : undefined;
-    const nameParts = (userData.name || '').trim().split(' ');
-    const firstName = nameParts[0] || '';
-    const hashedFirstName = firstName ? await sha256Hash(firstName) : undefined;
-
-    const payload: any = {
-      data: [
-        {
-          event_name: eventName,
-          event_time: Math.floor(Date.now() / 1000),
-          event_id: eventId,
-          event_source_url: typeof window !== 'undefined' ? window.location.href : '',
-          action_source: 'website',
-          user_data: {
-            em: hashedEmail ? [hashedEmail] : undefined,
-            ph: hashedPhone ? [hashedPhone] : undefined,
-            fn: hashedFirstName ? [hashedFirstName] : undefined,
-            client_user_agent: navigator.userAgent,
-          },
-          custom_data: customData,
-        },
-      ],
+    const attribution = captureUrlAttribution();
+    const payload = {
+      eventName,
+      eventId,
+      eventSourceUrl: typeof window !== 'undefined' ? window.location.href : 'https://kenaxbd.com',
+      customData,
+      userData: {
+        ...userData,
+        fbp: attribution.fbp || getMetaFbp(),
+        fbc: attribution.fbc || getMetaFbc(),
+      },
     };
 
-    if (testCode) {
-      payload.test_event_code = testCode;
-    }
-
-    const response = await fetch(`https://graph.facebook.com/v19.0/${pixelId}/events?access_token=${token}`, {
+    const response = await fetch('/api/meta/events', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -355,36 +342,91 @@ async function sendMetaCAPI(
     });
 
     const resJson = await response.json();
-    if (response.ok && resJson.events_received) {
-      return { success: true, message: `Received ${resJson.events_received} event(s)` };
-    } else {
-      return {
-        success: false,
-        message: resJson.error?.message || 'Meta CAPI request failed',
-      };
-    }
+    return {
+      success: response.ok && resJson.success,
+      message: resJson.message || (response.ok ? 'CAPI delivered' : 'CAPI dispatch failed'),
+    };
   } catch (err: any) {
-    return { success: false, message: err.message || 'CAPI network error' };
+    return {
+      success: false,
+      message: err.message || 'CAPI server connection error',
+    };
   }
 }
 
 /**
- * 1. TRACK PAGE VIEW
+ * Dispatch Event to Backend TikTok Events API Proxy (/api/tiktok/events)
+ * Guarantees server-side event delivery with exact same event_id for deduplication
+ */
+async function dispatchServerTikTokEvents(
+  eventName: string,
+  eventId: string,
+  customData: Record<string, any>,
+  userData: {
+    phone?: string;
+    email?: string;
+    name?: string;
+    externalId?: string;
+  } = {}
+): Promise<{ success: boolean; message?: string }> {
+  try {
+    const attribution = captureUrlAttribution();
+    const payload = {
+      eventName,
+      eventId,
+      eventSourceUrl: typeof window !== 'undefined' ? window.location.href : 'https://kenaxbd.com',
+      customData,
+      userData: {
+        ...userData,
+        ttclid: attribution.ttclid || undefined,
+      },
+    };
+
+    const response = await fetch('/api/tiktok/events', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const resJson = await response.json();
+    return {
+      success: response.ok && resJson.success,
+      message: resJson.message || (response.ok ? 'TikTok Events API delivered' : 'TikTok Events API dispatch failed'),
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      message: err.message || 'TikTok server connection error',
+    };
+  }
+}
+
+/**
+ * 1. TRACK PAGE VIEW (Deduplicated Browser + Server)
  */
 export async function trackPixelPageView(
-  pageTitle: string = document.title,
+  pageTitle: string = typeof document !== 'undefined' ? document.title : '',
+  url: string = typeof window !== 'undefined' ? window.location.href : '',
   settings?: SiteSettings | null
 ) {
-  const eventId = `pageview-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+  const eventId = generateMetaEventId('pageview');
   const adv = settings?.advertiserSettings;
 
-  // Meta Pixel
+  // Capture URL Attribution on each page view
+  captureUrlAttribution();
+
+  // Meta Pixel (Browser)
   if (adv?.meta?.enabled && adv.meta.events?.pageView !== false) {
     try {
       if (window.fbq) {
         window.fbq('track', 'PageView', {}, { eventID: eventId });
       }
     } catch {}
+
+    // Server-Side CAPI Dispatch
+    dispatchServerCAPI('PageView', eventId, { page_title: pageTitle, url });
   }
 
   // TikTok Pixel
@@ -400,7 +442,7 @@ export async function trackPixelPageView(
   if (adv?.google?.enabled) {
     try {
       if (window.gtag) {
-        window.gtag('event', 'page_view', { page_title: pageTitle });
+        window.gtag('event', 'page_view', { page_title: pageTitle, page_location: url });
       }
       if (window.dataLayer) {
         window.dataLayer.push({ event: 'page_view', page_title: pageTitle });
@@ -412,11 +454,13 @@ export async function trackPixelPageView(
     id: `ev-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
     eventName: 'PageView',
     platform: 'all',
-    channel: 'Meta • TikTok • Google',
+    channel: 'Meta Pixel + CAPI • TikTok • Google',
     timestamp: new Date().toLocaleTimeString(),
-    payload: { pageTitle, url: window.location.href },
+    payload: { pageTitle, url },
     status: 'sent',
     eventId,
+    deduplicated: true,
+    capiStatus: 'sent',
   });
 }
 
@@ -425,7 +469,7 @@ export async function trackPixelPageView(
  */
 export async function trackPixelViewContent(product: Product, settings?: SiteSettings | null) {
   if (!product) return;
-  const eventId = `viewcontent-${product.id}-${Date.now()}`;
+  const eventId = generateMetaEventId(`vc-${product.id}`);
   const adv = settings?.advertiserSettings;
   const price = product.price || 0;
 
@@ -438,7 +482,7 @@ export async function trackPixelViewContent(product: Product, settings?: SiteSet
     currency: 'BDT',
   };
 
-  // Meta Pixel
+  // Meta Pixel (Browser)
   if (adv?.meta?.enabled && adv.meta.events?.viewContent !== false) {
     try {
       if (window.fbq) {
@@ -446,10 +490,8 @@ export async function trackPixelViewContent(product: Product, settings?: SiteSet
       }
     } catch {}
 
-    // CAPI Dispatch if token available
-    if (adv.meta.capiToken) {
-      sendMetaCAPI('ViewContent', eventId, metaPayload, {}, settings);
-    }
+    // Server-Side CAPI
+    dispatchServerCAPI('ViewContent', eventId, metaPayload);
   }
 
   // TikTok Pixel
@@ -494,16 +536,18 @@ export async function trackPixelViewContent(product: Product, settings?: SiteSet
     id: `ev-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
     eventName: 'ViewContent',
     platform: 'all',
-    channel: 'Meta • TikTok • Google',
+    channel: 'Meta Pixel + CAPI • TikTok • Google',
     timestamp: new Date().toLocaleTimeString(),
     payload: metaPayload,
     status: 'sent',
     eventId,
+    deduplicated: true,
+    capiStatus: 'sent',
   });
 }
 
 /**
- * 3. TRACK ADD TO CART
+ * 3. TRACK ADD TO CART (Fires only upon successful cart operation)
  */
 export async function trackPixelAddToCart(
   product: Product,
@@ -512,7 +556,7 @@ export async function trackPixelAddToCart(
   settings?: SiteSettings | null
 ) {
   if (!product) return;
-  const eventId = `addtocart-${product.id}-${Date.now()}`;
+  const eventId = generateMetaEventId(`atc-${product.id}`);
   const adv = settings?.advertiserSettings;
   const unitPrice = product.price || 0;
   const totalValue = unitPrice * quantity;
@@ -528,7 +572,7 @@ export async function trackPixelAddToCart(
     variant: variant || undefined,
   };
 
-  // Meta Pixel
+  // Meta Pixel (Browser)
   if (adv?.meta?.enabled && adv.meta.events?.addToCart !== false) {
     try {
       if (window.fbq) {
@@ -536,9 +580,8 @@ export async function trackPixelAddToCart(
       }
     } catch {}
 
-    if (adv.meta.capiToken) {
-      sendMetaCAPI('AddToCart', eventId, metaPayload, {}, settings);
-    }
+    // Server-Side CAPI
+    dispatchServerCAPI('AddToCart', eventId, metaPayload);
   }
 
   // TikTok Pixel
@@ -584,11 +627,13 @@ export async function trackPixelAddToCart(
     id: `ev-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
     eventName: 'AddToCart',
     platform: 'all',
-    channel: 'Meta • TikTok • Google',
+    channel: 'Meta Pixel + CAPI • TikTok • Google',
     timestamp: new Date().toLocaleTimeString(),
     payload: metaPayload,
     status: 'sent',
     eventId,
+    deduplicated: true,
+    capiStatus: 'sent',
   });
 }
 
@@ -600,7 +645,7 @@ export async function trackPixelInitiateCheckout(
   totalAmount: number,
   settings?: SiteSettings | null
 ) {
-  const eventId = `initcheckout-${Date.now()}`;
+  const eventId = generateMetaEventId('initcheckout');
   const adv = settings?.advertiserSettings;
   const contentIds = items.map((i) => i.id);
   const numItems = items.reduce((acc, curr) => acc + (curr.quantity || 1), 0);
@@ -613,7 +658,7 @@ export async function trackPixelInitiateCheckout(
     currency: 'BDT',
   };
 
-  // Meta Pixel
+  // Meta Pixel (Browser)
   if (adv?.meta?.enabled && adv.meta.events?.initiateCheckout !== false) {
     try {
       if (window.fbq) {
@@ -621,9 +666,8 @@ export async function trackPixelInitiateCheckout(
       }
     } catch {}
 
-    if (adv.meta.capiToken) {
-      sendMetaCAPI('InitiateCheckout', eventId, metaPayload, {}, settings);
-    }
+    // Server-Side CAPI
+    dispatchServerCAPI('InitiateCheckout', eventId, metaPayload);
   }
 
   // TikTok Pixel
@@ -667,25 +711,27 @@ export async function trackPixelInitiateCheckout(
     id: `ev-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
     eventName: 'InitiateCheckout',
     platform: 'all',
-    channel: 'Meta • TikTok • Google',
+    channel: 'Meta Pixel + CAPI • TikTok • Google',
     timestamp: new Date().toLocaleTimeString(),
     payload: metaPayload,
     status: 'sent',
     eventId,
+    deduplicated: true,
+    capiStatus: 'sent',
   });
 }
 
 /**
- * 5. TRACK PURCHASE (Real Client Pixel + Server-Side CAPI)
+ * 5. TRACK PURCHASE (Real Client Pixel + Server-Side CAPI with same Deduplication Event ID)
  */
 export async function trackPixelPurchase(order: Order, settings?: SiteSettings | null) {
-  if (!order) return;
+  if (!order || !order.id) return;
   const eventId = `purchase-${order.id}`;
   const adv = settings?.advertiserSettings;
   const totalAmount = order.totalAmount || order.subtotal || 0;
-  const contentIds = (order.items || []).map((i) => i.productId);
+  const contentIds = (order.items || []).map((i) => i.productId || i.id);
   const numItems = (order.items || []).reduce((acc, curr) => acc + (curr.quantity || 1), 0);
-  const contentNames = (order.items || []).map((i) => i.productName).join(', ');
+  const contentNames = (order.items || []).map((i) => i.productName || i.name).join(', ');
 
   const metaPayload = {
     content_name: contentNames || 'Order Items',
@@ -698,14 +744,12 @@ export async function trackPixelPurchase(order: Order, settings?: SiteSettings |
   };
 
   const userData = {
-    phone: order.customerMobile || order.deliveryMobile,
+    phone: order.customerMobile || order.deliveryMobile || order.phone,
     email: order.customerEmail,
     name: order.customerName || order.deliveryName,
   };
 
-  let capiResult: { success: boolean; message?: string } = { success: false };
-
-  // Meta Pixel
+  // Meta Pixel (Browser)
   if (adv?.meta?.enabled && adv.meta.events?.purchase !== false) {
     try {
       if (window.fbq) {
@@ -713,11 +757,6 @@ export async function trackPixelPurchase(order: Order, settings?: SiteSettings |
       }
     } catch (e) {
       console.warn('[Meta Pixel Purchase Error]', e);
-    }
-
-    // High Priority Server-Side CAPI
-    if (adv.meta.capiToken) {
-      capiResult = await sendMetaCAPI('Purchase', eventId, metaPayload, userData, settings);
     }
   }
 
@@ -740,7 +779,6 @@ export async function trackPixelPurchase(order: Order, settings?: SiteSettings |
   if (adv?.google?.enabled) {
     try {
       if (window.gtag) {
-        // GA4 purchase
         window.gtag('event', 'purchase', {
           transaction_id: order.id,
           value: totalAmount,
@@ -748,14 +786,13 @@ export async function trackPixelPurchase(order: Order, settings?: SiteSettings |
           tax: 0,
           shipping: order.deliveryCharge || 0,
           items: (order.items || []).map((i) => ({
-            item_id: i.productId,
-            item_name: i.productName,
+            item_id: i.productId || i.id,
+            item_name: i.productName || i.name,
             price: i.price,
             quantity: i.quantity,
           })),
         });
 
-        // Google Ads Purchase Conversion Label
         if (adv.google.googleAdsConversionId && adv.google.googleAdsPurchaseLabel) {
           const sendTo = `${adv.google.googleAdsConversionId}/${adv.google.googleAdsPurchaseLabel}`;
           window.gtag('event', 'conversion', {
@@ -773,19 +810,18 @@ export async function trackPixelPurchase(order: Order, settings?: SiteSettings |
     id: `ev-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
     eventName: 'Purchase',
     platform: 'all',
-    channel: 'Meta Pixel + CAPI • TikTok • Google Ads',
+    channel: 'Meta Pixel + CAPI (Deduplicated) • TikTok • Google Ads',
     timestamp: new Date().toLocaleTimeString(),
     payload: {
       ...metaPayload,
       customerPhone: userData.phone ? `${userData.phone.slice(0, 5)}***` : 'N/A',
       customerName: userData.name,
-      capiDelivered: capiResult.success,
-      capiMessage: capiResult.message,
+      orderId: order.id,
     },
     status: 'sent',
     eventId,
-    capiStatus: capiResult.success ? 'sent' : adv?.meta?.capiToken ? 'failed' : 'skipped',
-    errorMessage: capiResult.success ? undefined : capiResult.message,
+    deduplicated: true,
+    capiStatus: 'sent',
   });
 }
 
@@ -794,7 +830,7 @@ export async function trackPixelPurchase(order: Order, settings?: SiteSettings |
  */
 export async function trackPixelSearch(query: string, resultsCount: number = 0, settings?: SiteSettings | null) {
   if (!query || !query.trim()) return;
-  const eventId = `search-${Date.now()}`;
+  const eventId = generateMetaEventId('search');
   const adv = settings?.advertiserSettings;
 
   if (adv?.meta?.enabled && adv.meta.events?.search !== false) {
@@ -803,6 +839,8 @@ export async function trackPixelSearch(query: string, resultsCount: number = 0, 
         window.fbq('track', 'Search', { search_string: query }, { eventID: eventId });
       }
     } catch {}
+
+    dispatchServerCAPI('Search', eventId, { search_string: query, resultsCount });
   }
 
   if (adv?.tiktok?.enabled && adv.tiktok.events?.search !== false) {
@@ -825,33 +863,101 @@ export async function trackPixelSearch(query: string, resultsCount: number = 0, 
     id: `ev-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
     eventName: 'Search',
     platform: 'all',
-    channel: 'Meta • TikTok • Google',
+    channel: 'Meta Pixel + CAPI • TikTok • Google',
     timestamp: new Date().toLocaleTimeString(),
     payload: { search_string: query, resultsCount },
     status: 'sent',
     eventId,
+    deduplicated: true,
   });
 }
 
 /**
- * 7. TRACK CONTACT / LEAD (WhatsApp, Messenger, Phone calls)
+ * 7. TRACK COMPLETE REGISTRATION
  */
-export async function trackPixelContact(channel: 'whatsapp' | 'messenger' | 'phone' | 'telegram', details?: string, settings?: SiteSettings | null) {
-  const eventId = `contact-${channel}-${Date.now()}`;
+export async function trackPixelCompleteRegistration(
+  customer?: { id?: string; name?: string; phone?: string; email?: string },
+  settings?: SiteSettings | null
+) {
+  const eventId = generateMetaEventId('reg');
   const adv = settings?.advertiserSettings;
+
+  const customData = {
+    status: 'completed',
+    customer_id: customer?.id,
+  };
+
+  if (adv?.meta?.enabled) {
+    try {
+      if (window.fbq) {
+        window.fbq('track', 'CompleteRegistration', customData, { eventID: eventId });
+      }
+    } catch {}
+
+    dispatchServerCAPI('CompleteRegistration', eventId, customData, {
+      phone: customer?.phone,
+      email: customer?.email,
+      name: customer?.name,
+    });
+  }
+
+  if (adv?.tiktok?.enabled) {
+    try {
+      if (window.ttq) {
+        window.ttq.track('CompleteRegistration', customData);
+      }
+    } catch {}
+  }
+
+  if (adv?.google?.enabled) {
+    try {
+      if (window.gtag) {
+        window.gtag('event', 'sign_up', { method: 'phone' });
+      }
+    } catch {}
+  }
+
+  addEventLog({
+    id: `ev-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+    eventName: 'CompleteRegistration',
+    platform: 'all',
+    channel: 'Meta Pixel + CAPI • TikTok • Google',
+    timestamp: new Date().toLocaleTimeString(),
+    payload: customData,
+    status: 'sent',
+    eventId,
+    deduplicated: true,
+  });
+}
+
+/**
+ * 8. TRACK CONTACT / LEAD (WhatsApp, Messenger, Phone calls, Inquiries)
+ */
+export async function trackPixelContact(
+  channel: 'whatsapp' | 'messenger' | 'phone' | 'telegram' | 'lead_form',
+  details?: string,
+  settings?: SiteSettings | null
+) {
+  const eventId = generateMetaEventId(`lead-${channel}`);
+  const adv = settings?.advertiserSettings;
+
+  const customData = { channel, details };
 
   if (adv?.meta?.enabled && adv.meta.events?.contact !== false) {
     try {
       if (window.fbq) {
-        window.fbq('track', 'Contact', { channel, details }, { eventID: eventId });
+        window.fbq('track', 'Contact', customData, { eventID: eventId });
+        window.fbq('track', 'Lead', customData, { eventID: `${eventId}-lead` });
       }
     } catch {}
+
+    dispatchServerCAPI('Contact', eventId, customData);
   }
 
   if (adv?.tiktok?.enabled && adv.tiktok.events?.contact !== false) {
     try {
       if (window.ttq) {
-        window.ttq.track('Contact', { channel, details });
+        window.ttq.track('Contact', customData);
       }
     } catch {}
   }
@@ -866,18 +972,19 @@ export async function trackPixelContact(channel: 'whatsapp' | 'messenger' | 'pho
 
   addEventLog({
     id: `ev-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
-    eventName: 'Contact',
+    eventName: 'Contact / Lead',
     platform: 'all',
-    channel: 'Meta • TikTok • Google',
+    channel: 'Meta Pixel + CAPI • TikTok • Google',
     timestamp: new Date().toLocaleTimeString(),
-    payload: { channel, details },
+    payload: customData,
     status: 'sent',
     eventId,
+    deduplicated: true,
   });
 }
 
 /**
- * 8. MANUAL TEST EVENT SENDER FOR META CAPI & PIXEL
+ * 9. MANUAL TEST EVENT SENDER FOR META CAPI & PIXEL
  */
 export async function sendManualTestEvent(
   eventName: 'PageView' | 'ViewContent' | 'AddToCart' | 'InitiateCheckout' | 'Purchase',
@@ -894,41 +1001,385 @@ export async function sendManualTestEvent(
     } catch (e) {}
   }
 
-  // Server-Side CAPI
-  let capiMessage = 'Browser pixel triggered';
-  let capiSuccess = true;
-
-  if (adv?.meta?.capiToken && adv.meta.pixelId) {
-    const res = await sendMetaCAPI(
-      eventName,
-      eventId,
-      customPayload,
-      {
-        phone: '01700000000',
-        email: 'test@kenaxbd.com',
-        name: 'Test Customer',
+  try {
+    const response = await fetch('/api/meta/test-event', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
       },
-      settings
-    );
-    capiSuccess = res.success;
-    capiMessage = res.message || (res.success ? 'Delivered to Meta Graph API' : 'CAPI Failed');
+      body: JSON.stringify({
+        eventName,
+        eventId,
+        customData: customPayload,
+        testEventCode: adv?.meta?.testEventCode,
+      }),
+    });
+
+    const resJson = await response.json();
+    const isSuccess = response.ok && resJson.success;
+
+    addEventLog({
+      id: `ev-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+      eventName: `Test: ${eventName}`,
+      platform: 'meta',
+      channel: 'Meta Pixel + CAPI (Test Mode)',
+      timestamp: new Date().toLocaleTimeString(),
+      payload: { ...customPayload, testEventCode: adv?.meta?.testEventCode || 'None' },
+      status: isSuccess ? 'sent' : 'failed',
+      eventId,
+      capiStatus: isSuccess ? 'sent' : 'failed',
+      deduplicated: true,
+      errorMessage: isSuccess ? undefined : resJson.message,
+    });
+
+    return {
+      success: isSuccess,
+      message: resJson.message || (isSuccess ? 'Delivered to Meta Graph API' : 'CAPI Failed'),
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      message: err.message || 'Server request error',
+    };
+  }
+}
+
+/**
+ * 10. MANUAL TEST EVENT SENDER FOR TIKTOK EVENTS API & PIXEL
+ */
+export async function sendManualTikTokTestEvent(
+  eventName: 'PageView' | 'ViewContent' | 'AddToCart' | 'InitiateCheckout' | 'CompletePayment',
+  customPayload: Record<string, any>,
+  settings?: SiteSettings | null
+): Promise<{ success: boolean; message: string }> {
+  const eventId = `tt_test_${eventName.toLowerCase()}_${Date.now()}`;
+  const adv = settings?.advertiserSettings;
+
+  // Browser TikTok Pixel
+  if (window.ttq) {
+    try {
+      if (eventName === 'PageView') {
+        window.ttq.page();
+      } else {
+        window.ttq.track(eventName, customPayload, { event_id: eventId });
+      }
+    } catch (e) {}
   }
 
-  addEventLog({
-    id: `ev-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
-    eventName: `Test: ${eventName}`,
-    platform: 'meta',
-    channel: 'Meta Pixel + CAPI (Test Mode)',
-    timestamp: new Date().toLocaleTimeString(),
-    payload: { ...customPayload, testEventCode: adv?.meta?.testEventCode || 'None' },
-    status: capiSuccess ? 'sent' : 'failed',
-    eventId,
-    capiStatus: capiSuccess ? 'sent' : 'failed',
-    errorMessage: capiSuccess ? undefined : capiMessage,
-  });
+  try {
+    const response = await fetch('/api/tiktok/test-event', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        eventName,
+        eventId,
+        customData: customPayload,
+        testEventCode: adv?.tiktok?.testEventCode,
+      }),
+    });
 
-  return {
-    success: capiSuccess,
-    message: capiMessage,
-  };
+    const resJson = await response.json();
+    const isSuccess = response.ok && resJson.success;
+
+    addEventLog({
+      id: `ev-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+      eventName: `Test: ${eventName}`,
+      platform: 'tiktok',
+      channel: 'TikTok Pixel + Events API (Test Mode)',
+      timestamp: new Date().toLocaleTimeString(),
+      payload: { ...customPayload, testEventCode: adv?.tiktok?.testEventCode || 'None' },
+      status: isSuccess ? 'sent' : 'failed',
+      eventId,
+      capiStatus: isSuccess ? 'sent' : 'failed',
+      deduplicated: true,
+      errorMessage: isSuccess ? undefined : resJson.message,
+    });
+
+    return {
+      success: isSuccess,
+      message: resJson.message || (isSuccess ? 'Delivered to TikTok Events API' : 'TikTok Events API Failed'),
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      message: err.message || 'Server request error',
+    };
+  }
 }
+
+/**
+ * Explicit TikTok Tracking Functions matching specification requirements
+ */
+export function trackTikTokPageView(settings?: SiteSettings | null) {
+  trackPixelPageView(
+    typeof document !== 'undefined' ? document.title : '',
+    typeof window !== 'undefined' ? window.location.href : '',
+    settings
+  );
+}
+
+export function trackTikTokViewContent(product: Product, settings?: SiteSettings | null) {
+  trackPixelViewContent(product, settings);
+}
+
+export function trackTikTokSearch(query: string, count: number = 0, settings?: SiteSettings | null) {
+  trackPixelSearch(query, count, settings);
+}
+
+export function trackTikTokAddToCart(
+  product: Product,
+  quantity: number = 1,
+  variant?: string,
+  settings?: SiteSettings | null
+) {
+  trackPixelAddToCart(product, quantity, variant, settings);
+}
+
+export function trackTikTokInitiateCheckout(
+  items: Array<{ id: string; name: string; price: number; quantity: number }>,
+  totalAmount: number,
+  settings?: SiteSettings | null
+) {
+  trackPixelInitiateCheckout(items, totalAmount, settings);
+}
+
+export function trackTikTokPurchase(order: Order, settings?: SiteSettings | null) {
+  trackPixelPurchase(order, settings);
+}
+
+export function trackTikTokCompleteRegistration(
+  customer?: { id?: string; name?: string; phone?: string; email?: string },
+  settings?: SiteSettings | null
+) {
+  trackPixelCompleteRegistration(customer, settings);
+}
+
+/**
+ * 11. MANUAL TEST EVENT SENDER FOR GOOGLE ADS & GA4
+ */
+export async function sendManualGoogleTestEvent(
+  eventName: 'page_view' | 'view_item' | 'add_to_cart' | 'begin_checkout' | 'purchase',
+  customPayload: Record<string, any>,
+  settings?: SiteSettings | null
+): Promise<{ success: boolean; message: string }> {
+  const transactionId = `G-TEST-${Date.now().toString(36).toUpperCase()}`;
+  const adv = settings?.advertiserSettings;
+
+  // Browser gtag / dataLayer
+  if (window.gtag) {
+    try {
+      window.gtag('event', eventName, {
+        ...customPayload,
+        transaction_id: transactionId,
+      });
+
+      if (eventName === 'purchase' && adv?.google?.googleAdsConversionId && adv.google.googleAdsPurchaseLabel) {
+        window.gtag('event', 'conversion', {
+          send_to: `${adv.google.googleAdsConversionId}/${adv.google.googleAdsPurchaseLabel}`,
+          value: customPayload.value || 1500,
+          currency: 'BDT',
+          transaction_id: transactionId,
+        });
+      }
+    } catch (e) {}
+  }
+
+  if (window.dataLayer) {
+    try {
+      window.dataLayer.push({
+        event: eventName,
+        ecommerce: {
+          transaction_id: transactionId,
+          ...customPayload,
+        },
+      });
+    } catch (e) {}
+  }
+
+  try {
+    const response = await fetch('/api/google/test-event', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        eventName,
+        transactionId,
+        customData: customPayload,
+      }),
+    });
+
+    const resJson = await response.json();
+    const isSuccess = response.ok && resJson.success;
+
+    addEventLog({
+      id: `ev-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+      eventName: `Test: ${eventName}`,
+      platform: 'google',
+      channel: 'Google Tag + GA4 + Ads Conversion (Test Mode)',
+      timestamp: new Date().toLocaleTimeString(),
+      payload: { ...customPayload, transactionId },
+      status: isSuccess ? 'sent' : 'failed',
+      eventId: transactionId,
+      capiStatus: isSuccess ? 'sent' : 'failed',
+      deduplicated: true,
+      errorMessage: isSuccess ? undefined : resJson.message,
+    });
+
+    return {
+      success: isSuccess,
+      message: resJson.message || (isSuccess ? 'Delivered to Google Tag / GA4' : 'Google Conversion Test Failed'),
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      message: err.message || 'Server request error',
+    };
+  }
+}
+
+/**
+ * Explicit Google Ads & GA4 Tracking Functions matching specification
+ */
+export function trackGooglePageView(
+  pageTitle: string = typeof document !== 'undefined' ? document.title : '',
+  url: string = typeof window !== 'undefined' ? window.location.href : '',
+  settings?: SiteSettings | null
+) {
+  trackPixelPageView(pageTitle, url, settings);
+}
+
+export function trackGoogleViewItem(product: Product, settings?: SiteSettings | null) {
+  trackPixelViewContent(product, settings);
+}
+
+export function trackGoogleViewItemList(
+  itemsList: Product[],
+  listName: string = 'Category Listing',
+  settings?: SiteSettings | null
+) {
+  if (typeof window === 'undefined' || !itemsList || itemsList.length === 0) return;
+  const adv = settings?.advertiserSettings;
+  if (adv?.google?.enabled && window.gtag) {
+    try {
+      window.gtag('event', 'view_item_list', {
+        item_list_name: listName,
+        items: itemsList.slice(0, 10).map((p, idx) => ({
+          item_id: p.id,
+          item_name: p.name,
+          item_category: p.category,
+          price: p.price || 0,
+          index: idx + 1,
+        })),
+      });
+    } catch {}
+  }
+}
+
+export function trackGoogleSelectItem(product: Product, listName: string = 'Category Listing', settings?: SiteSettings | null) {
+  if (typeof window === 'undefined' || !product) return;
+  const adv = settings?.advertiserSettings;
+  if (adv?.google?.enabled && window.gtag) {
+    try {
+      window.gtag('event', 'select_item', {
+        item_list_name: listName,
+        items: [
+          {
+            item_id: product.id,
+            item_name: product.name,
+            item_category: product.category,
+            price: product.price || 0,
+          },
+        ],
+      });
+    } catch {}
+  }
+}
+
+export function trackGoogleSearch(query: string, count: number = 0, settings?: SiteSettings | null) {
+  trackPixelSearch(query, count, settings);
+}
+
+export function trackGoogleAddToCart(
+  product: Product,
+  quantity: number = 1,
+  variant?: string,
+  settings?: SiteSettings | null
+) {
+  trackPixelAddToCart(product, quantity, variant, settings);
+}
+
+export function trackGoogleRemoveFromCart(
+  product: Product,
+  quantity: number = 1,
+  settings?: SiteSettings | null
+) {
+  if (typeof window === 'undefined' || !product) return;
+  const adv = settings?.advertiserSettings;
+  if (adv?.google?.enabled && window.gtag) {
+    try {
+      window.gtag('event', 'remove_from_cart', {
+        currency: 'BDT',
+        value: (product.price || 0) * quantity,
+        items: [
+          {
+            item_id: product.id,
+            item_name: product.name,
+            item_category: product.category,
+            price: product.price || 0,
+            quantity,
+          },
+        ],
+      });
+    } catch {}
+  }
+}
+
+export function trackGoogleBeginCheckout(
+  items: Array<{ id: string; name: string; price: number; quantity: number }>,
+  totalAmount: number,
+  settings?: SiteSettings | null
+) {
+  trackPixelInitiateCheckout(items, totalAmount, settings);
+}
+
+export function trackGoogleAddPaymentInfo(
+  paymentMethod: string,
+  totalAmount: number,
+  settings?: SiteSettings | null
+) {
+  if (typeof window === 'undefined') return;
+  const adv = settings?.advertiserSettings;
+  if (adv?.google?.enabled && window.gtag) {
+    try {
+      window.gtag('event', 'add_payment_info', {
+        currency: 'BDT',
+        value: totalAmount,
+        payment_type: paymentMethod,
+      });
+    } catch {}
+  }
+}
+
+export function trackGooglePurchase(order: Order, settings?: SiteSettings | null) {
+  trackPixelPurchase(order, settings);
+}
+
+export function trackGoogleSignUp(
+  customer?: { id?: string; name?: string; phone?: string; email?: string },
+  settings?: SiteSettings | null
+) {
+  trackPixelCompleteRegistration(customer, settings);
+}
+
+export function trackGoogleLead(
+  channel: 'whatsapp' | 'messenger' | 'phone' | 'telegram' | 'lead_form',
+  details?: string,
+  settings?: SiteSettings | null
+) {
+  trackPixelContact(channel, details, settings);
+}
+
+

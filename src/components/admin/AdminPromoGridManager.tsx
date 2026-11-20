@@ -1,4 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
+import {
+  SaasDonutChart,
+  SaasBarChart,
+  CollapsibleAnalyticsPanel,
+} from './charts/AdminCharts';
 import {
   PromoBannerItem,
   PromoGridSettings,
@@ -93,6 +98,41 @@ export const AdminPromoGridManager: React.FC<AdminPromoGridManagerProps> = ({
   const isMasterEnabled = promoGridSettings.enabled !== false;
   const isMasterDesktop = promoGridSettings.showOnDesktop !== false;
   const isMasterMobile = promoGridSettings.showOnMobile !== false;
+
+  const promoChartData = useMemo(() => {
+    const activeCards = banners.filter((b) => b.enabled !== false).length;
+    const pausedCards = Math.max(0, banners.length - activeCards);
+
+    const statusSlices = [
+      { id: 'active', label: 'Active Cards', value: activeCards, color: '#059669' },
+      { id: 'paused', label: 'Paused Cards', value: pausedCards, color: '#64748B' },
+    ];
+
+    const coverageBars = [
+      {
+        id: 'desktop',
+        label: 'Desktop Cards',
+        value: banners.filter((b) => b.enabled !== false && b.showOnDesktop !== false).length,
+      },
+      {
+        id: 'mobile',
+        label: 'Mobile Cards',
+        value: banners.filter((b) => b.enabled !== false && b.showOnMobile !== false).length,
+      },
+      {
+        id: 'categories',
+        label: 'Targeted Categories',
+        value: (placements.selectedCategoryNames || []).length,
+      },
+      {
+        id: 'tags',
+        label: 'Targeted Tags',
+        value: (placements.selectedTags || []).length,
+      },
+    ];
+
+    return { statusSlices, coverageBars };
+  }, [banners, placements]);
 
   // Default available categories if none passed
   const availableCategoryList = categories.length > 0
@@ -528,6 +568,28 @@ export const AdminPromoGridManager: React.FC<AdminPromoGridManagerProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Promo Grid Analytics */}
+      <CollapsibleAnalyticsPanel title="Promo Grid Activation & Placement Analytics" defaultOpen={true}>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <SaasDonutChart
+            title="Promo Cards Status"
+            subtitle="Enabled vs paused promo grid banners"
+            data={promoChartData.statusSlices}
+            centerLabel="Cards"
+            onSelectSlice={() => setManagerMainTab('cards')}
+          />
+          <SaasBarChart
+            title="Device & Placement Coverage"
+            subtitle="Active device targets and category/tag assignments"
+            data={promoChartData.coverageBars}
+            primaryLabel="Count"
+            onSelectBar={(bar) =>
+              setManagerMainTab(bar.id === 'categories' || bar.id === 'tags' ? 'placements' : 'cards')
+            }
+          />
+        </div>
+      </CollapsibleAnalyticsPanel>
 
       {/* 2. Main Manager Tab Switcher: Cards Design vs Placements & Locations */}
       <div className="flex items-center gap-2 p-1.5 rounded-2xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700">

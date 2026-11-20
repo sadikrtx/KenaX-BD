@@ -1,4 +1,23 @@
-import { Category, WebsiteSettings, DeliveryZone, Coupon, EmailTemplate, Order, HeroFeatureTag, DEFAULT_HERO_BANNERS, DEFAULT_HERO_SIDE_BANNER, CustomerRecord, ExpenseRecord, OtherProfitRecord, Review, PaymentGatewayConfig } from '../types/index.ts';
+import type {
+  Category,
+  WebsiteSettings,
+  DeliveryZone,
+  Coupon,
+  EmailTemplate,
+  Order,
+  HeroFeatureTag,
+  CustomerRecord,
+  ExpenseRecord,
+  OtherProfitRecord,
+  Review,
+  PaymentGatewayConfig,
+  ActivityLog,
+} from '../types/index.ts';
+import {
+  DEFAULT_HERO_BANNERS,
+  DEFAULT_HERO_SIDE_BANNER,
+  DEFAULT_STORAGE_SETTINGS,
+} from '../types/index.ts';
 import { DEFAULT_PROMO_GRID_SETTINGS } from './defaultPromoBanners.ts';
 import { DEFAULT_NAV_ITEMS } from './defaultNavItems.ts';
 
@@ -458,6 +477,8 @@ export const INITIAL_WEBSITE_SETTINGS: WebsiteSettings = {
   autoUpdateOrderStatusFromWebhook: true,
   fraudAlertThresholdPercent: 70,
   advanceDeliveryFeeAmount: 120,
+  // Cloud Storage & Google Drive Marketplace Settings
+  storageSettings: DEFAULT_STORAGE_SETTINGS,
 };
 
 export const INITIAL_DELIVERY_ZONES: DeliveryZone[] = [
@@ -581,6 +602,7 @@ export const INITIAL_STAFF = [
     password: 'sadik@1234',
     role: 'super_admin' as const,
     status: 'active' as const,
+    isActive: true,
     permissions: ['*'],
     phone: '+880 1700-123456',
     avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80',
@@ -592,68 +614,7 @@ export const INITIAL_STAFF = [
 
 export const INITIAL_CUSTOMERS: CustomerRecord[] = [];
 
-export const INITIAL_ACTIVITY_LOGS = [
-  {
-    id: 'log-101',
-    staffName: 'Rafiqul Islam',
-    staffRole: 'Manager',
-    action: 'Order Status Updated',
-    module: 'Orders' as const,
-    targetId: 'KB-89242',
-    details: 'Status changed from "Packed" to "Shipped" via Pathao Courier (PTH-CTG-9821)',
-    timestamp: '2025-02-14T09:00:00Z',
-    ip: '103.145.118.22',
-    device: 'Desktop (Chrome 132 / Windows 11)',
-  },
-  {
-    id: 'log-102',
-    staffName: 'Sadik Rahman',
-    staffRole: 'Super Admin',
-    action: 'Payment Verified',
-    module: 'Payments' as const,
-    targetId: 'KB-89242',
-    details: 'bKash Transaction ID BK9A77218X verified for ৳7,118',
-    timestamp: '2025-02-13T16:15:00Z',
-    ip: '103.205.71.18',
-    device: 'MacBook Pro (macOS Sequoia)',
-  },
-  {
-    id: 'log-103',
-    staffName: 'Rafiqul Islam',
-    staffRole: 'Manager',
-    action: 'Stock Adjustment',
-    module: 'Inventory' as const,
-    targetId: 'XIA-RN13-8-256',
-    details: 'Added +15 units to Redmi Note 13 stock (Reason: Official Xiaomi Batch Receipt)',
-    timestamp: '2025-02-12T14:30:00Z',
-    ip: '103.145.118.22',
-    device: 'Desktop (Chrome 132)',
-  },
-  {
-    id: 'log-104',
-    staffName: 'Anika Tabassum',
-    staffRole: 'Moderator',
-    action: 'Review Approved',
-    module: 'Reviews' as const,
-    targetId: 'rev-01',
-    details: 'Approved 5-star customer review on Xiaomi Redmi Buds 5',
-    timestamp: '2025-02-11T11:20:00Z',
-    ip: '103.102.24.89',
-    device: 'Mobile (Safari / iOS 18)',
-  },
-  {
-    id: 'log-105',
-    staffName: 'Sadik Rahman',
-    staffRole: 'Super Admin',
-    action: 'Staff Account Created',
-    module: 'Staff' as const,
-    targetId: 'staff-mod-1',
-    details: 'Created moderator account for Anika Tabassum (anika@kenaxbd.com)',
-    timestamp: '2025-02-01T00:00:00Z',
-    ip: '103.205.71.18',
-    device: 'Desktop (Chrome)',
-  },
-];
+export const INITIAL_ACTIVITY_LOGS: ActivityLog[] = [];
 
 export const INITIAL_NOTIFICATIONS = [
   {

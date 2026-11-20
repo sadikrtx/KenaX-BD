@@ -1,4 +1,4 @@
-import { TagCollectionSlide, WebsiteSettings } from '../types/index.ts';
+import type { TagCollectionSlide, WebsiteSettings } from '../types/index.ts';
 
 /**
  * Returns default banner slides for a specific tag or collection if custom ones are not yet saved.

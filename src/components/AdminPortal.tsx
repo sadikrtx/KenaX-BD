@@ -5,10 +5,15 @@ import {
 } from './admin/AdminSidebar';
 import { AdminHeader } from './admin/AdminHeader';
 
+import AdminOrderSettings from './admin/AdminOrderSettings';
+import AdminPlugins, { PluginManagerSubTab } from './admin/AdminPlugins';
+import { PluginProvider } from '../context/PluginContext';
+
 // Lazy-loaded Admin Sub-Modules (Zero overhead until opened)
 const AdminOverview = React.lazy(() => import('./admin/AdminOverview').then(m => ({ default: m.AdminOverview })));
 const AdminOrders = React.lazy(() => import('./admin/AdminOrders').then(m => ({ default: m.AdminOrders })));
 const AdminProducts = React.lazy(() => import('./admin/AdminProducts').then(m => ({ default: m.AdminProducts })));
+const SellingPriceCalculator = React.lazy(() => import('./admin/SellingPriceCalculator').then(m => ({ default: m.SellingPriceCalculator })));
 const AdminLandingPages = React.lazy(() => import('./admin/AdminLandingPages').then(m => ({ default: m.AdminLandingPages })));
 const AdminCategories = React.lazy(() => import('./admin/AdminCategories').then(m => ({ default: m.AdminCategories })));
 const AdminInventory = React.lazy(() => import('./admin/AdminInventory').then(m => ({ default: m.AdminInventory })));
@@ -18,6 +23,7 @@ const AdminCourierFraudChecker = React.lazy(() => import('./admin/AdminCourierFr
 const AdminPayments = React.lazy(() => import('./admin/AdminPayments').then(m => ({ default: m.AdminPayments })));
 const AdminDeliveryAdvance = React.lazy(() => import('./admin/AdminDeliveryAdvance').then(m => ({ default: m.AdminDeliveryAdvance })));
 const AdminCoupons = React.lazy(() => import('./admin/AdminCoupons').then(m => ({ default: m.AdminCoupons })));
+const AdminOfferPopupManager = React.lazy(() => import('./admin/AdminOfferPopupManager').then(m => ({ default: m.AdminOfferPopupManager })));
 const AdminReviews = React.lazy(() => import('./admin/AdminReviews').then(m => ({ default: m.AdminReviews })));
 const AdminStaff = React.lazy(() => import('./admin/AdminStaff').then(m => ({ default: m.AdminStaff })));
 const AdminActivityLogs = React.lazy(() => import('./admin/AdminActivityLogs').then(m => ({ default: m.AdminActivityLogs })));
@@ -38,11 +44,11 @@ const AdminWhatsAppAutomation = React.lazy(() => import('./admin/AdminWhatsAppAu
 const AdminTelegramBot = React.lazy(() => import('./admin/AdminTelegramBot').then(m => ({ default: m.AdminTelegramBot })));
 const AdminChatBot = React.lazy(() => import('./admin/AdminChatBot').then(m => ({ default: m.AdminChatBot })));
 const AdminDropshipping = React.lazy(() => import('./admin/AdminDropshipping').then(m => ({ default: m.AdminDropshipping })));
+const AdminDealers = React.lazy(() => import('./admin/AdminDealers').then(m => ({ default: m.AdminDealers })));
 const AdminAdvertiser = React.lazy(() => import('./admin/AdminAdvertiser').then(m => ({ default: m.AdminAdvertiser })));
-const AdminPartners = React.lazy(() => import('./admin/AdminPartners').then(m => ({ default: m.AdminPartners })));
-const AdminSellerManagement = React.lazy(() => import('./admin/AdminSellerManagement').then(m => ({ default: m.AdminSellerManagement })));
-const AdminResellerManagement = React.lazy(() => import('./admin/AdminResellerManagement').then(m => ({ default: m.AdminResellerManagement })));
-const PermissionMatrix = React.lazy(() => import('./admin/PermissionMatrix').then(m => ({ default: m.PermissionMatrix })));
+const AdminFacebookAds = React.lazy(() => import('./admin/AdminFacebookAds').then(m => ({ default: m.AdminFacebookAds })));
+const AdminTikTokAds = React.lazy(() => import('./admin/AdminTikTokAds').then(m => ({ default: m.AdminTikTokAds })));
+const AdminGoogleAds = React.lazy(() => import('./admin/AdminGoogleAds').then(m => ({ default: m.AdminGoogleAds })));
 const InvoiceModal = React.lazy(() => import('./admin/InvoiceModal').then(m => ({ default: m.InvoiceModal })));
 const AdminLoginModal = React.lazy(() => import('./admin/AdminLoginModal').then(m => ({ default: m.AdminLoginModal })));
 import {
@@ -77,7 +83,6 @@ import {
   isDemoOtherProfit,
   Supplier,
   SourcingLocation,
-  PartnerUser,
 } from '../types';
 import { hasPermission, DEFAULT_ROLE_PERMISSIONS } from '../lib/permissions';
 import { safeSetLocalStorage } from '../lib/storage';
@@ -110,6 +115,8 @@ import {
   subscribeToActivityLogs,
   getNotificationsFromDB,
   markNotificationReadInDB,
+  getStockLogsFromDB,
+  logStockAdjustmentToDB,
   saveOrderToDB,
   updateOrderInDB,
   getCartActivitiesFromDB,
@@ -162,8 +169,11 @@ interface AdminPortalProps {
     status: OrderStatus,
     courier?: string,
     tracking?: string,
-    staff?: { id?: string; name?: string; role?: string }
+    staff?: { id?: string; name?: string; role?: string },
+    adminNotes?: string,
+    trackingUrl?: string
   ) => void;
+  onUpdateOrder?: (orderId: string, updates: Partial<Order>) => void;
   onAddOrder?: (newOrder: Order) => void;
   onUpdateSettings: (settings: Partial<SiteSettings> | SiteSettings) => void | Promise<void>;
   currentRole: UserRole;
@@ -176,7 +186,6 @@ interface AdminPortalProps {
   staffList?: StaffUser[];
   onUpdateStaffList?: (newList: StaffUser[]) => void;
   onUpdateCurrentStaff?: (staff: StaffUser) => void;
-  onNavigateToPartnerPortal?: (partner: PartnerUser) => void;
 }
 
 export const AdminPortal: React.FC<AdminPortalProps> = ({
@@ -195,6 +204,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   onAddProduct,
   onDeleteProduct,
   onUpdateOrderStatus,
+  onUpdateOrder,
   onAddOrder,
   onUpdateSettings,
   currentRole,
@@ -207,19 +217,42 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   staffList: passedStaffList,
   onUpdateStaffList,
   onUpdateCurrentStaff,
-  onNavigateToPartnerPortal,
 }) => {
   // Navigation & View States
   const [currentTab, setCurrentTab] = useState<AdminTab>(() => {
     try {
+      const removedTabs = new Set([
+        'admin-reseller-orders',
+        'partners',
+        'admin-sellers',
+        'partner-login-portal',
+        'admin-seller-approvals',
+        'admin-seller-renewals',
+        'admin-seller-plans',
+        'admin-partner-payouts',
+        'admin-resellers',
+        'admin-reseller-approvals',
+        'admin-reseller-subscriptions',
+        'admin-reseller-renewals',
+        'admin-reseller-plans',
+        'admin-reseller-payouts',
+        'permission-matrix',
+      ]);
       const params = new URLSearchParams(window.location.search);
-      const urlTab = params.get('tab') as AdminTab;
-      if (urlTab) return urlTab;
-      const savedTab = localStorage.getItem('kenax_admin_active_tab') as AdminTab;
-      if (savedTab) return savedTab;
+      const urlTab = params.get('tab');
+      if (urlTab && !removedTabs.has(urlTab)) return urlTab as AdminTab;
+      const savedTab = localStorage.getItem('kenax_admin_active_tab');
+      if (savedTab) {
+        if (removedTabs.has(savedTab)) {
+          localStorage.setItem('kenax_admin_active_tab', 'overview');
+          return 'overview';
+        }
+        return savedTab as AdminTab;
+      }
     } catch {}
     return initialTab || 'overview';
   });
+  const [ordersInitialSearch, setOrdersInitialSearch] = useState<string>('');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(() => {
     try {
@@ -521,13 +554,6 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   // Effective Role (prioritizes currentStaff role if logged in)
   const activeRole: UserRole = currentStaff?.role || currentRole || 'super_admin';
 
-  // Ensure My Dashboard is strictly accessible by Super Admin only
-  useEffect(() => {
-    if (currentTab === 'my-dashboard' && activeRole !== 'super_admin') {
-      setCurrentTab('overview');
-    }
-  }, [currentTab, activeRole]);
-
   // Sub-entity states
   const [customers, setCustomers] = useState<CustomerRecord[]>(() => {
     let localCache: CustomerRecord[] = [];
@@ -538,22 +564,16 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     return mergeCustomersLists(INITIAL_CUSTOMERS, localCache);
   });
 
-  const [activityLogs, setActivityLogs] = useState<ActivityLog[]>(() => {
-    return INITIAL_ACTIVITY_LOGS.map((l: any) => ({
-      id: l.id,
-      staffId: l.staffId || 'staff-root',
-      staffName: l.staffName,
-      staffRole: l.staffRole as UserRole,
-      action: l.action,
-      module: l.module,
-      targetId: l.targetId,
-      details: l.details,
-      timestamp: l.timestamp,
-      ipAddress: l.ipAddress || l.ip || '103.145.118.24',
-    }));
-  });
+  const [activityLogs, setActivityLogs] = useState<ActivityLog[]>([]);
 
   const [stockLogs, setStockLogs] = useState<StockLog[]>(() => {
+    try {
+      const cached = localStorage.getItem('kenax_stock_logs_cache');
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch {}
     return INITIAL_STOCK_LOGS.map((sl: any) => ({
       id: sl.id,
       productId: sl.productId,
@@ -746,12 +766,49 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
         setReviews(dbReviews);
         safeSetLocalStorage('kenax_reviews_cache', JSON.stringify(dbReviews));
       }
+
+      const dbStockLogs = await getStockLogsFromDB();
+      if (dbStockLogs && dbStockLogs.length > 0) {
+        setStockLogs(dbStockLogs);
+      }
     }
     loadAdminData();
 
+    const handleStockLogsUpdated = () => {
+      const cached = localStorage.getItem('kenax_stock_logs_cache');
+      if (cached) {
+        try {
+          const parsed = JSON.parse(cached);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            setStockLogs(parsed);
+          }
+        } catch {}
+      }
+    };
+    window.addEventListener('kenax_stock_logs_updated', handleStockLogsUpdated);
+    window.addEventListener('storage', handleStockLogsUpdated);
+
+    // Fetch real persistent activity logs from server immediately
+    fetch('/api/activity-logs')
+      .then((res) => (res.ok ? res.json() : []))
+      .then((serverLogs) => {
+        if (Array.isArray(serverLogs)) {
+          setActivityLogs((prev) => {
+            const byId = new Map<string, ActivityLog>();
+            [...serverLogs, ...prev].forEach((item) => {
+              if (item && item.id) byId.set(item.id, item);
+            });
+            return Array.from(byId.values()).sort(
+              (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+            );
+          });
+        }
+      })
+      .catch(() => {});
+
     // Permanent Real-time Firestore sync for all staff activity logs & customer accounts across devices
     const unsubscribeLogs = subscribeToActivityLogs((freshLogs) => {
-      if (freshLogs && freshLogs.length > 0) {
+      if (Array.isArray(freshLogs)) {
         setActivityLogs(freshLogs);
       }
     });
@@ -806,6 +863,8 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
       unsubscribeSuppliers();
       unsubscribeSourcing();
       unsubscribeReviews();
+      window.removeEventListener('kenax_stock_logs_updated', handleStockLogsUpdated);
+      window.removeEventListener('storage', handleStockLogsUpdated);
     };
   }, []);
 
@@ -814,19 +873,34 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     action: string,
     module: string,
     targetId: string,
-    details: string
+    details: string,
+    meta?: {
+      orderId?: string;
+      productId?: string;
+      fromStatus?: string;
+      toStatus?: string;
+      staffEmail?: string;
+      source?: string;
+    }
   ) => {
+    const normalizedModule =
+      module.charAt(0).toUpperCase() + module.slice(1);
     const newLog: ActivityLog = {
-      id: 'log-' + Date.now(),
+      id: `log-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       staffId: currentStaff?.id || 'staff-root',
       staffName: currentStaff?.name || 'System Admin',
+      staffEmail: meta?.staffEmail || currentStaff?.email || undefined,
       staffRole: activeRole,
       action,
-      module,
+      module: normalizedModule,
       targetId,
+      orderId: meta?.orderId || (module.toLowerCase() === 'orders' ? targetId : undefined),
+      productId: meta?.productId || (module.toLowerCase() === 'products' || module.toLowerCase() === 'inventory' ? targetId : undefined),
+      fromStatus: meta?.fromStatus,
+      toStatus: meta?.toStatus,
+      source: meta?.source || 'admin',
       details,
       timestamp: new Date().toISOString(),
-      ipAddress: '103.145.118.24',
     };
 
     setActivityLogs((prev) => [newLog, ...prev]);
@@ -931,7 +1005,9 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     newStatus: OrderStatus,
     courierName?: string,
     trackingNumber?: string,
-    staff?: { id?: string; name?: string; role?: string }
+    staff?: { id?: string; name?: string; role?: string },
+    adminNotes?: string,
+    trackingUrl?: string
   ) => {
     const activeStaff = staff || (currentStaff ? {
       id: currentStaff.id,
@@ -939,17 +1015,34 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
       role: currentStaff.role,
     } : undefined);
 
-    onUpdateOrderStatus(orderId, newStatus, courierName, trackingNumber, activeStaff);
+    const targetOrder = orders.find((o) => o.id === orderId);
+    const prevStatus = targetOrder?.orderStatus || 'Pending';
+    const prevCourier = targetOrder?.courierName || '';
+
+    onUpdateOrderStatus(orderId, newStatus, courierName, trackingNumber, activeStaff, adminNotes, trackingUrl);
+
+    const courierNote =
+      courierName && courierName !== prevCourier
+        ? ` | Courier: ${prevCourier || 'None'} → ${courierName}`
+        : courierName
+        ? ` | Courier: ${courierName}`
+        : '';
 
     recordAuditLog(
-      `Order Status updated to ${newStatus}`,
-      'orders',
+      newStatus === 'Returned' || newStatus === 'Refunded'
+        ? `Return / Refund Processed (${newStatus})`
+        : 'Order Status Updated',
+      'Orders',
       orderId,
-      `Order #${orderId} marked as ${newStatus} by ${activeStaff?.name || 'Staff'} (${activeStaff?.role || 'Admin'}). Courier: ${courierName || 'Standard'}. Tracking: ${trackingNumber || 'N/A'}`
+      `Order #${orderId}: ${prevStatus} → ${newStatus} by ${activeStaff?.name || 'Staff'} (${activeStaff?.role || 'Admin'})${courierNote}${trackingNumber ? ` | Tracking: ${trackingNumber}` : ''}${adminNotes ? ` | Note: ${adminNotes}` : ''}`,
+      {
+        orderId,
+        fromStatus: prevStatus,
+        toStatus: newStatus,
+      }
     );
 
     // Automated Email Notification & Staff Audit Workflow
-    const targetOrder = orders.find((o) => o.id === orderId);
     if (targetOrder) {
       const isCompletingOrder = newStatus === 'Completed';
       const updatedOrderSnapshot: Order = {
@@ -1097,7 +1190,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   };
 
   // Stock Adjustment Handler
-  const handleAdjustStock = (
+  const handleAdjustStock = async (
     productId: string,
     changeAmount: number,
     reason: string
@@ -1113,8 +1206,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
       stock: newStock,
     });
 
-    const stockEntry: StockLog = {
-      id: 'stk-' + Date.now(),
+    const stockEntry = await logStockAdjustmentToDB({
       productId: prod.id,
       productName: prod.name,
       sku: prod.sku,
@@ -1125,16 +1217,16 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
       newStock,
       quantityChanged: changeAmount,
       reason,
-      timestamp: new Date().toISOString(),
-    };
+    });
 
-    setStockLogs((prev) => [stockEntry, ...prev]);
+    setStockLogs((prev) => [stockEntry, ...prev.filter((l) => l.id !== stockEntry.id)]);
 
     recordAuditLog(
       'Stock Adjusted',
-      'inventory',
-      prod.sku,
-      `${changeAmount > 0 ? '+' : ''}${changeAmount} units for ${prod.name} (${prod.sku}). Stock: ${prevStock} ➔ ${newStock}. Reason: ${reason}`
+      'Inventory',
+      prod.sku || prod.id,
+      `${changeAmount > 0 ? '+' : ''}${changeAmount} units for ${prod.name} (${prod.sku}). Stock: ${prevStock} → ${newStock}. Reason: ${reason}`,
+      { productId: prod.id }
     );
   };
 
@@ -1296,12 +1388,32 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
       } catch {}
     }
 
+    const prevStaff = staffList.find((s) => s.id === updatedStaff.id);
+    const changes: string[] = [];
+    if (prevStaff && prevStaff.role !== updatedStaff.role) {
+      changes.push(`Role: ${prevStaff.role} → ${updatedStaff.role}`);
+    }
+    if (prevStaff && prevStaff.isActive !== updatedStaff.isActive) {
+      changes.push(`Status: ${updatedStaff.isActive ? 'Active' : 'Suspended'}`);
+    }
+    if (prevStaff && prevStaff.status !== updatedStaff.status && updatedStaff.status) {
+      changes.push(`Account Status: ${prevStaff.status || 'active'} → ${updatedStaff.status}`);
+    }
+
     saveStaffToDB(updatedStaff);
     recordAuditLog(
-      'Staff Account Updated',
-      'staff',
+      prevStaff && prevStaff.role !== updatedStaff.role
+        ? 'Staff Role Changed'
+        : prevStaff && (prevStaff.isActive !== updatedStaff.isActive || prevStaff.status !== updatedStaff.status)
+        ? updatedStaff.isActive === false || updatedStaff.status === 'suspended'
+          ? 'Staff Suspended'
+          : 'Staff Activated'
+        : 'Staff Account Updated',
+      'Staff',
       updatedStaff.email,
-      `Updated profile/phone/permissions for ${updatedStaff.name}`
+      changes.length > 0
+        ? `Updated ${updatedStaff.name} (${updatedStaff.email}): ${changes.join(', ')}`
+        : `Updated profile/phone/permissions for ${updatedStaff.name} (${updatedStaff.email})`
     );
   };
 
@@ -1517,14 +1629,9 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
       costs: 'costs.view',
       reports: 'reports.view',
       products: 'products.view',
-      partners: 'products.view',
-      'admin-sellers': 'products.view',
-      'admin-resellers': 'products.view',
-      'admin-seller-plans': 'products.view',
-      'admin-reseller-plans': 'products.view',
-      'admin-partner-payouts': 'payments.view',
       advertiser: 'marketing.view',
       dropshipping: 'suppliers.view',
+      dealers: 'suppliers.view',
       categories: 'categories.manage',
       inventory: 'inventory.view',
       coupons: 'coupons.view',
@@ -1541,7 +1648,20 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
       'seo-settings': 'seo.manage',
       logs: 'logs.view',
       settings: 'settings.view',
+      plugins: 'plugins.view',
+      'plugins-installed': 'plugins.view',
+      'plugins-add-new': 'plugins.install',
+      'plugins-store': 'plugins.view',
+      'plugins-upload': 'plugins.install',
+      'plugins-settings': 'plugins.settings',
+      'plugins-updates': 'plugins.manage',
+      'plugins-logs': 'plugins.view',
     };
+
+    if (currentTab === 'integration-settings') {
+      setCurrentTab('overview');
+      return;
+    }
 
     const reqPerm = tabPermissionMap[currentTab];
     if (reqPerm && !hasPermission(activeRole, permissions, reqPerm)) {
@@ -1550,22 +1670,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   }, [activeRole, currentTab]);
 
   // Computed counts for badges
-  const isResellerOrderCheck = (o: Order) =>
-    Boolean(
-      (o as any).resellerId ||
-      (o as any).resellerStoreName ||
-      (o as any).isResellerOrder ||
-      (o.notes && o.notes.includes('[Dropship:'))
-    );
-
   const pendingOrdersCount = orders.filter((o) => {
-    if (isResellerOrderCheck(o)) return false;
-    const s = (o.orderStatus || (o as any).status || 'Pending').toString().trim().toLowerCase();
-    return s === 'pending' || s === 'payment verification' || s === 'unconfirmed';
-  }).length;
-
-  const pendingResellerOrdersCount = orders.filter((o) => {
-    if (!isResellerOrderCheck(o)) return false;
     const s = (o.orderStatus || (o as any).status || 'Pending').toString().trim().toLowerCase();
     return s === 'pending' || s === 'payment verification' || s === 'unconfirmed';
   }).length;
@@ -1602,52 +1707,12 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     }
   };
 
-  const isResellerTab =
-    currentTab === 'admin-resellers' ||
-    currentTab === 'admin-reseller-orders' ||
-    currentTab === 'admin-reseller-approvals' ||
-    currentTab === 'admin-reseller-subscriptions' ||
-    currentTab === 'admin-reseller-renewals' ||
-    currentTab === 'admin-reseller-plans' ||
-    currentTab === 'admin-reseller-payouts';
-
-  if (isResellerTab) {
-    return (
-      <div className="admin-portal-root min-h-screen bg-slate-100 dark:bg-slate-950 text-slate-900 dark:text-slate-100 p-3 sm:p-5 lg:p-6 font-sans">
-        <AdminResellerManagement
-          initialTab={
-            currentTab === 'admin-reseller-orders'
-              ? 'orders'
-              : currentTab === 'admin-reseller-approvals'
-              ? 'pending'
-              : currentTab === 'admin-reseller-subscriptions'
-              ? 'subscriptions'
-              : currentTab === 'admin-reseller-renewals'
-              ? 'renewals'
-              : currentTab === 'admin-reseller-plans'
-              ? 'plans'
-              : currentTab === 'admin-reseller-payouts'
-              ? 'payouts'
-              : 'overview'
-          }
-          onBackToAdmin={() => setCurrentTab('overview')}
-          onLoginAsPartner={onNavigateToPartnerPortal}
-          onNavigateToPermissionMatrix={() => setCurrentTab('permission-matrix')}
-          orders={orders}
-          products={products}
-          onUpdateOrderStatus={handleUpdateOrderStatus}
-          onVerifyPayment={handleVerifyPayment}
-          onOpenInvoice={(ord) => setSelectedInvoiceOrder(ord)}
-          currentRole={activeRole}
-          currentStaff={currentStaff}
-          settings={settings}
-          onRecordAudit={recordAuditLog}
-        />
-      </div>
-    );
-  }
-
   return (
+    <PluginProvider
+      actorName={currentStaff?.name || 'Super Admin'}
+      actorRole={activeRole}
+      onAuditLog={recordAuditLog}
+    >
     <div className="admin-portal-root min-h-screen bg-slate-100 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex flex-col font-sans">
       {/* Fixed Desktop / Drawer Mobile Sidebar */}
       <AdminSidebar
@@ -1661,7 +1726,6 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
         }}
         pendingOrdersCount={pendingOrdersCount}
         confirmedOrdersCount={confirmedOrdersCount}
-        pendingResellerOrdersCount={pendingResellerOrdersCount}
         lowStockCount={lowStockCount}
         liveCartsCount={liveCartsCount}
         liveWishlistsCount={customers.filter((c) => c.wishlist && c.wishlist.length > 0).length}
@@ -1701,7 +1765,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
         />
 
         {/* Tab Body */}
-        <main className="flex-1 p-2 sm:p-4 lg:p-5 w-full max-w-[99%] 2xl:max-w-[1720px] mx-auto">
+        <main className="flex-1 min-w-0 p-2 sm:p-4 lg:p-5 w-full max-w-[99%] 2xl:max-w-[1720px] mx-auto">
           <Suspense
             fallback={
               <div className="flex flex-col items-center justify-center py-24 text-slate-400 text-xs">
@@ -1726,6 +1790,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
               onPrintInvoice={(order) => setSelectedInvoiceOrder(order)}
               currentRole={activeRole}
               currentStaff={currentStaff}
+              lowStockThreshold={settings.lowStockThreshold ?? 5}
             />
           )}
 
@@ -1740,7 +1805,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
             />
           )}
 
-          {currentTab === 'my-dashboard' && activeRole === 'super_admin' && (
+          {currentTab === 'my-dashboard' && (
             <AdminMyDashboard
               orders={orders}
               staffList={staffList}
@@ -1772,13 +1837,21 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
 
           {(currentTab === 'orders' || currentTab === 'confirmed-orders') && (
             <AdminOrders
-              key={currentTab}
+              key={`${currentTab}_${ordersInitialSearch}`}
               orders={orders}
               products={products}
+              staffList={staffList}
               initialScope={currentTab === 'confirmed-orders' ? 'confirmed' : 'pending'}
-              onUpdateOrderStatus={(orderId, status, courier, tracking, staff) => {
-                handleUpdateOrderStatus(orderId, status, courier, tracking, staff);
+              isConfirmedOrdersTab={currentTab === 'confirmed-orders'}
+              initialSearchQuery={currentTab === 'orders' ? ordersInitialSearch : ''}
+              onNavigateToOrdersWithSearch={(searchIp) => {
+                setOrdersInitialSearch(searchIp);
+                setCurrentTab('orders');
               }}
+              onUpdateOrderStatus={(orderId, status, courier, tracking, staff, adminNotes, trackingUrl) => {
+                handleUpdateOrderStatus(orderId, status, courier, tracking, staff, adminNotes, trackingUrl);
+              }}
+              onUpdateOrder={onUpdateOrder}
               onVerifyPayment={handleVerifyPayment}
               onPrintInvoice={(order) => setSelectedInvoiceOrder(order)}
               onAddOrder={(newOrd) => {
@@ -1788,6 +1861,8 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
               currentRole={activeRole}
               currentStaff={currentStaff}
               settings={settings}
+              activityLogs={activityLogs}
+              onRecordAudit={recordAuditLog}
             />
           )}
 
@@ -1827,7 +1902,13 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
               categories={categories}
               onAddProduct={(p) => {
                 onAddProduct(p);
-                recordAuditLog('Product Created', 'products', p.sku, `Created product ${p.name} (${p.sku}) at ৳${p.price}`);
+                recordAuditLog(
+                  'Product Created',
+                  'Products',
+                  p.sku || p.id,
+                  `Created product ${p.name} (${p.sku}) at ৳${p.price}, Stock: ${p.stock}`,
+                  { productId: p.id }
+                );
                 triggerTelegramNewProductWorkflow({
                   product: p,
                   staffUser: currentStaff,
@@ -1836,9 +1917,25 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
               }}
               onUpdateProduct={(p) => {
                 const prevProd = products.find((old) => old.id === p.id || old.sku === p.sku);
-                const prevPrice = prevProd?.price || p.price;
+                const prevPrice = prevProd?.price ?? p.price;
+                const prevStock = prevProd?.stock ?? p.stock;
+                const diffParts: string[] = [];
+                if (prevProd && prevPrice !== p.price) {
+                  diffParts.push(`Price: ৳${prevPrice} → ৳${p.price}`);
+                }
+                if (prevProd && prevStock !== p.stock) {
+                  diffParts.push(`Stock: ${prevStock} → ${p.stock}`);
+                }
                 onUpdateProduct(p);
-                recordAuditLog('Product Updated', 'products', p.sku, `Updated pricing/specs for ${p.name} (${p.sku})`);
+                recordAuditLog(
+                  'Product Updated',
+                  'Products',
+                  p.sku || p.id,
+                  diffParts.length > 0
+                    ? `Updated ${p.name} (${p.sku}): ${diffParts.join(' | ')}`
+                    : `Updated pricing/specs for ${p.name} (${p.sku})`,
+                  { productId: p.id }
+                );
                 if (prevProd && p.price < prevPrice) {
                   triggerTelegramProductDiscountWorkflow({
                     product: p,
@@ -1851,7 +1948,13 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                 const prod = products.find((p) => p.id === id);
                 onDeleteProduct(id);
                 if (prod) {
-                  recordAuditLog('Product Deleted', 'products', prod.sku, `Removed product ${prod.name} from catalog`);
+                  recordAuditLog(
+                    'Product Deleted',
+                    'Products',
+                    prod.sku || prod.id,
+                    `Removed product ${prod.name} (${prod.sku}) from catalog`,
+                    { productId: prod.id }
+                  );
                 }
               }}
               currentRole={activeRole}
@@ -1865,33 +1968,8 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
             />
           )}
 
-          {(currentTab === 'admin-sellers' ||
-            currentTab === 'admin-seller-approvals' ||
-            currentTab === 'admin-seller-renewals' ||
-            currentTab === 'admin-seller-plans' ||
-            currentTab === 'admin-partner-payouts') && (
-            <AdminSellerManagement
-              initialTab={
-                currentTab === 'admin-seller-approvals'
-                  ? 'pending'
-                  : currentTab === 'admin-seller-renewals'
-                  ? 'renewals'
-                  : currentTab === 'admin-seller-plans'
-                  ? 'plans'
-                  : currentTab === 'admin-partner-payouts'
-                  ? 'payouts'
-                  : 'all'
-              }
-              onLoginAsPartner={onNavigateToPartnerPortal}
-              onNavigateToPermissionMatrix={() => setCurrentTab('permission-matrix')}
-            />
-          )}
-
-          {currentTab === 'partners' && (
-            <AdminPartners
-              initialTab="all"
-              onLoginAsPartner={onNavigateToPartnerPortal}
-            />
+          {currentTab === 'price-calculator' && (
+            <SellingPriceCalculator mode="standalone" />
           )}
 
           {currentTab === 'landing-pages' && (
@@ -1909,6 +1987,8 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
               }}
               currentRole={activeRole}
               currentStaff={currentStaff}
+              settings={settings}
+              onUpdateSettings={onUpdateSettings}
             />
           )}
 
@@ -1926,6 +2006,14 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
               onDeleteSourcingLocation={handleDeleteSourcingLocation}
               onEditProduct={handleEditProductFromSupplier}
               onAddProductForSupplier={handleAddProductForSupplier}
+              currentRole={activeRole}
+              currentStaff={currentStaff}
+            />
+          )}
+
+          {currentTab === 'dealers' && (
+            <AdminDealers
+              products={products}
               currentRole={activeRole}
               currentStaff={currentStaff}
             />
@@ -1967,8 +2055,30 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
             />
           )}
 
-          {currentTab === 'advertiser' && (
-            <AdminAdvertiser
+          {(currentTab === 'facebook-ads' || currentTab === 'advertiser') && (
+            <AdminFacebookAds
+              siteSettings={settings}
+              onUpdateSettings={onUpdateSettings}
+              products={products}
+              orders={orders}
+              currentRole={activeRole}
+              onRecordAudit={recordAuditLog}
+            />
+          )}
+
+          {currentTab === 'tiktok-ads' && (
+            <AdminTikTokAds
+              siteSettings={settings}
+              onUpdateSettings={onUpdateSettings}
+              products={products}
+              orders={orders}
+              currentRole={activeRole}
+              onRecordAudit={recordAuditLog}
+            />
+          )}
+
+          {currentTab === 'google-ads' && (
+            <AdminGoogleAds
               siteSettings={settings}
               onUpdateSettings={onUpdateSettings}
               products={products}
@@ -1981,10 +2091,16 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
           {currentTab === 'inventory' && (
             <AdminInventory
               products={products}
+              orders={orders}
               stockLogs={stockLogs}
               onAdjustStock={handleAdjustStock}
               currentRole={activeRole}
               currentStaff={currentStaff}
+              lowStockThreshold={settings.lowStockThreshold ?? 5}
+              onNavigateToOrdersWithSearch={(orderIdOrQuery) => {
+                setOrdersInitialSearch(orderIdOrQuery);
+                setCurrentTab('orders');
+              }}
             />
           )}
 
@@ -2024,6 +2140,22 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
             />
           )}
 
+          {currentTab === 'order-settings' && (
+            <AdminOrderSettings
+              settings={settings}
+              onUpdateSettings={async (newSet) => {
+                await onUpdateSettings(newSet);
+                recordAuditLog(
+                  'Order Settings Updated',
+                  'settings',
+                  'order-settings',
+                  'Updated order verification, fraud prevention, and security rules'
+                );
+              }}
+              canManageSettings={activeRole === 'super_admin' || activeRole === 'manager' || activeRole === 'admin'}
+            />
+          )}
+
           {currentTab === 'payments' && (
             <AdminPayments
               orders={orders}
@@ -2044,6 +2176,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
               currentRole={activeRole}
               currentStaff={currentStaff}
               settings={settings}
+              onUpdateSettings={onUpdateSettings}
             />
           )}
 
@@ -2076,6 +2209,23 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
               }}
               currentRole={activeRole}
               currentStaff={currentStaff}
+            />
+          )}
+
+          {currentTab === 'get-offers' && (
+            <AdminOfferPopupManager
+              settings={settings}
+              onUpdateSettings={async (newSet) => {
+                await onUpdateSettings(newSet);
+                recordAuditLog(
+                  'Offer Popup Updated',
+                  'settings',
+                  'offer-popup',
+                  `Updated Visitor Offer Popup configuration (Status: ${newSet.offerPopup?.enabled ? 'Active' : 'Disabled'})`
+                );
+              }}
+              categories={categories}
+              products={products}
             />
           )}
 
@@ -2163,10 +2313,6 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
               currentRole={activeRole}
               currentStaff={currentStaff}
             />
-          )}
-
-          {currentTab === 'permission-matrix' && (
-            <PermissionMatrix />
           )}
 
           {currentTab === 'reports' && (
@@ -2294,6 +2440,58 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
               initialSubTab={initialSettingsSubTab}
             />
           )}
+
+          {currentTab === 'storage-settings' && (
+            <AdminSettings
+              key="storage-settings"
+              settings={settings}
+              onUpdateSettings={onUpdateSettings}
+              currentRole={activeRole}
+              currentStaff={currentStaff}
+              initialSubTab="storage"
+            />
+          )}
+
+          {currentTab === 'integration-settings' && activeRole === 'super_admin' && (
+            <AdminSettings
+              key="muse-integration"
+              settings={settings}
+              onUpdateSettings={onUpdateSettings}
+              currentRole={activeRole}
+              currentStaff={currentStaff}
+              initialSubTab="integration"
+            />
+          )}
+
+          {(currentTab === 'plugins' ||
+            currentTab === 'plugins-installed' ||
+            currentTab === 'plugins-add-new' ||
+            currentTab === 'plugins-store' ||
+            currentTab === 'plugins-upload' ||
+            currentTab === 'plugins-settings' ||
+            currentTab === 'plugins-updates' ||
+            currentTab === 'plugins-logs') && (
+            <AdminPlugins
+              currentRole={activeRole}
+              currentStaff={currentStaff}
+              initialSubTab={
+                currentTab === 'plugins-add-new'
+                  ? 'add-new'
+                  : currentTab === 'plugins-store'
+                  ? 'store'
+                  : currentTab === 'plugins-upload'
+                  ? 'upload'
+                  : currentTab === 'plugins-settings'
+                  ? 'settings'
+                  : currentTab === 'plugins-updates'
+                  ? 'updates'
+                  : currentTab === 'plugins-logs'
+                  ? 'logs'
+                  : ('installed' as PluginManagerSubTab)
+              }
+              onSelectAdminTab={(tab) => setCurrentTab(tab)}
+            />
+          )}
           </Suspense>
         </main>
       </div>
@@ -2322,6 +2520,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
             staff.email,
             `${staff.name} logged into Admin Portal as ${staff.role}`
           );
+          setIsLoginModalOpen(false);
         }}
         staffList={staffList}
       />
@@ -2399,6 +2598,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
         </div>
       )}
     </div>
+    </PluginProvider>
   );
 };
 

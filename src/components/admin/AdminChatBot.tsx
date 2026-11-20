@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Bot,
   Sparkles,
@@ -36,6 +36,12 @@ import { DEFAULT_CHATBOT_RULES } from '../../data/defaultChatBotRules';
 import { AdminChatBotRuleMatrix } from './AdminChatBotRuleMatrix';
 import { evaluateChatBotRules } from '../../lib/chatBotRuleMatcher';
 import { hasPermission } from '../../lib/permissions';
+import {
+  SaasDonutChart,
+  SaasBarChart,
+  CollapsibleAnalyticsPanel,
+  SAAS_CHART_COLORS,
+} from './charts/AdminCharts';
 
 interface AdminChatBotProps {
   currentRole: UserRole;
@@ -222,6 +228,50 @@ When customers ask to place an order, collect product name, quantity, customer n
   // Backward compatibility
   const pendingOrders = pendingAiOrders.length > 0 ? pendingAiOrders : allPendingOrders;
   const aiBotOrders = allAiOrders;
+
+  const chatbotAnalytics = useMemo(() => {
+    const manualOrWebOrders = Math.max(0, orders.length - allAiOrders.length);
+    const channelSlices = [
+      { id: 'pending_ai', label: 'AI Bot Pending', value: pendingAiOrders.length, color: '#D97706' },
+      { id: 'confirmed_ai', label: 'AI Bot Confirmed+', value: confirmedAiOrders.length, color: '#059669' },
+      {
+        id: 'other_ai',
+        label: 'AI Bot Other/Cancelled',
+        value: Math.max(0, allAiOrders.length - pendingAiOrders.length - confirmedAiOrders.length),
+        color: '#E11D48',
+      },
+      { id: 'storewide', label: 'Storefront / Other', value: manualOrWebOrders, color: '#64748B' },
+    ].filter((s) => s.value > 0);
+
+    const enabledRules = chatBotRules.filter((r) => r.enabled).length;
+    const disabledRules = chatBotRules.length - enabledRules;
+    const ruleSlices = [
+      { id: 'enabled', label: 'Active Rules', value: enabledRules, color: '#4F46E5' },
+      { id: 'disabled', label: 'Paused Rules', value: disabledRules, color: '#64748B' },
+    ].filter((s) => s.value > 0);
+
+    // Group rules by actionType
+    const actionMap = new Map<string, number>();
+    chatBotRules.forEach((r) => {
+      const label = (r.actionType || 'text_reply').replace(/_/g, ' ');
+      actionMap.set(label, (actionMap.get(label) || 0) + 1);
+    });
+    const ruleActionBars = Array.from(actionMap.entries())
+      .map(([act, count]) => ({
+        id: act,
+        label: act.replace(/\b\w/g, (c) => c.toUpperCase()),
+        value: count,
+        color: '#0D9488',
+      }))
+      .sort((a, b) => b.value - a.value);
+
+    return {
+      channelSlices,
+      ruleSlices,
+      ruleActionBars,
+      enabledRules,
+    };
+  }, [orders, allAiOrders, pendingAiOrders, confirmedAiOrders, chatBotRules]);
 
   const handleConfirmOrder = (order: Order) => {
     if (!onUpdateOrderStatus) return;
@@ -551,6 +601,52 @@ When customers ask to place an order, collect product name, quantity, customer n
           <span className="truncate">Live Chat</span>
         </button>
       </div>
+
+      {/* Chatbot Performance & Rule Matrix Analytics */}
+      <CollapsibleAnalyticsPanel
+        title={`AI Chatbot Analytics (${allAiOrders.length} Bot Orders • ${chatbotAnalytics.enabledRules}/${chatBotRules.length} Active Rules)`}
+      >
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          <SaasDonutChart
+            title="AI Bot vs Storewide Orders"
+            subtitle="Click an AI slice to inspect orders"
+            data={chatbotAnalytics.channelSlices}
+            centerLabel="Total Orders"
+            emptyText="No orders recorded yet"
+            onSelectSlice={(slice) => {
+              if (!canViewOrders) return;
+              const id = slice.id || '';
+              if (id === 'pending_ai') setAiOrdersFilter('pending_ai');
+              else if (id === 'confirmed_ai') setAiOrdersFilter('confirmed_ai');
+              else if (id === 'other_ai') setAiOrdersFilter('all_ai');
+              else setAiOrdersFilter('all_pending');
+              setActiveTab('orders');
+            }}
+          />
+          <SaasDonutChart
+            title="Automation Rule Matrix Status"
+            subtitle="Enabled vs paused smart response rules"
+            data={chatbotAnalytics.ruleSlices}
+            centerLabel="Total Rules"
+            emptyText="No chatbot rules configured"
+            onSelectSlice={() => {
+              if (canManageRules) setActiveTab('rules-matrix');
+            }}
+          />
+          <SaasBarChart
+            title="Rules by Response Action"
+            subtitle="Configured trigger actions across the matrix"
+            data={chatbotAnalytics.ruleActionBars}
+            primaryLabel="Rules"
+            orientation="horizontal"
+            barColor="#0D9488"
+            emptyText="No rule action data"
+            onSelectBar={() => {
+              if (canManageRules) setActiveTab('rules-matrix');
+            }}
+          />
+        </div>
+      </CollapsibleAnalyticsPanel>
 
       {/* TAB 1: KenaX Bot Core Settings */}
       {activeTab === 'kenax-bot' && (

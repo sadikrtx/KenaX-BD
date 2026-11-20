@@ -1,4 +1,4 @@
-import { SMSSettings, SMSTemplate, SMSEventType, SMSLog, Order } from '../types/index.ts';
+import type { SMSSettings, SMSTemplate, SMSEventType, SMSLog, Order } from '../types/index.ts';
 import { saveSMSLogToDB, getSMSSettingsFromDB } from './firebase.ts';
 import { triggerOrderPlacedWorkflow } from './emailService.ts';
 

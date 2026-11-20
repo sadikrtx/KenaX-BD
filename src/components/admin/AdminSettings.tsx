@@ -34,6 +34,9 @@ import {
   Play,
   Server,
   FileSpreadsheet,
+  SlidersHorizontal,
+  Cloud,
+  Plug,
 } from 'lucide-react';
 import { extractYouTubeId } from '../HeroBanner';
 import { saveHeroVideoToFirestore, deleteHeroVideoFromFirestore, saveSettingsToDB, saveHeroBannersToDB } from '../../lib/firebase';
@@ -44,6 +47,9 @@ import { AdminPromoGridManager } from './AdminPromoGridManager';
 import { AdminMaintenanceSettings } from './AdminMaintenanceSettings';
 import { AdminPoliciesSettings } from './AdminPoliciesSettings';
 import { AdminGoogleSheets } from './AdminGoogleSheets';
+import { AdminCourierLogisticsSettings } from './AdminCourierLogisticsSettings';
+import { AdminStorageSettings } from './AdminStorageSettings';
+import { AdminIntegrationSettings } from './AdminIntegrationSettings';
 import {
   SiteSettings,
   UserRole,
@@ -64,7 +70,7 @@ interface AdminSettingsProps {
   currentUserRole?: UserRole;
   currentRole?: UserRole;
   currentStaff?: StaffUser | null;
-  initialSubTab?: 'hero' | 'nav_items' | 'tag_banners' | 'promo_grid' | 'promo' | 'profile' | 'delivery' | 'footer' | 'seo' | 'system' | 'order_steps' | 'policies' | 'google_sheets';
+  initialSubTab?: 'hero' | 'nav_items' | 'tag_banners' | 'promo_grid' | 'promo' | 'profile' | 'delivery' | 'footer' | 'seo' | 'system' | 'order_steps' | 'policies' | 'google_sheets' | 'storage' | 'integration';
 }
 
 const DEFAULT_HERO_FEATURES = [
@@ -83,11 +89,24 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
   initialSubTab,
 }) => {
   const effectiveRole = currentUserRole || currentRole || 'admin';
+  const isStrictSuperAdmin = effectiveRole === 'super_admin';
   const isSuperAdmin =
     effectiveRole === 'super_admin' ||
     currentStaff?.role === 'super_admin';
 
-  const [activeTab, setActiveTab] = useState<'hero' | 'nav_items' | 'tag_banners' | 'promo_grid' | 'promo' | 'profile' | 'delivery' | 'footer' | 'seo' | 'system' | 'order_steps' | 'policies' | 'google_sheets'>(initialSubTab || 'hero');
+  const [activeTab, setActiveTab] = useState<'hero' | 'nav_items' | 'tag_banners' | 'promo_grid' | 'promo' | 'profile' | 'delivery' | 'order_settings' | 'footer' | 'seo' | 'system' | 'order_steps' | 'policies' | 'google_sheets' | 'storage' | 'integration'>(initialSubTab || 'hero');
+
+  useEffect(() => {
+    if (initialSubTab && (initialSubTab !== 'integration' || isStrictSuperAdmin)) {
+      setActiveTab(initialSubTab);
+    }
+  }, [initialSubTab, isStrictSuperAdmin]);
+
+  useEffect(() => {
+    if (activeTab === 'integration' && !isStrictSuperAdmin) {
+      setActiveTab('hero');
+    }
+  }, [activeTab, isStrictSuperAdmin]);
 
 
   const [orderStepNames, setOrderStepNames] = useState<Record<string, CustomOrderStepName>>(
@@ -574,35 +593,35 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
         </>
       )}
 
-      {/* Navigation Tabs */}
-      <div className="flex items-center gap-1.5 p-1.5 rounded-2xl bg-slate-100/90 dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700 overflow-x-auto select-none">
+      {/* Navigation Tabs - Responsive wrap so all tabs are visible on Desktop & Mobile */}
+      <div className="flex flex-wrap items-center gap-2 p-2.5 rounded-2xl bg-slate-100/90 dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700 select-none shadow-xs">
         <button
           type="button"
           onClick={() => setActiveTab('hero')}
-          className={`px-3.5 py-2 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-2 shrink-0 ${
+          className={`px-3.5 py-2 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-2 ${
             activeTab === 'hero' ? 'bg-white dark:bg-slate-900 text-sky-700 dark:text-sky-300 shadow-xs ring-1 ring-slate-200 dark:ring-slate-700' : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-white/60 dark:hover:bg-slate-700/60'
           }`}
         >
-          <ImageIcon className="w-4 h-4" />
+          <ImageIcon className="w-4 h-4 text-sky-600 dark:text-sky-400" />
           <span>Hero Slides ({heroBanners.length})</span>
         </button>
 
         <button
           type="button"
           onClick={() => setActiveTab('nav_items')}
-          className={`px-3.5 py-2 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-2 shrink-0 ${
+          className={`px-3.5 py-2 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-2 ${
             activeTab === 'nav_items' ? 'bg-white dark:bg-slate-900 text-sky-700 dark:text-sky-300 shadow-xs ring-1 ring-slate-200 dark:ring-slate-700' : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-white/60 dark:hover:bg-slate-700/60'
           }`}
         >
-          <Tag className="w-4 h-4 text-sky-600 dark:text-sky-400" />
+          <Tag className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
           <span>Header Navigation & Priorities</span>
         </button>
 
         <button
           type="button"
           onClick={() => setActiveTab('tag_banners')}
-          className={`px-3.5 py-2 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-2 shrink-0 ${
-            activeTab === 'tag_banners' ? 'bg-white dark:bg-slate-900 text-sky-700 dark:text-sky-300 shadow-xs ring-1 ring-slate-200 dark:ring-slate-700' : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-white/60 dark:hover:bg-slate-700/60'
+          className={`px-3.5 py-2 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-2 ${
+            activeTab === 'tag_banners' ? 'bg-white dark:bg-slate-900 text-rose-700 dark:text-rose-300 shadow-xs ring-1 ring-slate-200 dark:ring-slate-700' : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-white/60 dark:hover:bg-slate-700/60'
           }`}
         >
           <Tag className="w-4 h-4 text-rose-500" />
@@ -612,8 +631,8 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
         <button
           type="button"
           onClick={() => setActiveTab('promo_grid')}
-          className={`px-3.5 py-2 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-2 shrink-0 ${
-            activeTab === 'promo_grid' ? 'bg-white dark:bg-slate-900 text-sky-700 dark:text-sky-300 shadow-xs ring-1 ring-slate-200 dark:ring-slate-700' : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-white/60 dark:hover:bg-slate-700/60'
+          className={`px-3.5 py-2 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-2 ${
+            activeTab === 'promo_grid' ? 'bg-white dark:bg-slate-900 text-amber-700 dark:text-amber-300 shadow-xs ring-1 ring-slate-200 dark:ring-slate-700' : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-white/60 dark:hover:bg-slate-700/60'
           }`}
         >
           <Sparkles className="w-4 h-4 text-amber-500" />
@@ -623,51 +642,51 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
         <button
           type="button"
           onClick={() => setActiveTab('promo')}
-          className={`px-3.5 py-2 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-2 shrink-0 ${
+          className={`px-3.5 py-2 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-2 ${
             activeTab === 'promo' ? 'bg-white dark:bg-slate-900 text-sky-700 dark:text-sky-300 shadow-xs ring-1 ring-slate-200 dark:ring-slate-700' : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-white/60 dark:hover:bg-slate-700/60'
           }`}
         >
-          <Tag className="w-4 h-4" />
+          <Tag className="w-4 h-4 text-blue-500" />
           <span>Mid Promo Banner</span>
         </button>
 
         <button
           type="button"
           onClick={() => setActiveTab('profile')}
-          className={`px-3.5 py-2 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-2 shrink-0 ${
+          className={`px-3.5 py-2 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-2 ${
             activeTab === 'profile' ? 'bg-white dark:bg-slate-900 text-sky-700 dark:text-sky-300 shadow-xs ring-1 ring-slate-200 dark:ring-slate-700' : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-white/60 dark:hover:bg-slate-700/60'
           }`}
         >
-          <Store className="w-4 h-4" />
+          <Store className="w-4 h-4 text-violet-500" />
           <span>Store Profile</span>
         </button>
 
         <button
           type="button"
           onClick={() => setActiveTab('delivery')}
-          className={`px-3.5 py-2 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-2 shrink-0 ${
-            activeTab === 'delivery' ? 'bg-white dark:bg-slate-900 text-sky-700 dark:text-sky-300 shadow-xs ring-1 ring-slate-200 dark:ring-slate-700' : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-white/60 dark:hover:bg-slate-700/60'
+          className={`px-3.5 py-2 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-2 ${
+            activeTab === 'delivery' ? 'bg-white dark:bg-slate-900 text-emerald-700 dark:text-emerald-300 shadow-xs ring-1 ring-slate-200 dark:ring-slate-700' : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-white/60 dark:hover:bg-slate-700/60'
           }`}
         >
-          <Truck className="w-4 h-4" />
+          <Truck className="w-4 h-4 text-emerald-500" />
           <span>Delivery & Pay</span>
         </button>
 
         <button
           type="button"
           onClick={() => setActiveTab('seo')}
-          className={`px-3.5 py-2 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-2 shrink-0 ${
-            activeTab === 'seo' ? 'bg-white dark:bg-slate-900 text-sky-700 dark:text-sky-300 shadow-xs ring-1 ring-slate-200 dark:ring-slate-700' : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-white/60 dark:hover:bg-slate-700/60'
+          className={`px-3.5 py-2 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-2 ${
+            activeTab === 'seo' ? 'bg-white dark:bg-slate-900 text-purple-700 dark:text-purple-300 shadow-xs ring-1 ring-slate-200 dark:ring-slate-700' : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-white/60 dark:hover:bg-slate-700/60'
           }`}
         >
-          <Sparkles className="w-4 h-4" />
+          <Sparkles className="w-4 h-4 text-purple-500" />
           <span>SEO & Meta</span>
         </button>
 
         <button
           type="button"
           onClick={() => setActiveTab('order_steps')}
-          className={`px-3.5 py-2 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-2 shrink-0 ${
+          className={`px-3.5 py-2 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-2 ${
             activeTab === 'order_steps' ? 'bg-white dark:bg-slate-900 text-teal-700 dark:text-teal-300 shadow-xs ring-1 ring-slate-200 dark:ring-slate-700' : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-white/60 dark:hover:bg-slate-700/60'
           }`}
         >
@@ -678,7 +697,7 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
         <button
           type="button"
           onClick={() => setActiveTab('google_sheets')}
-          className={`px-3.5 py-2 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-2 shrink-0 ${
+          className={`px-3.5 py-2 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-2 ${
             activeTab === 'google_sheets' ? 'bg-white dark:bg-slate-900 text-emerald-700 dark:text-emerald-300 shadow-xs ring-1 ring-slate-200 dark:ring-slate-700' : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-white/60 dark:hover:bg-slate-700/60'
           }`}
         >
@@ -686,12 +705,59 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
           <span>Google Sheets Sync</span>
         </button>
 
+        <button
+          type="button"
+          onClick={() => setActiveTab('policies')}
+          className={`px-3.5 py-2 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-2 ${
+            activeTab === 'policies' ? 'bg-white dark:bg-slate-900 text-cyan-700 dark:text-cyan-300 shadow-xs ring-1 ring-slate-200 dark:ring-slate-700' : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-white/60 dark:hover:bg-slate-700/60'
+          }`}
+        >
+          <FileText className="w-4 h-4 text-cyan-600 dark:text-cyan-400" />
+          <span>Policies & Legal Pages</span>
+        </button>
+
+        <button
+          type="button"
+          id="tab-storage-settings"
+          onClick={() => setActiveTab('storage')}
+          className={`px-3.5 py-2 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-2 ${
+            activeTab === 'storage'
+              ? 'bg-linear-to-r from-indigo-600 to-sky-600 text-white shadow-xs ring-2 ring-indigo-400'
+              : 'text-indigo-700 dark:text-indigo-300 bg-indigo-50/80 dark:bg-indigo-950/40 hover:bg-indigo-100 hover:text-indigo-950 border border-indigo-200/80 dark:border-indigo-800/80'
+          }`}
+        >
+          <Cloud className="w-4 h-4 text-indigo-500" />
+          <span>Storage & Cloud</span>
+          <span className="text-[9px] px-1.5 py-0.2 rounded font-black bg-indigo-200 dark:bg-indigo-900 text-indigo-950 dark:text-indigo-200 uppercase">
+            Cloud & Drive
+          </span>
+        </button>
+
+        {isStrictSuperAdmin && (
+          <button
+            type="button"
+            id="tab-muse-integration"
+            onClick={() => setActiveTab('integration')}
+            className={`px-3.5 py-2 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-2 ${
+              activeTab === 'integration'
+                ? 'bg-emerald-600 text-white shadow-xs ring-2 ring-emerald-400'
+                : 'text-emerald-800 dark:text-emerald-300 bg-emerald-50/80 dark:bg-emerald-950/40 hover:bg-emerald-100 border border-emerald-200/80 dark:border-emerald-800/80'
+            }`}
+          >
+            <Plug className="w-4 h-4" />
+            <span>Integration</span>
+            <span className="text-[9px] px-1.5 py-0.2 rounded font-black bg-emerald-200 dark:bg-emerald-900 text-emerald-950 dark:text-emerald-200 uppercase">
+              Super Admin
+            </span>
+          </button>
+        )}
+
         {isSuperAdmin && (
           <button
             type="button"
             id="tab-system-maintenance"
             onClick={() => setActiveTab('system')}
-            className={`px-3.5 py-2 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-2 shrink-0 ${
+            className={`px-3.5 py-2 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-2 ${
               activeTab === 'system'
                 ? 'bg-amber-500 text-slate-950 shadow-xs ring-2 ring-amber-400'
                 : 'text-amber-800 bg-amber-50/80 hover:bg-amber-100 hover:text-amber-950 border border-amber-200/80'
@@ -707,7 +773,19 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
       </div>
 
       {/* Main Settings Body */}
-      {activeTab === 'policies' ? (
+      {activeTab === 'integration' && isStrictSuperAdmin ? (
+        <AdminIntegrationSettings
+          settings={settings}
+          onUpdateSettings={onUpdateSettings}
+          currentUserRole={effectiveRole}
+          currentStaff={currentStaff}
+        />
+      ) : activeTab === 'storage' ? (
+        <AdminStorageSettings
+          settings={settings}
+          onUpdateSettings={onUpdateSettings}
+        />
+      ) : activeTab === 'policies' ? (
         <AdminPoliciesSettings
           settings={settings}
           onUpdateSettings={onUpdateSettings}
@@ -907,13 +985,18 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Support Phone</label>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1 flex items-center gap-1.5">
+                    <Phone className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                    <span>সরাসরি কল দেওয়ার নাম্বার (Direct Call Phone)</span>
+                  </label>
                   <input
                     type="text"
                     value={phone}
                     onChange={(e) => setPhone(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs text-slate-900 dark:text-white"
+                    placeholder="01719143897"
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-semibold text-slate-900 dark:text-white focus:ring-2 focus:ring-emerald-500"
                   />
+                  <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">কাস্টমার প্রোডাক্ট কুইক ভিউ ও প্রোডাক্ট পেইজ থেকে এই নাম্বারে ১-ক্লিকে সরাসরি ডায়াল করবে।</p>
                 </div>
 
                 <div>
@@ -927,8 +1010,9 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-emerald-800 dark:text-emerald-300 mb-1 flex items-center gap-1">
-                    <span>WhatsApp Live Chat Number</span>
+                  <label className="block text-xs font-bold text-emerald-800 dark:text-emerald-300 mb-1 flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                    <span>অফিসিয়াল হোয়াটসঅ্যাপ নাম্বার (Official WhatsApp Number)</span>
                   </label>
                   <input
                     type="text"
@@ -937,7 +1021,7 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
                     placeholder="01719143897"
                     className="w-full px-3 py-2 rounded-xl border border-emerald-300 dark:border-emerald-800 focus:ring-emerald-500 text-xs font-semibold text-slate-900 dark:text-white bg-emerald-50/20 dark:bg-emerald-950/30"
                   />
-                  <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">ডিফল্ট অফিসিয়াল ইনবক্স: 01719143897</p>
+                  <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">কাস্টমার কুইক ভিউ ও প্রোডাক্ট পেইজ থেকে সরাসরি হোয়াটসঅ্যাপ চ্যাট ওপেন করবে।</p>
                 </div>
 
                 <div>
@@ -1362,6 +1446,15 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
                   />
                 </label>
               </div>
+            </div>
+
+            {/* Courier API Gateways & Logistics Settings */}
+            <div className="pt-2">
+              <AdminCourierLogisticsSettings
+                settings={settings}
+                onUpdateSettings={onUpdateSettings}
+                canManageSettings={currentRole === 'super_admin' || currentRole === 'manager' || currentRole === 'admin'}
+              />
             </div>
           </div>
         )}

@@ -10,6 +10,7 @@ import {
   User,
   Bot,
   Phone,
+  PhoneCall,
   ShoppingBag,
   RotateCcw,
   Clock,
@@ -165,6 +166,217 @@ export const CustomerFloatingChat: React.FC<CustomerFloatingChatProps> = ({
   const [hasUnread, setHasUnread] = useState(false);
   const [showGreetingTooltip, setShowGreetingTooltip] = useState(true);
   const [isSupportMenuOpen, setIsSupportMenuOpen] = useState(false);
+
+  // 2.5-second auto-dismiss greeting tooltip upon initial load or browser reload/refresh
+  useEffect(() => {
+    setShowGreetingTooltip(true);
+    const timer = setTimeout(() => {
+      setShowGreetingTooltip(false);
+    }, 2500);
+    return () => clearTimeout(timer);
+  }, []);
+
+  // Floating Chatbot Draggable Position state
+  // Default is ALWAYS null (anchored cleanly in bottom-right corner)
+  const [customPosition, setCustomPosition] = useState<{ side: 'left' | 'right'; y: number } | null>(null);
+
+  // Clear any legacy absolute position data from storage so it never glitches into the center
+  useEffect(() => {
+    try {
+      localStorage.removeItem('kenax_chatbot_position');
+      sessionStorage.removeItem('kenax_chatbot_position');
+    } catch {}
+  }, []);
+
+  const [isDragging, setIsDragging] = useState(false);
+  const dragStartRef = useRef<{ clientX: number; clientY: number }>({ clientX: 0, clientY: 0 });
+  const buttonStartPosRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const currentDragPosRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const hasDraggedRef = useRef(false);
+  const isPointerDownRef = useRef(false);
+  const triggerButtonRef = useRef<HTMLButtonElement>(null);
+
+  // Keep button within window bounds on resize with edge snapping (anchored to side)
+  useEffect(() => {
+    const handleResize = () => {
+      // In mobile view (window.innerWidth < 768), if user hasn't explicitly dragged in this session,
+      // always reset to default bottom-right corner so it never glitches into center on resize or rotation!
+      if (window.innerWidth < 768 && !hasDraggedRef.current) {
+        setCustomPosition(null);
+        if (chatContainerRef.current) {
+          chatContainerRef.current.style.left = '';
+          chatContainerRef.current.style.top = '';
+          chatContainerRef.current.style.right = '';
+          chatContainerRef.current.style.bottom = '';
+        }
+        return;
+      }
+      setCustomPosition((prev) => {
+        if (!prev) return null;
+        const btnSize = 56;
+        const isMobile = window.innerWidth < 768;
+        const bottomNavHeight = isMobile ? 84 : 40;
+        const clampedY = Math.max(50, Math.min(window.innerHeight - btnSize - bottomNavHeight, prev.y));
+        return { side: prev.side, y: clampedY };
+      });
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  // When chat modal closes, automatically return chatbot to default position
+  const prevModalRef = useRef(activeChatModal);
+  useEffect(() => {
+    if (prevModalRef.current !== 'none' && activeChatModal === 'none') {
+      setCustomPosition(null);
+      if (chatContainerRef.current) {
+        chatContainerRef.current.style.transition = 'left 0.42s cubic-bezier(0.25, 1, 0.5, 1), top 0.42s cubic-bezier(0.25, 1, 0.5, 1)';
+        chatContainerRef.current.style.left = '';
+        chatContainerRef.current.style.top = '';
+        chatContainerRef.current.style.right = '';
+        chatContainerRef.current.style.bottom = '';
+      }
+      try {
+        localStorage.removeItem('kenax_chatbot_position');
+        sessionStorage.removeItem('kenax_chatbot_position');
+      } catch {}
+    }
+    prevModalRef.current = activeChatModal;
+  }, [activeChatModal]);
+
+  const handlePointerDown = (e: React.PointerEvent<HTMLButtonElement>) => {
+    if (e.button !== 0) return; // left click only
+    isPointerDownRef.current = true;
+    hasDraggedRef.current = false;
+    dragStartRef.current = { clientX: e.clientX, clientY: e.clientY };
+
+    if (chatContainerRef.current) {
+      const rect = chatContainerRef.current.getBoundingClientRect();
+      buttonStartPosRef.current = { x: rect.left, y: rect.top };
+      currentDragPosRef.current = { x: rect.left, y: rect.top };
+      chatContainerRef.current.style.transition = 'none';
+    }
+
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {}
+  };
+
+  const handlePointerMove = (e: React.PointerEvent<HTMLButtonElement>) => {
+    if (!isPointerDownRef.current) return;
+    const dx = e.clientX - dragStartRef.current.clientX;
+    const dy = e.clientY - dragStartRef.current.clientY;
+
+    // Threshold of 18px prevents touch taps and scroll jitters from accidentally starting a drag
+    if (!hasDraggedRef.current && (Math.abs(dx) > 18 || Math.abs(dy) > 18)) {
+      hasDraggedRef.current = true;
+      setIsDragging(true);
+    }
+
+    if (hasDraggedRef.current && chatContainerRef.current) {
+      const btnSize = 56;
+      const margin = 8;
+      const newX = Math.max(margin, Math.min(window.innerWidth - btnSize - margin, buttonStartPosRef.current.x + dx));
+      const newY = Math.max(50, Math.min(window.innerHeight - btnSize - 75, buttonStartPosRef.current.y + dy));
+
+      currentDragPosRef.current = { x: newX, y: newY };
+
+      // Direct hardware-accelerated DOM update for silky 120 FPS without re-render jank
+      chatContainerRef.current.style.left = `${newX}px`;
+      chatContainerRef.current.style.top = `${newY}px`;
+      chatContainerRef.current.style.bottom = 'auto';
+      chatContainerRef.current.style.right = 'auto';
+      chatContainerRef.current.style.transition = 'none';
+    }
+  };
+
+  const handlePointerUp = (e: React.PointerEvent<HTMLButtonElement>) => {
+    if (!isPointerDownRef.current) return;
+    isPointerDownRef.current = false;
+
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch {}
+
+    if (hasDraggedRef.current) {
+      setIsDragging(false);
+
+      // Super-Smooth Magnetic Snap to Edge (Anchored to Left or Right edge - NEVER floats in middle!)
+      const btnSize = 56;
+      const isMobile = window.innerWidth < 768;
+      const bottomNavHeight = isMobile ? 84 : 40;
+      const screenMidX = window.innerWidth / 2;
+      const curr = currentDragPosRef.current;
+
+      const isRightSide = (curr.x + btnSize / 2) >= screenMidX;
+      const side: 'left' | 'right' = isRightSide ? 'right' : 'left';
+      const clampedY = Math.max(50, Math.min(window.innerHeight - btnSize - bottomNavHeight, curr.y));
+
+      // If user dropped it near default bottom-right area, snap directly back to default
+      const isNearDefault = isRightSide && (curr.y >= window.innerHeight - btnSize - bottomNavHeight - 45);
+
+      if (isNearDefault) {
+        setCustomPosition(null);
+        if (chatContainerRef.current) {
+          chatContainerRef.current.style.transition = 'left 0.35s cubic-bezier(0.25, 1, 0.5, 1), top 0.35s cubic-bezier(0.25, 1, 0.5, 1)';
+          chatContainerRef.current.style.left = '';
+          chatContainerRef.current.style.top = '';
+          chatContainerRef.current.style.right = '';
+          chatContainerRef.current.style.bottom = '';
+        }
+      } else {
+        const snappedPos = { side, y: Math.round(clampedY) };
+        setCustomPosition(snappedPos);
+        if (chatContainerRef.current) {
+          chatContainerRef.current.style.transition = 'left 0.35s cubic-bezier(0.25, 1, 0.5, 1), top 0.35s cubic-bezier(0.25, 1, 0.5, 1), right 0.35s cubic-bezier(0.25, 1, 0.5, 1)';
+          if (side === 'right') {
+            chatContainerRef.current.style.left = 'auto';
+            chatContainerRef.current.style.right = isMobile ? '14px' : '24px';
+          } else {
+            chatContainerRef.current.style.right = 'auto';
+            chatContainerRef.current.style.left = '12px';
+          }
+          chatContainerRef.current.style.top = `${snappedPos.y}px`;
+        }
+      }
+
+      e.preventDefault();
+      e.stopPropagation();
+      setTimeout(() => {
+        hasDraggedRef.current = false;
+      }, 50);
+    } else {
+      setIsDragging(false);
+      hasDraggedRef.current = false;
+      handleToggleChat();
+    }
+  };
+
+  const handlePointerCancel = (e: React.PointerEvent<HTMLButtonElement>) => {
+    isPointerDownRef.current = false;
+    setIsDragging(false);
+    hasDraggedRef.current = false;
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch {}
+  };
+
+  const handleToggleChat = () => {
+    if (activeChatModal !== 'none') {
+      setActiveChatModal('none');
+      setIsSpeedDialOpen(false);
+      // Return to default position
+      setCustomPosition(null);
+      try {
+        localStorage.removeItem('kenax_chatbot_position');
+        sessionStorage.removeItem('kenax_chatbot_position');
+      } catch {}
+    } else {
+      setActiveChatModal('ai_bot');
+      setShowGreetingTooltip(false);
+      setHasUnread(false);
+    }
+  };
 
   // Refs for tracking outside clicks
   const chatContainerRef = useRef<HTMLDivElement>(null);
@@ -566,14 +778,6 @@ export const CustomerFloatingChat: React.FC<CustomerFloatingChatProps> = ({
       tgScrollRef.current.scrollTop = tgScrollRef.current.scrollHeight;
     }
   }, [aiMessages, waMessages, tgMessages, activeChatModal, showAiSuggestions, isAiThinking, isOrderModalOpen, isOrderBoxMinimized, activeOrderProduct]);
-
-  // Auto dismiss greeting tooltip after 9s
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setShowGreetingTooltip(false);
-    }, 9000);
-    return () => clearTimeout(timer);
-  }, []);
 
   // Close chat modal when clicking outside the chat widget
   useEffect(() => {
@@ -1862,17 +2066,40 @@ export const CustomerFloatingChat: React.FC<CustomerFloatingChatProps> = ({
     setIsSendingTg(false);
   };
 
+  const isCustom = customPosition !== null;
+  const isNearTop = isCustom && customPosition.y < 160;
+  const isNearLeft = isCustom && customPosition.side === 'left';
+
   return (
     <>
       <div
         ref={chatContainerRef}
-        className={`fixed bottom-[84px] sm:bottom-24 md:bottom-6 right-3.5 sm:right-6 md:right-6 z-[99999] flex flex-col items-end pointer-events-none select-none font-sans`}
+        style={
+          isCustom && activeChatModal === 'none'
+            ? {
+                left: customPosition.side === 'left' ? '12px' : 'auto',
+                right: customPosition.side === 'right' ? (typeof window !== 'undefined' && window.innerWidth < 640 ? '14px' : '24px') : 'auto',
+                top: `${customPosition.y}px`,
+                bottom: 'auto',
+                transition: isDragging
+                  ? 'none'
+                  : 'top 0.35s cubic-bezier(0.25, 1, 0.5, 1), right 0.35s cubic-bezier(0.25, 1, 0.5, 1), left 0.35s cubic-bezier(0.25, 1, 0.5, 1)',
+              }
+            : undefined
+        }
+        className={
+          isCustom && activeChatModal === 'none'
+            ? `fixed z-[99999] flex flex-col pointer-events-none select-none font-sans ${
+                isNearLeft ? 'items-start' : 'items-end'
+              }`
+            : `fixed bottom-[84px] sm:bottom-24 md:bottom-6 right-3.5 sm:right-6 md:right-6 z-[99999] flex flex-col items-end pointer-events-none select-none font-sans`
+        }
       >
-        {/* 1. GREETING TOOLTIP (When closed) */}
+        {/* 1. GREETING TOOLTIP (When closed - shows for 1 second on visit/reload) */}
         <AnimatePresence>
           {showGreetingTooltip && activeChatModal === 'none' && !isSpeedDialOpen && (
             <motion.div
-              initial={{ opacity: 0, y: 10, scale: 0.95 }}
+              initial={{ opacity: 0, y: isNearTop ? -10 : 10, scale: 0.95 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, scale: 0.9 }}
               transition={{ duration: 0.2 }}
@@ -1880,15 +2107,17 @@ export const CustomerFloatingChat: React.FC<CustomerFloatingChatProps> = ({
                 setShowGreetingTooltip(false);
                 setActiveChatModal('ai_bot');
               }}
-              className="pointer-events-auto mb-3 max-w-[250px] bg-slate-900/95 backdrop-blur-md text-white text-xs p-3 rounded-2xl shadow-2xl border border-emerald-500/30 flex items-start gap-2.5 cursor-pointer hover:border-emerald-400 transition-all group"
+              className={`pointer-events-auto max-w-[250px] bg-slate-900/95 backdrop-blur-md text-white text-xs p-3 rounded-2xl shadow-2xl border border-sky-500/40 flex items-start gap-2.5 cursor-pointer hover:border-sky-400 transition-all group ${
+                isNearTop ? 'order-2 mt-3' : 'order-1 mb-3'
+              }`}
             >
-              <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-emerald-500 to-teal-400 text-slate-950 flex items-center justify-center shrink-0 font-bold shadow-md shadow-emerald-500/30">
+              <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-sky-500 via-cyan-500 to-blue-600 text-white flex items-center justify-center shrink-0 font-bold shadow-md shadow-sky-500/30">
                 <Sparkles className="w-4 h-4" />
               </div>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-1.5">
                   <p className="font-extrabold text-white text-[11px]">{botName}</p>
-                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                  <span className="w-2 h-2 rounded-full bg-sky-400 animate-pulse" />
                 </div>
                 <p className="text-slate-300 text-[10px] mt-0.5 leading-snug">
                   পণ্য সম্পর্কে জানতে, সরাসরি অর্ডার দিতে বা এজেন্টের সাথে কথা বলতে ক্লিক করুন!
@@ -1949,20 +2178,24 @@ export const CustomerFloatingChat: React.FC<CustomerFloatingChatProps> = ({
                 </div>
 
                 <div className="flex items-center gap-1.5 shrink-0">
-                  {/* Customer Support Channels Dropdown */}
-                  <div className="relative" ref={supportMenuRef}>
+                  {/* Customer Support Channels Dropdown (Call Icon with Border Lighting) */}
+                  <div className="relative group/callbtn" ref={supportMenuRef}>
+                    {/* Glowing Border Lighting Aura */}
+                    <span className="absolute -inset-[2px] rounded-xl bg-gradient-to-r from-cyan-400 via-sky-500 to-blue-600 opacity-70 blur-[3px] animate-pulse pointer-events-none" />
+
                     <button
                       type="button"
                       onClick={() => setIsSupportMenuOpen((prev) => !prev)}
-                      className="p-2 rounded-xl bg-emerald-50 dark:bg-emerald-950/60 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 active:scale-95 text-emerald-800 dark:text-emerald-300 transition-all flex items-center justify-center cursor-pointer border border-emerald-200 dark:border-emerald-800/80"
-                      title="কাস্টমার সাপোর্ট"
+                      className="relative z-10 p-2 rounded-xl bg-white dark:bg-slate-900 hover:bg-sky-50 dark:hover:bg-slate-800 active:scale-95 text-sky-600 dark:text-sky-300 transition-all flex items-center justify-center cursor-pointer border-2 border-sky-400 dark:border-sky-400 ring-2 ring-sky-400/20 shadow-[0_0_12px_rgba(14,165,233,0.45)]"
+                      title="সরাসরি কল বা কাস্টমার সাপোর্ট"
+                      aria-label="Call Customer Support"
                     >
-                      <Headphones className="w-4 h-4 shrink-0 text-emerald-800 dark:text-emerald-300" />
+                      <PhoneCall className="w-4 h-4 shrink-0 text-sky-500 dark:text-sky-300" />
                     </button>
 
                     {/* Compact Dropdown Popover */}
                     {isSupportMenuOpen && (
-                      <div className="absolute right-0 mt-2 w-48 bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 p-1.5 z-50 animate-in fade-in zoom-in-95 duration-150 space-y-0.5">
+                      <div className="absolute right-0 mt-2 w-52 bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border-2 border-sky-400/40 dark:border-sky-500/40 p-1.5 z-50 animate-in fade-in zoom-in-95 duration-150 space-y-0.5 ring-4 ring-sky-500/10">
                         {/* 1. Super Admin */}
                         <a
                           href={`https://wa.me/88${superAdminNumber.replace(/[^0-9]/g, '').replace(/^88/, '')}?text=${encodeURIComponent('হ্যালো সুপার অ্যাডমিন, KenaX BD সংক্রান্ত সহায়তার জন্য নক দিচ্ছি।')}`}
@@ -2438,6 +2671,73 @@ export const CustomerFloatingChat: React.FC<CustomerFloatingChatProps> = ({
                               );
                             })()}
                           </div>
+
+                          {/* 5-Step Visual Mini Milestone Flow */}
+                          {(() => {
+                            const rawSt = String(msg.trackedOrder.status || 'pending').toLowerCase();
+                            const miniSteps = [
+                              { key: 'pending', label: 'গ্রহণ' },
+                              { key: 'confirmed', label: 'নিশ্চিত' },
+                              { key: 'processing', label: 'প্যাকিং' },
+                              { key: 'shipped', label: 'শিপড' },
+                              { key: 'delivered', label: 'ডেলিভারি' },
+                            ];
+                            let currentIdx = 0;
+                            if (rawSt.includes('deliver') || rawSt.includes('complete')) currentIdx = 4;
+                            else if (rawSt.includes('ship') || rawSt.includes('transit')) currentIdx = 3;
+                            else if (rawSt.includes('process') || rawSt.includes('pack')) currentIdx = 2;
+                            else if (rawSt.includes('confirm') || rawSt.includes('approve')) currentIdx = 1;
+                            else currentIdx = 0;
+
+                            return (
+                              <div className="py-1 px-0.5 border-b border-slate-100 dark:border-slate-800">
+                                <div className="relative flex items-center justify-between">
+                                  {/* Background Track Line */}
+                                  <div className="absolute left-2 right-2 top-3 h-1 bg-slate-200 dark:bg-slate-800 z-0">
+                                    <div
+                                      className="h-full bg-gradient-to-r from-amber-500 to-emerald-500 rounded-full transition-all duration-300"
+                                      style={{ width: `${(currentIdx / (miniSteps.length - 1)) * 100}%` }}
+                                    />
+                                  </div>
+
+                                  {miniSteps.map((mStep, mIdx) => {
+                                    const isDone = mIdx <= currentIdx;
+                                    const isCurrent = mIdx === currentIdx;
+                                    return (
+                                      <div key={mStep.key} className="relative z-10 flex flex-col items-center">
+                                        <div
+                                          className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black transition-all ${
+                                            isCurrent
+                                              ? 'bg-emerald-600 text-white ring-2 ring-emerald-200 dark:ring-emerald-900 scale-110 shadow-xs'
+                                              : isDone
+                                              ? 'bg-emerald-500 text-white'
+                                              : 'bg-white dark:bg-slate-800 border-2 border-slate-300 dark:border-slate-700 text-slate-400'
+                                          }`}
+                                        >
+                                          {isDone && !isCurrent ? (
+                                            <Check className="w-3.5 h-3.5" />
+                                          ) : (
+                                            <span>{mIdx + 1}</span>
+                                          )}
+                                        </div>
+                                        <span
+                                          className={`text-[9px] mt-1 font-bold ${
+                                            isCurrent
+                                              ? 'text-emerald-700 dark:text-emerald-400 font-black'
+                                              : isDone
+                                              ? 'text-slate-800 dark:text-slate-200'
+                                              : 'text-slate-400'
+                                          }`}
+                                        >
+                                          {mStep.label}
+                                        </span>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            );
+                          })()}
 
                           {/* Order Items List */}
                           <div className="space-y-2">
@@ -3570,7 +3870,7 @@ export const CustomerFloatingChat: React.FC<CustomerFloatingChatProps> = ({
         {/* 3. OPTIONAL SPEED DIAL ICONS (WhatsApp, Telegram, Messenger) */}
         <AnimatePresence>
           {isSpeedDialOpen && activeChatModal === 'none' && (
-            <div className="flex flex-col items-center gap-2.5 mb-3 pointer-events-auto">
+            <div className={`flex flex-col items-center gap-2.5 pointer-events-auto ${isNearTop ? 'order-2 mt-3' : 'order-1 mb-3'}`}>
               {/* Messenger */}
               <motion.a
                 href={messengerUrl}
@@ -3616,54 +3916,88 @@ export const CustomerFloatingChat: React.FC<CustomerFloatingChatProps> = ({
           )}
         </AnimatePresence>
 
-        {/* 4. THE MAIN FLOATING TRIGGER BUTTON - AI CHATBOT WITH KENAX BD LOGO */}
-        <motion.button
-          whileHover={{ scale: 1.08 }}
-          whileTap={{ scale: 0.94 }}
-          onClick={() => {
-            if (activeChatModal !== 'none') {
-              setActiveChatModal('none');
-              setIsSpeedDialOpen(false);
-            } else {
-              setActiveChatModal('ai_bot');
-              setShowGreetingTooltip(false);
-              setHasUnread(false);
+        {/* 4. THE MAIN FLOATING TRIGGER BUTTON - AI CHATBOT WITH KENAX BD LOGO (BORDER LIGHTING ONLY - NO SHADOW SPREAD) */}
+        <div className={`relative group/chatbtn pointer-events-auto ${isNearTop ? 'order-1' : 'order-2'}`}>
+          <motion.button
+            ref={triggerButtonRef}
+            onPointerDown={handlePointerDown}
+            onPointerMove={handlePointerMove}
+            onPointerUp={handlePointerUp}
+            onPointerCancel={handlePointerCancel}
+            whileHover={{ scale: isDragging ? 1.04 : 1.06 }}
+            whileTap={{ scale: isDragging ? 1.04 : 0.95 }}
+            className={`pointer-events-auto relative w-13 h-13 sm:w-14 sm:h-14 rounded-full flex items-center justify-center select-none touch-none ${
+              isDragging ? 'cursor-grabbing scale-105' : 'cursor-grab'
+            }`}
+            style={{
+              boxShadow: 'none',
+              filter: 'none',
+            }}
+            aria-label="KenaX AI Chatbot"
+            title={
+              isDragging
+                ? 'ছেড়ে দিন (Release to dock)'
+                : 'KenaX AI Chatbot - কথা বলুন বা ড্র্যাগ করে স্ক্রিনের যেকোনো সাইডে রাখুন'
             }
-          }}
-          className={`pointer-events-auto relative w-13 h-13 sm:w-14 sm:h-14 rounded-full flex items-center justify-center shadow-2xl transition-all cursor-pointer ${
-            activeChatModal !== 'none'
-              ? 'bg-slate-900 text-white shadow-slate-900/40 ring-2 ring-slate-700'
-              : 'bg-white dark:bg-slate-900 border-2 border-emerald-400 shadow-[0_4px_20px_rgba(16,185,129,0.3)] ring-4 ring-emerald-100/90 dark:ring-emerald-950/60'
-          }`}
-          aria-label="KenaX AI Chatbot"
-          title="KenaX AI Chatbot - কথা বলুন বা অর্ডার করুন"
-        >
-          {activeChatModal !== 'none' ? (
-            <X className="w-6 h-6 text-white" />
-          ) : (
-            <div className="relative flex items-center justify-center p-1 w-full h-full overflow-hidden">
-              {siteSettings?.customLogo ? (
-                <img
-                  src={siteSettings.customLogo}
-                  alt={siteSettings.siteName || 'KenaX BD'}
-                  className="w-8 h-8 sm:w-9 sm:h-9 object-contain rounded-full"
-                  onError={(e) => {
-                    e.currentTarget.style.display = 'none';
-                  }}
-                />
-              ) : (
-                <KenaXLogo size="xs" customLogoUrl={siteSettings?.customLogo} siteName="KenaX BD" />
-              )}
-              <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 border-2 border-white absolute top-1 right-1 animate-pulse" />
-            </div>
-          )}
+          >
+            {activeChatModal !== 'none' ? (
+              <div className="w-full h-full rounded-full bg-slate-900 border-2 border-slate-700 flex items-center justify-center text-white">
+                <X className="w-6 h-6 text-white relative z-10" />
+              </div>
+            ) : (
+              <>
+                {/* Border lighting: Crisp glowing circular border line ONLY, absolutely zero outer or inner shadow */}
+                <svg
+                  className="absolute inset-0 w-full h-full pointer-events-none rounded-full"
+                  viewBox="0 0 56 56"
+                  style={{ filter: 'none' }}
+                >
+                  <circle
+                    cx="28"
+                    cy="28"
+                    r="26.5"
+                    fill="none"
+                    stroke="url(#chatBtnBorderLighting)"
+                    strokeWidth="2.5"
+                  />
+                  <defs>
+                    <linearGradient id="chatBtnBorderLighting" x1="0%" y1="0%" x2="100%" y2="100%">
+                      <stop offset="0%" stopColor="#00E5FF" />
+                      <stop offset="50%" stopColor="#10B981" />
+                      <stop offset="100%" stopColor="#00E5FF" />
+                    </linearGradient>
+                  </defs>
+                </svg>
 
-          {hasUnread && activeChatModal === 'none' && (
-            <span className="absolute -top-1 -right-1 w-4.5 h-4.5 rounded-full bg-rose-600 text-white text-[9px] font-black flex items-center justify-center border-2 border-white shadow-md">
-              1
-            </span>
-          )}
-        </motion.button>
+                {/* Inner Logo Disc: Pure crisp white in light mode, dark:bg-slate-900 in night mode, no shadow */}
+                <div
+                  className="relative z-10 w-[calc(100%-5px)] h-[calc(100%-5px)] rounded-full bg-white dark:bg-slate-900 flex items-center justify-center p-1 overflow-hidden pointer-events-none"
+                  style={{ filter: 'none', boxShadow: 'none' }}
+                >
+                  {siteSettings?.customLogo ? (
+                    <img
+                      src={siteSettings.customLogo}
+                      alt={siteSettings.siteName || 'KenaX BD'}
+                      className="w-8 h-8 sm:w-9 sm:h-9 object-contain rounded-full pointer-events-none"
+                      style={{ filter: 'none', boxShadow: 'none' }}
+                      onError={(e) => {
+                        e.currentTarget.style.display = 'none';
+                      }}
+                    />
+                  ) : (
+                    <KenaXLogo size="xs" customLogoUrl={siteSettings?.customLogo} siteName="KenaX BD" />
+                  )}
+                </div>
+              </>
+            )}
+
+            {hasUnread && activeChatModal === 'none' && (
+              <span className="absolute -top-1 -right-1 z-20 w-4.5 h-4.5 rounded-full bg-rose-600 text-white text-[9px] font-black flex items-center justify-center border-2 border-white pointer-events-none">
+                1
+              </span>
+            )}
+          </motion.button>
+        </div>
       </div>
     </>
   );

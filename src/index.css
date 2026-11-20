@@ -27,12 +27,16 @@ body {
   background-color: #f8fafc;
   color: #0f172a;
   min-height: 100vh;
+  overflow-x: hidden;
+  width: 100%;
 }
 
 #root {
   min-height: 100vh;
   display: flex;
   flex-direction: column;
+  overflow-x: hidden;
+  width: 100%;
 }
 
 /* Light Mode Selection */
@@ -282,19 +286,19 @@ html.dark ::-webkit-scrollbar-thumb:hover {
   background: #334155;
 }
 
-/* Hide horizontal bottom scrollbars completely in Admin Portal & Tables while preserving smooth left/right movement */
-.admin-portal-root .overflow-x-auto,
-.admin-portal-root table,
-.admin-portal-root [class*="overflow-x-"],
+/* Hide horizontal bottom scrollbars completely in Admin Portal & Tables unless opted in via .visible-x-scrollbar */
+.admin-portal-root .overflow-x-auto:not(.visible-x-scrollbar),
+.admin-portal-root table:not(.visible-x-scrollbar),
+.admin-portal-root [class*="overflow-x-"]:not(.visible-x-scrollbar),
 .no-scrollbar,
 .scrollbar-none {
   -ms-overflow-style: none !important;
   scrollbar-width: none !important;
 }
 
-.admin-portal-root .overflow-x-auto::-webkit-scrollbar,
-.admin-portal-root table::-webkit-scrollbar,
-.admin-portal-root [class*="overflow-x-"]::-webkit-scrollbar,
+.admin-portal-root .overflow-x-auto:not(.visible-x-scrollbar)::-webkit-scrollbar,
+.admin-portal-root table:not(.visible-x-scrollbar)::-webkit-scrollbar,
+.admin-portal-root [class*="overflow-x-"]:not(.visible-x-scrollbar)::-webkit-scrollbar,
 .no-scrollbar::-webkit-scrollbar,
 .scrollbar-none::-webkit-scrollbar {
   display: none !important;
@@ -302,8 +306,8 @@ html.dark ::-webkit-scrollbar-thumb:hover {
   height: 0 !important;
 }
 
-html.dark .admin-portal-root .overflow-x-auto::-webkit-scrollbar,
-html.dark .admin-portal-root [class*="overflow-x-"]::-webkit-scrollbar {
+html.dark .admin-portal-root .overflow-x-auto:not(.visible-x-scrollbar)::-webkit-scrollbar,
+html.dark .admin-portal-root [class*="overflow-x-"]:not(.visible-x-scrollbar)::-webkit-scrollbar {
   display: none !important;
   height: 0 !important;
   width: 0 !important;
@@ -341,17 +345,47 @@ img {
   display: none;
 }
 
-/* Hide horizontal scrollbars across all admin dashboard tables & card containers */
-.admin-portal-root .overflow-x-auto,
-.admin-portal-root [class*="overflow-x-"] {
-  -ms-overflow-style: none !important;
-  scrollbar-width: none !important;
+/* Explicit visible horizontal scrollbar opt-in for wide data tables */
+.admin-portal-root .visible-x-scrollbar,
+.visible-x-scrollbar {
+  -ms-overflow-style: auto !important;
+  scrollbar-width: thin !important;
+  scrollbar-color: #cbd5e1 #f8fafc !important;
 }
-.admin-portal-root .overflow-x-auto::-webkit-scrollbar,
-.admin-portal-root [class*="overflow-x-"]::-webkit-scrollbar {
-  display: none !important;
-  height: 0px !important;
-  width: 0px !important;
+.admin-portal-root .visible-x-scrollbar::-webkit-scrollbar,
+.visible-x-scrollbar::-webkit-scrollbar {
+  display: block !important;
+  height: 10px !important;
+  width: 10px !important;
+}
+.admin-portal-root .visible-x-scrollbar::-webkit-scrollbar-track,
+.visible-x-scrollbar::-webkit-scrollbar-track {
+  background: #f8fafc !important;
+  border-top: 1px solid #e2e8f0 !important;
+}
+.admin-portal-root .visible-x-scrollbar::-webkit-scrollbar-thumb,
+.visible-x-scrollbar::-webkit-scrollbar-thumb {
+  background: #cbd5e1 !important;
+  border-radius: 9999px !important;
+  border: 2px solid #f8fafc !important;
+}
+.admin-portal-root .visible-x-scrollbar::-webkit-scrollbar-thumb:hover,
+.visible-x-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8 !important;
+}
+html.dark .admin-portal-root .visible-x-scrollbar,
+html.dark .visible-x-scrollbar {
+  scrollbar-color: #475569 #0f172a !important;
+}
+html.dark .admin-portal-root .visible-x-scrollbar::-webkit-scrollbar-track,
+html.dark .visible-x-scrollbar::-webkit-scrollbar-track {
+  background: #0f172a !important;
+  border-top: 1px solid #1e293b !important;
+}
+html.dark .admin-portal-root .visible-x-scrollbar::-webkit-scrollbar-thumb,
+html.dark .visible-x-scrollbar::-webkit-scrollbar-thumb {
+  background: #475569 !important;
+  border: 2px solid #0f172a !important;
 }
 
 /* Dark mode glowing card effect */
@@ -486,6 +520,296 @@ html.dark body::before {
   width: 0 !important;
   height: 0 !important;
 }
+
+/* ==========================================================================
+   KENAX BD — COMPREHENSIVE RESPONSIVE DESIGN & CSS SYSTEM
+   Mobile First -> Tablet -> Laptop -> Desktop -> Large Desktop -> 2K/4K
+   ========================================================================== */
+
+/* 1. Global Viewport & Safe Area Variables */
+:root {
+  --sat: env(safe-area-inset-top, 0px);
+  --sab: env(safe-area-inset-bottom, 0px);
+  --sal: env(safe-area-inset-left, 0px);
+  --sar: env(safe-area-inset-right, 0px);
+
+  /* Fluid Typography Scale */
+  --text-fluid-hero: clamp(1.35rem, 3.5vw + 0.5rem, 3rem);
+  --text-fluid-h1: clamp(1.2rem, 2.5vw + 0.25rem, 2.25rem);
+  --text-fluid-h2: clamp(1.05rem, 2vw + 0.2rem, 1.75rem);
+  --text-fluid-h3: clamp(0.95rem, 1.5vw + 0.15rem, 1.35rem);
+  --text-fluid-title: clamp(0.85rem, 1.2vw + 0.15rem, 1.15rem);
+  --text-fluid-price: clamp(0.95rem, 1.5vw + 0.2rem, 1.4rem);
+  --text-fluid-body: clamp(0.8125rem, 0.5vw + 0.75rem, 0.9375rem);
+  --text-fluid-caption: clamp(0.6875rem, 0.4vw + 0.6rem, 0.8125rem);
+
+  /* Central Max-Width */
+  --content-max-width: 1440px;
+}
+
+/* 2. Zero Accidental Horizontal Overflow Protection */
+html, body {
+  overflow-x: clip;
+  max-width: 100vw;
+  width: 100%;
+}
+
+#root {
+  overflow-x: clip;
+  width: 100%;
+  max-width: 100vw;
+}
+
+/* 3. Central Content Width Wrapper for 2K/4K Displays (Prevents over-stretching) */
+.content-contained-max {
+  max-width: var(--content-max-width);
+  margin-left: auto;
+  margin-right: auto;
+  width: 100%;
+}
+
+@media (min-width: 1920px) {
+  .content-contained-max {
+    max-width: 1536px;
+    padding-left: clamp(1rem, 2vw, 2.5rem);
+    padding-right: clamp(1rem, 2vw, 2.5rem);
+  }
+}
+
+@media (min-width: 2560px) {
+  .content-contained-max {
+    max-width: 1728px;
+  }
+}
+
+/* 4. CSS Container Queries Architecture */
+.cq-product-card {
+  container-type: inline-size;
+  container-name: product-card;
+}
+
+.cq-dashboard-card {
+  container-type: inline-size;
+  container-name: dashboard-card;
+}
+
+.cq-table-container {
+  container-type: inline-size;
+  container-name: table-box;
+}
+
+/* Container Query Adaptations for Product Cards */
+@container product-card (max-width: 180px) {
+  .card-action-btn-text {
+    display: none !important;
+  }
+  .card-badge-container {
+    scale: 0.88;
+    transform-origin: top left;
+  }
+  .card-title-clamp {
+    -webkit-line-clamp: 1 !important;
+    line-clamp: 1 !important;
+  }
+}
+
+@container product-card (min-width: 181px) and (max-width: 280px) {
+  .card-title-clamp {
+    -webkit-line-clamp: 2 !important;
+    line-clamp: 2 !important;
+  }
+}
+
+@container product-card (min-width: 281px) {
+  .card-horizontal-layout {
+    display: flex !important;
+    flex-direction: row !important;
+    align-items: center !important;
+  }
+}
+
+/* Container Query for Dashboard Stats Cards */
+@container dashboard-card (max-width: 220px) {
+  .stat-card-subtitle {
+    display: none !important;
+  }
+  .stat-card-badge {
+    padding: 2px 4px !important;
+    font-size: 9px !important;
+  }
+}
+
+/* 5. Responsive Fluid Grid Utilities */
+.grid-fluid-products {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(clamp(145px, 46vw, 230px), 1fr));
+  gap: clamp(0.5rem, 1.5vw, 1.25rem);
+}
+
+@media (min-width: 1024px) {
+  .grid-fluid-products {
+    grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  }
+}
+
+@media (min-width: 1536px) {
+  .grid-fluid-products {
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  }
+}
+
+@media (min-width: 1920px) {
+  .grid-fluid-products {
+    grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  }
+}
+
+/* 6. Responsive Fluid Spacing Classes */
+.fluid-py-section {
+  padding-top: clamp(1rem, 2.5vw, 2.5rem);
+  padding-bottom: clamp(1rem, 2.5vw, 2.5rem);
+}
+
+.fluid-px-page {
+  padding-left: clamp(0.75rem, 2.5vw, 2rem);
+  padding-right: clamp(0.75rem, 2.5vw, 2rem);
+}
+
+.fluid-gap-grid {
+  gap: clamp(0.5rem, 1.75vw, 1.25rem);
+}
+
+/* 7. Touch & Pointer Capabilities Optimization */
+@media (pointer: coarse) {
+  /* Interactive Buttons minimum 40-44px touch target on mobile */
+  button, a[role="button"], input[type="button"], input[type="submit"] {
+    min-height: 38px;
+  }
+  
+  /* Inputs minimum height for easy thumb tap */
+  input:not([type="checkbox"]):not([type="radio"]), select, textarea {
+    min-height: 40px;
+    font-size: 16px !important; /* Prevents iOS auto-zoom on input focus */
+  }
+
+  /* Give scrollable chips comfortably tappable padding */
+  .touch-scroll-chip {
+    padding-top: 0.5rem;
+    padding-bottom: 0.5rem;
+  }
+}
+
+@media (pointer: fine) {
+  /* Precise cursor hover effects on desktop / laptops */
+  .hover-elevate {
+    transition: transform 180ms ease, box-shadow 180ms ease;
+  }
+  .hover-elevate:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1);
+  }
+}
+
+/* 8. Hover Query (Disables stuck hover on mobile devices) */
+@media (hover: none) {
+  .group:hover .group-hover\:opacity-100 {
+    opacity: 1 !important;
+  }
+  .group:hover .group-hover\:scale-105 {
+    transform: none !important;
+  }
+}
+
+/* 9. Landscape Orientation Support for Phones */
+@media (orientation: landscape) and (max-height: 520px) {
+  .modal-landscape-scroll {
+    max-height: 85vh !important;
+    overflow-y: auto !important;
+  }
+  .drawer-landscape-adjust {
+    height: 95vh !important;
+  }
+  .header-landscape-compact {
+    padding-top: 0.25rem !important;
+    padding-bottom: 0.25rem !important;
+  }
+}
+
+/* 10. Accessibility: Reduced Motion */
+@media (prefers-reduced-motion: reduce) {
+  *, ::before, ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  .animate-spin, .animate-pulse, .animate-bounce, .animate-shine, .animate-dark-glow {
+    animation: none !important;
+  }
+}
+
+/* 11. Responsive Print Stylesheet (Invoices, Receipts, Order Summaries) */
+@media print {
+  body {
+    background: #ffffff !important;
+    color: #000000 !important;
+    font-size: 12pt !important;
+  }
+
+  /* Hide navigation, mobile bottom bars, floating buttons, chat, and decorative controls */
+  header,
+  nav,
+  footer,
+  aside,
+  .no-print,
+  #floating-chat,
+  .fixed,
+  button:not(.print-preserve) {
+    display: none !important;
+  }
+
+  /* Make print container full width */
+  .print-area,
+  .invoice-container,
+  #invoice-print-section {
+    position: static !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    box-shadow: none !important;
+    border: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  table {
+    width: 100% !important;
+    border-collapse: collapse !important;
+  }
+
+  th, td {
+    border: 1px solid #e2e8f0 !important;
+    padding: 6px 10px !important;
+    color: #000000 !important;
+  }
+
+  @page {
+    margin: 1.5cm;
+  }
+}
+
+/* 12. Safe Area Inset Support for Sticky Bars */
+.safe-pb {
+  padding-bottom: max(0.75rem, env(safe-area-inset-bottom, 0px));
+}
+
+.safe-pt {
+  padding-top: max(0.5rem, env(safe-area-inset-top, 0px));
+}
+
+.safe-bottom-fixed {
+  bottom: env(safe-area-inset-bottom, 0px);
+}
+
 
 
 

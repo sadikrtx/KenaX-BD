@@ -1,5 +1,7 @@
 export type UserRole = 'super_admin' | 'manager' | 'admin' | 'moderator' | 'customer';
 
+export type StorageProvider = 'GOOGLE_DRIVE' | 'FIREBASE' | 'EXTERNAL';
+
 export type ProductType = 'own' | 'dropshipping' | 'aliexpress' | 'alibaba';
 
 export interface ColorVariation {
@@ -108,6 +110,9 @@ export interface Product {
   videoAspectRatio?: 'auto' | '9:16' | '16:9' | '1:1' | '4:3';
   keyHighlights?: ProductHighlight[];
   landingPage?: LandingPageConfig;
+  // File & Media Storage Provider (Google Drive vs Firebase vs External)
+  storageProvider?: StorageProvider;
+  storagePath?: string;
   [key: string]: any;
 }
 
@@ -205,6 +210,11 @@ export interface LandingPageConfig {
   stickyBarSubtext?: string;
   deliveryInsideDhakaFee?: number;
   deliveryOutsideDhakaFee?: number;
+  // Landing Page Payment Options Settings
+  allowCashOnDelivery?: boolean;
+  allowDeliveryAdvance?: boolean;
+  allowFullAdvance?: boolean;
+  paymentMode?: 'inherit' | 'cod_only' | 'advance_delivery' | 'full_advance' | 'all';
   viewsCount?: number;
   ordersCount?: number;
   updatedAt?: string;
@@ -283,17 +293,25 @@ export interface DeliveryAddress {
 
 export type OrderStatus =
   | 'Pending'
+  | 'Follow Up'
   | 'Payment Verification'
+  | 'Incomplete'
   | 'Confirmed'
   | 'Processing'
+  | 'Ready to Ship'
   | 'Packed'
+  | 'In Transit'
   | 'Shipped'
   | 'Out for Delivery'
   | 'Delivered'
+  | 'Completed'
+  | 'Hold'
   | 'Cancelled'
+  | 'Spam'
   | 'Returned'
   | 'Refunded'
   | 'Rejected'
+  | 'Failed Delivery'
   | 'Fake Order'
   | string;
 
@@ -329,6 +347,7 @@ export type PaymentStatus =
 
 export interface OrderItem {
   productId: string;
+  id?: string;
   productName: string;
   name?: string;
   productImage: string;
@@ -403,6 +422,9 @@ export interface Order {
   // Shipping & Courier
   orderStatus: OrderStatus;
   isFakeOrder?: boolean;
+  isIncompleteOrder?: boolean;
+  incompleteReason?: string;
+  missingFields?: string[];
   courierName?: string; // Steadfast, Pathao, RedX, eCourier, Paperfly
   courierOrderId?: string;
   trackingNumber?: string;
@@ -410,6 +432,8 @@ export interface Order {
   estimatedDelivery?: string;
   
   timeline: OrderTimelineEvent[];
+  customerNotes?: string;
+  notes?: string;
   adminNotes?: string;
   createdAt: string;
   updatedAt: string;
@@ -430,7 +454,188 @@ export interface Order {
   confirmedAt?: string;
   telegramChatId?: string;
   telegramUsername?: string;
+
+  // Meta Ads & Marketing Attribution Fields
+  attribution?: {
+    firstTouch?: {
+      utm_source?: string;
+      utm_medium?: string;
+      utm_campaign?: string;
+      utm_content?: string;
+      utm_term?: string;
+      fbclid?: string;
+      ttclid?: string;
+      gclid?: string;
+      gbraid?: string;
+      wbraid?: string;
+      referrer?: string;
+      landingUrl?: string;
+      landingPage?: string;
+      timestamp?: string;
+    };
+    lastTouch?: {
+      utm_source?: string;
+      utm_medium?: string;
+      utm_campaign?: string;
+      utm_content?: string;
+      utm_term?: string;
+      fbclid?: string;
+      ttclid?: string;
+      gclid?: string;
+      gbraid?: string;
+      wbraid?: string;
+      referrer?: string;
+      landingUrl?: string;
+      landingPage?: string;
+      timestamp?: string;
+    };
+    sessionId?: string;
+    fbclid?: string;
+    ttclid?: string;
+    gclid?: string;
+    gbraid?: string;
+    wbraid?: string;
+    fbp?: string;
+    fbc?: string;
+    capturedAt?: string;
+  };
+  metaPurchaseEventId?: string;
+  metaPurchaseSent?: boolean;
+  metaPurchaseSentAt?: string;
+  metaPurchaseStatus?: 'sent' | 'skipped' | 'failed' | 'simulated';
+  metaPurchaseError?: string;
+
+  // TikTok Ads & Marketing Attribution Fields
+  tiktokPurchaseEventId?: string;
+  tiktokPurchaseSent?: boolean;
+  tiktokPurchaseSentAt?: string;
+  tiktokPurchaseStatus?: 'sent' | 'skipped' | 'failed' | 'simulated';
+  tiktokPurchaseError?: string;
+
+  // Google Ads & GA4 Tracking Fields
+  googlePurchaseTracked?: boolean;
+  googlePurchaseTrackedAt?: string;
+  googlePurchaseTrackingStatus?: 'sent' | 'skipped' | 'failed' | 'simulated';
+  googlePurchaseTransactionId?: string;
+
+  // Customer IP Tracking & Security Fields
+  customerIp?: string;
+  ipVersion?: 'IPv4' | 'IPv6' | string;
+  ipStatus?: 'Active' | 'Blocked' | 'Suspicious' | 'Whitelisted' | string;
+  ipBlockReason?: string;
+  ipFirstSeen?: string;
+  ipLastSeen?: string;
+  ipOrdersCount?: number;
+  ipCapturedAt?: string;
+  ipCaptureSource?: string;
+  isTrustedProxy?: boolean;
+  ipProxyType?: string;
+  
+  // IP Approximate Geolocation Intelligence Fields
+  ipCountry?: string;
+  ipCountryCode?: string;
+  ipRegion?: string; // Division / State / Region
+  ipCity?: string;
+  ipLatitude?: number;
+  ipLongitude?: number;
+  ipIsp?: string; // ISP / Network Provider
+  ipConnectionType?: string; // Connection type e.g. Broadband, Cellular, Datacenter
+  ipLocationAccuracy?: string; // Approximate, City-level, Country-level, Unavailable
+  ipGeoResolvedAt?: string;
+  ipGeoData?: IpGeoLocation;
+
+  // Inventory & Stock Control Fields
+  stockDeducted?: boolean;
+  stockDeductedAt?: string;
+
+  // Extended Order Management Dashboard Fields
+  siteOrderNumber?: string;
+  fulfillmentStatus?: 'Unfulfilled' | 'Processing' | 'Packed' | 'Shipped' | 'Fulfilled' | 'Returned' | 'Failed' | string;
+  packagingStatus?: string;
+  channel?: string;
+  adNetwork?: string;
+  isDuplicate?: boolean;
+  internalNotesList?: Array<{
+    id: string;
+    note: string;
+    authorName: string;
+    authorRole: string;
+    createdAt: string;
+  }>;
+  courierCheckStatus?: 'verified' | 'risky' | 'unverified' | 'no_data';
+  courierCheckSummary?: {
+    successRate: number;
+    totalOrders: number;
+    deliveredOrders: number;
+    cancelledOrders?: number;
+    returnedOrders?: number;
+    riskLevel: string;
+    checkedAt: string;
+  };
   [key: string]: any;
+}
+
+export interface IpGeoLocation {
+  ip: string;
+  ipVersion: 'IPv4' | 'IPv6' | 'Unknown';
+  country?: string;
+  countryCode?: string;
+  region?: string;
+  city?: string;
+  latitude?: number;
+  longitude?: number;
+  isp?: string;
+  org?: string;
+  as?: string;
+  connectionType?: string;
+  accuracyStatus?: 'approximate' | 'city_level' | 'country_level' | 'unavailable' | string;
+  detectionSource?: 'server_header' | 'cloudflare' | 'x_forwarded_for' | 'remote_address' | string;
+  isTrustedProxy?: boolean;
+  proxyType?: 'Cloudflare' | 'Google Cloud Load Balancer / Cloud Run' | 'Nginx' | 'Direct' | 'Unknown' | string;
+  resolvedAt?: string;
+  isDatacenterOrProxy?: boolean;
+}
+
+export type IpStatus = 'Active' | 'Blocked' | 'Suspicious' | 'Whitelisted';
+
+export interface IpActivityHistory {
+  action: 'blocked' | 'unblocked' | 'order_placed' | 'checkout_attempt' | 'note_added';
+  timestamp: string;
+  actor?: string;
+  reason?: string;
+  details?: string;
+  orderId?: string;
+}
+
+export interface IpRecord {
+  ip: string;
+  status: IpStatus;
+  blockReason?: string;
+  blockedAt?: string;
+  blockedBy?: string;
+  unblockedAt?: string;
+  unblockedBy?: string;
+  firstSeen: string;
+  lastSeen: string;
+  totalOrders: number;
+  orderIds: string[];
+  customerIds: string[];
+  customerNames: string[];
+  customerPhones: string[];
+  customerEmails: string[];
+  locations: string[];
+  riskScore?: number;
+  notes?: string;
+  history: IpActivityHistory[];
+  updatedAt?: string;
+}
+
+export interface IpSummaryStats {
+  totalIps: number;
+  totalActive: number;
+  totalBlocked: number;
+  totalSuspicious: number;
+  totalOrdersTracked: number;
 }
 
 export interface DeliveryZone {
@@ -578,33 +783,79 @@ export interface MetaPixelSettings {
   domainVerification?: string;
   enableAdvancedMatching?: boolean;
   events?: MetaPixelEventToggles;
+  catalogFeedEnabled?: boolean;
+  catalogUpdateFrequency?: 'hourly' | 'daily' | 'realtime';
+  catalogBrandFallback?: string;
+  apiVersion?: string;
+  status?: 'connected' | 'not_configured' | 'error';
+  lastCapiEventAt?: string;
+  lastCatalogSyncAt?: string;
+}
+
+export interface TikTokPixelEventToggles {
+  pageView: boolean;
+  viewContent: boolean;
+  addToCart: boolean;
+  initiateCheckout: boolean;
+  purchase: boolean;
+  search: boolean;
+  completeRegistration: boolean;
+  contact: boolean;
 }
 
 export interface TikTokAdsSettings {
   enabled: boolean;
   pixelId: string;
+  additionalPixelIds?: string[];
   eventsApiToken?: string;
   testEventCode?: string;
+  appId?: string;
+  apiVersion?: string;
   enableAdvancedMatching?: boolean;
-  events?: {
-    pageView: boolean;
-    viewContent: boolean;
-    addToCart: boolean;
-    initiateCheckout: boolean;
-    purchase: boolean;
-    search: boolean;
-    contact: boolean;
-  };
+  catalogFeedEnabled?: boolean;
+  catalogBrandFallback?: string;
+  catalogUpdateFrequency?: 'hourly' | 'daily' | 'realtime';
+  status?: 'connected' | 'not_configured' | 'error';
+  lastEventsApiEventAt?: string;
+  lastCatalogSyncAt?: string;
+  events?: TikTokPixelEventToggles;
+}
+
+export interface GoogleAdsEventToggles {
+  pageView: boolean;
+  viewItem: boolean;
+  viewItemList: boolean;
+  selectItem: boolean;
+  search: boolean;
+  addToCart: boolean;
+  removeFromCart: boolean;
+  beginCheckout: boolean;
+  addPaymentInfo: boolean;
+  purchase: boolean;
+  signUp: boolean;
+  generateLead: boolean;
 }
 
 export interface GoogleAdsSettings {
   enabled: boolean;
   gtmContainerId?: string; // GTM-XXXXXX
   ga4MeasurementId?: string; // G-XXXXXXXXXX
+  googleTagId?: string; // GT-XXXXXXXXXX or AW-XXXXXXXXX
   googleAdsConversionId?: string; // AW-XXXXXXXXX
   googleAdsPurchaseLabel?: string;
+  googleAdsBeginCheckoutLabel?: string;
+  googleAdsAddToCartLabel?: string;
+  googleAdsSignUpLabel?: string;
+  googleAdsLeadLabel?: string;
+  enableEnhancedConversions?: boolean;
   enableEnhancedEcommerce?: boolean;
   enableRemarketingTag?: boolean;
+  merchantCenterFeedEnabled?: boolean;
+  merchantCenterCurrency?: string;
+  status?: 'connected' | 'not_configured' | 'error';
+  lastConversionAt?: string;
+  lastFeedSyncAt?: string;
+  events?: GoogleAdsEventToggles;
 }
 
 export interface CustomScriptsSettings {
@@ -1077,6 +1328,10 @@ export interface SiteSettings {
   enableCod?: boolean;
   enableFullPayment?: boolean;
   enableDeliveryOnlyPayment?: boolean;
+  // Landing Page Payment Controls
+  lpEnableCod?: boolean;
+  lpEnableDeliveryAdvance?: boolean;
+  lpEnableFullAdvance?: boolean;
   paymentInstructionsNotice?: string;
   customLogo?: string;
   heroBanners?: HeroBannerItem[];
@@ -1135,8 +1390,258 @@ export interface SiteSettings {
   fraudAlertThresholdPercent?: number; // e.g. 70 (if success rate < 70%, trigger high risk alert)
   autoFraudCheckOnOrder?: boolean;
   advanceDeliveryFeeAmount?: number;
+  courierCredentials?: CourierCredentialsSettings;
+  deliveryZones?: DeliveryZoneItem[];
+  orderSecuritySettings?: OrderSecuritySettings;
+  offerPopup?: OfferPopupSettings;
+  // Cloud Storage & Google Drive Marketplace File Settings
+  storageSettings?: StorageSettingsConfig;
   [key: string]: any;
 }
+
+export interface StorageSettingsConfig {
+  googleDriveEnabled: boolean;
+  cloudSellerUploadEnabled?: boolean;
+  cloudResellerUploadEnabled?: boolean;
+  allowedSellerPlans: string[]; // e.g. ['premium', 'standard']
+  allowedResellerPlans: string[]; // e.g. ['premium', 'standard']
+  individualSellerOverrides: Record<string, boolean>; // e.g. { 'seller-123': true }
+  individualResellerOverrides: Record<string, boolean>; // e.g. { 'reseller-456': false }
+  maxFileSizeMB: number; // default: 5
+  allowedFileTypes: string[]; // default: ['image/jpeg', 'image/png', 'image/webp', 'image/gif']
+}
+
+export const DEFAULT_STORAGE_SETTINGS: StorageSettingsConfig = {
+  googleDriveEnabled: true,
+  cloudSellerUploadEnabled: false,
+  cloudResellerUploadEnabled: false,
+  allowedSellerPlans: ['premium'],
+  allowedResellerPlans: ['premium'],
+  individualSellerOverrides: {},
+  individualResellerOverrides: {},
+  maxFileSizeMB: 5,
+  allowedFileTypes: ['image/jpeg', 'image/png', 'image/webp', 'image/gif'],
+};
+
+export interface OrderSecuritySettings {
+  mobileNumberVerification: boolean;
+  locationFieldsRequired: boolean;
+  vpnProtection: boolean;
+  orderConfirmationSms: boolean;
+  duplicateOrderBlock: boolean;
+  duplicateOrderBlockMinutes: number;
+  courierProtection: boolean;
+  courierSuccessRatioThreshold: number;
+  advanceDeliveryFeeForHighRisk?: boolean;
+  advanceDeliveryFeeAmount?: number;
+  blockFakeMobileNumbers?: boolean;
+  minOrderAmount?: number;
+  maxOrderQuantity?: number;
+  autoConfirmVerifiedOrders?: boolean;
+}
+
+export const DEFAULT_ORDER_SECURITY_SETTINGS: OrderSecuritySettings = {
+  mobileNumberVerification: false,
+  locationFieldsRequired: true,
+  vpnProtection: false,
+  orderConfirmationSms: true,
+  duplicateOrderBlock: true,
+  duplicateOrderBlockMinutes: 15,
+  courierProtection: true,
+  courierSuccessRatioThreshold: 70,
+  advanceDeliveryFeeForHighRisk: false,
+  advanceDeliveryFeeAmount: 120,
+  blockFakeMobileNumbers: true,
+  minOrderAmount: 0,
+  maxOrderQuantity: 10,
+  autoConfirmVerifiedOrders: false,
+};
+
+export interface DeliveryZoneItem {
+  id: string;
+  name: string;
+  charge: number;
+  deliveryTime: string;
+  isDefault?: boolean;
+}
+
+export interface CourierCredentialsSettings {
+  // SteadFast
+  steadfastUrl?: string;
+  steadfastApiKey?: string;
+  steadfastSecretKey?: string;
+  steadfastWebhookToken?: string;
+  steadfastEnabled?: boolean;
+
+  // Pathao
+  pathaoUrl?: string;
+  pathaoClientId?: string;
+  pathaoClientSecret?: string;
+  pathaoUsername?: string;
+  pathaoPassword?: string;
+  pathaoStoreId?: string;
+  pathaoWebhookSecret?: string;
+  pathaoWebhookCallbackSecret?: string;
+  pathaoEnabled?: boolean;
+
+  // Redx
+  redxUrl?: string;
+  redxAccessToken?: string;
+  redxStoreId?: string;
+  redxEnabled?: boolean;
+
+  // Carrybee
+  carrybeeUrl?: string;
+  carrybeeClientId?: string;
+  carrybeeClientSecret?: string;
+  carrybeeClientContext?: string;
+  carrybeeStoreId?: string;
+  carrybeeEnabled?: boolean;
+}
+
+export type OfferHighlightType =
+  | 'coupon'
+  | 'countdown'
+  | 'discount_badge'
+  | 'free_delivery'
+  | 'hotline'
+  | 'custom_text'
+  | 'none';
+
+export interface OfferSlideItem {
+  id: string;
+  enabled: boolean;
+  badgeText?: string;
+  badgeTextEn?: string;
+  title: string;
+  titleEn?: string;
+  subtitle: string;
+  subtitleEn?: string;
+  imageUrl?: string;
+  // Flexible Highlight Feature
+  highlightType: OfferHighlightType;
+  couponCode?: string;
+  couponDiscountText?: string;
+  couponDiscountTextEn?: string;
+  countdownHours?: number;
+  customHighlightTitle?: string;
+  customHighlightTitleEn?: string;
+  customHighlightSubtitle?: string;
+  customHighlightSubtitleEn?: string;
+  hotlineNumber?: string;
+  // CTA Action
+  buttonText: string;
+  buttonTextEn?: string;
+  actionType: 'shop' | 'category' | 'product' | 'flash_sale' | 'custom_url' | 'whatsapp';
+  actionTarget?: string;
+}
+
+export interface OfferPopupSettings {
+  enabled: boolean;
+  delaySeconds: number; // e.g. 2, 2.5, 3, 5
+  autoSlideInterval?: number; // e.g. 4 seconds
+  showOncePerSession?: boolean;
+  slides?: OfferSlideItem[];
+  badgeText?: string;
+  badgeTextEn?: string;
+  title?: string;
+  titleEn?: string;
+  subtitle?: string;
+  subtitleEn?: string;
+  imageUrl?: string;
+  mobileImageUrl?: string;
+  couponCode?: string;
+  couponDiscountText?: string;
+  couponDiscountTextEn?: string;
+  buttonText?: string;
+  buttonTextEn?: string;
+  actionType?: 'shop' | 'category' | 'product' | 'flash_sale' | 'custom_url' | 'whatsapp';
+  actionTarget?: string;
+  updatedAt?: string;
+}
+
+export const DEFAULT_OFFER_SLIDES: OfferSlideItem[] = [
+  {
+    id: 'slide_1_mega_sale',
+    enabled: true,
+    badgeText: '🔥 মেগা ফ্ল্যাশ সেল ও সুপার ডিসকাউন্ট',
+    badgeTextEn: '🔥 MEGA FLASH SALE & SUPER DEALS',
+    title: 'সীমিত সময়ের জন্য বিশেষ এক্সক্লুসিভ অফার!',
+    titleEn: 'Limited-Time Exclusive Deal for You!',
+    subtitle: 'আমাদের যেকোনো ট্রেন্ডি স্মার্ট গ্যাজেট ও অ্যাক্সেসরিজ অর্ডারে উপভোগ করুন আকর্ষণীয় ক্যাশব্যাক ও ফ্ল্যাট ডিসকাউন্ট।',
+    subtitleEn: 'Enjoy massive instant discounts and verified Cash on Delivery across Bangladesh on all original gadgets.',
+    imageUrl: 'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=800&auto=format&fit=crop&q=80',
+    highlightType: 'coupon',
+    couponCode: 'OFFER50',
+    couponDiscountText: '৫০% পর্যন্ত ছাড়',
+    couponDiscountTextEn: 'Up to 50% OFF',
+    buttonText: '🛍️ এখনই অফারটি উপভোগ করুন',
+    buttonTextEn: '🛍️ Claim Offer Now',
+    actionType: 'shop',
+    actionTarget: '',
+  },
+  {
+    id: 'slide_2_flash_deal',
+    enabled: true,
+    badgeText: '⚡ ফ্ল্যাশ সেল কাউন্টডাউন',
+    badgeTextEn: '⚡ FLASH SALE COUNTDOWN',
+    title: 'আজকের ফ্ল্যাশ সেল অফার শেষ হতে আর কিছুক্ষণ!',
+    titleEn: 'Today’s Flash Deals Ending Very Soon!',
+    subtitle: 'স্টক সীমিত! আপনার পছন্দের স্মার্ট ওয়াচ ও হেডফোন লুফে নিন সেরা মূল্যে ক্যাশ অন ডেলিভারিতে।',
+    subtitleEn: 'Grab top trending smartwatches and audio accessories at unbeatable prices before stock runs out.',
+    imageUrl: 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=800&auto=format&fit=crop&q=80',
+    highlightType: 'countdown',
+    countdownHours: 12,
+    customHighlightTitle: '⚡ অফার শেষ হতে বাকি:',
+    customHighlightTitleEn: '⚡ Offer ends in:',
+    buttonText: '⚡ ফ্ল্যাশ সেল পণ্যগুলো দেখুন',
+    buttonTextEn: '⚡ View Flash Sale Items',
+    actionType: 'flash_sale',
+    actionTarget: '',
+  },
+  {
+    id: 'slide_3_free_delivery',
+    enabled: true,
+    badgeText: '🚚 ফ্রি ডেলিভারি অফার',
+    badgeTextEn: '🚚 FREE DELIVERY PROMO',
+    title: 'সারাদেশে সম্পূর্ণ ফ্রি হোম ডেলিভারি অফার!',
+    titleEn: 'Free Express Home Delivery Nationwide!',
+    subtitle: 'যেকোনো প্রিমিয়াম গ্যাজেট ও গ্যাজেট এক্সেসরিজ অর্ডারে কোনো ডেলিভারি চার্জ লাগবে না।',
+    subtitleEn: 'Zero shipping cost on all orders. Safe packaging and instant verified Cash on Delivery.',
+    imageUrl: 'https://images.unsplash.com/photo-1546868871-7041f2a55e12?w=800&auto=format&fit=crop&q=80',
+    highlightType: 'free_delivery',
+    customHighlightTitle: '🎁 ফ্রি এক্সপ্রেস ডেলিভারি সারা বাংলাদেশ',
+    customHighlightTitleEn: '🎁 Free Express Delivery Nationwide',
+    customHighlightSubtitle: 'শর্তহীন ফ্রি হোম ডেলিভারি ও দ্রুত সার্ভিস',
+    customHighlightSubtitleEn: 'No minimum order required today only',
+    buttonText: '📦 ফ্রি ডেলিভারিতে অর্ডার করুন',
+    buttonTextEn: '📦 Order with Free Delivery',
+    actionType: 'shop',
+    actionTarget: '',
+  },
+];
+
+export const DEFAULT_OFFER_POPUP_SETTINGS: OfferPopupSettings = {
+  enabled: true,
+  delaySeconds: 2.5,
+  autoSlideInterval: 4.5,
+  showOncePerSession: true,
+  slides: DEFAULT_OFFER_SLIDES,
+  badgeText: '🔥 মেগা ফ্ল্যাশ সেল ও সুপার ডিসকাউন্ট',
+  badgeTextEn: '🔥 MEGA FLASH SALE & SUPER DEALS',
+  title: 'সীমিত সময়ের জন্য বিশেষ এক্সক্লুসিভ অফার!',
+  titleEn: 'Limited-Time Exclusive Deal for You!',
+  subtitle: 'আমাদের যেকোনো ট্রেন্ডি স্মার্ট গ্যাজেট ও অ্যাক্সেসরিজ অর্ডারে উপভোগ করুন আকর্ষণীয় ক্যাশব্যাক ও ফ্ল্যাট ডিসকাউন্ট।',
+  subtitleEn: 'Enjoy massive instant discounts and verified Cash on Delivery across Bangladesh on all original gadgets.',
+  imageUrl: 'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=800&auto=format&fit=crop&q=80',
+  couponCode: 'OFFER50',
+  couponDiscountText: '৫০% পর্যন্ত ছাড়',
+  couponDiscountTextEn: 'Up to 50% OFF',
+  buttonText: '🛍️ এখনই অফারটি উপভোগ করুন',
+  buttonTextEn: '🛍️ Claim Offer Now',
+  actionType: 'shop',
+  actionTarget: '',
+};
 
 export interface CourierFraudReport {
   phone: string;
@@ -1216,6 +1721,7 @@ export interface ActivityLog {
   id: string;
   staffId?: string;
   staffName: string;
+  staffEmail?: string;
   staffRole: string;
   action: string;
   module:
@@ -1230,8 +1736,14 @@ export interface ActivityLog {
     | 'Staff'
     | 'Settings'
     | 'Auth'
+    | 'Integration'
     | string;
   targetId: string;
+  orderId?: string;
+  productId?: string;
+  fromStatus?: string;
+  toStatus?: string;
+  source?: 'admin' | 'muse_integration' | 'system' | string;
   previousData?: any;
   newData?: any;
   details: string;
@@ -1253,6 +1765,7 @@ export interface StockLog {
   newStock: number;
   quantityChanged: number;
   reason: string;
+  orderId?: string;
   timestamp: string;
 }
 
@@ -1703,77 +2216,3 @@ export interface NewsletterSubscriber {
   source?: string;
   status: 'active' | 'unsubscribed';
 }
-
-export type PartnerRole = 'seller' | 'reseller';
-
-export interface PartnerUser {
-  id: string;
-  type: PartnerRole;
-  name: string;
-  shopName: string;
-  phone: string;
-  email: string;
-  username: string;
-  password?: string;
-  status: 'active' | 'suspended' | 'pending';
-  planId?: string;
-  selectedPlanId?: string;
-  billingCycle?: 'monthly' | 'yearly';
-  subscriptionStatus?: 'active' | 'expired' | 'pending_renewal' | 'trial';
-  subscriptionEndDate?: string;
-  paymentMethod?: 'bkash' | 'nagad' | 'rocket' | 'bank' | 'none';
-  paymentSenderNumber?: string;
-  paymentTxId?: string;
-  paymentAmount?: number;
-  paymentProofNote?: string;
-  paymentSubmittedAt?: string;
-  renewalTxId?: string;
-  renewalPaymentMethod?: string;
-  renewalAmount?: number;
-  renewalSubmittedAt?: string;
-  isVip?: boolean;
-  resellerTier?: 'bronze' | 'silver' | 'gold_vip';
-  rejectionReason?: string;
-  commissionRate: number; // For seller: commission deduction %; For reseller: wholesale discount or markup %
-  walletBalance: number;
-  balance?: number;
-  totalEarnings: number;
-  totalSales?: number;
-  orderCount?: number;
-  totalWithdrawn: number;
-  paymentDetails: {
-    bkash?: string;
-    nagad?: string;
-    rocket?: string;
-    bankName?: string;
-    bankAccount?: string;
-    bankBranch?: string;
-    accountHolderName?: string;
-  };
-  address?: string;
-  city?: string;
-  createdAt: string;
-  updatedAt?: string;
-}
-
-export interface PartnerPayout {
-  id: string;
-  partnerId: string;
-  partnerName: string;
-  partnerType: PartnerRole;
-  amount: number;
-  method: 'bkash' | 'nagad' | 'rocket' | 'bank';
-  accountNumber: string;
-  status: 'pending' | 'approved' | 'rejected';
-  requestedAt: string;
-  date?: string;
-  processedAt?: string;
-  approvedAt?: string;
-  txId?: string;
-  transactionId?: string;
-  note?: string;
-  adminNote?: string;
-}
-
-
-

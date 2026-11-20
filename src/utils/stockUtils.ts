@@ -1,4 +1,4 @@
-import { Product } from '../types/index.ts';
+import type { Product } from '../types/index.ts';
 
 export type StockStatus = 'in_stock' | 'out_of_stock' | 'upcoming';
 

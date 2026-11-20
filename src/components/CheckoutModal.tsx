@@ -31,6 +31,7 @@ import {
   Wallet,
   RotateCcw,
   Award,
+  FileText,
 } from 'lucide-react';
 import {
   Order,
@@ -57,10 +58,13 @@ import { triggerOrderPlacedSMS } from '../lib/smsService';
 import { triggerOrderPlacedWorkflow } from '../lib/emailService';
 import { triggerWhatsAppEvent } from '../lib/whatsappService';
 import { isTelegramWebApp, getTelegramUser, triggerHaptic } from '../lib/telegramWebApp';
+import { trackPixelInitiateCheckout } from '../utils/pixelTracker';
+import { getAttributionForOrder } from '../utils/attribution';
 import { CartItemImage } from './CartItemImage';
 import { isSameCartItem, sanitizeCart } from '../utils/cartUtils';
 import { getOptimizedImageUrl, handleImageError } from '../utils/imageOptimizer';
 import { useLanguage } from '../context/LanguageContext';
+import { OrderRestrictionModal, RestrictionReason } from './OrderRestrictionModal';
 
 interface CheckoutModalProps {
   isOpen: boolean;
@@ -255,6 +259,21 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
         };
       });
       setItemsList(initial);
+
+      // Track Meta / Google / TikTok InitiateCheckout on checkout opening
+      try {
+        const checkoutTotal = initial.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+        trackPixelInitiateCheckout(
+          initial.map((i) => ({
+            id: i.productId,
+            name: i.productName,
+            price: i.price,
+            quantity: i.quantity,
+          })),
+          checkoutTotal,
+          siteSettings
+        );
+      } catch (e) {}
     }
     prevIsOpenRef.current = isOpen;
   }, [isOpen, cartItems, products]);
@@ -520,6 +539,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   const [fullAddress, setFullAddress] = useState('');
   const [postalCode, setPostalCode] = useState('');
   const [deliveryInstructions, setDeliveryInstructions] = useState('');
+  const [showOrderNote, setShowOrderNote] = useState(false);
 
   // Delivery method
   const [selectedDeliveryMethod, setSelectedDeliveryMethod] = useState<'inside' | 'outside' | 'express'>('inside');
@@ -531,9 +551,56 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   const [transactionId, setTransactionId] = useState('');
   const [copiedNumber, setCopiedNumber] = useState(false);
 
+  // Dynamic payment option permissions from Admin Payment Gateways settings
+  const isCodAllowed = siteSettings?.enableCod !== false;
+  const isFullAllowed = siteSettings?.enableFullPayment === true || (siteSettings?.enableFullPayment !== false && siteSettings?.enableFullPayment !== undefined);
+  const isDeliveryAllowed = siteSettings?.enableDeliveryOnlyPayment === true || (siteSettings?.enableDeliveryOnlyPayment !== false && siteSettings?.enableDeliveryOnlyPayment !== undefined);
+
+  // Safety fallback if all are unticked
+  const effectiveCodAllowed = isCodAllowed || (!isFullAllowed && !isDeliveryAllowed);
+  const effectiveFullAllowed = isFullAllowed;
+  const effectiveDeliveryAllowed = isDeliveryAllowed;
+
+  const allowedOptionsCount =
+    (effectiveCodAllowed ? 1 : 0) +
+    (effectiveFullAllowed ? 1 : 0) +
+    (effectiveDeliveryAllowed ? 1 : 0);
+
+  const paymentGridCols =
+    allowedOptionsCount === 1
+      ? 'grid-cols-1'
+      : allowedOptionsCount === 2
+      ? 'grid-cols-2'
+      : 'grid-cols-3';
+
+  // Automatically switch paymentOptionType if currently selected option is unticked/disabled in admin settings
+  useEffect(() => {
+    if (paymentOptionType === 'cod' && !effectiveCodAllowed) {
+      if (effectiveDeliveryAllowed) setPaymentOptionType('delivery_only');
+      else if (effectiveFullAllowed) setPaymentOptionType('full');
+    } else if (paymentOptionType === 'full' && !effectiveFullAllowed) {
+      if (effectiveCodAllowed) setPaymentOptionType('cod');
+      else if (effectiveDeliveryAllowed) setPaymentOptionType('delivery_only');
+    } else if (paymentOptionType === 'delivery_only' && !effectiveDeliveryAllowed) {
+      if (effectiveCodAllowed) setPaymentOptionType('cod');
+      else if (effectiveFullAllowed) setPaymentOptionType('full');
+    }
+  }, [effectiveCodAllowed, effectiveFullAllowed, effectiveDeliveryAllowed, paymentOptionType]);
+
   // Validation state
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Restriction Contact Modal State (for Blocked IP, Duplicate Orders, Low Success Rate)
+  const [restrictionModal, setRestrictionModal] = useState<{
+    isOpen: boolean;
+    reason: RestrictionReason;
+    customMessage?: string;
+    customerPhone?: string;
+  }>({
+    isOpen: false,
+    reason: 'blocked_ip',
+  });
 
   // Address presets
   const [selectedAddressPreset, setSelectedAddressPreset] = useState<string>('custom');
@@ -760,6 +827,42 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
       errs.address = t('অনুগ্রহ করে সম্পূর্ণ ডেলিভারি ঠিকানা দিন', 'Please enter your complete delivery address');
     }
 
+    // Check duplicate order blocking rule from Order Settings
+    const cleanPhone = cleanBDPhoneNumber(customerMobile || deliveryMobile);
+    const secSettings = siteSettings?.orderSecuritySettings;
+    if (secSettings?.duplicateOrderBlock && cleanPhone) {
+      const blockMinutes = secSettings.duplicateOrderBlockMinutes || 15;
+      const lastPlacedTime = localStorage.getItem(`kenax_last_order_time_${cleanPhone}`);
+      if (lastPlacedTime) {
+        const elapsedMinutes = (Date.now() - parseInt(lastPlacedTime, 10)) / (1000 * 60);
+        if (elapsedMinutes < blockMinutes) {
+          const remaining = Math.ceil(blockMinutes - elapsedMinutes);
+          setRestrictionModal({
+            isOpen: true,
+            reason: 'duplicate_order',
+            customerPhone: cleanPhone,
+            customMessage: `এই নম্বর (${cleanPhone}) থেকে ইতিমধ্যে একটি সাম্প্রতিক অর্ডার করা হয়েছে। দয়া করে নিচে মেসেঞ্জারে, হোয়াটসঅ্যাপে বা টেলিগ্রামে আমাদের প্রতিনিধিকে সরাসরি মেসেজ দিন।`,
+          });
+          errs.phone = t(
+            `একই নম্বর থেকে ইতিমধ্যে একটি অর্ডার করা হয়েছে। দয়া করে সাপোর্টে যোগাযোগ করুন।`,
+            `An order was recently placed from this number. Please contact support.`
+          );
+        }
+      }
+    }
+
+    // Check low delivery success rate restriction
+    const custRate = (currentCustomer as any)?.deliverySuccessRate ?? (currentCustomer as any)?.successRate;
+    if (currentCustomer && (currentCustomer.isBlocked || (custRate !== undefined && custRate < 50))) {
+      setRestrictionModal({
+        isOpen: true,
+        reason: 'low_success_rate',
+        customerPhone: cleanPhone,
+        customMessage: 'আপনার প্রোফাইলের ডেলিভারি সাকসেস রেট যাচাইকরণের প্রয়োজন রয়েছে। সরাসরি অর্ডার প্রসেস করতে মেসেঞ্জারে, হোয়াটসঅ্যাপে বা টেলিগ্রামে আমাদের টিমের সাথে যোগাযোগ করুন।',
+      });
+      errs.phone = t('ডেলিভারি সাকসেস রেট ভেরিফিকেশনের জন্য সরাসরি যোগাযোগ করুন', 'Delivery success verification needed. Please contact support.');
+    }
+
     if (paymentOptionType !== 'cod') {
       const cleanSender = cleanBDPhoneNumber(senderMobile);
       if (!cleanSender) {
@@ -778,6 +881,64 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 
   const handlePlaceOrder = async () => {
     if (!validateForm()) {
+      // Capture Incomplete Order lead so admin can follow up and recover the sale
+      const rawMobile = (deliveryMobile || customerMobile || '').trim();
+      const rawName = (deliveryName || customerName || '').trim();
+      const rawAddress = (fullAddress || '').trim();
+      
+      // If customer entered at least partial info or attempted order with items in cart
+      if (itemsList.length > 0 && (rawMobile || rawName || rawAddress)) {
+        try {
+          const incompleteOrderId = 'INC-' + Math.floor(100000 + Math.random() * 900000);
+          const nowISO = new Date().toISOString();
+          const missingFieldsList: string[] = [];
+          if (!rawName) missingFieldsList.push('Customer Name');
+          if (!rawMobile || rawMobile.replace(/[^0-9]/g, '').length < 10) missingFieldsList.push('Mobile Number');
+          if (!rawAddress || rawAddress.length < 5) missingFieldsList.push('Full Address');
+
+          const incompleteOrder: Order = {
+            id: incompleteOrderId,
+            customerId: currentCustomer?.id || 'cust-incomplete',
+            customerName: rawName || 'অসম্পূর্ণ কাস্টমার (Incomplete)',
+            customerEmail: (customerEmail || '').trim() || 'incomplete@customer.com',
+            customerMobile: rawMobile || 'মোবাইল দেওয়া হয়নি',
+            customerPhone: rawMobile || 'মোবাইল দেওয়া হয়নি',
+            deliveryName: rawName || 'অসম্পূর্ণ কাস্টমার',
+            deliveryMobile: rawMobile || 'মোবাইল দেওয়া হয়নি',
+            division: division || 'ঢাকা',
+            district: district || 'অসম্পূর্ণ জেলা',
+            upazila: upazila || '',
+            area: area || '',
+            houseRoad: houseRoad || '',
+            fullAddress: rawAddress || 'অসম্পূর্ণ ডেলিভারি ঠিকানা',
+            shippingAddress: rawAddress || 'অসম্পূর্ণ ডেলিভারি ঠিকানা',
+            items: itemsList,
+            subtotal,
+            deliveryCharge,
+            discount: discountAmount,
+            couponCode: couponCode || '',
+            totalAmount: finalTotal,
+            paymentMethod: 'Cash on Delivery',
+            paymentStatus: 'Pending',
+            orderStatus: 'Incomplete',
+            isIncompleteOrder: true,
+            incompleteReason: `অসম্পূর্ণ তথ্য: ${missingFieldsList.join(', ')}`,
+            missingFields: missingFieldsList,
+            timeline: [
+              {
+                status: 'Incomplete',
+                timestamp: nowISO,
+                note: `Customer attempted checkout with incomplete fields: ${missingFieldsList.join(', ')}`,
+              },
+            ],
+            createdAt: nowISO,
+            updatedAt: nowISO,
+          };
+          onOrderPlaced(incompleteOrder);
+        } catch (e) {
+          console.warn('Failed to capture incomplete order lead:', e);
+        }
+      }
       return;
     }
 
@@ -787,6 +948,26 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
     }
 
     setIsSubmitting(true);
+
+    // Check IP restriction before placing order
+    try {
+      const ipCheckRes = await fetch('/api/ip-management/check', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      if (ipCheckRes.ok) {
+        const ipCheckData = await ipCheckRes.json();
+        if (ipCheckData?.isBlocked) {
+          setIsSubmitting(false);
+          setRestrictionModal({
+            isOpen: true,
+            reason: 'blocked_ip',
+            customMessage: 'আপনার আইপি অ্যাড্রেস থেকে অটোমেটিক অর্ডার করার চেষ্টা সাময়িকভাবে স্থগিত রাখা হয়েছে। অনুগ্রহ করে মেসেঞ্জারে, হোয়াটসঅ্যাপে বা টেলিগ্রামে আমাদের সাথে সরাসরি কথা বলুন।',
+          });
+          return;
+        }
+      }
+    } catch (e) {}
 
     const generatedOrderId = 'KB-' + Math.floor(100000 + Math.random() * 900000);
     const nowISO = new Date().toISOString();
@@ -893,6 +1074,8 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
       address: fullAddress.trim(),
       postalCode: postalCode.trim() || '',
       deliveryInstructions: deliveryInstructions.trim() || '',
+      customerNotes: deliveryInstructions.trim() || '',
+      notes: deliveryInstructions.trim() || '',
 
       items: itemsList,
       subtotal,
@@ -914,9 +1097,9 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
       dueAmount: dueOnDelivery,
 
       orderStatus: 'Pending',
-      courierName: district.toLowerCase().includes('dhaka') ? 'Steadfast Courier' : 'Pathao Courier',
-      trackingNumber: `TRK-${generatedOrderId}`,
-      trackingUrl: `https://kenaxbd.com/track?id=${generatedOrderId}`,
+      courierName: undefined,
+      trackingNumber: undefined,
+      trackingUrl: undefined,
       estimatedDelivery:
         selectedDeliveryMethod === 'inside'
           ? '24-48 Hours (Inside Dhaka)'
@@ -944,11 +1127,12 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
             ]
           : []),
       ],
-      source: orderSource === 'chatbot' ? 'Ordered by KenaX Bot' : 'Website Store',
-      orderSource: orderSource === 'chatbot' ? 'chatbot' : 'manual',
-      sourceChannel: orderSource === 'chatbot' ? 'Ordered by KenaX Bot' : 'Website Store',
+      source: orderSource === 'chatbot' ? 'Ordered by KenaX Bot' : orderSource === 'landing_page' ? 'Landing Page' : 'Website Store',
+      orderSource: orderSource === 'chatbot' ? 'chatbot' : orderSource === 'landing_page' ? 'landing_page' : 'website_store',
+      sourceChannel: orderSource === 'chatbot' ? 'Ordered by KenaX Bot' : orderSource === 'landing_page' ? 'Landing Page Direct' : 'Website Store',
       isAiBotOrder: orderSource === 'chatbot',
       createdByStaffName: orderSource === 'chatbot' ? 'Ordered by KenaX Bot' : undefined,
+      attribution: getAttributionForOrder(),
       createdAt: nowISO,
       updatedAt: nowISO,
     };
@@ -974,6 +1158,13 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 
     if (isTelegramWebApp()) {
       triggerHaptic('success');
+    }
+
+    const cleanPhoneForRecord = cleanBDPhoneNumber(orderData.customerMobile || orderData.deliveryMobile);
+    if (cleanPhoneForRecord) {
+      try {
+        localStorage.setItem(`kenax_last_order_time_${cleanPhoneForRecord}`, Date.now().toString());
+      } catch {}
     }
 
     setTimeout(() => {
@@ -1165,6 +1356,50 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                   } focus:ring-2 focus:ring-sky-500 transition-all leading-relaxed`}
                 />
                 {errors.address && <p className="text-[10px] text-rose-500 mt-0.5">{errors.address}</p>}
+              </div>
+
+              {/* Add Note / Customer Instructions Toggle (Hidden by default, opens on click) */}
+              <div className="pt-1">
+                {!showOrderNote && !deliveryInstructions.trim() ? (
+                  <button
+                    type="button"
+                    onClick={() => setShowOrderNote(true)}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-dashed border-sky-300 dark:border-sky-800 bg-sky-50/50 dark:bg-sky-950/30 hover:bg-sky-50 dark:hover:bg-sky-950/60 text-sky-700 dark:text-sky-300 text-xs font-bold transition-all cursor-pointer group"
+                  >
+                    <Plus className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400 group-hover:rotate-90 transition-transform duration-200" />
+                    <span>{t('+ অ্যাড নোট (Add Note)', '+ Add Order Note')}</span>
+                  </button>
+                ) : (
+                  <div className="p-2.5 sm:p-3 rounded-xl bg-sky-50/40 dark:bg-slate-850 border border-sky-200/80 dark:border-slate-700/80 space-y-1.5 animate-in fade-in slide-in-from-top-1 duration-200">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[10px] sm:text-[11px] font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                        <FileText className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400" />
+                        <span>{t('অর্ডার নোট / ডেলিভারি নির্দেশনা', 'Order Note / Delivery Instructions')}</span>
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (!deliveryInstructions.trim()) {
+                            setShowOrderNote(false);
+                          } else {
+                            setDeliveryInstructions('');
+                            setShowOrderNote(false);
+                          }
+                        }}
+                        className="text-[10px] text-slate-400 hover:text-rose-500 transition-colors cursor-pointer font-medium"
+                      >
+                        {deliveryInstructions.trim() ? t('রিমুভ', 'Remove') : t('লুকান', 'Hide')}
+                      </button>
+                    </div>
+                    <textarea
+                      rows={2}
+                      value={deliveryInstructions}
+                      onChange={(e) => setDeliveryInstructions(e.target.value)}
+                      placeholder={t('অর্ডার বা ডেলিভারি সম্পর্কিত কোনো বিশেষ নির্দেশনা বা নোট থাকলে লিখুন (ঐচ্ছিক)...', 'Any specific delivery instructions, preferred timing, or note for this order...')}
+                      className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:ring-2 focus:ring-sky-500 transition-all leading-relaxed"
+                    />
+                  </div>
+                )}
               </div>
 
               {/* Create an Account Checkbox & Expandable Fields for Logged-Out Guests (Mobile & Desktop) */}
@@ -1389,118 +1624,124 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                 <span>{t('পেমেন্ট মেথড', 'Payment Method')}</span>
               </h3>
 
-              {/* Horizontal 3-Column Compact Grid with Icons */}
-              <div className="grid grid-cols-3 gap-1.5 sm:gap-2">
+              {/* Horizontal Dynamic Grid with Icons */}
+              <div className={`grid ${paymentGridCols} gap-1.5 sm:gap-2`}>
                 {/* A. Cash on Delivery */}
-                <button
-                  type="button"
-                  onClick={() => setPaymentOptionType('cod')}
-                  className={`p-2 sm:p-2.5 rounded-xl border text-center sm:text-left transition-all cursor-pointer flex flex-col justify-between items-center sm:items-stretch relative ${
-                    paymentOptionType === 'cod'
-                      ? 'border-emerald-600 dark:border-emerald-500 bg-emerald-50/70 dark:bg-emerald-950/40 ring-2 ring-emerald-500/25 shadow-xs'
-                      : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/80 hover:bg-slate-50 dark:hover:bg-slate-800'
-                  }`}
-                >
-                  <div className="flex sm:flex-row flex-col items-center sm:items-start gap-1 sm:gap-2 w-full">
-                    <div className={`w-7 h-7 sm:w-7 sm:h-7 rounded-lg flex items-center justify-center shrink-0 ${
+                {effectiveCodAllowed && (
+                  <button
+                    type="button"
+                    onClick={() => setPaymentOptionType('cod')}
+                    className={`p-2 sm:p-2.5 rounded-xl border text-center sm:text-left transition-all cursor-pointer flex flex-col justify-between items-center sm:items-stretch relative ${
                       paymentOptionType === 'cod'
-                        ? 'bg-emerald-600 text-white'
-                        : 'bg-emerald-50 dark:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400'
-                    }`}>
-                      <Banknote className="w-4 h-4" />
+                        ? 'border-emerald-600 dark:border-emerald-500 bg-emerald-50/70 dark:bg-emerald-950/40 ring-2 ring-emerald-500/25 shadow-xs'
+                        : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/80 hover:bg-slate-50 dark:hover:bg-slate-800'
+                    }`}
+                  >
+                    <div className="flex sm:flex-row flex-col items-center sm:items-start gap-1 sm:gap-2 w-full">
+                      <div className={`w-7 h-7 sm:w-7 sm:h-7 rounded-lg flex items-center justify-center shrink-0 ${
+                        paymentOptionType === 'cod'
+                          ? 'bg-emerald-600 text-white'
+                          : 'bg-emerald-50 dark:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400'
+                      }`}>
+                        <Banknote className="w-4 h-4" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <span className="text-[10px] sm:text-xs font-black text-slate-900 dark:text-white leading-tight block truncate">
+                          {t('ক্যাশ অন ডেলিভারি', 'Cash on Delivery')}
+                        </span>
+                        <p className="hidden sm:block text-[10px] text-slate-500 dark:text-slate-400 truncate mt-0.5">
+                          {t('পণ্য পেয়ে টাকা দিন', 'Pay upon delivery')}
+                        </p>
+                      </div>
                     </div>
-                    <div className="min-w-0 flex-1">
-                      <span className="text-[10px] sm:text-xs font-black text-slate-900 dark:text-white leading-tight block truncate">
-                        {t('ক্যাশ অন ডেলিভারি', 'Cash on Delivery')}
+                    <div className="mt-1 sm:mt-2 flex items-center justify-center sm:justify-between w-full">
+                      <span className="text-[11px] sm:text-xs font-black text-emerald-700 dark:text-emerald-400">
+                        ৳{finalTotal}
                       </span>
-                      <p className="hidden sm:block text-[10px] text-slate-500 dark:text-slate-400 truncate mt-0.5">
-                        {t('পণ্য পেয়ে টাকা দিন', 'Pay upon delivery')}
-                      </p>
+                      {paymentOptionType === 'cod' && (
+                        <CheckCircle className="hidden sm:inline w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                      )}
                     </div>
-                  </div>
-                  <div className="mt-1 sm:mt-2 flex items-center justify-center sm:justify-between w-full">
-                    <span className="text-[11px] sm:text-xs font-black text-emerald-700 dark:text-emerald-400">
-                      ৳{finalTotal}
-                    </span>
-                    {paymentOptionType === 'cod' && (
-                      <CheckCircle className="hidden sm:inline w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
-                    )}
-                  </div>
-                </button>
+                  </button>
+                )}
 
                 {/* B. Full Advance */}
-                <button
-                  type="button"
-                  onClick={() => setPaymentOptionType('full')}
-                  className={`p-2 sm:p-2.5 rounded-xl border text-center sm:text-left transition-all cursor-pointer flex flex-col justify-between items-center sm:items-stretch relative ${
-                    paymentOptionType === 'full'
-                      ? 'border-sky-600 dark:border-sky-500 bg-sky-50/70 dark:bg-sky-950/40 ring-2 ring-sky-500/25 shadow-xs'
-                      : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/80 hover:bg-slate-50 dark:hover:bg-slate-800'
-                  }`}
-                >
-                  <div className="flex sm:flex-row flex-col items-center sm:items-start gap-1 sm:gap-2 w-full">
-                    <div className={`w-7 h-7 sm:w-7 sm:h-7 rounded-lg flex items-center justify-center shrink-0 ${
+                {effectiveFullAllowed && (
+                  <button
+                    type="button"
+                    onClick={() => setPaymentOptionType('full')}
+                    className={`p-2 sm:p-2.5 rounded-xl border text-center sm:text-left transition-all cursor-pointer flex flex-col justify-between items-center sm:items-stretch relative ${
                       paymentOptionType === 'full'
-                        ? 'bg-sky-600 text-white'
-                        : 'bg-sky-50 dark:bg-sky-950/50 text-sky-600 dark:text-sky-400'
-                    }`}>
-                      <Wallet className="w-4 h-4" />
+                        ? 'border-sky-600 dark:border-sky-500 bg-sky-50/70 dark:bg-sky-950/40 ring-2 ring-sky-500/25 shadow-xs'
+                        : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/80 hover:bg-slate-50 dark:hover:bg-slate-800'
+                    }`}
+                  >
+                    <div className="flex sm:flex-row flex-col items-center sm:items-start gap-1 sm:gap-2 w-full">
+                      <div className={`w-7 h-7 sm:w-7 sm:h-7 rounded-lg flex items-center justify-center shrink-0 ${
+                        paymentOptionType === 'full'
+                          ? 'bg-sky-600 text-white'
+                          : 'bg-sky-50 dark:bg-sky-950/50 text-sky-600 dark:text-sky-400'
+                      }`}>
+                        <Wallet className="w-4 h-4" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <span className="text-[10px] sm:text-xs font-black text-slate-900 dark:text-white leading-tight block truncate">
+                          {t('সম্পূর্ণ অগ্রিম', 'Full Advance')}
+                        </span>
+                        <p className="hidden sm:block text-[10px] text-slate-500 dark:text-slate-400 truncate mt-0.5">
+                          {t('বিকাশ, নগদ, রকেট', 'bKash, Nagad, Rocket')}
+                        </p>
+                      </div>
                     </div>
-                    <div className="min-w-0 flex-1">
-                      <span className="text-[10px] sm:text-xs font-black text-slate-900 dark:text-white leading-tight block truncate">
-                        {t('সম্পূর্ণ অগ্রিম', 'Full Advance')}
+                    <div className="mt-1 sm:mt-2 flex items-center justify-center sm:justify-between w-full">
+                      <span className="text-[11px] sm:text-xs font-black text-sky-700 dark:text-sky-400">
+                        ৳{finalTotal}
                       </span>
-                      <p className="hidden sm:block text-[10px] text-slate-500 dark:text-slate-400 truncate mt-0.5">
-                        {t('বিকাশ, নগদ, রকেট', 'bKash, Nagad, Rocket')}
-                      </p>
+                      {paymentOptionType === 'full' && (
+                        <CheckCircle className="hidden sm:inline w-3.5 h-3.5 text-sky-600 dark:text-sky-400 shrink-0" />
+                      )}
                     </div>
-                  </div>
-                  <div className="mt-1 sm:mt-2 flex items-center justify-center sm:justify-between w-full">
-                    <span className="text-[11px] sm:text-xs font-black text-sky-700 dark:text-sky-400">
-                      ৳{finalTotal}
-                    </span>
-                    {paymentOptionType === 'full' && (
-                      <CheckCircle className="hidden sm:inline w-3.5 h-3.5 text-sky-600 dark:text-sky-400 shrink-0" />
-                    )}
-                  </div>
-                </button>
+                  </button>
+                )}
 
                 {/* C. Delivery Charge Advance */}
-                <button
-                  type="button"
-                  onClick={() => setPaymentOptionType('delivery_only')}
-                  className={`p-2 sm:p-2.5 rounded-xl border text-center sm:text-left transition-all cursor-pointer flex flex-col justify-between items-center sm:items-stretch relative ${
-                    paymentOptionType === 'delivery_only'
-                      ? 'border-amber-600 dark:border-amber-500 bg-amber-50/70 dark:bg-amber-950/40 ring-2 ring-amber-500/25 shadow-xs'
-                      : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/80 hover:bg-slate-50 dark:hover:bg-slate-800'
-                  }`}
-                >
-                  <div className="flex sm:flex-row flex-col items-center sm:items-start gap-1 sm:gap-2 w-full">
-                    <div className={`w-7 h-7 sm:w-7 sm:h-7 rounded-lg flex items-center justify-center shrink-0 ${
+                {effectiveDeliveryAllowed && (
+                  <button
+                    type="button"
+                    onClick={() => setPaymentOptionType('delivery_only')}
+                    className={`p-2 sm:p-2.5 rounded-xl border text-center sm:text-left transition-all cursor-pointer flex flex-col justify-between items-center sm:items-stretch relative ${
                       paymentOptionType === 'delivery_only'
-                        ? 'bg-amber-600 text-white'
-                        : 'bg-amber-50 dark:bg-amber-950/50 text-amber-600 dark:text-amber-400'
-                    }`}>
-                      <Truck className="w-4 h-4" />
+                        ? 'border-amber-600 dark:border-amber-500 bg-amber-50/70 dark:bg-amber-950/40 ring-2 ring-amber-500/25 shadow-xs'
+                        : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/80 hover:bg-slate-50 dark:hover:bg-slate-800'
+                    }`}
+                  >
+                    <div className="flex sm:flex-row flex-col items-center sm:items-start gap-1 sm:gap-2 w-full">
+                      <div className={`w-7 h-7 sm:w-7 sm:h-7 rounded-lg flex items-center justify-center shrink-0 ${
+                        paymentOptionType === 'delivery_only'
+                          ? 'bg-amber-600 text-white'
+                          : 'bg-amber-50 dark:bg-amber-950/50 text-amber-600 dark:text-amber-400'
+                      }`}>
+                        <Truck className="w-4 h-4" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <span className="text-[10px] sm:text-xs font-black text-slate-900 dark:text-white leading-tight block truncate">
+                          {t('ডেলিভারি চার্জ', 'Delivery Charge')}
+                        </span>
+                        <p className="hidden sm:block text-[10px] text-slate-500 dark:text-slate-400 truncate mt-0.5">
+                          {t('শুধু ডেলিভারি ফি অগ্রিম', 'Advance delivery fee')}
+                        </p>
+                      </div>
                     </div>
-                    <div className="min-w-0 flex-1">
-                      <span className="text-[10px] sm:text-xs font-black text-slate-900 dark:text-white leading-tight block truncate">
-                        {t('ডেলিভারি চার্জ', 'Delivery Charge')}
+                    <div className="mt-1 sm:mt-2 flex items-center justify-center sm:justify-between w-full">
+                      <span className="text-[11px] sm:text-xs font-black text-amber-700 dark:text-amber-400">
+                        ৳{deliveryCharge}
                       </span>
-                      <p className="hidden sm:block text-[10px] text-slate-500 dark:text-slate-400 truncate mt-0.5">
-                        {t('শুধু ডেলিভারি ফি অগ্রিম', 'Advance delivery fee')}
-                      </p>
+                      {paymentOptionType === 'delivery_only' && (
+                        <CheckCircle className="hidden sm:inline w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
+                      )}
                     </div>
-                  </div>
-                  <div className="mt-1 sm:mt-2 flex items-center justify-center sm:justify-between w-full">
-                    <span className="text-[11px] sm:text-xs font-black text-amber-700 dark:text-amber-400">
-                      ৳{deliveryCharge}
-                    </span>
-                    {paymentOptionType === 'delivery_only' && (
-                      <CheckCircle className="hidden sm:inline w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
-                    )}
-                  </div>
-                </button>
+                  </button>
+                )}
               </div>
 
               {/* Mobile Banking & Gateway Box if Full Advance or Delivery Charge is selected */}
@@ -2120,6 +2361,15 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
           )}
         </button>
       </div>
+      {/* Order Restriction Contact Popup Modal for Blocked IP / Duplicate Order / Low Success Rate */}
+      <OrderRestrictionModal
+        isOpen={restrictionModal.isOpen}
+        onClose={() => setRestrictionModal((prev) => ({ ...prev, isOpen: false }))}
+        reason={restrictionModal.reason}
+        customMessage={restrictionModal.customMessage}
+        customerPhone={restrictionModal.customerPhone}
+        siteSettings={siteSettings}
+      />
     </div>
   );
 };

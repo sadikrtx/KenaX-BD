@@ -1,4 +1,4 @@
-import {
+import type {
   Order,
   CustomerRecord,
   StaffUser,
@@ -9,7 +9,7 @@ import {
   TelegramEventType,
   TelegramLog,
 } from '../types/index.ts';
-import { db } from './firebase.ts';
+import { db, isQuotaExceededError, markQuotaExceeded, isQuotaExceededFlag } from './firebase.ts';
 import { doc, getDoc, setDoc, onSnapshot, collection, addDoc, getDocs, query, orderBy, limit } from 'firebase/firestore';
 
 export const DEFAULT_TELEGRAM_TEMPLATES: Record<TelegramEventType, TelegramTemplate> = {
@@ -563,7 +563,7 @@ export async function getTelegramSettingsFromDB(): Promise<TelegramBotSettings> 
 
   // 2. Fetch from Firestore with 3.5s timeout
   try {
-    if (db) {
+    if (db && !isQuotaExceededFlag) {
       const fetchFirestore = async () => {
         const snap = await getDoc(doc(db, 'system_settings', SETTINGS_DOC_ID));
         if (snap.exists()) {
@@ -578,7 +578,7 @@ export async function getTelegramSettingsFromDB(): Promise<TelegramBotSettings> 
       ]);
     }
   } catch (err) {
-    console.warn('[Telegram Settings DB Read Fallback]:', err);
+    if (isQuotaExceededError(err)) markQuotaExceeded(err);
   }
 
   const merged: TelegramBotSettings = {
@@ -627,19 +627,18 @@ export async function saveTelegramSettingsToDB(settings: TelegramBotSettings): P
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ settings: payload }),
-  }).catch((err) => {
-    console.warn('[Telegram Settings Server POST Notice]:', err);
+  }).catch(() => {
     return null;
   });
 
   // 3. Firestore Write with 3.5s safety timeout
   const firestoreSavePromise = (async () => {
-    if (!db) return true;
+    if (!db || isQuotaExceededFlag) return true;
     try {
       await setDoc(doc(db, 'system_settings', SETTINGS_DOC_ID), payload, { merge: true });
       return true;
     } catch (err) {
-      console.warn('[Telegram Settings Firestore Write Warning]:', err);
+      if (isQuotaExceededError(err)) markQuotaExceeded(err);
       return false;
     }
   })();
@@ -662,32 +661,38 @@ export async function saveTelegramSettingsToDB(settings: TelegramBotSettings): P
  */
 export function subscribeToTelegramSettings(callback: (settings: TelegramBotSettings) => void): () => void {
   try {
-    if (db) {
-      const unsub = onSnapshot(doc(db, 'system_settings', SETTINGS_DOC_ID), (snap) => {
-        if (snap.exists()) {
-          const data = snap.data() as Partial<TelegramBotSettings>;
-          const localSettings = getTelegramSettingsSync();
-          const merged: TelegramBotSettings = {
-            ...DEFAULT_TELEGRAM_BOT_SETTINGS,
-            ...localSettings,
-            ...data,
-            customerNotifyStatuses: {
-              ...DEFAULT_TELEGRAM_BOT_SETTINGS.customerNotifyStatuses,
-              ...(localSettings.customerNotifyStatuses || {}),
-              ...(data.customerNotifyStatuses || {}),
-            },
-            templates: {
-              ...DEFAULT_TELEGRAM_TEMPLATES,
-              ...(localSettings.templates || {}),
-              ...(data.templates || {}),
-            },
-          };
-          try {
-            localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(merged));
-          } catch {}
-          callback(merged);
+    if (db && !isQuotaExceededFlag) {
+      const unsub = onSnapshot(
+        doc(db, 'system_settings', SETTINGS_DOC_ID),
+        (snap) => {
+          if (snap.exists()) {
+            const data = snap.data() as Partial<TelegramBotSettings>;
+            const localSettings = getTelegramSettingsSync();
+            const merged: TelegramBotSettings = {
+              ...DEFAULT_TELEGRAM_BOT_SETTINGS,
+              ...localSettings,
+              ...data,
+              customerNotifyStatuses: {
+                ...DEFAULT_TELEGRAM_BOT_SETTINGS.customerNotifyStatuses,
+                ...(localSettings.customerNotifyStatuses || {}),
+                ...(data.customerNotifyStatuses || {}),
+              },
+              templates: {
+                ...DEFAULT_TELEGRAM_TEMPLATES,
+                ...(localSettings.templates || {}),
+                ...(data.templates || {}),
+              },
+            };
+            try {
+              localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(merged));
+            } catch {}
+            callback(merged);
+          }
+        },
+        (err) => {
+          if (isQuotaExceededError(err)) markQuotaExceeded(err);
         }
-      });
+      );
       return unsub;
     }
   } catch {}
@@ -924,11 +929,11 @@ export async function saveTelegramLogToDB(log: Omit<TelegramLog, 'id'>): Promise
 
   // 3. Firestore
   try {
-    if (db) {
+    if (db && !isQuotaExceededFlag) {
       await addDoc(collection(db, 'telegram_logs'), fullLog);
     }
   } catch (err) {
-    console.warn('[Telegram Log Firestore Write Warning]:', err);
+    if (isQuotaExceededError(err)) markQuotaExceeded(err);
   }
 }
 
@@ -949,7 +954,7 @@ export async function getTelegramLogsFromDB(): Promise<TelegramLog[]> {
 
   // 2. Firestore
   try {
-    if (db) {
+    if (db && !isQuotaExceededFlag) {
       const q = query(collection(db, 'telegram_logs'), orderBy('timestamp', 'desc'), limit(50));
       const snap = await getDocs(q);
       if (!snap.empty) {
@@ -957,7 +962,7 @@ export async function getTelegramLogsFromDB(): Promise<TelegramLog[]> {
       }
     }
   } catch (err) {
-    console.warn('[Telegram Logs DB Query Warning]:', err);
+    if (isQuotaExceededError(err)) markQuotaExceeded(err);
   }
 
   // 3. LocalStorage fallback

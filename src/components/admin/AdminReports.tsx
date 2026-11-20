@@ -19,6 +19,14 @@ import {
   ArrowUpRight,
 } from 'lucide-react';
 import { Order, Product, UserRole, ExpenseRecord } from '../../types';
+import { PluginSlotRenderer } from './PluginSlotRenderer';
+import {
+  SaasDonutChart,
+  SaasBarChart,
+  SaasLineAreaChart,
+  SAAS_CHART_COLORS,
+} from './charts/AdminCharts';
+import { computeStoreSalesSummary, isCancelledOrSpamOrder } from '../../utils/salesAnalytics';
 
 interface AdminReportsProps {
   orders: Order[];
@@ -30,6 +38,7 @@ interface AdminReportsProps {
 export const AdminReports: React.FC<AdminReportsProps> = ({
   orders,
   products,
+  currentRole,
   expenses = [],
 }) => {
   const [dateFilter, setDateFilter] = useState<'all' | 'today' | '7d' | '30d' | 'month'>('all');
@@ -59,21 +68,22 @@ export const AdminReports: React.FC<AdminReportsProps> = ({
     return true;
   });
 
-  const validOrders = filteredOrders.filter((o) => o.orderStatus !== 'Cancelled');
-  const cancelledOrders = filteredOrders.filter((o) => o.orderStatus === 'Cancelled');
+  const salesSummary = computeStoreSalesSummary(filteredOrders, products);
+  const validOrders = filteredOrders.filter((o) => !isCancelledOrSpamOrder(o));
+  const cancelledOrders = filteredOrders.filter((o) => isCancelledOrSpamOrder(o));
 
-  // Key Financial Metrics
-  const grossSales = validOrders.reduce((sum, o) => sum + (o.totalAmount || 0), 0);
-  const netProductSales = validOrders.reduce((sum, o) => sum + (o.subtotal || 0), 0);
-  const deliveryCharges = validOrders.reduce((sum, o) => sum + (o.deliveryCharge || 0), 0);
-  const discountsGiven = validOrders.reduce((sum, o) => sum + (o.discountAmount || 0), 0);
-  const averageOrderValue = validOrders.length > 0 ? Math.round(grossSales / validOrders.length) : 0;
+  // Key Financial Metrics (Single Source of Truth — matches Overview & /api/integration/sales-summary)
+  const grossSales = salesSummary.grossSales;
+  const netProductSales = salesSummary.netProductSales;
+  const deliveryCharges = salesSummary.deliveryCollected;
+  const discountsGiven = salesSummary.discountsGiven;
+  const averageOrderValue = salesSummary.averageOrderValue;
   const cancelledRevenueLoss = cancelledOrders.reduce((sum, o) => sum + (o.totalAmount || 0), 0);
 
-  // Paid vs Unpaid Collection
+  // Paid vs Unpaid / Pending COD Collection
   const paidOrders = validOrders.filter((o) => o.paymentStatus === 'Paid');
-  const totalPaidAmount = paidOrders.reduce((sum, o) => sum + (o.totalAmount || 0), 0);
-  const pendingCollectionAmount = grossSales - totalPaidAmount;
+  const totalPaidAmount = salesSummary.totalPaidAmount;
+  const pendingCollectionAmount = salesSummary.pendingCOD;
 
   // Regional breakdown (Dhaka vs Outside Dhaka)
   const dhakaOrders = validOrders.filter((o) => (o.customerDivision || 'dhaka').toLowerCase().includes('dhaka'));
@@ -711,6 +721,14 @@ export const AdminReports: React.FC<AdminReportsProps> = ({
 
   return (
     <div className="space-y-4 sm:space-y-6 pb-12">
+      {/* Extension Slot: Advanced Analytics -> Reports Menu */}
+      <PluginSlotRenderer
+        slot="admin.reports.panel"
+        userRole={currentRole}
+        orders={orders}
+        products={products}
+      />
+
       {/* Header & Controls */}
       <div className="p-4 sm:p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xs flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
         <div>
@@ -723,7 +741,12 @@ export const AdminReports: React.FC<AdminReportsProps> = ({
               </span>
             )}
           </div>
-          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">Real-time breakdown of revenue, courier costs, discounts, and payment gateways</p>
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 flex flex-wrap items-center gap-2">
+            <span>Real-time breakdown of revenue, courier costs, discounts, and payment gateways</span>
+            <span className="text-[11px] font-semibold text-slate-400 dark:text-slate-500">
+              · Last updated: {new Date(salesSummary.calculatedAt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+            </span>
+          </p>
         </div>
 
         {/* Date Filters & Action Buttons */}
@@ -899,6 +922,61 @@ export const AdminReports: React.FC<AdminReportsProps> = ({
             <p className="text-sm sm:text-base font-black text-rose-700 dark:text-rose-400 truncate">৳{cancelledRevenueLoss.toLocaleString()} ({cancelledOrders.length})</p>
           </div>
         </div>
+      </div>
+
+      {/* 2B. Visual Reports: Daily Sales Trend, Top Categories Donut & Collection/Regional Comparison */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-5">
+        <SaasLineAreaChart
+          title="Daily Revenue & Order Trend"
+          subtitle="Grouped by order date"
+          primaryLabel="Sales (৳)"
+          secondaryLabel="Orders"
+          primaryFormat="currency"
+          secondaryFormat="number"
+          primaryColor="#0284C7"
+          secondaryColor="#EA580C"
+          data={(() => {
+            const byDay = new Map<string, { primary: number; secondary: number; sortKey: number }>();
+            validOrders.forEach((o) => {
+              const dt = o.createdAt ? new Date(o.createdAt) : new Date();
+              if (isNaN(dt.getTime())) return;
+              const key = dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+              const cur = byDay.get(key) || { primary: 0, secondary: 0, sortKey: new Date(dt.toDateString()).getTime() };
+              cur.primary += o.totalAmount || 0;
+              cur.secondary += 1;
+              byDay.set(key, cur);
+            });
+            return Array.from(byDay.entries())
+              .sort((a, b) => a[1].sortKey - b[1].sortKey)
+              .slice(-10)
+              .map(([label, v]) => ({ label, primary: v.primary, secondary: v.secondary }));
+          })()}
+        />
+
+        <SaasDonutChart
+          title="Top Categories Revenue Share"
+          subtitle={`${topCategories.length} active categories`}
+          valueFormat="currency"
+          centerLabel="Top Sales"
+          data={topCategories.map((cat, idx) => ({
+            label: cat.name,
+            value: cat.revenue,
+            color: SAAS_CHART_COLORS[idx % SAAS_CHART_COLORS.length],
+          }))}
+        />
+
+        <SaasBarChart
+          title="Collection & Regional Comparison"
+          subtitle="Paid vs Pending COD & Dhaka vs Outside"
+          valueFormat="currency"
+          data={[
+            { label: 'Paid', value: totalPaidAmount, color: '#059669' },
+            { label: 'Pending COD', value: Math.max(0, pendingCollectionAmount), color: '#D97706' },
+            { label: 'Dhaka', value: dhakaSales, color: '#2563EB' },
+            { label: 'Outside Dhaka', value: outsideDhakaSales, color: '#7C3AED' },
+            { label: 'Cancelled', value: cancelledRevenueLoss, color: '#E11D48' },
+          ]}
+        />
       </div>
 
       {/* 3. Detailed Regional & Gateway Breakdown */}

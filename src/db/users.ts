@@ -3,8 +3,7 @@ import { users } from './schema.ts';
 
 export async function getOrCreateUser(uid: string, email: string, name?: string) {
   try {
-    const result = await db
-      .insert(users)
+    const result = await (db.insert(users) as any)
       .values({
         uid,
         email,

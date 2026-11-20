@@ -12,10 +12,13 @@ import {
   Save,
   ShieldAlert,
   Sliders,
+  Lock,
 } from 'lucide-react';
 import { Order, OrderStatus, UserRole, StaffUser, SiteSettings } from '../../types';
 import { ClickableOrderId } from '../common/ClickableOrderId';
 import { AdminCourierFraudChecker } from './AdminCourierFraudChecker';
+import { AdminCourierLogisticsSettings } from './AdminCourierLogisticsSettings';
+import { SaasBarChart, SaasDonutChart, CollapsibleAnalyticsPanel } from './charts/AdminCharts';
 
 interface AdminDeliveryProps {
   orders: Order[];
@@ -39,7 +42,7 @@ export const AdminDelivery: React.FC<AdminDeliveryProps> = ({
   settings,
   onUpdateSettings,
 }) => {
-  const [activeSubTab, setActiveSubTab] = useState<'deliveries' | 'fraud_checker'>('deliveries');
+  const [activeSubTab, setActiveSubTab] = useState<'api_credentials' | 'deliveries' | 'fraud_checker'>('api_credentials');
   const [courierFilter, setCourierFilter] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
@@ -62,6 +65,53 @@ export const AdminDelivery: React.FC<AdminDeliveryProps> = ({
 
     return matchesSearch && matchesCourier;
   });
+
+  const deliveryAnalytics = React.useMemo(() => {
+    const steadfast = orders.filter((o) => o.courierName?.toLowerCase().includes('steadfast')).length;
+    const pathao = orders.filter((o) => o.courierName?.toLowerCase().includes('pathao')).length;
+    const redx = orders.filter((o) => o.courierName?.toLowerCase().includes('redx')).length;
+    const otherAssigned = orders.filter(
+      (o) =>
+        o.courierName &&
+        !o.courierName.toLowerCase().includes('steadfast') &&
+        !o.courierName.toLowerCase().includes('pathao') &&
+        !o.courierName.toLowerCase().includes('redx')
+    ).length;
+    const unassigned = Math.max(0, orders.length - (steadfast + pathao + redx + otherAssigned));
+
+    const partnerSlices = [
+      { id: 'steadfast', label: 'Steadfast Courier', value: steadfast, color: '#0284C7' },
+      { id: 'pathao', label: 'Pathao Courier', value: pathao, color: '#E11D48' },
+      { id: 'redx', label: 'RedX Logistics', value: redx, color: '#D97706' },
+      { id: 'other', label: 'Other Couriers', value: otherAssigned, color: '#7C3AED' },
+      { id: 'all', label: 'Unassigned', value: unassigned, color: '#94A3B8' },
+    ];
+
+    const pipelineBars = [
+      {
+        label: 'Pending/Confirm',
+        value: orders.filter((o) => ['Pending', 'Confirmed', 'Processing', 'Follow Up', 'Ready to Ship'].includes(o.orderStatus)).length,
+        color: '#D97706',
+      },
+      {
+        label: 'In Transit',
+        value: orders.filter((o) => ['Shipped', 'Out for Delivery', 'In Transit'].includes(o.orderStatus)).length,
+        color: '#0284C7',
+      },
+      {
+        label: 'Delivered',
+        value: orders.filter((o) => o.orderStatus === 'Delivered' || o.orderStatus === 'Completed').length,
+        color: '#059669',
+      },
+      {
+        label: 'Return/Cancel',
+        value: orders.filter((o) => ['Returned', 'Cancelled', 'Failed Delivery'].includes(o.orderStatus)).length,
+        color: '#E11D48',
+      },
+    ];
+
+    return { partnerSlices, pipelineBars };
+  }, [orders]);
 
   const getTrackingUrl = (courierName?: string, trackingNumber?: string) => {
     if (!trackingNumber) return '#';
@@ -97,9 +147,25 @@ export const AdminDelivery: React.FC<AdminDeliveryProps> = ({
             <Truck className="w-5 h-5 text-sky-600 dark:text-sky-400" />
             <span>Delivery & Courier Logistics</span>
           </h2>
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+            SteadFast, Pathao, Redx, Carrybee API credentials, delivery zones & consignment tracking
+          </p>
         </div>
 
-        <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl border border-slate-200 dark:border-slate-700 shrink-0">
+        <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl border border-slate-200 dark:border-slate-700 shrink-0 flex-wrap">
+          <button
+            type="button"
+            onClick={() => setActiveSubTab('api_credentials')}
+            className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+              activeSubTab === 'api_credentials'
+                ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs border border-slate-200/80 dark:border-slate-700'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+            }`}
+          >
+            <Lock className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400" />
+            <span>API Credentials & Zones</span>
+          </button>
+
           <button
             type="button"
             onClick={() => setActiveSubTab('deliveries')}
@@ -110,7 +176,7 @@ export const AdminDelivery: React.FC<AdminDeliveryProps> = ({
             }`}
           >
             <Truck className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400" />
-            <span>Parcel Tracking</span>
+            <span>Parcel Tracking ({orders.filter((o) => o.orderStatus === 'Shipped' || o.orderStatus === 'Out for Delivery').length})</span>
           </button>
 
           <button
@@ -143,7 +209,13 @@ export const AdminDelivery: React.FC<AdminDeliveryProps> = ({
         </div>
       )}
 
-      {activeSubTab === 'fraud_checker' ? (
+      {activeSubTab === 'api_credentials' ? (
+        <AdminCourierLogisticsSettings
+          settings={settings || ({} as SiteSettings)}
+          onUpdateSettings={onUpdateSettings}
+          canManageSettings={currentRole === 'super_admin' || currentRole === 'manager' || currentRole === 'admin'}
+        />
+      ) : activeSubTab === 'fraud_checker' ? (
         <AdminCourierFraudChecker
           siteSettings={settings || ({} as SiteSettings)}
           onUpdateSettings={onUpdateSettings}
@@ -185,6 +257,28 @@ export const AdminDelivery: React.FC<AdminDeliveryProps> = ({
           <p className="text-[11px] text-emerald-700 dark:text-emerald-300 mt-0.5">Completed</p>
         </div>
       </div>
+
+      <CollapsibleAnalyticsPanel title="Courier Partner & Parcel Pipeline Analytics" defaultOpen={true}>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <SaasDonutChart
+            title="Courier Partner Share"
+            subtitle="Click a courier slice to filter table"
+            data={deliveryAnalytics.partnerSlices}
+            centerLabel="Orders"
+            onSelectSlice={(item) => {
+              if (item.id === 'steadfast' || item.id === 'pathao' || item.id === 'redx' || item.id === 'all') {
+                setCourierFilter((prev) => (prev === item.id ? 'all' : item.id!));
+              }
+            }}
+          />
+          <SaasBarChart
+            title="Delivery Pipeline Breakdown"
+            subtitle="Order fulfillment & courier stages"
+            data={deliveryAnalytics.pipelineBars}
+            barColor="#0284C7"
+          />
+        </div>
+      </CollapsibleAnalyticsPanel>
 
       {/* Filter & Search */}
       <div className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xs flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">

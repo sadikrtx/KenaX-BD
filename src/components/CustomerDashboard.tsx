@@ -29,6 +29,7 @@ import { Order, DeliveryAddress, Product, CustomerRecord, OrderItem } from '../t
 import { normalizePhoneNumber, fetchCustomerOrdersFromDB, getOrdersFromDB, subscribeToOrders } from '../lib/firebase';
 import { BANGLADESH_LOCATIONS } from '../data/bangladeshData';
 import { CartItemImage } from './CartItemImage';
+import { ClickableOrderId } from './common/ClickableOrderId';
 import { getOptimizedImageUrl, handleImageError } from '../utils/imageOptimizer';
 import {
   cleanBDPhoneNumber,
@@ -631,9 +632,10 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                   {/* Order Top Bar: ID, Date, Status */}
                   <div className="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-slate-100">
                     <div className="flex flex-wrap items-center gap-3">
-                      <span className="font-mono font-bold text-sm text-sky-700 bg-sky-50 px-3 py-1 rounded-lg border border-sky-200/60">
-                        #{order.id}
-                      </span>
+                      <ClickableOrderId
+                        orderId={order.id}
+                        className="font-mono font-bold text-sm text-sky-700 bg-sky-50 px-3 py-1 rounded-lg border border-sky-200/60 cursor-pointer hover:bg-sky-100"
+                      />
                       <span
                         className={`text-xs font-bold px-3 py-1 rounded-full border ${
                           isDelivered

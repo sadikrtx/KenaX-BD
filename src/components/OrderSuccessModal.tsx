@@ -20,6 +20,7 @@ import {
 import { Order } from '../types';
 import { generateAndPrintInvoice } from '../utils/invoiceGenerator';
 import { CartItemImage } from './CartItemImage';
+import { ClickableOrderId } from './common/ClickableOrderId';
 import { useLanguage } from '../context/LanguageContext';
 
 interface OrderSuccessModalProps {
@@ -114,23 +115,13 @@ export const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({
               </div>
             </div>
 
-            {/* Order ID Pill with Copy */}
+            {/* Order ID Pill - Click directly to copy without any separate copy button */}
             <div className="inline-flex items-center gap-1.5 bg-black/40 backdrop-blur-xs px-2.5 py-1 rounded-xl border border-white/20 shrink-0">
               <span className="text-[10px] text-slate-300 font-medium">{t('আইডি:', 'ID:')}</span>
-              <span className="font-mono text-xs sm:text-sm font-black text-amber-300">
-                #{order.id}
-              </span>
-              <button
-                onClick={handleCopyOrderId}
-                className="p-1 rounded hover:bg-white/20 text-white transition-colors cursor-pointer"
-                title={t('অর্ডার আইডি কপি করুন', 'Copy Order ID')}
-              >
-                {copiedId ? (
-                  <Check className="w-3 h-3 text-emerald-300" />
-                ) : (
-                  <Copy className="w-3 h-3 text-slate-300 hover:text-white" />
-                )}
-              </button>
+              <ClickableOrderId
+                orderId={order.id}
+                className="font-mono text-xs sm:text-sm font-black text-amber-300 hover:text-amber-200 cursor-pointer"
+              />
             </div>
           </div>
         </div>

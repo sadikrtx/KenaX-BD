@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   ShieldAlert,
   ShieldCheck,
@@ -23,6 +23,12 @@ import {
 import { SiWhatsapp } from 'react-icons/si';
 import { CourierFraudReport, SiteSettings } from '../../types';
 import { checkCourierFraud, formatAdvanceDeliveryMessage, normalizePhoneForCourier } from '../../lib/courierFraudService';
+import {
+  SaasDonutChart,
+  SaasBarChart,
+  CollapsibleAnalyticsPanel,
+  SAAS_CHART_COLORS,
+} from './charts/AdminCharts';
 
 interface AdminCourierFraudCheckerProps {
   siteSettings?: SiteSettings;
@@ -225,6 +231,33 @@ export const AdminCourierFraudChecker: React.FC<AdminCourierFraudCheckerProps> =
     { label: 'Sample High Return Risk', number: '01987654321' },
   ];
 
+  const fraudAnalytics = useMemo(() => {
+    const reportsSource = recentChecks.length > 0 ? recentChecks : fraudReport ? [fraudReport] : [];
+    const safeCount = reportsSource.filter((r) => r.riskLevel === 'safe').length;
+    const moderateCount = reportsSource.filter((r) => r.riskLevel === 'moderate').length;
+    const highRiskCount = reportsSource.filter((r) => r.riskLevel === 'high_risk').length;
+    const unknownCount = reportsSource.filter((r) => r.riskLevel === 'unknown').length;
+
+    const riskSlices = [
+      { id: 'safe', label: 'Safe Buyers', value: safeCount, color: '#059669' },
+      { id: 'moderate', label: 'Moderate Risk', value: moderateCount, color: '#D97706' },
+      { id: 'high_risk', label: 'High Return Risk', value: highRiskCount, color: '#E11D48' },
+      { id: 'unknown', label: 'New / Unknown', value: unknownCount, color: '#64748B' },
+    ].filter((s) => s.value > 0);
+
+    const screeningBars = reportsSource.slice(0, 8).map((r) => ({
+      id: r.phone,
+      label: r.phone.slice(-6),
+      value: r.deliveredOrders || 0,
+      secondaryValue: r.cancelledOrders || r.returnedOrders || 0,
+      color: '#059669',
+      secondaryColor: '#E11D48',
+      hint: `${r.phone} (${r.successRate}% success)`,
+    }));
+
+    return { riskSlices, screeningBars, count: reportsSource.length };
+  }, [recentChecks, fraudReport]);
+
   return (
     <div className="space-y-5">
       {/* Top Header Card */}
@@ -307,6 +340,38 @@ export const AdminCourierFraudChecker: React.FC<AdminCourierFraudCheckerProps> =
               </p>
             </div>
           </div>
+
+          {/* Courier Risk Screening Analytics */}
+          <CollapsibleAnalyticsPanel
+            title={`Courier Fraud Intelligence Charts (${fraudAnalytics.count} Screened Numbers)`}
+          >
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <SaasDonutChart
+                title="Screened Customer Risk Distribution"
+                subtitle="Safe vs Moderate vs High Return Risk buyers"
+                data={fraudAnalytics.riskSlices}
+                centerLabel="Screened"
+                emptyText="Screen a customer phone number to see risk chart"
+              />
+              <SaasBarChart
+                title="Delivered vs Returned Parcels by Number"
+                subtitle="Click a bar to view that number's courier report"
+                data={fraudAnalytics.screeningBars}
+                primaryLabel="Delivered"
+                secondaryLabel="Returned/Cancelled"
+                barColor="#059669"
+                secondaryColor="#E11D48"
+                emptyText="Run a phone check to compare delivery vs return history"
+                onSelectBar={(bar) => {
+                  const found = recentChecks.find((r) => r.phone === bar.id);
+                  if (found) {
+                    setFraudReport(found);
+                    setPhoneInput(found.phone);
+                  }
+                }}
+              />
+            </div>
+          </CollapsibleAnalyticsPanel>
 
           {/* Search Box Card */}
           <div className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200 shadow-2xs space-y-3">

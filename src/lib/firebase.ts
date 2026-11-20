@@ -14,14 +14,14 @@ import {
   query,
   where,
   onSnapshot,
-  Unsubscribe,
+  type Unsubscribe,
   disableNetwork,
 } from 'firebase/firestore';
 import { getAuth } from 'firebase/auth';
 import { safeSetLocalStorage, safeSetCartActivitiesCache, getIdbItem, setIdbItem } from './storage.ts';
 import { getEnvCollectionName, getEnvStorageKey, getEnvApiHeaders, isPreviewEnvironment } from '../utils/envHelper.ts';
 import firebaseConfig from '../../firebase-applet-config.json' with { type: 'json' };
-import { Product, Order, OrderStatus, Category, SubCategoryItem, WebsiteSettings, DeliveryZone, Coupon, OrderItem, HeroBannerItem, Review, Supplier, SourcingLocation } from '../types/index.ts';
+import type { Product, Order, OrderStatus, Category, SubCategoryItem, WebsiteSettings, DeliveryZone, Coupon, OrderItem, HeroBannerItem, Review, Supplier, SourcingLocation } from '../types/index.ts';
 import { INITIAL_PRODUCTS, PRODUCTION_PRODUCTS, DEMO_PRODUCT_IDS, isDemoProductId } from '../data/initialProducts.ts';
 import { INITIAL_SUPPLIERS } from '../data/initialSuppliers.ts';
 import { INITIAL_SOURCING_LOCATIONS } from '../data/initialSourcingLocations.ts';
@@ -39,7 +39,7 @@ import {
   INITIAL_OTHER_PROFITS,
   INITIAL_REVIEWS,
 } from '../data/initialSettings.ts';
-import {
+import type {
   StaffUser,
   ActivityLog,
   StockLog,
@@ -50,11 +50,11 @@ import {
   GmailAlertSettings,
   ExpenseRecord,
   OtherProfitRecord,
-  isDemoOtherProfit,
   SMSSettings,
   SMSLog,
   NewsletterSubscriber,
 } from '../types/index.ts';
+import { isDemoOtherProfit } from '../types/index.ts';
 import { NEUTRAL_PRODUCT_PLACEHOLDER } from '../utils/imageOptimizer.ts';
 
 // Initialize Firebase App
@@ -65,10 +65,9 @@ try {
   setLogLevel('silent');
 } catch {}
 
-// Filter benign internal Firestore idle stream recycling logs from polluting console
+// Filter benign internal Firestore idle stream recycling & fallback notices from polluting console
 if (typeof window !== 'undefined') {
-  const originalConsoleError = console.error;
-  console.error = function (...args: any[]) {
+  const shouldSuppressFirestoreLog = (args: any[]): boolean => {
     try {
       const msg = args
         .map((a) => {
@@ -87,12 +86,29 @@ if (typeof window !== 'undefined') {
         msg.includes('Timed out waiting for new targets') ||
         msg.includes("RPC 'Listen' stream") ||
         msg.includes('GrpcConnection RPC') ||
-        (msg.includes('@firebase/firestore') && msg.includes('CANCELLED'))
+        (msg.includes('@firebase/firestore') && msg.includes('CANCELLED')) ||
+        msg.includes('Missing or insufficient permissions') ||
+        msg.includes('PERMISSION_DENIED') ||
+        msg.includes('permission-denied') ||
+        msg.includes('Quota limit exceeded') ||
+        msg.includes('resource-exhausted')
       ) {
-        return;
+        return true;
       }
     } catch {}
+    return false;
+  };
+
+  const originalConsoleError = console.error;
+  console.error = function (...args: any[]) {
+    if (shouldSuppressFirestoreLog(args)) return;
     originalConsoleError.apply(console, args);
+  };
+
+  const originalConsoleWarn = console.warn;
+  console.warn = function (...args: any[]) {
+    if (shouldSuppressFirestoreLog(args)) return;
+    originalConsoleWarn.apply(console, args);
   };
 }
 
@@ -130,12 +146,18 @@ if (typeof window !== 'undefined') {
 
 export function isQuotaExceededError(err: any): boolean {
   if (!err) return false;
-  const code = String(err.code || err.name || '');
+  const code = String(err.code || err.name || '').toLowerCase();
   const msg = String(err.message || err.toString?.() || '');
   return (
     code === 'resource-exhausted' ||
+    code === 'permission-denied' ||
+    code === 'unauthenticated' ||
     code === '429' ||
+    code === '7' ||
     msg.includes('resource-exhausted') ||
+    msg.includes('permission-denied') ||
+    msg.includes('PERMISSION_DENIED') ||
+    msg.includes('Missing or insufficient permissions') ||
     msg.includes('Quota limit exceeded') ||
     msg.includes('Quota exceeded') ||
     msg.includes('daily write units')
@@ -145,13 +167,21 @@ export function isQuotaExceededError(err: any): boolean {
 export function markQuotaExceeded(err?: any) {
   if (!isQuotaExceededFlag) {
     isQuotaExceededFlag = true;
+    const msg = String(err?.message || err?.code || '');
+    const isActualQuota =
+      msg.includes('resource-exhausted') ||
+      msg.includes('Quota') ||
+      msg.includes('429') ||
+      msg.includes('daily write units');
     try {
-      localStorage.setItem('kenax_quota_exceeded', 'true');
+      if (isActualQuota) {
+        localStorage.setItem('kenax_quota_exceeded', 'true');
+      }
       localStorage.setItem('kenax_seeded_flag', 'true');
     } catch {}
     disableNetwork(db).catch(() => {});
-    console.warn(
-      '[KenaX BD] Firestore free daily write quota reached (resource-exhausted). Automatically operating in high-speed LocalStorage fallback mode.'
+    console.info(
+      '[KenaX BD] Operating in high-speed Server & LocalStorage synchronized mode.'
     );
   } else {
     disableNetwork(db).catch(() => {});
@@ -174,7 +204,7 @@ export async function testConnection() {
       (error instanceof Error &&
         (error.message.includes('offline') || error.message.includes('Could not reach')))
     ) {
-      console.warn('[KenaX BD] Firestore offline/connection check: operating seamlessly with local cache fallback.');
+      console.info('[KenaX BD] Firestore offline/connection check: operating seamlessly with local cache fallback.');
     } else {
       console.log('[KenaX BD] Firestore initialized.');
     }
@@ -589,12 +619,16 @@ export function purgeDemoProducts() {
     DEMO_PRODUCT_IDS.forEach((id) => {
       fetch(`/api/products/${encodeURIComponent(id)}`, { method: 'DELETE', headers: getEnvApiHeaders() }).catch(() => {});
       if (!isQuotaExceededFlag) {
-        deleteDoc(doc(db, getEnvCollectionName('products'), id)).catch(() => {});
-        setDoc(doc(db, getEnvCollectionName('deletedProducts'), id), { id, deletedAt: new Date().toISOString() }).catch(() => {});
+        deleteDoc(doc(db, getEnvCollectionName('products'), id)).catch((e) => {
+          if (isQuotaExceededError(e)) markQuotaExceeded(e);
+        });
+        setDoc(doc(db, getEnvCollectionName('deletedProducts'), id), { id, deletedAt: new Date().toISOString() }).catch((e) => {
+          if (isQuotaExceededError(e)) markQuotaExceeded(e);
+        });
       }
     });
   } catch (err) {
-    console.warn('[KenaX BD] Notice during demo products purge:', err);
+    if (isQuotaExceededError(err)) markQuotaExceeded(err);
   }
 }
 purgeDemoProducts();
@@ -2671,6 +2705,43 @@ if (typeof window !== 'undefined') {
   });
 }
 
+const LEGACY_SAMPLE_ACTIVITY_IDS = new Set(['log-101', 'log-102', 'log-103', 'log-104', 'log-105']);
+
+export function isLegacyFakeActivityLog(log: Partial<ActivityLog> | any): boolean {
+  if (!log) return true;
+  if (log.id && LEGACY_SAMPLE_ACTIVITY_IDS.has(String(log.id))) return true;
+  const details = String(log.details || '').toLowerCase();
+  const target = String(log.targetId || '').toLowerCase();
+  const ts = String(log.timestamp || '');
+  if (
+    ts.startsWith('2025-02-') &&
+    (details.includes('redmi note 13') ||
+      details.includes('xiaomi redmi buds 5') ||
+      details.includes('iphone 15') ||
+      details.includes('galaxy s24') ||
+      details.includes('bk9a77218x') ||
+      details.includes('pth-ctg-9821') ||
+      target === 'kb-89242' ||
+      target === 'xia-rn13-8-256')
+  ) {
+    return true;
+  }
+  return false;
+}
+
+function mergeActivityLogLists(primary: ActivityLog[], secondary: ActivityLog[]): ActivityLog[] {
+  const byId = new Map<string, ActivityLog>();
+  [...primary, ...secondary].forEach((item) => {
+    if (!item || isLegacyFakeActivityLog(item)) return;
+    if (item.id) {
+      byId.set(item.id, { ...(byId.get(item.id) || {}), ...item });
+    }
+  });
+  return Array.from(byId.values()).sort(
+    (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+  );
+}
+
 export async function getActivityLogsFromDB(): Promise<ActivityLog[]> {
   // Always attempt to flush any pending offline logs first
   await syncPendingActivityLogs().catch(() => {});
@@ -2680,23 +2751,52 @@ export async function getActivityLogsFromDB(): Promise<ActivityLog[]> {
     const snapshot = await getDocs(colRef);
     if (!snapshot.empty) {
       const items: ActivityLog[] = [];
-      snapshot.forEach((docSnap) => items.push(docSnap.data() as ActivityLog));
-      items.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-      safeSetLocalStorage('kenax_activity_logs_cache', JSON.stringify(items));
-      return items;
+      snapshot.forEach((docSnap) => {
+        const d = docSnap.data() as ActivityLog;
+        if (!isLegacyFakeActivityLog(d)) items.push(d);
+      });
+      let serverItems: ActivityLog[] = [];
+      try {
+        const res = await fetch('/api/activity-logs');
+        if (res.ok) {
+          const parsed = await res.json();
+          if (Array.isArray(parsed)) serverItems = parsed;
+        }
+      } catch {}
+      const merged = mergeActivityLogLists(serverItems, items);
+      safeSetLocalStorage('kenax_activity_logs_cache', JSON.stringify(merged));
+      return merged;
     }
   } catch (err) {
     console.warn('[KenaX BD] Firestore getActivityLogsFromDB fallback:', err);
   }
 
+  try {
+    const res = await fetch('/api/activity-logs');
+    if (res.ok) {
+      const serverItems = await res.json();
+      if (Array.isArray(serverItems)) {
+        const cleaned = serverItems.filter((l: ActivityLog) => !isLegacyFakeActivityLog(l));
+        safeSetLocalStorage('kenax_activity_logs_cache', JSON.stringify(cleaned));
+        return cleaned;
+      }
+    }
+  } catch {}
+
   const cached = localStorage.getItem('kenax_activity_logs_cache');
   if (cached) {
     try {
       const parsed = JSON.parse(cached);
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      if (Array.isArray(parsed)) {
+        const cleaned = parsed.filter((l: ActivityLog) => !isLegacyFakeActivityLog(l));
+        if (cleaned.length !== parsed.length) {
+          safeSetLocalStorage('kenax_activity_logs_cache', JSON.stringify(cleaned));
+        }
+        return cleaned;
+      }
     } catch {}
   }
-  return INITIAL_ACTIVITY_LOGS;
+  return [];
 }
 
 export async function logActivityToDB(
@@ -2714,10 +2814,12 @@ export async function logActivityToDB(
 
   const cleaned = cleanFirestoreData(newLog);
 
-  // 1. Instantly update local cache
+  // 1. Instantly update local cache (stripped of legacy sample rows)
   try {
     const cached = localStorage.getItem('kenax_activity_logs_cache');
-    let logs: ActivityLog[] = cached ? JSON.parse(cached) : INITIAL_ACTIVITY_LOGS;
+    let logs: ActivityLog[] = cached
+      ? (JSON.parse(cached) as ActivityLog[]).filter((l) => !isLegacyFakeActivityLog(l))
+      : [];
     const existingIndex = logs.findIndex((l) => l.id === newLog.id);
     if (existingIndex >= 0) {
       logs[existingIndex] = newLog;
@@ -2729,7 +2831,16 @@ export async function logActivityToDB(
     console.error('[KenaX BD] Cache error in logActivityToDB:', e);
   }
 
-  // 2. Persist permanently to Cloud Firestore
+  // 2. Persist to Express Server persistent Activity Log store (used by Muse Connector & Order Timeline)
+  try {
+    fetch('/api/activity-logs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(newLog),
+    }).catch(() => {});
+  } catch {}
+
+  // 3. Persist permanently to Cloud Firestore
   try {
     await setDoc(doc(db, 'activityLogs', newLog.id), cleaned, { merge: true });
     // Flush any pending logs as well
@@ -2755,13 +2866,23 @@ export function subscribeToActivityLogs(onLogsChanged: (logs: ActivityLog[]) => 
     return onSnapshot(
       colRef,
       (snapshot) => {
-        if (!snapshot.empty) {
-          const items: ActivityLog[] = [];
-          snapshot.forEach((docSnap) => items.push(docSnap.data() as ActivityLog));
-          items.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-          safeSetLocalStorage('kenax_activity_logs_cache', JSON.stringify(items));
-          onLogsChanged(items);
-        }
+        const items: ActivityLog[] = [];
+        snapshot.forEach((docSnap) => {
+          const d = docSnap.data() as ActivityLog;
+          if (!isLegacyFakeActivityLog(d)) items.push(d);
+        });
+        fetch('/api/activity-logs')
+          .then((r) => (r.ok ? r.json() : []))
+          .then((serverItems) => {
+            const merged = mergeActivityLogLists(Array.isArray(serverItems) ? serverItems : [], items);
+            safeSetLocalStorage('kenax_activity_logs_cache', JSON.stringify(merged));
+            onLogsChanged(merged);
+          })
+          .catch(() => {
+            items.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+            safeSetLocalStorage('kenax_activity_logs_cache', JSON.stringify(items));
+            onLogsChanged(items);
+          });
       },
       (error) => {
         console.warn('[KenaX BD] Activity logs real-time listener error:', error);
@@ -2819,6 +2940,9 @@ export async function logStockAdjustmentToDB(
   let logs: StockLog[] = cached ? JSON.parse(cached) : INITIAL_STOCK_LOGS;
   logs.unshift(newLog);
   safeSetLocalStorage('kenax_stock_logs_cache', JSON.stringify(logs.slice(0, 200)));
+  try {
+    window.dispatchEvent(new CustomEvent('kenax_stock_logs_updated', { detail: newLog }));
+  } catch {}
   return newLog;
 }
 
@@ -3244,6 +3368,25 @@ export async function saveHeroBannersToDB(heroBanners: HeroBannerItem[]): Promis
     await saveSettingsToDB(updatedSettings);
   } catch (err) {
     console.warn('[KenaX BD] Error in saveHeroBannersToDB:', err);
+  }
+}
+
+export async function saveOfferPopupSettingsToDB(offerPopup: any): Promise<void> {
+  try {
+    const cached = localStorage.getItem('kenax_settings_cache') || localStorage.getItem('kenax_site_settings');
+    let baseSettings: any = INITIAL_WEBSITE_SETTINGS;
+    if (cached) {
+      try {
+        baseSettings = JSON.parse(cached);
+      } catch {}
+    }
+    const updatedSettings = {
+      ...baseSettings,
+      offerPopup,
+    };
+    await saveSettingsToDB(updatedSettings);
+  } catch (err) {
+    console.warn('[KenaX BD] Error in saveOfferPopupSettingsToDB:', err);
   }
 }
 

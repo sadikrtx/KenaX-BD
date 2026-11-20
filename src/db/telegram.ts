@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { getFirestore, doc, setDoc, getDoc, collection, addDoc, getDocs, query, orderBy, limit } from 'firebase/firestore';
 import { initializeApp, getApps, getApp } from 'firebase/app';
-import { TelegramBotSettings, TelegramLog } from '../types/index.ts';
+import type { TelegramBotSettings, TelegramLog } from '../types/index.ts';
 import { DEFAULT_TELEGRAM_BOT_SETTINGS, DEFAULT_TELEGRAM_TEMPLATES } from '../lib/telegramBotService.ts';
 
 const SERVER_STORE_DIR = path.join(process.cwd(), 'data');
@@ -21,13 +21,33 @@ function getFirebaseConfig() {
 
 const firebaseConfig = getFirebaseConfig();
 let db: any = null;
+let telegramFirestoreUnavailable = false;
+
+function isTelegramFirestoreError(err: any): boolean {
+  if (!err) return false;
+  const code = String(err.code || err.name || '').toLowerCase();
+  const msg = String(err.message || err.toString?.() || '');
+  return (
+    code === 'permission-denied' ||
+    code === 'unauthenticated' ||
+    code === 'resource-exhausted' ||
+    code === '7' ||
+    code === '429' ||
+    msg.includes('PERMISSION_DENIED') ||
+    msg.includes('permission-denied') ||
+    msg.includes('Missing or insufficient permissions') ||
+    msg.includes('Quota limit exceeded') ||
+    msg.includes('resource-exhausted')
+  );
+}
+
 if (firebaseConfig) {
   try {
     const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
     const dbId = (firebaseConfig as { firestoreDatabaseId?: string }).firestoreDatabaseId;
     db = dbId ? getFirestore(app, dbId) : getFirestore(app);
-  } catch (err) {
-    console.warn('[Telegram DB] Failed to init firestore in telegram.ts:', err);
+  } catch {
+    telegramFirestoreUnavailable = true;
   }
 }
 
@@ -50,19 +70,29 @@ export async function getServerTelegramSettings(): Promise<TelegramBotSettings> 
       const raw = fs.readFileSync(TELEGRAM_SETTINGS_FILE, 'utf-8');
       diskSettings = JSON.parse(raw);
     } catch (e) {
-      console.warn('[Telegram Server Disk Read Error]:', e);
+      console.info('[Telegram Server Disk Read Fallback]:', e);
     }
   }
 
-  // 2. Read from Firestore if available
+  // 2. Read from Firestore if available and client is online
   let firestoreSettings: Partial<TelegramBotSettings> | null = null;
-  try {
-    const snap = await getDoc(doc(db, 'system_settings', 'telegram_bot_settings'));
-    if (snap.exists()) {
-      firestoreSettings = snap.data() as Partial<TelegramBotSettings>;
+  if (db && !telegramFirestoreUnavailable) {
+    try {
+      // Use a fast timeout to prevent blocking when client is offline or network is disconnected
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Firestore read timeout')), 1200)
+      );
+      const readPromise = getDoc(doc(db, 'system_settings', 'telegram_bot_settings'));
+      const snap: any = await Promise.race([readPromise, timeoutPromise]);
+      if (snap && typeof snap.exists === 'function' && snap.exists()) {
+        firestoreSettings = snap.data() as Partial<TelegramBotSettings>;
+      }
+    } catch (err: any) {
+      if (isTelegramFirestoreError(err)) {
+        telegramFirestoreUnavailable = true;
+      }
+      // Graceful offline fallback: silently fall back to local disk persistence
     }
-  } catch (err) {
-    console.warn('[Telegram Server Firestore Read Warning]:', err);
   }
 
   // 3. Merge hierarchy: DEFAULT -> Firestore -> Disk (Disk takes highest precedence for server persistence)
@@ -107,14 +137,18 @@ export async function saveServerTelegramSettings(settings: TelegramBotSettings):
   try {
     fs.writeFileSync(TELEGRAM_SETTINGS_FILE, JSON.stringify(dataToSave, null, 2), 'utf-8');
   } catch (err) {
-    console.error('[Telegram Server Disk Write Error]:', err);
+    console.info('[Telegram Server Disk Write Fallback]:', err);
   }
 
-  // 2. Write to Firestore in background / async
-  try {
-    await setDoc(doc(db, 'system_settings', 'telegram_bot_settings'), dataToSave, { merge: true });
-  } catch (err) {
-    console.warn('[Telegram Server Firestore Write Warning]:', err);
+  // 2. Write to Firestore in background / async if db is available
+  if (db && !telegramFirestoreUnavailable) {
+    try {
+      setDoc(doc(db, 'system_settings', 'telegram_bot_settings'), dataToSave, { merge: true }).catch((err) => {
+        if (isTelegramFirestoreError(err)) {
+          telegramFirestoreUnavailable = true;
+        }
+      });
+    } catch {}
   }
 
   return true;
@@ -198,10 +232,16 @@ export async function saveServerTelegramLog(log: Omit<TelegramLog, 'id'> & { id?
     const updated = [fullLog, ...existing].slice(0, 150);
     fs.writeFileSync(TELEGRAM_LOGS_FILE, JSON.stringify(updated, null, 2), 'utf-8');
   } catch (err) {
-    console.warn('[Telegram Log Disk Save Warning]:', err);
+    console.info('[Telegram Log Disk Save Fallback]:', err);
   }
 
-  try {
-    await addDoc(collection(db, 'telegram_logs'), fullLog);
-  } catch {}
+  if (db && !telegramFirestoreUnavailable) {
+    try {
+      await addDoc(collection(db, 'telegram_logs'), fullLog);
+    } catch (err: any) {
+      if (isTelegramFirestoreError(err)) {
+        telegramFirestoreUnavailable = true;
+      }
+    }
+  }
 }

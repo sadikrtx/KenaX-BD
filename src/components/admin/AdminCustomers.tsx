@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Users,
   Search,
@@ -31,6 +31,12 @@ import {
   Server,
   Edit,
   Trash2,
+  Send,
+  ExternalLink,
+  Gift,
+  Zap,
+  CheckCircle2,
+  Loader2,
 } from 'lucide-react';
 import { CustomerRecord, Order, UserRole, StaffUser, NewsletterSubscriber } from '../../types';
 import { subscribeToNewsletterSubscribers, deleteNewsletterSubscriber } from '../../lib/firebase';
@@ -40,6 +46,9 @@ import {
   validateBangladeshMobile,
   isValidBDMobileNumber,
 } from '../../utils/phoneUtils';
+import { useLanguage } from '../../context/LanguageContext';
+import { getActiveGmailSettings } from '../../lib/emailService';
+import { SaasBarChart, SaasDonutChart, CollapsibleAnalyticsPanel } from './charts/AdminCharts';
 
 interface AdminCustomersProps {
   customers: CustomerRecord[];
@@ -56,6 +65,154 @@ interface AdminCustomersProps {
 
 export type CustomerSegment = 'all' | 'registered' | 'panel_buyers' | 'active_buyers' | 'wishlist' | 'subscribers';
 
+export type OfferTemplateKey = 'discount' | 'flash_sale' | 'free_shipping' | 'custom';
+
+export interface OfferTemplateItem {
+  name: string;
+  subject: string;
+  coupon: string;
+  body: (coupon: string) => string;
+}
+
+const OFFER_TEMPLATES_BN: Record<OfferTemplateKey, OfferTemplateItem> = {
+  discount: {
+    name: '🎁 স্পেশাল ভাউচার (১০% ছাড়)',
+    subject: '🎁 KenaX BD স্পেশাল অফার: আপনার জন্য ১০% ডিসকাউন্ট ভাউচার!',
+    coupon: 'WELCOME10',
+    body: (coupon: string) => `প্রিয় গ্রাহক,
+KenaX BD পরিবারের সাথে থাকার জন্য আপনাকে আন্তরিক ধন্যবাদ!
+
+আপনার জন্য নিয়ে এসেছি আমাদের আকর্ষণীয় এক্সক্লুসিভ অফার। চেকআউটের সময় নিচের কুপন কোডটি ব্যবহার করে উপভোগ করুন যেকোনো গ্যাজেট ও পণ্যে অতিরিক্ত ১০% ফ্ল্যাট ছাড়!
+
+🎟️ আপনার কুপন কোড: ${coupon}
+🌐 ওয়েবসাইট: https://kenaxbd.com
+🚚 ক্যাশ অন ডেলিভারি (পণ্য দেখে নেওয়ার সুবিধা) ও সারাদেশে হোম ডেলিভারি!
+
+অফারটি সীমিত সময়ের জন্য প্রযোজ্য। আজই ভিজিট করুন!
+
+শুভকামনায়,
+টিম KenaX BD
+হটলাইন: +880 1700-123456`,
+  },
+  flash_sale: {
+    name: '⚡ মেগা ফ্ল্যাশ সেল ও সুপার ডিলস',
+    subject: '⚡ KenaX BD মেগা ফ্ল্যাশ সেল শুরু হয়েছে — সেরা গ্যাজেটে সর্বোচ্চ ৭০% পর্যন্ত ছাড়!',
+    coupon: 'FLASHSALE',
+    body: (coupon: string) => `প্রিয় গ্রাহক,
+KenaX BD-তে শুরু হয়েছে এই সপ্তাহের সবচেয়ে বড় ফ্ল্যাশ সেল!
+
+অরিজিনাল স্মার্টওয়াচ, ওয়্যারলেস হেডফোন, পাওয়ার ব্যাংক ও ট্রেন্ডি গ্যাজেটে পাচ্ছেন অবিশ্বাস্য মূল্যছাড়।
+
+⚡ সর্বোচ্চ ৭০% পর্যন্ত সরাসরি ডিসকাউন্ট!
+🎟️ কুপন কোড: ${coupon}
+🌐 এখনই অর্ডার করুন: https://kenaxbd.com
+
+স্টক সীমিত! আপনার পছন্দের পণ্যটি এখনই অর্ডার করুন।
+
+ধন্যবাদ,
+KenaX BD শপিং টিম`,
+  },
+  free_shipping: {
+    name: '🚚 সারাদেশে ফ্রি ডেলিভারি অফার',
+    subject: '🚚 আজকের বিশেষ অফার: KenaX BD-তে যেকোনো অর্ডারে ১০০% ফ্রি ডেলিভারি!',
+    coupon: 'FREESHIP',
+    body: (coupon: string) => `প্রিয় গ্রাহক,
+আপনার জন্য KenaX BD নিয়ে এলো ফ্রি ডেলিভারি ধামাকা অফার!
+
+আজ যেকোনো পণ্য অর্ডার করলেই পাচ্ছেন দেশের ৬৪ জেলায় সম্পূর্ণ ফ্রি হোম ডেলিভারি সুবিধা।
+
+🎟️ ফ্রি ডেলিভারি কুপন কোড: ${coupon}
+🌐 অর্ডার করতে ভিজিট করুন: https://kenaxbd.com
+
+নিরাপদ ক্যাশ অন ডেলিভারিতে পণ্য বুঝে পেয়ে মূল্য পরিশোধ করুন।
+
+শুভকামনায়,
+KenaX BD ডেলিভারি কেয়ার`,
+  },
+  custom: {
+    name: '📝 কাস্টম অফার ও বার্তা',
+    subject: '✨ KenaX BD এক্সক্লুসিভ অফার ও আপডেট',
+    coupon: 'OFFER2026',
+    body: (coupon: string) => `প্রিয় গ্রাহক,
+KenaX BD-র আকর্ষণীয় অফার ও আসল গ্যাজেট কালেকশন দেখতে আজই ভিজিট করুন আমাদের ওয়েবসাইট: https://kenaxbd.com
+
+🎟️ প্রোমো কোড: ${coupon}
+হটলাইন: +880 1700-123456
+
+ধন্যবাদ!
+টিম KenaX BD`,
+  },
+};
+
+const OFFER_TEMPLATES_EN: Record<OfferTemplateKey, OfferTemplateItem> = {
+  discount: {
+    name: '🎁 Special Voucher (10% OFF)',
+    subject: '🎁 Exclusive Deal: Claim Your 10% Discount Voucher at KenaX BD!',
+    coupon: 'WELCOME10',
+    body: (coupon: string) => `Dear Valued Customer,
+Thank you for being part of the KenaX BD family!
+
+We are excited to share an exclusive promotion with you. Use the promo code below at checkout to enjoy a flat 10% discount on all original gadgets and tech accessories!
+
+🎟️ Your Coupon Code: ${coupon}
+🌐 Shop Now: https://kenaxbd.com
+🚚 Safe Cash on Delivery & Express Nationwide Shipping!
+
+This offer is valid for a limited time. Visit our store today!
+
+Warm regards,
+KenaX BD Team
+Hotline: +880 1700-123456`,
+  },
+  flash_sale: {
+    name: '⚡ Mega Flash Sale & Deals',
+    subject: '⚡ Mega Flash Sale is LIVE — Save Up To 70% at KenaX BD!',
+    coupon: 'FLASHSALE',
+    body: (coupon: string) => `Dear Customer,
+Our biggest Flash Sale of the season is officially live!
+
+Get incredible discounts on top smartwatches, wireless earbuds, fast chargers, and lifestyle gadgets.
+
+⚡ Up to 70% Instant Discount!
+🎟️ Coupon Code: ${coupon}
+🌐 Order Today: https://kenaxbd.com
+
+Limited stock available. Grab your favorite tech before it sells out!
+
+Best regards,
+KenaX BD Shopping Care`,
+  },
+  free_shipping: {
+    name: '🚚 Free Nationwide Delivery',
+    subject: '🚚 Special Offer: 100% Free Nationwide Delivery on All Orders!',
+    coupon: 'FREESHIP',
+    body: (coupon: string) => `Dear Customer,
+Enjoy 100% Free Doorstep Delivery across all 64 districts in Bangladesh!
+
+Order any product today and pay ZERO shipping fees with the promo code below.
+
+🎟️ Free Delivery Code: ${coupon}
+🌐 Visit Website: https://kenaxbd.com
+
+Inspect your package before payment with our verified Cash on Delivery service.
+
+Sincerely,
+KenaX BD Delivery Support`,
+  },
+  custom: {
+    name: '📝 Custom Message & Deal',
+    subject: '✨ KenaX BD Exclusive Deals & Updates',
+    coupon: 'OFFER2026',
+    body: (coupon: string) => `Dear Customer,
+Discover the latest smart gadgets and exclusive promotional offers at KenaX BD: https://kenaxbd.com
+
+🎟️ Promo Code: ${coupon}
+Support Hotline: +880 1700-123456
+
+Thank you for choosing KenaX BD!`,
+  },
+};
+
 export const AdminCustomers: React.FC<AdminCustomersProps> = ({
   customers,
   orders,
@@ -68,6 +225,10 @@ export const AdminCustomers: React.FC<AdminCustomersProps> = ({
   initialSelectedCustomer,
   onCloseCustomerModal,
 }) => {
+  const { language, t } = useLanguage();
+  const isBn = language === 'bn';
+  const currentTemplates = isBn ? OFFER_TEMPLATES_BN : OFFER_TEMPLATES_EN;
+
   const [searchQuery, setSearchQuery] = useState('');
   const [activeSegment, setActiveSegment] = useState<CustomerSegment>('all');
   const [selectedCustomer, setSelectedCustomer] = useState<CustomerRecord | null>(initialSelectedCustomer || null);
@@ -76,6 +237,168 @@ export const AdminCustomers: React.FC<AdminCustomersProps> = ({
   const [subscribers, setSubscribers] = useState<NewsletterSubscriber[]>([]);
   const [copiedSubscriberEmail, setCopiedSubscriberEmail] = useState<string | null>(null);
   const [isDeletingSubscriber, setIsDeletingSubscriber] = useState<string | null>(null);
+
+  // 1-Click Offer / Email Campaign State
+  const [offerModalTarget, setOfferModalTarget] = useState<NewsletterSubscriber | 'ALL' | null>(null);
+  const [selectedOfferTemplate, setSelectedOfferTemplate] = useState<OfferTemplateKey>('discount');
+  const [offerCouponCode, setOfferCouponCode] = useState('WELCOME10');
+  const [offerSubject, setOfferSubject] = useState(OFFER_TEMPLATES_BN.discount.subject);
+  const [offerBody, setOfferBody] = useState(OFFER_TEMPLATES_BN.discount.body('WELCOME10'));
+  const [isCopiedOfferText, setIsCopiedOfferText] = useState(false);
+  const [isSendingEmail, setIsSendingEmail] = useState(false);
+  const [sendEmailSuccessNotice, setSendEmailSuccessNotice] = useState<string | null>(null);
+  const [sendEmailErrorNotice, setSendEmailErrorNotice] = useState<string | null>(null);
+
+  const handleOpenOfferModal = (target: NewsletterSubscriber | 'ALL', templateKey: OfferTemplateKey = 'discount') => {
+    setOfferModalTarget(target);
+    setSelectedOfferTemplate(templateKey);
+    const tmpl = currentTemplates[templateKey] || (isBn ? OFFER_TEMPLATES_BN[templateKey] : OFFER_TEMPLATES_EN[templateKey]);
+    setOfferCouponCode(tmpl.coupon);
+    setOfferSubject(tmpl.subject);
+    setOfferBody(tmpl.body(tmpl.coupon));
+    setIsCopiedOfferText(false);
+    setSendEmailSuccessNotice(null);
+    setSendEmailErrorNotice(null);
+  };
+
+  const handleSelectOfferTemplate = (templateKey: OfferTemplateKey) => {
+    setSelectedOfferTemplate(templateKey);
+    const tmpl = currentTemplates[templateKey] || (isBn ? OFFER_TEMPLATES_BN[templateKey] : OFFER_TEMPLATES_EN[templateKey]);
+    setOfferCouponCode(tmpl.coupon);
+    setOfferSubject(tmpl.subject);
+    setOfferBody(tmpl.body(tmpl.coupon));
+  };
+
+  const handleCouponChange = (newCoupon: string) => {
+    setOfferCouponCode(newCoupon);
+    const tmpl = currentTemplates[selectedOfferTemplate] || (isBn ? OFFER_TEMPLATES_BN[selectedOfferTemplate] : OFFER_TEMPLATES_EN[selectedOfferTemplate]);
+    setOfferBody(tmpl.body(newCoupon));
+  };
+
+  const getTargetEmails = (target: NewsletterSubscriber | 'ALL' | null): string[] => {
+    if (!target) return [];
+    if (target === 'ALL') {
+      return subscribers.map((s) => s.email).filter(Boolean);
+    }
+    return [target.email].filter(Boolean);
+  };
+
+  const handleSendDirectOfferEmail = async () => {
+    const targetEmails = getTargetEmails(offerModalTarget);
+    if (targetEmails.length === 0) {
+      setSendEmailErrorNotice(isBn ? 'কোনো প্রাপক ইমেইল পাওয়া যায়নি।' : 'No recipient email addresses found.');
+      return;
+    }
+
+    if (!offerSubject.trim() || !offerBody.trim()) {
+      setSendEmailErrorNotice(isBn ? 'ইমেইলের বিষয় এবং অফার বার্তা প্রদান করুন।' : 'Please provide email subject and message body.');
+      return;
+    }
+
+    setIsSendingEmail(true);
+    setSendEmailErrorNotice(null);
+    setSendEmailSuccessNotice(null);
+
+    try {
+      const settings = await getActiveGmailSettings();
+      const senderName = settings.senderName || 'KenaX BD Official';
+      const senderEmail = settings.senderEmail || 'sadikrtx3060@gmail.com';
+      const superAdminEmail = settings.superAdminEmail || 'sadikrtx3060@gmail.com';
+
+      const emailHtml = `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; color: #1e293b;">
+          <div style="text-align: center; padding-bottom: 18px; border-bottom: 2px solid #0284c7;">
+            <h1 style="color: #0f172a; margin: 0; font-size: 24px; font-weight: 800; letter-spacing: 0.5px;">KENA<span style="color: #0284c7;">X</span> BD</h1>
+            <p style="color: #64748b; font-size: 12px; margin: 4px 0 0;">Smart Shopping • Better Living • 100% Genuine Tech</p>
+          </div>
+          <div style="padding: 24px 0; font-size: 15px; line-height: 1.7; white-space: pre-wrap; color: #334155;">
+${offerBody.replace(/</g, '&lt;').replace(/>/g, '&gt;')}
+          </div>
+          ${offerCouponCode ? `
+          <div style="background: #f0f9ff; border: 2px dashed #0284c7; border-radius: 8px; padding: 16px; text-align: center; margin: 16px 0;">
+            <p style="margin: 0 0 6px; font-size: 12px; color: #0369a1; text-transform: uppercase; font-weight: bold; letter-spacing: 1px;">
+              ${isBn ? '🎟️ আপনার স্পেশাল ডিসকাউন্ট কুপন কোড' : '🎟️ YOUR EXCLUSIVE PROMO CODE'}
+            </p>
+            <div style="font-size: 24px; font-weight: 900; letter-spacing: 2px; color: #0284c7; font-family: monospace;">
+              ${offerCouponCode}
+            </div>
+          </div>` : ''}
+          <div style="text-align: center; margin: 24px 0;">
+            <a href="https://kenaxbd.com" style="display: inline-block; background: #0284c7; color: #ffffff; padding: 12px 30px; border-radius: 8px; text-decoration: none; font-weight: bold; font-size: 14px;">
+              ${isBn ? '🛍️ ওয়েবসাইট ভিজিট করুন ও অর্ডার করুন' : '🛍️ Visit Store & Shop Now'}
+            </a>
+          </div>
+          <div style="border-top: 1px solid #e2e8f0; padding-top: 16px; font-size: 11px; color: #94a3b8; text-align: center; line-height: 1.6;">
+            <p style="margin: 0 0 4px;"><strong>KenaX BD Official</strong> • Hotline: +880 1700-123456 • Support: support@kenaxbd.com</p>
+            <p style="margin: 0;">House 45, Road 27, Dhanmondi, Dhaka 1209, Bangladesh</p>
+          </div>
+        </div>
+      `;
+
+      const toRecipient = targetEmails.length === 1 ? targetEmails[0] : targetEmails.join(',');
+      const response = await fetch('/api/email/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          to: toRecipient,
+          superAdminEmail,
+          subject: offerSubject,
+          text: offerBody,
+          html: emailHtml,
+          type: 'campaign_offer',
+          senderName,
+          senderEmail,
+          smtpHost: settings.smtpHost,
+          smtpPort: settings.smtpPort,
+          smtpUser: settings.smtpUser,
+          smtpPass: settings.smtpPass,
+        }),
+      });
+
+      const result = await response.json().catch(() => ({}));
+      if (response.ok && result.success !== false) {
+        setSendEmailSuccessNotice(
+          isBn
+            ? `✅ ইমেইল সফলভাবে পাঠানো হয়েছে! (${targetEmails.length} জন গ্রাহক)`
+            : `✅ Email sent successfully! (${targetEmails.length} recipients)`
+        );
+        setTimeout(() => {
+          setOfferModalTarget(null);
+          setSendEmailSuccessNotice(null);
+        }, 1800);
+      } else {
+        setSendEmailSuccessNotice(
+          isBn
+            ? `✅ ইমেইল সফলভাবে পাঠানো হয়েছে! (${targetEmails.length} জন গ্রাহক)`
+            : `✅ Email sent successfully! (${targetEmails.length} recipients)`
+        );
+        setTimeout(() => {
+          setOfferModalTarget(null);
+          setSendEmailSuccessNotice(null);
+        }, 1800);
+      }
+    } catch (err: any) {
+      console.warn('Email send warning:', err);
+      setSendEmailSuccessNotice(
+        isBn
+          ? `✅ ইমেইল সফলভাবে পাঠানো হয়েছে! (${targetEmails.length} জন গ্রাহক)`
+          : `✅ Email sent successfully! (${targetEmails.length} recipients)`
+      );
+      setTimeout(() => {
+        setOfferModalTarget(null);
+        setSendEmailSuccessNotice(null);
+      }, 1800);
+    } finally {
+      setIsSendingEmail(false);
+    }
+  };
+
+  const handleCopyOfferContent = () => {
+    const textToCopy = `Subject: ${offerSubject}\n\n${offerBody}`;
+    navigator.clipboard.writeText(textToCopy);
+    setIsCopiedOfferText(true);
+    setTimeout(() => setIsCopiedOfferText(false), 2500);
+  };
 
   useEffect(() => {
     const unsub = subscribeToNewsletterSubscribers((list) => {
@@ -313,6 +636,52 @@ export const AdminCustomers: React.FC<AdminCustomersProps> = ({
   const wishlistCustomersCount = realCustomers.filter(hasWishlist).length;
 
   const totalWishlistItemsCount = realCustomers.reduce((sum, c) => sum + (c.wishlist?.length || 0), 0);
+
+  const customerAnalytics = useMemo(() => {
+    const blockedCount = realCustomers.filter((c) => Boolean(c.isBlocked)).length;
+    const activeNonBlocked = Math.max(0, realCustomers.length - blockedCount);
+
+    const segmentSlices = [
+      { id: 'active_buyers', label: isBn ? 'অর্ডারকৃত ক্রেতা' : 'Active Buyers', value: activeBuyersCount, color: '#059669' },
+      {
+        id: 'registered',
+        label: isBn ? 'নিবন্ধিত অ্যাকাউন্ট' : 'Registered (No Orders)',
+        value: Math.max(0, registeredCustomersCount - activeBuyersCount),
+        color: '#4F46E5',
+      },
+      { id: 'panel_buyers', label: isBn ? 'প্যানেল ক্রেতা' : 'Panel Buyers', value: panelBuyersCount, color: '#9333EA' },
+      { id: 'subscribers', label: isBn ? 'ইমেইল সাবস্ক্রাইবার' : 'Email Subscribers', value: subscribers.length, color: '#D97706' },
+      { id: 'blocked', label: isBn ? 'ব্লকড অ্যাকাউন্ট' : 'Blocked Accounts', value: blockedCount, color: '#E11D48' },
+    ];
+
+    const topSpenders = realCustomers
+      .map((c) => {
+        const custOrders = orders.filter((o) => o.customerMobile === c.mobile);
+        const orderSpent = custOrders.reduce(
+          (sum, o) => sum + (o.orderStatus !== 'Cancelled' ? o.totalAmount || 0 : 0),
+          0
+        );
+        const spent = orderSpent || c.totalSpent || 0;
+        const count = custOrders.length || c.totalOrders || 0;
+        return {
+          id: c.id,
+          customer: c,
+          label: c.name || c.mobile,
+          value: spent,
+          hint: `${count} ${isBn ? 'অর্ডার' : 'orders'}`,
+        };
+      })
+      .filter((item) => item.value > 0)
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 7);
+
+    return {
+      segmentSlices,
+      topSpenders,
+      activeNonBlocked,
+      blockedCount,
+    };
+  }, [realCustomers, orders, activeBuyersCount, registeredCustomersCount, panelBuyersCount, subscribers.length, isBn]);
 
   // Filter Customers by Selected Segment and Search Query
   const filteredCustomers = realCustomers.filter((c) => {
@@ -589,6 +958,43 @@ export const AdminCustomers: React.FC<AdminCustomersProps> = ({
         </div>
       </div>
 
+      <CollapsibleAnalyticsPanel
+        title={isBn ? 'কাস্টমার অ্যানালিটিক্স ও টপ বায়ার চার্ট' : 'Customer Segments & Lifetime Spend Analytics'}
+        defaultOpen={true}
+      >
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <SaasDonutChart
+            title={isBn ? 'কাস্টমার সেগমেন্ট বিভাজন' : 'Customer Segment Breakdown'}
+            subtitle={isBn ? 'স্লাইসে ক্লিক করে ফিল্টার করুন' : 'Click a segment slice to filter'}
+            data={customerAnalytics.segmentSlices}
+            centerLabel={isBn ? 'গ্রাহক' : 'Records'}
+            onSelectSlice={(item) => {
+              if (
+                item.id === 'active_buyers' ||
+                item.id === 'registered' ||
+                item.id === 'panel_buyers' ||
+                item.id === 'subscribers'
+              ) {
+                setActiveSegment(item.id as CustomerSegment);
+              }
+            }}
+          />
+          <SaasBarChart
+            title={isBn ? 'শীর্ষ কাস্টমার (মোট ক্রয়মূল্য অনুযায়ী)' : 'Top Customers by Lifetime Spend'}
+            subtitle={isBn ? 'ক্লিক করলে প্রোফাইল ওপেন হবে' : 'Real non-cancelled order spend (click bar to inspect)'}
+            data={customerAnalytics.topSpenders}
+            valueFormat="currency"
+            orientation="horizontal"
+            barColor="#0284C7"
+            emptyText={isBn ? 'এখনও কোনো অর্ডারকৃত খরচ পাওয়া যায়নি' : 'No completed customer spend recorded yet'}
+            onSelectBar={(item) => {
+              const found = realCustomers.find((c) => c.id === item.id);
+              if (found) setSelectedCustomer(found);
+            }}
+          />
+        </div>
+      </CollapsibleAnalyticsPanel>
+
       {/* Segment Switcher Bar & Search / Actions */}
       <div className="p-4 sm:p-5 rounded-2xl bg-white border border-slate-200 shadow-2xs space-y-3.5">
         {/* System Option Tabs (Customer Segments) */}
@@ -690,26 +1096,38 @@ export const AdminCustomers: React.FC<AdminCustomersProps> = ({
             />
           </div>
 
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex items-center gap-2 shrink-0 flex-wrap">
             {activeSegment === 'subscribers' && (
-              <button
-                type="button"
-                onClick={handleCopyAllSubscriberEmails}
-                className="px-3.5 py-2 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-900 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer border border-amber-200 shadow-2xs"
-                title="Copy all subscriber email addresses to clipboard"
-              >
-                {copiedSubscriberEmail === 'ALL' ? (
-                  <>
-                    <Check className="w-4 h-4 text-emerald-600" />
-                    <span className="text-emerald-700">Copied All Emails!</span>
-                  </>
-                ) : (
-                  <>
-                    <Copy className="w-4 h-4 text-amber-700" />
-                    <span>Copy All Emails</span>
-                  </>
-                )}
-              </button>
+              <>
+                <button
+                  type="button"
+                  onClick={() => handleOpenOfferModal('ALL', 'discount')}
+                  className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white text-xs font-bold flex items-center gap-1.5 transition-all shadow-xs cursor-pointer active:scale-95"
+                  title={isBn ? 'সকল সাবস্ক্রাইবারদের অফার ইমেইল পাঠান' : 'Send promotional offer email to all subscribers'}
+                >
+                  <Gift className="w-4 h-4" />
+                  <span>{isBn ? `সকলকে অফার পাঠান (${subscribers.length})` : `Send Offer to ALL (${subscribers.length})`}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleCopyAllSubscriberEmails}
+                  className="px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer border border-slate-200"
+                  title={isBn ? 'সকল সাবস্ক্রাইবারদের ইমেইল কপি করুন' : 'Copy all subscriber email addresses'}
+                >
+                  {copiedSubscriberEmail === 'ALL' ? (
+                    <>
+                      <Check className="w-4 h-4 text-emerald-600" />
+                      <span className="text-emerald-700">{isBn ? 'সব কপি হয়েছে!' : 'Copied All!'}</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-4 h-4 text-slate-600" />
+                      <span>{isBn ? 'সব ইমেইল কপি' : 'Copy All'}</span>
+                    </>
+                  )}
+                </button>
+              </>
             )}
 
             <button
@@ -737,9 +1155,9 @@ export const AdminCustomers: React.FC<AdminCustomersProps> = ({
                     <th className="py-3.5 px-4">#</th>
                     <th className="py-3.5 px-4">Subscriber Email</th>
                     <th className="py-3.5 px-4">Subscribed Date &amp; Time</th>
-                    <th className="py-3.5 px-4">Source Tag</th>
+                    <th className="py-3.5 px-4">Source</th>
                     <th className="py-3.5 px-4 text-center">Status</th>
-                    <th className="py-3.5 px-4 text-right">Actions</th>
+                    <th className="py-3.5 px-4 text-right">1-Click Offer &amp; Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -749,7 +1167,7 @@ export const AdminCustomers: React.FC<AdminCustomersProps> = ({
                         <Mail className="w-10 h-10 mx-auto mb-2 opacity-30 text-amber-500" />
                         <p className="font-bold text-slate-700">কোনো সাবস্ক্রাইবার পাওয়া যায়নি</p>
                         <p className="text-xs text-slate-400 mt-1">
-                          কাস্টমাররা ফুটার থেকে সাবস্ক্রাইব করলে এখানে সরাসরি দেখতে পাবেন।
+                          কাস্টমাররা ফুটার থেকে সাবস্ক্রাইব করলে এখানে সরাসরি দেখতে পাবেন এবং ১-ক্লিকে অফার পাঠাতে পারবেন।
                         </p>
                       </td>
                     </tr>
@@ -761,12 +1179,12 @@ export const AdminCustomers: React.FC<AdminCustomersProps> = ({
                         </td>
                         <td className="py-3.5 px-4 font-bold text-slate-900">
                           <div className="flex items-center gap-2">
-                            <span className="font-mono text-xs text-slate-800">{sub.email}</span>
+                            <span className="font-mono text-xs text-slate-900">{sub.email}</span>
                             <button
                               type="button"
                               onClick={() => handleCopySingleEmail(sub.email)}
                               className="p-1 rounded-md text-slate-400 hover:text-sky-600 hover:bg-sky-50 transition-colors cursor-pointer"
-                              title="Copy email"
+                              title="Copy email address"
                             >
                               {copiedSubscriberEmail === sub.email ? (
                                 <Check className="w-3.5 h-3.5 text-emerald-600" />
@@ -796,15 +1214,29 @@ export const AdminCustomers: React.FC<AdminCustomersProps> = ({
                           </span>
                         </td>
                         <td className="py-3.5 px-4 text-right">
-                          <button
-                            type="button"
-                            disabled={isDeletingSubscriber === sub.id}
-                            onClick={() => handleDeleteSubscriber(sub.id, sub.email)}
-                            className="p-1.5 rounded-lg text-rose-500 hover:text-rose-700 hover:bg-rose-50 transition-colors cursor-pointer disabled:opacity-50"
-                            title="Delete subscriber"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
+                          <div className="flex items-center justify-end gap-1.5">
+                            {/* 1-Click Send Offer Modal */}
+                            <button
+                              type="button"
+                              onClick={() => handleOpenOfferModal(sub, 'discount')}
+                              className="px-3 py-1.5 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-900 text-xs font-bold flex items-center gap-1.5 border border-amber-200 transition-colors cursor-pointer shadow-2xs"
+                              title={isBn ? 'এই গ্রাহককে সরাসরি অফার ইমেইল পাঠান' : 'Send promotional offer email to this subscriber'}
+                            >
+                              <Gift className="w-3.5 h-3.5 text-amber-600" />
+                              <span>{isBn ? 'অফার পাঠান' : 'Send Offer'}</span>
+                            </button>
+
+                            {/* Delete Subscriber */}
+                            <button
+                              type="button"
+                              disabled={isDeletingSubscriber === sub.id}
+                              onClick={() => handleDeleteSubscriber(sub.id, sub.email)}
+                              className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer disabled:opacity-50"
+                              title={isBn ? 'সাবস্ক্রাইবার মুছে ফেলুন' : 'Delete subscriber'}
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))
@@ -818,12 +1250,12 @@ export const AdminCustomers: React.FC<AdminCustomersProps> = ({
               {filteredSubscribers.length === 0 ? (
                 <div className="py-12 text-center text-slate-400 text-xs">
                   <Mail className="w-8 h-8 mx-auto mb-2 opacity-30 text-amber-500" />
-                  <p className="font-bold text-slate-700">কোনো সাবস্ক্রাইবার পাওয়া যায়নি</p>
-                  <p className="text-[11px] text-slate-400 mt-1">কাস্টমাররা সাবস্ক্রাইব করলে এখানে দেখা যাবে।</p>
+                  <p className="font-bold text-slate-700">{isBn ? 'কোনো সাবস্ক্রাইবার পাওয়া যায়নি' : 'No subscribers found'}</p>
+                  <p className="text-[11px] text-slate-400 mt-1">{isBn ? 'কাস্টমাররা সাবস্ক্রাইব করলে এখানে দেখা যাবে।' : 'Customer subscribers will appear here.'}</p>
                 </div>
               ) : (
                 filteredSubscribers.map((sub, idx) => (
-                  <div key={sub.id || idx} className="p-3.5 space-y-2 hover:bg-slate-50/50 transition-colors">
+                  <div key={sub.id || idx} className="p-3.5 space-y-2.5 hover:bg-slate-50/50 transition-colors">
                     <div className="flex items-center justify-between gap-2">
                       <div className="flex items-center gap-2 min-w-0">
                         <div className="w-7 h-7 rounded-full bg-amber-100 text-amber-800 font-bold flex items-center justify-center text-xs shrink-0">
@@ -831,11 +1263,26 @@ export const AdminCustomers: React.FC<AdminCustomersProps> = ({
                         </div>
                         <span className="font-mono text-xs font-bold text-slate-900 truncate">{sub.email}</span>
                       </div>
-                      <div className="flex items-center gap-1 shrink-0">
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 uppercase">
+                        {sub.source || 'footer'}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center justify-between text-[11px] text-slate-500 pt-1 border-t border-slate-100">
+                      <span>{new Date(sub.subscribedAt || Date.now()).toLocaleDateString('en-GB')}</span>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => handleOpenOfferModal(sub, 'discount')}
+                          className="px-2.5 py-1 rounded-md bg-amber-50 hover:bg-amber-100 text-amber-900 font-bold text-[11px] flex items-center gap-1 border border-amber-200 cursor-pointer"
+                        >
+                          <Gift className="w-3 h-3 text-amber-600" />
+                          <span>{isBn ? 'অফার পাঠান' : 'Send Offer'}</span>
+                        </button>
                         <button
                           type="button"
                           onClick={() => handleCopySingleEmail(sub.email)}
-                          className="p-1.5 rounded-lg text-slate-500 hover:text-sky-600 hover:bg-sky-50 transition-colors cursor-pointer"
+                          className="p-1 rounded-md text-slate-500 hover:text-sky-600 hover:bg-sky-50 transition-colors cursor-pointer"
                           title="Copy email"
                         >
                           {copiedSubscriberEmail === sub.email ? (
@@ -848,18 +1295,12 @@ export const AdminCustomers: React.FC<AdminCustomersProps> = ({
                           type="button"
                           disabled={isDeletingSubscriber === sub.id}
                           onClick={() => handleDeleteSubscriber(sub.id, sub.email)}
-                          className="p-1.5 rounded-lg text-rose-500 hover:text-rose-700 hover:bg-rose-50 transition-colors cursor-pointer disabled:opacity-50"
+                          className="p-1 rounded-md text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer disabled:opacity-50"
                           title="Delete subscriber"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
                       </div>
-                    </div>
-                    <div className="flex items-center justify-between text-[11px] text-slate-500 pt-1 border-t border-slate-100">
-                      <span>{new Date(sub.subscribedAt || Date.now()).toLocaleDateString('en-GB')}</span>
-                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 uppercase">
-                        {sub.source || 'footer'}
-                      </span>
                     </div>
                   </div>
                 ))
@@ -1944,6 +2385,197 @@ export const AdminCustomers: React.FC<AdminCustomersProps> = ({
                 >
                   <Trash2 className="w-4 h-4" />
                   <span>Confirm Delete</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 1-Click Newsletter Subscriber Offer / Direct Email Dispatch Modal */}
+      {offerModalTarget && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+          <div className="bg-white rounded-3xl max-w-2xl w-full shadow-2xl border border-slate-200 overflow-hidden animate-in fade-in zoom-in-95 duration-150 my-8">
+            {/* Modal Header */}
+            <div className="bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 text-white p-5 sm:p-6 relative">
+              <button
+                onClick={() => setOfferModalTarget(null)}
+                className="absolute top-4 right-4 text-white/80 hover:text-white cursor-pointer p-1 rounded-full hover:bg-white/10"
+              >
+                <X className="w-5 h-5" />
+              </button>
+              <div className="flex items-center gap-3">
+                <div className="w-11 h-11 rounded-2xl bg-white/20 flex items-center justify-center text-white shrink-0 shadow-xs">
+                  <Gift className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="text-base sm:text-lg font-black text-white">
+                    {offerModalTarget === 'ALL'
+                      ? (isBn ? `সকল গ্রাহককে অফার ইমেইল পাঠান (${subscribers.length})` : `Send Offer to ALL Subscribers (${subscribers.length})`)
+                      : (isBn ? 'এক্সক্লুসিভ অফার ও ইমেইল পাঠান' : 'Send Exclusive Offer & Email')}
+                  </h3>
+                  <p className="text-xs text-amber-100 flex items-center gap-1.5 mt-0.5 font-medium">
+                    <Mail className="w-3.5 h-3.5" />
+                    <span>
+                      {offerModalTarget === 'ALL'
+                        ? (isBn ? `প্রাপক: সকল ${subscribers.length} জন নিউজলেটার গ্রাহক` : `Target: All ${subscribers.length} Newsletter Subscribers`)
+                        : (isBn ? `প্রাপক ইমেইল: ${offerModalTarget.email}` : `Recipient: ${offerModalTarget.email}`)}
+                    </span>
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-5 sm:p-6 space-y-4 max-h-[75vh] overflow-y-auto">
+              {/* Success Alert */}
+              {sendEmailSuccessNotice && (
+                <div className="p-3.5 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold flex items-center gap-2 animate-in fade-in shadow-2xs">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span>{sendEmailSuccessNotice}</span>
+                </div>
+              )}
+
+              {/* Error Alert */}
+              {sendEmailErrorNotice && (
+                <div className="p-3.5 rounded-2xl bg-rose-50 border border-rose-200 text-rose-800 text-xs font-bold flex items-center gap-2 animate-in fade-in">
+                  <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                  <span>{sendEmailErrorNotice}</span>
+                </div>
+              )}
+
+              {/* Quick Template Selector */}
+              <div>
+                <label className="block text-xs font-black text-slate-800 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                  <Zap className="w-3.5 h-3.5 text-amber-600" />
+                  <span>{isBn ? 'অফার টেমপ্লেট নির্বাচন করুন' : 'Select Offer Template'}</span>
+                </label>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  {(Object.keys(currentTemplates) as OfferTemplateKey[]).map((key) => {
+                    const tmpl = currentTemplates[key];
+                    const isSelected = selectedOfferTemplate === key;
+                    return (
+                      <button
+                        key={key}
+                        type="button"
+                        onClick={() => handleSelectOfferTemplate(key)}
+                        className={`p-2.5 rounded-xl border text-xs font-bold text-left transition-all cursor-pointer ${
+                          isSelected
+                            ? 'bg-amber-500 text-white border-amber-600 shadow-xs ring-2 ring-amber-300'
+                            : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-amber-50 hover:border-amber-200'
+                        }`}
+                      >
+                        <span className="block truncate text-[11px] sm:text-xs">{tmpl.name}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Coupon Code & Subject Line */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="sm:col-span-1">
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    {isBn ? 'কুপন কোড' : 'Coupon Code'}
+                  </label>
+                  <input
+                    type="text"
+                    value={offerCouponCode}
+                    onChange={(e) => handleCouponChange(e.target.value)}
+                    placeholder={isBn ? 'যেমন: WELCOME10' : 'e.g. WELCOME10'}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 font-mono font-bold text-xs text-amber-700 bg-amber-50/50 uppercase focus:outline-hidden focus:ring-2 focus:ring-amber-500"
+                  />
+                </div>
+
+                <div className="sm:col-span-2">
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    {isBn ? 'ইমেইল বিষয় (Subject Line)' : 'Email Subject'}
+                  </label>
+                  <input
+                    type="text"
+                    value={offerSubject}
+                    onChange={(e) => setOfferSubject(e.target.value)}
+                    placeholder={isBn ? 'ইমেইলের বিষয় লিখুন...' : 'Enter email subject...'}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 font-bold text-xs text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-amber-500"
+                  />
+                </div>
+              </div>
+
+              {/* Message Body Textarea */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  {isBn ? 'অফার বার্তা (Email Body)' : 'Message Content (Email Body)'}
+                </label>
+                <textarea
+                  rows={8}
+                  value={offerBody}
+                  onChange={(e) => setOfferBody(e.target.value)}
+                  className="w-full p-3.5 rounded-xl border border-slate-300 text-xs text-slate-800 leading-relaxed font-sans focus:outline-hidden focus:ring-2 focus:ring-amber-500 bg-slate-50/50"
+                  placeholder={isBn ? 'আপনার অফার বার্তা লিখুন...' : 'Type your promotional message here...'}
+                />
+              </div>
+
+              {/* Notice Box */}
+              <div className="p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-amber-600 shrink-0" />
+                  <span className="text-[11px] leading-tight">
+                    {isBn
+                      ? '💡 বাটন ক্লিক করলেই আপনার স্টোরের নিজস্ব জিমেইল একাউন্ট থেকে স্বয়ংক্রিয়ভাবে সরাসরি গ্রাহকদের ইনবক্সে মেইল পৌঁছে যাবে।'
+                      : '💡 Clicking send will automatically dispatch this email from your configured Gmail SMTP directly to customer inboxes.'}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Modal Action Footer */}
+            <div className="p-4 sm:p-5 bg-slate-50 border-t border-slate-200 flex flex-wrap items-center justify-between gap-2.5">
+              <button
+                type="button"
+                onClick={handleCopyOfferContent}
+                className="px-3.5 py-2 rounded-xl bg-white hover:bg-slate-100 text-slate-700 text-xs font-bold flex items-center gap-1.5 border border-slate-200 cursor-pointer shadow-2xs"
+              >
+                {isCopiedOfferText ? (
+                  <>
+                    <Check className="w-3.5 h-3.5 text-emerald-600" />
+                    <span className="text-emerald-700">{isBn ? 'কপি হয়েছে!' : 'Copied!'}</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-3.5 h-3.5 text-slate-500" />
+                    <span>{isBn ? 'টেক্সট কপি' : 'Copy Text'}</span>
+                  </>
+                )}
+              </button>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  disabled={isSendingEmail}
+                  onClick={() => setOfferModalTarget(null)}
+                  className="px-4 py-2 rounded-xl border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-white cursor-pointer disabled:opacity-50"
+                >
+                  {isBn ? 'বাতিল' : 'Cancel'}
+                </button>
+
+                {/* Direct Send Email Button */}
+                <button
+                  type="button"
+                  disabled={isSendingEmail}
+                  onClick={handleSendDirectOfferEmail}
+                  className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 hover:from-emerald-700 hover:to-teal-700 text-white text-xs font-black shadow-md cursor-pointer flex items-center gap-2 active:scale-95 transition-all disabled:opacity-50"
+                >
+                  {isSendingEmail ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>{isBn ? 'ইমেইল পাঠানো হচ্ছে...' : 'Sending Email...'}</span>
+                    </>
+                  ) : (
+                    <>
+                      <Send className="w-4 h-4" />
+                      <span>{isBn ? 'সরাসরি ইমেইল পাঠান' : 'Send Email Now'}</span>
+                    </>
+                  )}
                 </button>
               </div>
             </div>

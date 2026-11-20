@@ -19,7 +19,9 @@
     "createdByStaffName": "Ordered by KenaX Bot",
     "status": "Pending",
     "isV2Order": true,
-    "updatedAt": "2026-09-24T14:25:23.720Z"
+    "updatedAt": "2026-11-20T12:50:39.545Z",
+    "isFakeOrder": false,
+    "timeline": []
   },
   {
     "id": "KNX-TEST-MANUAL-1790259904400",

@@ -171,11 +171,28 @@ export const ProductCard: React.FC<ProductCardProps> = React.memo(({
       );
     }
 
+    const lowThreshold = typeof (product as any).lowStockThreshold === 'number' ? (product as any).lowStockThreshold : 5;
+    if (
+      getProductStockStatus(product) === 'in_stock' &&
+      typeof product.stock === 'number' &&
+      product.stock > 0 &&
+      product.stock <= lowThreshold
+    ) {
+      badges.push(
+        <span
+          key="low-stock"
+          className="bg-amber-500 text-white text-[10px] font-extrabold px-2 py-0.5 rounded-md uppercase tracking-wider shadow-xs"
+        >
+          {t(`মাত্র ${product.stock}টি বাকি`, `Only ${product.stock} left`)}
+        </span>
+      );
+    }
+
     return badges.length > 0 ? badges : null;
   };
 
   return (
-    <div className="product-card-contain bg-white dark:bg-slate-900/95 rounded-2xl border border-slate-200/90 dark:border-slate-800/80 hover:border-sky-400 dark:hover:border-sky-500/70 shadow-2xs hover:shadow-lg dark:hover:shadow-[0_8px_30px_rgba(0,0,0,0.5)] transition-all duration-200 flex flex-col justify-between overflow-hidden group hover:-translate-y-0.5">
+    <div className="product-card-contain cq-product-card bg-white dark:bg-slate-900/95 rounded-2xl border border-slate-200/90 dark:border-slate-800/80 hover:border-sky-400 dark:hover:border-sky-500/70 shadow-2xs hover:shadow-lg dark:hover:shadow-[0_8px_30px_rgba(0,0,0,0.5)] transition-all duration-200 flex flex-col justify-between overflow-hidden group hover:-translate-y-0.5">
       {/* Product Image & Badges */}
       <div
         onClick={() => onQuickView(product)}

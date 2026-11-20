@@ -1,4 +1,4 @@
-import { SiteSettings, WebsiteSettings, HeroBannerItem, HeroFeatureTag, HeroSideBannerSettings, FlashSaleBannerSettings, PromoGridSettings, TagCollectionSlide } from '../types/index.ts';
+import type { SiteSettings, WebsiteSettings, HeroBannerItem, HeroFeatureTag, HeroSideBannerSettings, FlashSaleBannerSettings, PromoGridSettings, TagCollectionSlide } from '../types/index.ts';
 import { INITIAL_WEBSITE_SETTINGS, DEFAULT_HERO_FEATURES } from '../data/initialSettings.ts';
 import { DEFAULT_HERO_BANNERS, DEFAULT_HERO_SIDE_BANNER } from '../types/index.ts';
 import {

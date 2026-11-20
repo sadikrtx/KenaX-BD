@@ -1,4 +1,4 @@
-import { CourierFraudReport, SiteSettings } from '../types/index.ts';
+import type { CourierFraudReport, SiteSettings } from '../types/index.ts';
 
 // In-memory cache to save external API requests and reduce latency
 const fraudCache = new Map<string, { report: CourierFraudReport; expiry: number }>();

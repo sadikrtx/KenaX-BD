@@ -57,6 +57,13 @@ import {
   saveGmailAlertSettingsToDB,
   subscribeToEmailLogs,
 } from '../../lib/firebase';
+import {
+  SaasDonutChart,
+  SaasBarChart,
+  SaasLineAreaChart,
+  CollapsibleAnalyticsPanel,
+  SAAS_CHART_COLORS,
+} from './charts/AdminCharts';
 
 interface AdminGmailAlertsProps {
   currentRole: UserRole;
@@ -354,6 +361,65 @@ export const AdminGmailAlerts: React.FC<AdminGmailAlertsProps> = ({
     return matchesSearch && matchesRole && matchesType && matchesStatus;
   });
 
+  const emailAnalytics = useMemo(() => {
+    let delivered = 0;
+    let sent = 0;
+    let failed = 0;
+
+    const roleMap = new Map<string, number>();
+    const dateMap = new Map<string, { ok: number; fail: number }>();
+
+    logs.forEach((l) => {
+      const st = (l.status || '').toLowerCase();
+      if (st === 'delivered') delivered += 1;
+      else if (st === 'sent' || st === 'simulated') sent += 1;
+      else failed += 1;
+
+      const role = l.recipientRole || 'Customer';
+      roleMap.set(role, (roleMap.get(role) || 0) + 1);
+
+      const d = new Date(l.timestamp);
+      if (!isNaN(d.getTime())) {
+        const key = d.toISOString().slice(0, 10);
+        const cur = dateMap.get(key) || { ok: 0, fail: 0 };
+        if (st === 'delivered' || st === 'sent' || st === 'simulated') cur.ok += 1;
+        else cur.fail += 1;
+        dateMap.set(key, cur);
+      }
+    });
+
+    const statusSlices = [
+      { id: 'delivered', label: 'Delivered', value: delivered, color: '#059669' },
+      { id: 'sent', label: 'Sent / Dispatched', value: sent, color: '#0284C7' },
+      { id: 'failed', label: 'Failed / Bounced', value: failed, color: '#E11D48' },
+    ].filter((s) => s.value > 0);
+
+    const roleBars = Array.from(roleMap.entries())
+      .map(([role, count]) => ({
+        id: role,
+        label: role,
+        value: count,
+        color:
+          role.toLowerCase().includes('super')
+            ? '#7C3AED'
+            : role.toLowerCase().includes('admin') || role.toLowerCase().includes('staff')
+            ? '#4F46E5'
+            : '#E11D48',
+      }))
+      .sort((a, b) => b.value - a.value);
+
+    const dailyTrend = Array.from(dateMap.entries())
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .slice(-14)
+      .map(([iso, c]) => ({
+        label: new Date(iso).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }),
+        primary: c.ok,
+        secondary: c.fail,
+      }));
+
+    return { statusSlices, roleBars, dailyTrend, okCount: delivered + sent, failed };
+  }, [logs]);
+
   return (
     <div id="admin-gmail-alerts-hub" className="space-y-6">
       {/* Header Banner - Fully Responsive */}
@@ -444,6 +510,50 @@ export const AdminGmailAlerts: React.FC<AdminGmailAlertsProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Gmail Dispatch & Audience Analytics */}
+      <CollapsibleAnalyticsPanel
+        title={`Email Dispatch Analytics (${emailAnalytics.okCount} Dispatched • ${emailAnalytics.failed} Failed)`}
+      >
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          <SaasDonutChart
+            title="Email Delivery Status"
+            subtitle="Click a status slice to filter activity logs"
+            data={emailAnalytics.statusSlices}
+            centerLabel="Total Emails"
+            emptyText="No emails dispatched yet"
+            onSelectSlice={(slice) => {
+              const id = slice.id || slice.label.toLowerCase();
+              setLogFilterStatus(id === 'delivered' ? 'Delivered' : id === 'sent' ? 'Sent' : 'Failed');
+              setActiveTab('logs');
+            }}
+          />
+          <SaasBarChart
+            title="Emails by Recipient Audience"
+            subtitle="Customer, Staff, and Super Admin alert volume"
+            data={emailAnalytics.roleBars}
+            primaryLabel="Emails"
+            barColor="#E11D48"
+            emptyText="No audience distribution data"
+            onSelectBar={(bar) => {
+              setLogFilterRole(bar.id || bar.label);
+              setActiveTab('logs');
+            }}
+          />
+          <SaasLineAreaChart
+            title="Daily Email Volume"
+            subtitle="Successful vs failed email alerts by date"
+            data={emailAnalytics.dailyTrend}
+            primaryLabel="Sent / Delivered"
+            secondaryLabel="Failed"
+            primaryFormat="number"
+            secondaryFormat="number"
+            primaryColor="#059669"
+            secondaryColor="#E11D48"
+            emptyText="Not enough daily email timeline data"
+          />
+        </div>
+      </CollapsibleAnalyticsPanel>
 
       {/* ---------------------------------------------------- */}
       {/* TAB 1: TEMPLATE EDITOR & LIVE PREVIEW */}

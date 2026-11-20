@@ -14,6 +14,10 @@ import {
   Lock,
 } from 'lucide-react';
 import { StaffUser, Order, Review, ActivityLog, UserRole } from '../../types';
+import {
+  SaasDonutChart,
+  SaasBarChart,
+} from './charts/AdminCharts';
 
 interface AdminPerformanceOverviewProps {
   staffList: StaffUser[];
@@ -32,7 +36,6 @@ export const AdminPerformanceOverview: React.FC<AdminPerformanceOverviewProps> =
   currentRole,
   currentStaff,
 }) => {
-  const [selectedStaffId, setSelectedStaffId] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
 
   // Filter staff members based on roles (moderators, managers, admins, super_admin)
@@ -70,6 +73,55 @@ export const AdminPerformanceOverview: React.FC<AdminPerformanceOverviewProps> =
       reviewsModerated: reviewsModeratedCount,
       lastActive: staff.lastLogin || staff.createdAt,
       recentLogs: logs.slice(0, 5),
+    };
+  };
+
+  // Staff order attribution & handling ledger calculation
+  const getStaffOrderLedger = (staff: StaffUser) => {
+    const isOrderConfirmed = (o: Order) => {
+      const isById =
+        (o.confirmedByStaffId && o.confirmedByStaffId === staff.id) ||
+        (o.handledByStaffId && o.handledByStaffId === staff.id) ||
+        (o.createdByStaffId &&
+          o.createdByStaffId === staff.id &&
+          o.orderStatus !== 'Pending' &&
+          o.orderStatus !== 'Payment Verification');
+      const isByName =
+        (o.confirmedByStaffName && o.confirmedByStaffName.toLowerCase() === staff.name.toLowerCase()) ||
+        (o.handledByStaffName && o.handledByStaffName.toLowerCase() === staff.name.toLowerCase()) ||
+        Boolean(
+          o.timeline &&
+            o.timeline.some(
+              (t) =>
+                t.updatedBy &&
+                t.updatedBy.toLowerCase().includes(staff.name.toLowerCase()) &&
+                (t.status === 'Confirmed' || t.status === 'Processing' || t.status === 'Delivered')
+            )
+        );
+      return isById || isByName;
+    };
+
+    const confOrders = orders.filter(isOrderConfirmed);
+    const delOrders = confOrders.filter((o) => o.orderStatus === 'Delivered');
+    const procOrders = confOrders.filter(
+      (o) => o.orderStatus === 'Processing' || o.orderStatus === 'Packed' || o.orderStatus === 'Shipped'
+    );
+    const cancOrders = confOrders.filter((o) => o.orderStatus === 'Cancelled');
+    const retOrders = confOrders.filter((o) => o.orderStatus === 'Returned');
+    const rev = delOrders.reduce((sum, o) => sum + (o.totalAmount || 0), 0);
+    const total = confOrders.length;
+    const succRate = total > 0 ? ((delOrders.length / total) * 100).toFixed(1) : '0.0';
+    const retRate = total > 0 ? ((retOrders.length / total) * 100).toFixed(1) : '0.0';
+
+    return {
+      confirmedCount: total,
+      deliveredCount: delOrders.length,
+      processingCount: procOrders.length,
+      cancelledCount: cancOrders.length,
+      returnedCount: retOrders.length,
+      deliveredRevenue: rev,
+      successRate: succRate,
+      returnRate: retRate,
     };
   };
 
@@ -121,6 +173,147 @@ export const AdminPerformanceOverview: React.FC<AdminPerformanceOverviewProps> =
           <Lock className="w-5 h-5 shrink-0 text-amber-600 dark:text-amber-400" />
           <div>
             <span className="font-bold">Access Isolation Active:</span> As a <b>{currentRole.toUpperCase()}</b>, you can only view your own secure performance dashboard. Other staff dashboards are strictly isolated for privacy and security.
+          </div>
+        </div>
+      )}
+
+      {/* Visual Staff Performance Charts */}
+      {effectiveStaffList.length > 0 && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <SaasBarChart
+            title="Staff Delivered Revenue & Order Volume"
+            subtitle="Real-time attribution per team member"
+            valueFormat="currency"
+            data={effectiveStaffList.slice(0, 8).map((staff) => {
+              const ledger = getStaffOrderLedger(staff);
+              return {
+                label: staff.name.split(' ')[0] || staff.name,
+                value: ledger.deliveredRevenue,
+                hint: `${ledger.deliveredCount} delivered`,
+                color: '#0284C7',
+              };
+            })}
+            orientation="horizontal"
+          />
+
+          <SaasDonutChart
+            title="Team Order Outcomes Distribution"
+            subtitle="Confirmed orders across fulfillment stages"
+            centerLabel="Handled"
+            data={(() => {
+              let del = 0;
+              let proc = 0;
+              let canc = 0;
+              let ret = 0;
+              effectiveStaffList.forEach((s) => {
+                const l = getStaffOrderLedger(s);
+                del += l.deliveredCount;
+                proc += l.processingCount;
+                canc += l.cancelledCount;
+                ret += l.returnedCount;
+              });
+              return [
+                { label: 'Delivered', value: del, color: '#059669' },
+                { label: 'Processing', value: proc, color: '#2563EB' },
+                { label: 'Returned', value: ret, color: '#D97706' },
+                { label: 'Cancelled', value: canc, color: '#E11D48' },
+              ];
+            })()}
+          />
+        </div>
+      )}
+
+      {/* Staff Order Handling Ledger & Attribution Table (Visible to Super Admin & Authorized Roles) */}
+      {!isStrictRoleRestricted && (
+        <div className="p-6 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xs space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100 dark:border-slate-800">
+            <div>
+              <h3 className="text-base font-black text-slate-900 dark:text-white flex items-center gap-2">
+                <Users className="w-5 h-5 text-sky-600 dark:text-sky-400" />
+                <span>Staff Order Handling Ledger & Attribution</span>
+              </h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                Full team breakdown of confirmed orders, in-transit processing, delivery success rates, and revenue attribution
+              </p>
+            </div>
+            <span className="text-[11px] font-bold text-slate-400 px-2.5 py-1 rounded-lg bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 w-fit">
+              {teamMembers.length} Active Staff Members
+            </span>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs min-w-[860px]">
+              <thead className="bg-slate-50 dark:bg-slate-800/80 text-slate-600 dark:text-slate-300 font-bold border-b border-slate-200 dark:border-slate-700 uppercase text-[10px] tracking-wider">
+                <tr>
+                  <th className="py-3 px-4">Staff Member</th>
+                  <th className="py-3 px-4">Role</th>
+                  <th className="py-3 px-4 text-center">Confirmed</th>
+                  <th className="py-3 px-4 text-center text-blue-600 dark:text-blue-400">Processing</th>
+                  <th className="py-3 px-4 text-center text-emerald-600 dark:text-emerald-400">Delivered</th>
+                  <th className="py-3 px-4 text-center text-rose-600 dark:text-rose-400">Cancelled</th>
+                  <th className="py-3 px-4 text-center text-amber-600 dark:text-amber-400">Returned</th>
+                  <th className="py-3 px-4 text-center">Success Rate</th>
+                  <th className="py-3 px-4 text-center">Return Rate</th>
+                  <th className="py-3 px-4 text-right">Delivered Revenue</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 dark:divide-slate-800 font-medium text-slate-800 dark:text-slate-200">
+                {teamMembers.map((staff) => {
+                  const ledger = getStaffOrderLedger(staff);
+                  return (
+                    <tr
+                      key={staff.id}
+                      className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors"
+                    >
+                      <td className="py-3.5 px-4 font-bold text-slate-900 dark:text-white">
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-8 h-8 rounded-xl bg-slate-900 dark:bg-slate-800 text-white flex items-center justify-center font-bold text-xs shrink-0 shadow-2xs border dark:border-slate-700">
+                            {staff.name.charAt(0).toUpperCase()}
+                          </div>
+                          <div>
+                            <div className="font-extrabold text-slate-900 dark:text-white">{staff.name}</div>
+                            <div className="text-[11px] font-normal text-slate-400">{staff.email}</div>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="py-3.5 px-4 whitespace-nowrap">
+                        <span className="px-2.5 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
+                          {staff.role.replace('_', ' ')}
+                        </span>
+                      </td>
+                      <td className="py-3.5 px-4 text-center font-bold text-slate-900 dark:text-white">
+                        {ledger.confirmedCount}
+                      </td>
+                      <td className="py-3.5 px-4 text-center font-bold text-blue-600 dark:text-blue-400">
+                        {ledger.processingCount}
+                      </td>
+                      <td className="py-3.5 px-4 text-center font-bold text-emerald-600 dark:text-emerald-400">
+                        {ledger.deliveredCount}
+                      </td>
+                      <td className="py-3.5 px-4 text-center font-bold text-rose-600 dark:text-rose-400">
+                        {ledger.cancelledCount}
+                      </td>
+                      <td className="py-3.5 px-4 text-center font-bold text-amber-600 dark:text-amber-400">
+                        {ledger.returnedCount}
+                      </td>
+                      <td className="py-3.5 px-4 text-center">
+                        <span className="font-extrabold text-emerald-600 dark:text-emerald-400">
+                          {ledger.successRate}%
+                        </span>
+                      </td>
+                      <td className="py-3.5 px-4 text-center">
+                        <span className="font-extrabold text-amber-600 dark:text-amber-400">
+                          {ledger.returnRate}%
+                        </span>
+                      </td>
+                      <td className="py-3.5 px-4 text-right font-black text-slate-900 dark:text-white whitespace-nowrap">
+                        ৳{ledger.deliveredRevenue.toLocaleString()}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
         </div>
       )}

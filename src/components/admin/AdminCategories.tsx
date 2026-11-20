@@ -26,6 +26,7 @@ import {
 } from 'lucide-react';
 import { Product, UserRole, StaffUser, Category, SubCategoryItem } from '../../types';
 import { getOptimizedImageUrl, handleImageError } from '../../utils/imageOptimizer';
+import { SaasBarChart, SaasDonutChart, CollapsibleAnalyticsPanel, SAAS_CHART_COLORS } from './charts/AdminCharts';
 
 interface AdminCategoriesProps {
   categories: Category[];
@@ -154,6 +155,52 @@ export const AdminCategories: React.FC<AdminCategoriesProps> = ({
       return acc + subs.reduce((sAcc, s) => sAcc + (s.subSubcategories?.length || 0), 0);
     }, 0);
   }, [categories]);
+
+  const categoryAnalytics = useMemo(() => {
+    const prodCounts = sortedCategories.map((cat) => ({
+      name: cat.name,
+      productsCount: products.filter((p) => p.category === cat.name).length,
+      subCount: (cat.subcategories || []).length,
+      tagCount: normalizeSubs(cat.subcategories).reduce(
+        (sAcc, s) => sAcc + (s.subSubcategories?.length || 0),
+        0
+      ),
+    }));
+
+    const topByProducts = [...prodCounts]
+      .sort((a, b) => b.productsCount - a.productsCount);
+
+    const topSlices = topByProducts.slice(0, 5).map((item, idx) => ({
+      id: item.name,
+      label: item.name,
+      value: item.productsCount,
+      color: SAAS_CHART_COLORS[idx % SAAS_CHART_COLORS.length],
+    }));
+
+    const otherCount = topByProducts
+      .slice(5)
+      .reduce((sum, item) => sum + item.productsCount, 0);
+    if (otherCount > 0) {
+      topSlices.push({
+        id: 'others',
+        label: 'Other Categories',
+        value: otherCount,
+        color: '#94A3B8',
+      });
+    }
+
+    const hierarchyBars = [...prodCounts]
+      .sort((a, b) => b.subCount + b.tagCount - (a.subCount + a.tagCount))
+      .slice(0, 8)
+      .map((item) => ({
+        id: item.name,
+        label: item.name,
+        value: item.subCount,
+        secondaryValue: item.tagCount,
+      }));
+
+    return { topSlices, hierarchyBars };
+  }, [sortedCategories, products]);
 
   // Visual highlight on priority change
   const triggerMoveHighlight = (catId: string) => {
@@ -632,6 +679,36 @@ export const AdminCategories: React.FC<AdminCategoriesProps> = ({
           </div>
         </div>
       </div>
+
+      <CollapsibleAnalyticsPanel title="Category Distribution & Hierarchy Charts" defaultOpen={true}>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <SaasDonutChart
+            title="Products per Category"
+            subtitle="Catalog share across top categories (click to search)"
+            data={categoryAnalytics.topSlices}
+            centerLabel="Catalog Items"
+            emptyText="No products assigned to categories yet"
+            onSelectSlice={(item) => {
+              if (item.id && item.id !== 'others') {
+                setSearchQuery((prev) => (prev === item.id ? '' : item.id!));
+              }
+            }}
+          />
+          <SaasBarChart
+            title="Category Tree Depth"
+            subtitle="Subcategories vs 3rd-tier child tags per category"
+            data={categoryAnalytics.hierarchyBars}
+            primaryLabel="Subcategories"
+            secondaryLabel="Child Tags"
+            barColor="#0284C7"
+            secondaryColor="#10B981"
+            emptyText="No subcategories configured yet"
+            onSelectBar={(item) => {
+              if (item.id) setSearchQuery((prev) => (prev === item.id ? '' : item.id!));
+            }}
+          />
+        </div>
+      </CollapsibleAnalyticsPanel>
 
       {/* Filter & Search Bar */}
       <div className="flex flex-col sm:flex-row items-center justify-between gap-3 bg-white dark:bg-slate-900 p-3.5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs">

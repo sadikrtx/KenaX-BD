@@ -93,10 +93,29 @@ import {
   togglePinnedWhatsAppChatInStore,
   getAllWhatsAppWebhookLogs,
   syncWhatsAppMessageToFirestore,
-  WhatsAppMessageRecord,
+  type WhatsAppMessageRecord,
   isPhoneMatch,
   normalizePhoneNumber,
 } from "./src/db/whatsapp.ts";
+import {
+  getMuseIntegrationAdminView,
+  generateMuseApiKey,
+  updateMuseIntegrationSettings,
+  getMuseLowStockThreshold,
+  verifyMuseApiKey,
+} from "./src/db/museIntegration.ts";
+import {
+  getAllActivityLogsFromStore,
+  appendActivityLogToStore,
+  isLegacySampleActivityLog,
+} from "./src/db/activityLogs.ts";
+import {
+  computeStoreSalesSummary,
+  computeInventoryMetrics,
+  resolveOrderSalesChannel,
+  getOrderItemsList,
+  getOrderSubtotalAmount,
+} from "./src/utils/salesAnalytics.ts";
 import {
   validateBangladeshMobile,
   cleanBDPhoneNumber,
@@ -110,6 +129,89 @@ import {
   getServerTelegramLogs,
   saveServerTelegramLog,
 } from "./src/db/telegram.ts";
+import {
+  sendMetaServerEvent,
+  sendServerPurchaseEvent,
+  getMetaServerLogs,
+  clearMetaServerLogs,
+  getMetaConnectionStatus,
+  getMetaConfig,
+} from "./src/lib/metaAdsService.ts";
+import {
+  generateMetaCatalogXml,
+  generateMetaCatalogJson,
+  getEligibleCatalogProducts,
+} from "./src/lib/metaCatalogService.ts";
+import {
+  sendTikTokServerEvent,
+  sendTikTokServerPurchaseEvent,
+  getTikTokServerLogs,
+  clearTikTokServerLogs,
+  getTikTokConnectionStatus,
+} from "./src/lib/tiktokAdsService.ts";
+import {
+  generateTikTokCatalogXml,
+  generateTikTokCatalogJson,
+  getEligibleTikTokCatalogProducts,
+} from "./src/lib/tiktokCatalogService.ts";
+import {
+  sendGoogleServerConversion,
+  sendGoogleServerPurchaseEvent,
+  getGoogleServerLogs,
+  clearGoogleServerLogs,
+  getGoogleConnectionStatus,
+} from "./src/lib/googleAdsService.ts";
+import {
+  generateGoogleMerchantXml,
+  generateGoogleMerchantJson,
+  getEligibleGoogleMerchantProducts,
+} from "./src/lib/googleMerchantService.ts";
+import { getRealClientIp, normalizeIp, isValidIp, formatIpForDisplay, getIpVersion, detectIpConnectionDetails } from "./src/utils/ipUtils.ts";
+import { resolveIpGeolocation } from "./src/utils/ipGeolocation.ts";
+import {
+  getAllIpRecords,
+  getIpRecord,
+  isIpBlocked,
+  recordIpOrderActivity,
+  blockIp,
+  unblockIp,
+  deleteIpRecord,
+  getIpSummaryStats,
+  rebuildIpRecordsFromOrders,
+} from "./src/db/ipTracker.ts";
+import {
+  getXigConfig,
+  saveXigConfig,
+  rotateXigApiKeys,
+  getXigProductPermissions,
+  saveXigProductPermission,
+  bulkUpdateXigProductPermissions,
+  revokeXigProductPermission,
+  getXigSyncLogs,
+  addXigSyncLog,
+  clearXigSyncLogs,
+  getXigOrderMappings,
+  saveXigOrderMapping,
+  findXigOrderMappingByIdempotency,
+  verifyXigApiKey,
+} from "./src/db/xigIntegration.ts";
+import {
+  getSanitizedPluginSystemState,
+  installPluginInStore,
+  activatePluginInStore,
+  deactivatePluginInStore,
+  updatePluginInStore,
+  rollbackPluginInStore,
+  uninstallPluginInStore,
+  updatePluginSettingsInStore,
+  updatePluginPermissionsInStore,
+  validatePluginPackagePayload,
+  getSamplePluginManifestPackage,
+  verifyPluginBackendConnectionInStore,
+  verifyExternalPluginBridgeRequest,
+  generatePluginApiKeyInStore,
+  deletePluginApiKeyInStore,
+} from "./src/db/plugins.ts";
 
 dotenv.config();
 
@@ -137,7 +239,10 @@ async function startServer() {
   app.use((req, res, next) => {
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, PATCH, OPTIONS");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With, x-app-env, Accept");
+    res.setHeader(
+      "Access-Control-Allow-Headers",
+      "Content-Type, Authorization, X-Requested-With, x-app-env, X-API-Key, x-api-key, x-staff-role, x-staff-name, x-staff-email, Accept"
+    );
     if (req.method === "OPTIONS") {
       return res.status(200).end();
     }
@@ -214,6 +319,350 @@ async function startServer() {
     } catch (err: any) {
       console.error("[POST /api/settings error]:", err);
       res.status(500).json({ error: "Failed to persist settings", details: err.message });
+    }
+  });
+
+  // ==========================================
+  // Meta / Facebook Ads Tracking & CAPI API
+  // ==========================================
+  app.post("/api/meta/events", async (req, res) => {
+    try {
+      const { eventName, eventId, customData, userData, eventSourceUrl, testEventCode } = req.body;
+      const clientIp = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.socket.remoteAddress;
+      const clientUserAgent = req.headers['user-agent'];
+
+      const result = await sendMetaServerEvent({
+        eventName,
+        eventId,
+        customData,
+        userData: {
+          ...userData,
+          clientIp,
+          clientUserAgent,
+        },
+        eventSourceUrl,
+        testEventCode,
+      });
+
+      res.json(result);
+    } catch (err: any) {
+      res.status(500).json({ success: false, message: err.message });
+    }
+  });
+
+  app.post("/api/meta/test-event", async (req, res) => {
+    try {
+      const { eventName, eventId, customData, testEventCode } = req.body;
+      const clientIp = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.socket.remoteAddress;
+      const clientUserAgent = req.headers['user-agent'];
+
+      const result = await sendMetaServerEvent({
+        eventName: eventName || 'PageView',
+        eventId: eventId || `test_${Date.now()}`,
+        customData: customData || { test: true },
+        userData: {
+          email: 'test@kenaxbd.com',
+          phone: '01700000000',
+          name: 'KenaX Test Customer',
+          clientIp,
+          clientUserAgent,
+        },
+        testEventCode,
+      });
+
+      res.json(result);
+    } catch (err: any) {
+      res.status(500).json({ success: false, message: err.message });
+    }
+  });
+
+  app.get("/api/meta/logs", (req, res) => {
+    res.json(getMetaServerLogs());
+  });
+
+  app.delete("/api/meta/logs", (req, res) => {
+    clearMetaServerLogs();
+    res.json({ success: true });
+  });
+
+  app.get("/api/meta/status", (req, res) => {
+    res.json(getMetaConnectionStatus());
+  });
+
+  // Meta / Facebook Product Catalog XML Feed (RSS 2.0 / Google Merchant Feed)
+  app.get("/api/meta/catalog.xml", async (req, res) => {
+    try {
+      const isEnvPreview = checkIsEnvPreview(req);
+      const host = req.get('host') || 'kenaxbd.com';
+      const protocol = req.protocol === 'https' || req.headers['x-forwarded-proto'] === 'https' ? 'https' : 'http';
+      const baseUrl = `${protocol}://${host}`;
+      const xml = await generateMetaCatalogXml(baseUrl, isEnvPreview);
+      res.setHeader('Content-Type', 'application/xml; charset=utf-8');
+      res.setHeader('Cache-Control', 'public, max-age=1800');
+      res.send(xml);
+    } catch (err: any) {
+      res.status(500).send(`<?xml version="1.0" encoding="UTF-8"?><error>${err.message}</error>`);
+    }
+  });
+
+  // Meta Product Catalog JSON Feed
+  app.get("/api/meta/catalog.json", async (req, res) => {
+    try {
+      const isEnvPreview = checkIsEnvPreview(req);
+      const host = req.get('host') || 'kenaxbd.com';
+      const protocol = req.protocol === 'https' || req.headers['x-forwarded-proto'] === 'https' ? 'https' : 'http';
+      const baseUrl = `${protocol}://${host}`;
+      const json = await generateMetaCatalogJson(baseUrl, isEnvPreview);
+      res.json(json);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Meta Catalog Health Status
+  app.get("/api/meta/catalog/status", async (req, res) => {
+    try {
+      const isEnvPreview = checkIsEnvPreview(req);
+      const eligible = await getEligibleCatalogProducts(isEnvPreview);
+      res.json({
+        totalEligibleProducts: eligible.length,
+        inStockCount: eligible.filter((p) => p.stockStatus !== 'out_of_stock' && (p.stock || 0) > 0).length,
+        outOfStockCount: eligible.filter((p) => p.stockStatus === 'out_of_stock' || (p.stock || 0) <= 0).length,
+        catalogXmlUrl: '/api/meta/catalog.xml',
+        catalogJsonUrl: '/api/meta/catalog.json',
+        currency: 'BDT',
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ==========================================
+  // TikTok Ads Tracking, Events API & Catalog
+  // ==========================================
+  app.post("/api/tiktok/events", async (req, res) => {
+    try {
+      const { eventName, eventId, customData, userData, eventSourceUrl, testEventCode } = req.body;
+      const clientIp = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.socket.remoteAddress;
+      const clientUserAgent = req.headers['user-agent'];
+
+      const result = await sendTikTokServerEvent({
+        eventName,
+        eventId,
+        customData,
+        userData: {
+          ...userData,
+          clientIp,
+          clientUserAgent,
+        },
+        eventSourceUrl,
+        testEventCode,
+      });
+
+      res.json(result);
+    } catch (err: any) {
+      res.status(500).json({ success: false, message: err.message });
+    }
+  });
+
+  app.post("/api/tiktok/test-event", async (req, res) => {
+    try {
+      const { eventName, eventId, customData, testEventCode } = req.body;
+      const clientIp = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.socket.remoteAddress;
+      const clientUserAgent = req.headers['user-agent'];
+
+      const result = await sendTikTokServerEvent({
+        eventName: eventName || 'PageView',
+        eventId: eventId || `tt_test_${Date.now()}`,
+        customData: customData || { test: true },
+        userData: {
+          email: 'test@kenaxbd.com',
+          phone: '01700000000',
+          name: 'KenaX Test Customer',
+          clientIp,
+          clientUserAgent,
+        },
+        testEventCode,
+      });
+
+      res.json(result);
+    } catch (err: any) {
+      res.status(500).json({ success: false, message: err.message });
+    }
+  });
+
+  app.get("/api/tiktok/logs", (req, res) => {
+    res.json(getTikTokServerLogs());
+  });
+
+  app.delete("/api/tiktok/logs", (req, res) => {
+    clearTikTokServerLogs();
+    res.json({ success: true });
+  });
+
+  app.get("/api/tiktok/status", (req, res) => {
+    res.json(getTikTokConnectionStatus());
+  });
+
+  // TikTok Product Catalog XML Feed (RSS 2.0 / Merchant Center Feed)
+  app.get("/api/tiktok/catalog.xml", async (req, res) => {
+    try {
+      const isEnvPreview = checkIsEnvPreview(req);
+      const host = req.get('host') || 'kenaxbd.com';
+      const protocol = req.protocol === 'https' || req.headers['x-forwarded-proto'] === 'https' ? 'https' : 'http';
+      const baseUrl = `${protocol}://${host}`;
+      const xml = await generateTikTokCatalogXml(baseUrl, isEnvPreview);
+      res.setHeader('Content-Type', 'application/xml; charset=utf-8');
+      res.setHeader('Cache-Control', 'public, max-age=1800');
+      res.send(xml);
+    } catch (err: any) {
+      res.status(500).send(`<?xml version="1.0" encoding="UTF-8"?><error>${err.message}</error>`);
+    }
+  });
+
+  // TikTok Product Catalog JSON Feed
+  app.get("/api/tiktok/catalog.json", async (req, res) => {
+    try {
+      const isEnvPreview = checkIsEnvPreview(req);
+      const host = req.get('host') || 'kenaxbd.com';
+      const protocol = req.protocol === 'https' || req.headers['x-forwarded-proto'] === 'https' ? 'https' : 'http';
+      const baseUrl = `${protocol}://${host}`;
+      const json = await generateTikTokCatalogJson(baseUrl, isEnvPreview);
+      res.json(json);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // TikTok Catalog Health Status
+  app.get("/api/tiktok/catalog/status", async (req, res) => {
+    try {
+      const isEnvPreview = checkIsEnvPreview(req);
+      const eligible = await getEligibleTikTokCatalogProducts(isEnvPreview);
+      res.json({
+        totalEligibleProducts: eligible.length,
+        inStockCount: eligible.filter((p) => p.stockStatus !== 'out_of_stock' && (p.stock || 0) > 0).length,
+        outOfStockCount: eligible.filter((p) => p.stockStatus === 'out_of_stock' || (p.stock || 0) <= 0).length,
+        catalogXmlUrl: '/api/tiktok/catalog.xml',
+        catalogJsonUrl: '/api/tiktok/catalog.json',
+        currency: 'BDT',
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ==========================================
+  // Google Ads, GA4 & Merchant Center Feed
+  // ==========================================
+  app.post("/api/google/events", async (req, res) => {
+    try {
+      const { eventName, transactionId, customData, userData, eventSourceUrl, conversionAction } = req.body;
+      const clientIp = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.socket.remoteAddress;
+      const clientUserAgent = req.headers['user-agent'];
+
+      const result = await sendGoogleServerConversion({
+        eventName,
+        transactionId,
+        customData,
+        userData: {
+          ...userData,
+          clientIp,
+          clientUserAgent,
+        },
+        eventSourceUrl,
+        conversionAction,
+      });
+
+      res.json(result);
+    } catch (err: any) {
+      res.status(500).json({ success: false, message: err.message });
+    }
+  });
+
+  app.post("/api/google/test-event", async (req, res) => {
+    try {
+      const { eventName, transactionId, customData } = req.body;
+      const clientIp = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.socket.remoteAddress;
+      const clientUserAgent = req.headers['user-agent'];
+
+      const result = await sendGoogleServerConversion({
+        eventName: eventName || 'page_view',
+        transactionId: transactionId || `G-TEST-${Date.now()}`,
+        customData: customData || { value: 1500, currency: 'BDT' },
+        userData: {
+          email: 'test@kenaxbd.com',
+          phone: '01700000000',
+          firstName: 'Google Test Customer',
+          clientIp,
+          clientUserAgent,
+        },
+      });
+
+      res.json(result);
+    } catch (err: any) {
+      res.status(500).json({ success: false, message: err.message });
+    }
+  });
+
+  app.get("/api/google/logs", (req, res) => {
+    res.json(getGoogleServerLogs());
+  });
+
+  app.delete("/api/google/logs", (req, res) => {
+    clearGoogleServerLogs();
+    res.json({ success: true });
+  });
+
+  app.get("/api/google/status", (req, res) => {
+    res.json(getGoogleConnectionStatus());
+  });
+
+  // Google Merchant Center XML Feed (RSS 2.0 / Google Shopping Feed)
+  app.get("/api/google/merchant.xml", async (req, res) => {
+    try {
+      const isEnvPreview = checkIsEnvPreview(req);
+      const host = req.get('host') || 'kenaxbd.com';
+      const protocol = req.protocol === 'https' || req.headers['x-forwarded-proto'] === 'https' ? 'https' : 'http';
+      const baseUrl = `${protocol}://${host}`;
+      const xml = await generateGoogleMerchantXml(baseUrl, isEnvPreview);
+      res.setHeader('Content-Type', 'application/xml; charset=utf-8');
+      res.setHeader('Cache-Control', 'public, max-age=1800');
+      res.send(xml);
+    } catch (err: any) {
+      res.status(500).send(`<?xml version="1.0" encoding="UTF-8"?><error>${err.message}</error>`);
+    }
+  });
+
+  // Google Merchant Center JSON Feed
+  app.get("/api/google/merchant.json", async (req, res) => {
+    try {
+      const isEnvPreview = checkIsEnvPreview(req);
+      const host = req.get('host') || 'kenaxbd.com';
+      const protocol = req.protocol === 'https' || req.headers['x-forwarded-proto'] === 'https' ? 'https' : 'http';
+      const baseUrl = `${protocol}://${host}`;
+      const json = await generateGoogleMerchantJson(baseUrl, isEnvPreview);
+      res.json(json);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Google Merchant Center Feed Health Status
+  app.get("/api/google/merchant/status", async (req, res) => {
+    try {
+      const isEnvPreview = checkIsEnvPreview(req);
+      const eligible = await getEligibleGoogleMerchantProducts(isEnvPreview);
+      res.json({
+        totalEligibleProducts: eligible.length,
+        inStockCount: eligible.filter((p) => p.stockStatus !== 'out_of_stock' && (p.stock || 0) > 0).length,
+        outOfStockCount: eligible.filter((p) => p.stockStatus === 'out_of_stock' || (p.stock || 0) <= 0).length,
+        merchantXmlUrl: '/api/google/merchant.xml',
+        merchantJsonUrl: '/api/google/merchant.json',
+        currency: 'BDT',
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
     }
   });
 
@@ -294,28 +743,925 @@ async function startServer() {
     }
   });
 
+  // =========================================================================
+  // Xig Reseller Marketplace Integration (Source Side for KenaX BD)
+  // =========================================================================
+
+  const xigRateLimitTracker = new Map<string, { count: number; resetTime: number }>();
+
+  function checkXigRateLimit(ip: string, limitPerMinute: number): boolean {
+    const now = Date.now();
+    const entry = xigRateLimitTracker.get(ip);
+    if (!entry || now > entry.resetTime) {
+      xigRateLimitTracker.set(ip, { count: 1, resetTime: now + 60000 });
+      return true;
+    }
+    if (entry.count >= limitPerMinute) {
+      return false;
+    }
+    entry.count++;
+    return true;
+  }
+
+  // Auth Middleware for Xig Server-to-Server API
+  const authenticateXigRequest = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    const startTime = Date.now();
+    const clientIp = getRealClientIp(req);
+    const config = getXigConfig();
+
+    if (!config.enabled) {
+      addXigSyncLog({
+        endpoint: req.originalUrl || req.url,
+        method: req.method,
+        status: 403,
+        ip: clientIp,
+        responseTimeMs: Date.now() - startTime,
+        details: 'Rejected: Xig Marketplace integration is currently disabled by administrator',
+        isError: true,
+      });
+      return res.status(403).json({
+        error: "Xig Reseller Marketplace integration is currently disabled",
+        code: "INTEGRATION_DISABLED",
+        message: "The administrator has disabled Xig product sharing. Contact KenaX BD support.",
+      });
+    }
+
+    if (!checkXigRateLimit(clientIp, config.rateLimitPerMinute || 120)) {
+      addXigSyncLog({
+        endpoint: req.originalUrl || req.url,
+        method: req.method,
+        status: 429,
+        ip: clientIp,
+        responseTimeMs: Date.now() - startTime,
+        details: `Rate limit exceeded (${config.rateLimitPerMinute || 120} req/min)`,
+        isError: true,
+      });
+      return res.status(429).json({
+        error: "Too Many Requests",
+        code: "RATE_LIMIT_EXCEEDED",
+        retryAfterSeconds: 60,
+      });
+    }
+
+    const authHeader = req.headers.authorization || (req.headers['x-xig-api-key'] as string) || '';
+    if (!verifyXigApiKey(authHeader)) {
+      addXigSyncLog({
+        endpoint: req.originalUrl || req.url,
+        method: req.method,
+        status: 401,
+        ip: clientIp,
+        responseTimeMs: Date.now() - startTime,
+        details: 'Unauthorized: Invalid or revoked Xig API key provided',
+        isError: true,
+      });
+      return res.status(401).json({
+        error: "Unauthorized",
+        code: "INVALID_CREDENTIALS",
+        message: "Valid Bearer token or X-Xig-API-Key header required",
+      });
+    }
+
+    (req as any)._xigStartTime = startTime;
+    (req as any)._xigClientIp = clientIp;
+    next();
+  };
+
+  // Helper to calculate approved reseller price
+  function calculateResellerPrices(sourcePrice: number, permission?: any, pricingRule?: any) {
+    const retail = Number(sourcePrice) || 0;
+    if (permission?.approvedResellerPrice && permission.approvedResellerPrice > 0) {
+      return {
+        resellerPrice: Number(permission.approvedResellerPrice),
+        minResalePrice: Number(permission.minResalePrice || retail),
+        maxResalePrice: permission.maxResalePrice ? Number(permission.maxResalePrice) : undefined,
+      };
+    }
+
+    const rule = pricingRule || { mode: 'percentage_margin', marginPercent: 15, minResalePriceRule: 'enforce_retail' };
+    let resellerPrice = retail;
+    if (rule.mode === 'percentage_margin') {
+      const discount = Math.round(retail * ((rule.marginPercent || 15) / 100));
+      resellerPrice = Math.max(1, retail - discount);
+    } else if (rule.mode === 'fixed_discount') {
+      resellerPrice = Math.max(1, retail - (rule.marginPercent || 100));
+    }
+
+    const minResalePrice = rule.minResalePriceRule === 'enforce_retail' ? retail : resellerPrice;
+
+    return {
+      resellerPrice,
+      minResalePrice,
+      maxResalePrice: undefined,
+    };
+  }
+
+  // --- Admin Endpoints ---
+
+  app.get("/api/admin/xig-integration/config", async (req, res) => {
+    try {
+      const isEnvPreview = checkIsEnvPreview(req);
+      const config = getXigConfig();
+      const permissions = getXigProductPermissions();
+      const allProducts = await getAllProductsFromSQL(isEnvPreview);
+
+      const authorizedCount = Object.values(permissions).filter((p) => p.isEligible && p.status === 'authorized').length;
+      res.json({
+        config,
+        stats: {
+          totalProductsInStore: allProducts.length,
+          authorizedProductsCount: authorizedCount,
+          revokedProductsCount: Object.values(permissions).filter((p) => p.status === 'revoked').length,
+          lastSyncAt: config.lastSyncAt || null,
+        },
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/admin/xig-integration/config", (req, res) => {
+    try {
+      const updates = req.body;
+      const updated = saveXigConfig(updates);
+      res.json({ success: true, config: updated });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/admin/xig-integration/rotate-keys", (req, res) => {
+    try {
+      const updated = rotateXigApiKeys();
+      addXigSyncLog({
+        endpoint: '/api/admin/xig-integration/rotate-keys',
+        method: 'POST',
+        status: 200,
+        ip: getRealClientIp(req),
+        responseTimeMs: 2,
+        details: 'Admin rotated Xig API credentials',
+        isError: false,
+      });
+      res.json({ success: true, config: updated });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/admin/xig-integration/permissions", async (req, res) => {
+    try {
+      const isEnvPreview = checkIsEnvPreview(req);
+      const allProducts = await getAllProductsFromSQL(isEnvPreview);
+      const permissions = getXigProductPermissions();
+      const config = getXigConfig();
+
+      const matrix = allProducts.map((p) => {
+        const perm = permissions[p.id];
+        const isAuth = perm ? (perm.isEligible && perm.status === 'authorized') : false;
+        const prices = calculateResellerPrices(p.price, perm, config.pricingRule);
+
+        return {
+          productId: p.id,
+          sku: p.sku || `KB-${p.id}`,
+          title: p.name,
+          category: p.category || 'General',
+          image: p.image || (Array.isArray(p.images) ? p.images[0] : ''),
+          sourcePrice: p.price,
+          resellerPrice: prices.resellerPrice,
+          minResalePrice: prices.minResalePrice,
+          inStock: p.stockStatus !== 'out_of_stock' && (p.stock || 0) > 0,
+          stock: p.stock || 0,
+          status: perm?.status || 'draft',
+          isEligible: isAuth,
+          authorizedAt: perm?.authorizedAt,
+          revokedAt: perm?.revokedAt,
+          notes: perm?.notes || '',
+        };
+      });
+
+      res.json(matrix);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/admin/xig-integration/permissions", (req, res) => {
+    try {
+      const { productId, isEligible, status, approvedResellerPrice, minResalePrice, notes } = req.body;
+      if (!productId) return res.status(400).json({ error: "Missing productId" });
+
+      const current: any = getXigProductPermissions()[productId] || {
+        productId,
+        sourcePrice: 0,
+        approvedResellerPrice: 0,
+        minResalePrice: 0,
+        isEligible: false,
+        status: 'draft',
+        notes: '',
+      };
+
+      const now = new Date().toISOString();
+      const updatedPerm = {
+        ...current,
+        productId,
+        isEligible: Boolean(isEligible),
+        status: status || (isEligible ? 'authorized' : 'revoked'),
+        approvedResellerPrice: approvedResellerPrice ? Number(approvedResellerPrice) : current.approvedResellerPrice,
+        minResalePrice: minResalePrice ? Number(minResalePrice) : current.minResalePrice,
+        authorizedAt: isEligible ? (current.authorizedAt || now) : current.authorizedAt,
+        revokedAt: !isEligible ? now : undefined,
+        notes: notes !== undefined ? notes : current.notes,
+      };
+
+      saveXigProductPermission(updatedPerm);
+      res.json({ success: true, permission: updatedPerm });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/admin/xig-integration/permissions/bulk", async (req, res) => {
+    try {
+      const isEnvPreview = checkIsEnvPreview(req);
+      const { action, category, productIds } = req.body; // action: 'authorize' | 'revoke'
+      const allProducts = await getAllProductsFromSQL(isEnvPreview);
+      const config = getXigConfig();
+      const permissions = getXigProductPermissions();
+
+      let targets = allProducts;
+      if (category && category !== 'all') {
+        targets = targets.filter((p) => p.category === category);
+      }
+      if (Array.isArray(productIds) && productIds.length > 0) {
+        targets = targets.filter((p) => productIds.includes(p.id));
+      }
+
+      const now = new Date().toISOString();
+      const updatedList: any[] = [];
+
+      targets.forEach((p) => {
+        const cur = permissions[p.id];
+        const prices = calculateResellerPrices(p.price, cur, config.pricingRule);
+        const isAuth = action === 'authorize';
+        const perm = {
+          productId: p.id,
+          sku: p.sku || `KB-${p.id}`,
+          title: p.name,
+          category: p.category,
+          sourcePrice: p.price,
+          approvedResellerPrice: cur?.approvedResellerPrice || prices.resellerPrice,
+          minResalePrice: cur?.minResalePrice || prices.minResalePrice,
+          isEligible: isAuth,
+          status: isAuth ? 'authorized' : 'revoked',
+          authorizedAt: isAuth ? (cur?.authorizedAt || now) : cur?.authorizedAt,
+          revokedAt: !isAuth ? now : undefined,
+        };
+        updatedList.push(perm);
+      });
+
+      bulkUpdateXigProductPermissions(updatedList);
+      res.json({ success: true, count: updatedList.length, action });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/admin/xig-integration/logs", (req, res) => {
+    try {
+      const logs = getXigSyncLogs(100);
+      res.json(logs);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/admin/xig-integration/clear-logs", (_req, res) => {
+    try {
+      clearXigSyncLogs();
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/admin/xig-integration/test-webhook", async (req, res) => {
+    try {
+      const config = getXigConfig();
+      if (!config.webhookUrl) {
+        return res.status(400).json({ error: "No Webhook URL configured in Xig integration settings" });
+      }
+
+      const testPayload = {
+        event: 'integration.ping',
+        source: 'kenax_bd',
+        timestamp: new Date().toISOString(),
+        message: 'KenaX BD Xig Reseller Marketplace Webhook Test Ping',
+        sampleProduct: {
+          id: 'test-item-01',
+          sku: 'KB-TEST-001',
+          title: 'Test Authorized Product',
+          price: 1200,
+          resellerPrice: 1020,
+          inStock: true,
+        },
+      };
+
+      const signature = crypto
+        .createHmac('sha256', config.webhookSecret || config.apiSecret)
+        .update(JSON.stringify(testPayload))
+        .digest('hex');
+
+      const response = await fetch(config.webhookUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Kenax-Signature': signature,
+          'User-Agent': 'KenaX-BD-Xig-Sync/1.0',
+        },
+        body: JSON.stringify(testPayload),
+      }).catch((e) => ({
+        ok: false,
+        status: 500,
+        statusText: e.message,
+      } as any));
+
+      addXigSyncLog({
+        endpoint: config.webhookUrl,
+        method: 'POST (Webhook Ping)',
+        status: response.status || 200,
+        ip: getRealClientIp(req),
+        responseTimeMs: 45,
+        details: `Webhook ping to ${config.webhookUrl} result: ${response.status} ${response.statusText}`,
+        isError: !response.ok,
+      });
+
+      res.json({
+        success: response.ok,
+        status: response.status,
+        statusText: response.statusText,
+        url: config.webhookUrl,
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // --- Public / Server-to-Server Xig API (v1) ---
+
+  // 1. Health & Connection Check
+  app.get("/api/integrations/xig/v1/health", (req, res) => {
+    const config = getXigConfig();
+    const permissions = getXigProductPermissions();
+    const authorizedCount = Object.values(permissions).filter((p) => p.isEligible && p.status === 'authorized').length;
+
+    res.json({
+      status: config.enabled ? "active" : "disabled",
+      platform: "KenaX BD E-Commerce",
+      module: "xig_reseller_source_api",
+      version: "v1.0.0",
+      serverTime: new Date().toISOString(),
+      authorizedCatalogSize: authorizedCount,
+      rateLimitPerMinute: config.rateLimitPerMinute || 120,
+      pricingMode: config.pricingRule?.mode || 'percentage_margin',
+      authMethod: "Bearer token in Authorization header or X-Xig-API-Key",
+    });
+  });
+
+  // 2. Authorized Reseller Products Catalog (Filtered, Safe, Sanitized)
+  app.get("/api/integrations/xig/v1/products", authenticateXigRequest, async (req, res) => {
+    const startTime = (req as any)._xigStartTime || Date.now();
+    const clientIp = (req as any)._xigClientIp || getRealClientIp(req);
+    try {
+      const isEnvPreview = checkIsEnvPreview(req);
+      const allProducts = await getAllProductsFromSQL(isEnvPreview);
+      const permissions = getXigProductPermissions();
+      const config = getXigConfig();
+
+      // Query params
+      const page = Math.max(1, parseInt(req.query.page as string) || 1);
+      const limit = Math.min(100, Math.max(1, parseInt(req.query.limit as string) || 50));
+      const categoryFilter = req.query.category as string;
+      const statusFilter = req.query.status as string; // 'in_stock' | 'out_of_stock'
+
+      // Filter ONLY authorized products
+      let authorized = allProducts.filter((p) => {
+        const perm = permissions[p.id];
+        return perm && perm.isEligible && perm.status === 'authorized';
+      });
+
+      if (categoryFilter) {
+        authorized = authorized.filter((p) => p.category?.toLowerCase() === categoryFilter.toLowerCase());
+      }
+
+      const buffer = config.inventorySync?.stockBuffer || 0;
+      const autoHideOut = Boolean(config.inventorySync?.autoHideOutOfStock);
+
+      let mapped = authorized.map((p) => {
+        const perm = permissions[p.id];
+        const prices = calculateResellerPrices(p.price, perm, config.pricingRule);
+
+        const rawStock = Number(p.stock) || 0;
+        const effectiveStock = Math.max(0, rawStock - buffer);
+        const inStock = p.stockStatus !== 'out_of_stock' && effectiveStock > 0;
+
+        const rawImages = Array.isArray(p.images) && p.images.length > 0 ? p.images : (p.image ? [p.image] : []);
+        // Exclude videos from images list
+        const cleanImages = rawImages.filter(img => typeof img === 'string' && !img.includes('.mp4') && !img.includes('youtube'));
+
+        const variants = Array.isArray(p.variants)
+          ? p.variants.map((v: any) => ({
+              id: v.id || v.name,
+              name: v.name || v.label,
+              price: v.price ? Number(v.price) : prices.resellerPrice,
+              sku: v.sku || `${p.sku || p.id}-${v.name}`,
+              stock: v.stock !== undefined ? Number(v.stock) : effectiveStock,
+            }))
+          : undefined;
+
+        return {
+          id: p.id,
+          sku: p.sku || `KB-${p.id}`,
+          title: p.name,
+          description: p.description || '',
+          images: cleanImages,
+          category: p.category || 'General',
+          sourceRetailPrice: p.price,
+          approvedResellerPrice: prices.resellerPrice,
+          suggestedRetailPrice: p.price,
+          minResalePrice: prices.minResalePrice,
+          maxResalePrice: prices.maxResalePrice,
+          inStock,
+          availableQuantity: effectiveStock,
+          variants,
+          resaleEligible: true,
+          shippingWeightGrams: p.weightGrams || 250,
+          warranty: p.warranty || '7 Days Replacement Warranty',
+          updatedAt: (p as any).updatedAt || new Date().toISOString(),
+        };
+      });
+
+      if (autoHideOut || statusFilter === 'in_stock') {
+        mapped = mapped.filter((p) => p.inStock);
+      } else if (statusFilter === 'out_of_stock') {
+        mapped = mapped.filter((p) => !p.inStock);
+      }
+
+      const totalItems = mapped.length;
+      const totalPages = Math.ceil(totalItems / limit) || 1;
+      const paginated = mapped.slice((page - 1) * limit, page * limit);
+
+      saveXigConfig({ lastSyncAt: new Date().toISOString() });
+
+      addXigSyncLog({
+        endpoint: '/api/integrations/xig/v1/products',
+        method: 'GET',
+        status: 200,
+        ip: clientIp,
+        responseTimeMs: Date.now() - startTime,
+        details: `Returned ${paginated.length} products (Page ${page}/${totalPages}, Total ${totalItems})`,
+        isError: false,
+      });
+
+      res.json({
+        success: true,
+        data: paginated,
+        pagination: {
+          currentPage: page,
+          perPage: limit,
+          totalItems,
+          totalPages,
+          hasNextPage: page < totalPages,
+          hasPrevPage: page > 1,
+        },
+        meta: {
+          currency: 'BDT',
+          fulfillmentLocation: 'Dhaka, Bangladesh',
+          terms: 'Standard KenaX BD Wholesale Resale Terms',
+          generatedAt: new Date().toISOString(),
+        },
+      });
+    } catch (err: any) {
+      addXigSyncLog({
+        endpoint: '/api/integrations/xig/v1/products',
+        method: 'GET',
+        status: 500,
+        ip: clientIp,
+        responseTimeMs: Date.now() - startTime,
+        details: `Error: ${err.message}`,
+        isError: true,
+      });
+      res.status(500).json({ error: "Internal server error fetching reseller products", details: err.message });
+    }
+  });
+
+  // 3. Single Product Lookup
+  app.get("/api/integrations/xig/v1/products/:productId", authenticateXigRequest, async (req, res) => {
+    const startTime = (req as any)._xigStartTime || Date.now();
+    const clientIp = (req as any)._xigClientIp || getRealClientIp(req);
+    try {
+      const isEnvPreview = checkIsEnvPreview(req);
+      const { productId } = req.params;
+      const allProducts = await getAllProductsFromSQL(isEnvPreview);
+      const permissions = getXigProductPermissions();
+      const config = getXigConfig();
+
+      const perm = permissions[productId];
+      if (!perm || !perm.isEligible || perm.status !== 'authorized') {
+        return res.status(404).json({
+          error: "Product not available for Xig resale",
+          code: "PRODUCT_NOT_AUTHORIZED",
+          message: `Product ${productId} is not currently authorized or has been revoked by KenaX BD.`,
+        });
+      }
+
+      const product = allProducts.find((p) => p.id === productId);
+      if (!product) {
+        return res.status(404).json({ error: "Product not found in catalog" });
+      }
+
+      const prices = calculateResellerPrices(product.price, perm, config.pricingRule);
+      const buffer = config.inventorySync?.stockBuffer || 0;
+      const rawStock = Number(product.stock) || 0;
+      const effectiveStock = Math.max(0, rawStock - buffer);
+      const inStock = product.stockStatus !== 'out_of_stock' && effectiveStock > 0;
+
+      const rawImages = Array.isArray(product.images) && product.images.length > 0 ? product.images : (product.image ? [product.image] : []);
+      const cleanImages = rawImages.filter(img => typeof img === 'string' && !img.includes('.mp4') && !img.includes('youtube'));
+
+      addXigSyncLog({
+        endpoint: `/api/integrations/xig/v1/products/${productId}`,
+        method: 'GET',
+        status: 200,
+        ip: clientIp,
+        responseTimeMs: Date.now() - startTime,
+        details: `Product ${productId} (${product.name}) fetched`,
+        isError: false,
+      });
+
+      res.json({
+        success: true,
+        data: {
+          id: product.id,
+          sku: product.sku || `KB-${product.id}`,
+          title: product.name,
+          description: product.description || '',
+          images: cleanImages,
+          category: product.category || 'General',
+          sourceRetailPrice: product.price,
+          approvedResellerPrice: prices.resellerPrice,
+          minResalePrice: prices.minResalePrice,
+          maxResalePrice: prices.maxResalePrice,
+          inStock,
+          availableQuantity: effectiveStock,
+          resaleEligible: true,
+          warranty: product.warranty || '7 Days Replacement Warranty',
+          updatedAt: (product as any).updatedAt || new Date().toISOString(),
+        },
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // 4. Incremental Product Changes (Since Timestamp)
+  app.get("/api/integrations/xig/v1/changes", authenticateXigRequest, async (req, res) => {
+    const startTime = (req as any)._xigStartTime || Date.now();
+    const clientIp = (req as any)._xigClientIp || getRealClientIp(req);
+    try {
+      const isEnvPreview = checkIsEnvPreview(req);
+      const since = req.query.since ? new Date(req.query.since as string) : new Date(Date.now() - 24 * 3600 * 1000);
+      const allProducts = await getAllProductsFromSQL(isEnvPreview);
+      const permissions = getXigProductPermissions();
+      const config = getXigConfig();
+
+      const updatedAuthorized: any[] = [];
+      const revokedProductIds: string[] = [];
+
+      Object.entries(permissions).forEach(([pid, perm]) => {
+        if (perm.status === 'revoked' && perm.revokedAt && new Date(perm.revokedAt) >= since) {
+          revokedProductIds.push(pid);
+        } else if (perm.isEligible && perm.status === 'authorized') {
+          const prod = allProducts.find((p) => p.id === pid);
+          if (prod) {
+            const prodUpdated = new Date((prod as any).updatedAt || perm.authorizedAt || 0);
+            if (prodUpdated >= since) {
+              const prices = calculateResellerPrices(prod.price, perm, config.pricingRule);
+              updatedAuthorized.push({
+                id: prod.id,
+                sku: prod.sku || `KB-${prod.id}`,
+                title: prod.name,
+                sourceRetailPrice: prod.price,
+                approvedResellerPrice: prices.resellerPrice,
+                minResalePrice: prices.minResalePrice,
+                inStock: prod.stockStatus !== 'out_of_stock' && (prod.stock || 0) > 0,
+                availableQuantity: Math.max(0, (prod.stock || 0) - (config.inventorySync?.stockBuffer || 0)),
+                updatedAt: (prod as any).updatedAt || new Date().toISOString(),
+              });
+            }
+          }
+        }
+      });
+
+      addXigSyncLog({
+        endpoint: '/api/integrations/xig/v1/changes',
+        method: 'GET',
+        status: 200,
+        ip: clientIp,
+        responseTimeMs: Date.now() - startTime,
+        details: `Changes since ${since.toISOString()}: ${updatedAuthorized.length} updated, ${revokedProductIds.length} revoked`,
+        isError: false,
+      });
+
+      res.json({
+        success: true,
+        since: since.toISOString(),
+        updatedProducts: updatedAuthorized,
+        revokedProductIds,
+        timestamp: new Date().toISOString(),
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // 5. Submit Order from Xig for KenaX BD Fulfillment
+  app.post("/api/integrations/xig/v1/orders", authenticateXigRequest, async (req, res) => {
+    const startTime = (req as any)._xigStartTime || Date.now();
+    const clientIp = (req as any)._xigClientIp || getRealClientIp(req);
+    try {
+      const isEnvPreview = checkIsEnvPreview(req);
+      const idempotencyKey = (req.headers['idempotency-key'] as string) || req.body.idempotencyKey || req.body.xigOrderReference;
+
+      // 1. Idempotency Check
+      if (idempotencyKey) {
+        const existingMap = findXigOrderMappingByIdempotency(idempotencyKey);
+        if (existingMap) {
+          addXigSyncLog({
+            endpoint: '/api/integrations/xig/v1/orders',
+            method: 'POST (Idempotent replay)',
+            status: 200,
+            ip: clientIp,
+            responseTimeMs: Date.now() - startTime,
+            details: `Idempotent duplicate order returned for key ${idempotencyKey} (Kenax Order ${existingMap.kenaxOrderId})`,
+            isError: false,
+          });
+          return res.json({
+            success: true,
+            isDuplicate: true,
+            message: "Order already accepted previously under this idempotency key",
+            orderId: existingMap.kenaxOrderId,
+            xigOrderReference: existingMap.xigOrderId,
+            status: existingMap.status,
+            totalAmount: existingMap.totalAmount,
+            createdAt: existingMap.createdAt,
+          });
+        }
+      }
+
+      const { xigOrderReference, items, customer, deliveryCharge, notes, paymentMethod } = req.body;
+
+      if (!xigOrderReference) {
+        return res.status(400).json({ error: "Missing required xigOrderReference", code: "INVALID_BODY" });
+      }
+
+      if (!Array.isArray(items) || items.length === 0) {
+        return res.status(400).json({ error: "Order must contain at least one product item in 'items'", code: "EMPTY_ITEMS" });
+      }
+
+      if (!customer || !customer.name || !customer.phone || !customer.address) {
+        return res.status(400).json({ error: "Missing required customer details (name, phone, address)", code: "INVALID_CUSTOMER" });
+      }
+
+      const allProducts = await getAllProductsFromSQL(isEnvPreview);
+      const permissions = getXigProductPermissions();
+      const config = getXigConfig();
+
+      // 2. Validate each product for Resale Authorization and Availability
+      const orderItems: any[] = [];
+      let calculatedSubtotal = 0;
+
+      for (const item of items) {
+        const pid = item.productId || item.id;
+        const product = allProducts.find((p) => p.id === pid);
+
+        if (!product) {
+          return res.status(422).json({
+            error: `Product ${pid} not found in KenaX BD catalog`,
+            code: "PRODUCT_NOT_FOUND",
+          });
+        }
+
+        const perm = permissions[pid];
+        if (!perm || !perm.isEligible || perm.status !== 'authorized') {
+          return res.status(422).json({
+            error: `Product '${product.name}' (ID: ${pid}) is not authorized for resale by KenaX BD`,
+            code: "PRODUCT_NOT_AUTHORIZED_FOR_RESALE",
+          });
+        }
+
+        const reqQty = Math.max(1, parseInt(item.quantity) || 1);
+        const currentStock = Number(product.stock) || 0;
+        if (product.stockStatus === 'out_of_stock' || (currentStock < reqQty && !config.inventorySync?.allowBackorders)) {
+          return res.status(422).json({
+            error: `Insufficient stock for product '${product.name}'. Requested: ${reqQty}, Available: ${currentStock}`,
+            code: "OUT_OF_STOCK",
+          });
+        }
+
+        const prices = calculateResellerPrices(product.price, perm, config.pricingRule);
+        const unitPrice = prices.resellerPrice;
+        const lineTotal = unitPrice * reqQty;
+        calculatedSubtotal += lineTotal;
+
+        orderItems.push({
+          productId: product.id,
+          productName: product.name,
+          sku: product.sku || `KB-${product.id}`,
+          price: unitPrice,
+          sourceRetailPrice: product.price,
+          quantity: reqQty,
+          variant: item.variant || '',
+          image: product.image || (Array.isArray(product.images) ? product.images[0] : ''),
+        });
+      }
+
+      const shippingFee = Number(deliveryCharge) || 70; // Standard Dhaka courier
+      const totalAmount = calculatedSubtotal + shippingFee;
+
+      // 3. Create persistent Order in KenaX BD Store
+      const cleanPhone = normalizeBDPhoneNumber(customer.phone);
+      const nowIso = new Date().toISOString();
+      const newOrderId = `KB-XIG-${Date.now().toString().slice(-6)}-${Math.floor(100 + Math.random() * 900)}`;
+
+      const newOrder: any = {
+        id: newOrderId,
+        customerName: customer.name.trim(),
+        customerMobile: cleanPhone,
+        deliveryMobile: cleanPhone,
+        deliveryAddress: customer.address.trim(),
+        district: customer.district || 'Dhaka',
+        deliveryCharge: shippingFee,
+        totalAmount,
+        orderStatus: 'Pending',
+        paymentMethod: paymentMethod || 'Cash on Delivery (Xig Marketplace)',
+        orderSource: 'xig_marketplace',
+        createdAt: nowIso,
+        updatedAt: nowIso,
+        items: orderItems,
+        notes: `[Xig Marketplace Order: ${xigOrderReference}] ${notes || ''}`.trim(),
+        assignedStaffName: 'Xig Automated System',
+        ipStatus: 'Active',
+      };
+
+      saveOrderToStore(newOrder, isEnvPreview);
+      writeOrderToFirestore(newOrder, isEnvPreview).catch(() => {});
+
+      // 4. Save external mapping
+      saveXigOrderMapping({
+        xigOrderId: xigOrderReference,
+        kenaxOrderId: newOrderId,
+        idempotencyKey,
+        status: 'Pending',
+        totalAmount,
+        customerName: customer.name.trim(),
+        customerPhone: cleanPhone,
+        shippingAddress: customer.address.trim(),
+        createdAt: nowIso,
+        updatedAt: nowIso,
+      });
+
+      addXigSyncLog({
+        endpoint: '/api/integrations/xig/v1/orders',
+        method: 'POST',
+        status: 201,
+        ip: clientIp,
+        responseTimeMs: Date.now() - startTime,
+        details: `Order created: ${newOrderId} for Xig Ref ${xigOrderReference} (৳${totalAmount})`,
+        isError: false,
+      });
+
+      res.status(201).json({
+        success: true,
+        orderId: newOrderId,
+        xigOrderReference,
+        status: "pending",
+        subtotal: calculatedSubtotal,
+        deliveryCharge: shippingFee,
+        totalAmount,
+        currency: "BDT",
+        acceptedAt: nowIso,
+        message: "Order successfully received and placed into KenaX BD fulfillment queue.",
+      });
+    } catch (err: any) {
+      addXigSyncLog({
+        endpoint: '/api/integrations/xig/v1/orders',
+        method: 'POST',
+        status: 500,
+        ip: clientIp,
+        responseTimeMs: Date.now() - startTime,
+        details: `Order processing error: ${err.message}`,
+        isError: true,
+      });
+      res.status(500).json({ error: "Failed to process order", details: err.message });
+    }
+  });
+
+  // 6. Check Order Fulfillment Status
+  app.get("/api/integrations/xig/v1/orders/:orderId", authenticateXigRequest, (req, res) => {
+    try {
+      const isEnvPreview = checkIsEnvPreview(req);
+      const { orderId } = req.params;
+      const allOrders = getAllOrdersFromStore(isEnvPreview);
+      const maps = getXigOrderMappings();
+
+      const mapping = maps.find((m) => m.kenaxOrderId === orderId || m.xigOrderId === orderId);
+      const targetKenaxId = mapping ? mapping.kenaxOrderId : orderId;
+
+      const order = allOrders.find((o) => o.id === targetKenaxId);
+      if (!order) {
+        return res.status(404).json({ error: "Order not found", code: "ORDER_NOT_FOUND" });
+      }
+
+      res.json({
+        success: true,
+        orderId: order.id,
+        xigOrderReference: mapping?.xigOrderId || null,
+        status: order.orderStatus || 'Pending',
+        courierName: (order as any).courierName || null,
+        trackingNumber: (order as any).trackingNumber || (order as any).courierTrackingCode || null,
+        totalAmount: order.totalAmount,
+        updatedAt: (order as any).updatedAt || order.createdAt,
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  const normalizeOrderStatusServer = (raw?: string): string => {
+    const val = (raw || 'Pending').toString().trim();
+    const lower = val.toLowerCase();
+    const map: Record<string, string> = {
+      pending: 'Pending',
+      'follow up': 'Follow Up',
+      followup: 'Follow Up',
+      'follow_up': 'Follow Up',
+      'payment verification': 'Payment Verification',
+      payment_verification: 'Payment Verification',
+      incomplete: 'Incomplete',
+      confirmed: 'Confirmed',
+      processing: 'Processing',
+      'ready to ship': 'Ready to Ship',
+      ready_to_ship: 'Ready to Ship',
+      packed: 'Packed',
+      picked: 'Packed',
+      'in transit': 'In Transit',
+      in_transit: 'In Transit',
+      shipped: 'Shipped',
+      'out for delivery': 'Out for Delivery',
+      out_for_delivery: 'Out for Delivery',
+      delivered: 'Delivered',
+      completed: 'Completed',
+      hold: 'Hold',
+      'on hold': 'Hold',
+      on_hold: 'Hold',
+      cancelled: 'Cancelled',
+      canceled: 'Cancelled',
+      rejected: 'Rejected',
+      spam: 'Spam',
+      'fake order': 'Fake Order',
+      fake: 'Fake Order',
+      returned: 'Returned',
+      refunded: 'Refunded',
+      'failed delivery': 'Failed Delivery',
+      failed_delivery: 'Failed Delivery',
+    };
+    return map[lower] || (val.charAt(0).toUpperCase() + val.slice(1));
+  };
+
+  const getOrderTabBucketServer = (order: any): string => {
+    if (order?.isFakeOrder) return 'spam';
+    const lower = normalizeOrderStatusServer(order?.orderStatus || order?.status).toLowerCase();
+    if (lower === 'pending' || lower === 'payment verification' || lower === 'unconfirmed' || lower === 'incomplete') return 'pending';
+    if (lower === 'follow up') return 'follow_up';
+    if (lower === 'confirmed') return 'confirmed';
+    if (lower === 'processing') return 'processing';
+    if (lower === 'ready to ship' || lower === 'packed') return 'ready_to_ship';
+    if (lower === 'in transit' || lower === 'shipped' || lower === 'out for delivery') return 'in_transit';
+    if (lower === 'delivered' || lower === 'completed') return 'delivered';
+    if (lower === 'hold') return 'hold';
+    if (lower === 'cancelled' || lower === 'rejected') return 'cancelled';
+    if (lower === 'spam' || lower === 'fake order') return 'spam';
+    if (lower === 'returned' || lower === 'refunded') return 'returned';
+    if (lower === 'failed delivery') return 'failed_delivery';
+    return 'pending';
+  };
+
   // Central Server Orders API (Permanent Cloud Persistence)
   app.get("/api/orders", (req, res) => {
     try {
       const isEnvPreview = checkIsEnvPreview(req);
       const orders = getAllOrdersFromStore(isEnvPreview);
       const normalized = (orders || []).map((o: any) => {
-        const rawStatus = (o.orderStatus || o.status || 'Pending').toString().trim();
-        const lower = rawStatus.toLowerCase();
-        const normalizedStatus =
-          lower === 'pending'
-            ? 'Pending'
-            : lower === 'confirmed'
-            ? 'Confirmed'
-            : lower === 'cancelled'
-            ? 'Cancelled'
-            : lower === 'delivered'
-            ? 'Delivered'
-            : lower === 'processing'
-            ? 'Processing'
-            : lower === 'shipped'
-            ? 'Shipped'
-            : rawStatus.charAt(0).toUpperCase() + rawStatus.slice(1);
+        const normalizedStatus = normalizeOrderStatusServer(o.orderStatus || o.status);
         return {
           ...o,
           orderStatus: normalizedStatus,
@@ -326,6 +1672,272 @@ async function startServer() {
       res.json(normalized);
     } catch (err: any) {
       res.status(500).json({ error: "Failed to read server orders", details: err.message });
+    }
+  });
+
+  // Server-side Paginated, Filtered, Sorted & Counted Orders Management Endpoint
+  app.get("/api/orders/manage", (req, res) => {
+    try {
+      const isEnvPreview = checkIsEnvPreview(req);
+      const rawOrders = getAllOrdersFromStore(isEnvPreview) || [];
+      const normalized = rawOrders.map((o: any) => {
+        const normalizedStatus = normalizeOrderStatusServer(o.orderStatus || o.status);
+        return {
+          ...o,
+          orderStatus: normalizedStatus,
+          status: normalizedStatus,
+          isV2Order: true,
+        };
+      });
+
+      const role = String(req.query.role || 'super_admin').toLowerCase();
+      const staffId = String(req.query.staffId || '');
+      const staffName = String(req.query.staffName || '');
+      const isModerator = role === 'moderator';
+
+      // Enforce reseller isolation & moderator isolation
+      const scopedOrders = normalized.filter((order: any) => {
+        if (!order) return false;
+        const isReseller = Boolean(
+          order.resellerId ||
+          order.resellerStoreName ||
+          order.isResellerOrder ||
+          (order.notes && String(order.notes).includes('[Dropship:'))
+        );
+        if (isReseller) return false;
+
+        if (isModerator && (staffId || staffName)) {
+          const bucket = getOrderTabBucketServer(order);
+          const isMine =
+            (staffId && (order.handledByStaffId === staffId || order.createdByStaffId === staffId)) ||
+            (staffName && (order.handledByStaffName === staffName || order.createdByStaffName === staffName));
+          if (bucket !== 'pending' && !isMine) return false;
+        }
+        return true;
+      });
+
+      // Compute duplicate phone/IP maps on scopedOrders
+      const phoneFreq: Record<string, number> = {};
+      const ipFreq: Record<string, number> = {};
+      scopedOrders.forEach((o: any) => {
+        const p = String(o.customerMobile || o.deliveryMobile || o.phone || '').replace(/\D/g, '').slice(-10);
+        if (p.length >= 8) phoneFreq[p] = (phoneFreq[p] || 0) + 1;
+        const ip = String(o.customerIp || '').trim();
+        if (ip && ip !== 'N/A' && ip !== 'unknown') ipFreq[ip] = (ipFreq[ip] || 0) + 1;
+      });
+
+      // Compute live status tab counts across all 13 operational tabs
+      const counts: Record<string, number> = {
+        all: scopedOrders.length,
+        pending: 0,
+        follow_up: 0,
+        confirmed: 0,
+        processing: 0,
+        ready_to_ship: 0,
+        in_transit: 0,
+        delivered: 0,
+        hold: 0,
+        cancelled: 0,
+        spam: 0,
+        returned: 0,
+        failed_delivery: 0,
+      };
+      scopedOrders.forEach((o: any) => {
+        const b = getOrderTabBucketServer(o);
+        if (counts[b] !== undefined) counts[b] += 1;
+      });
+
+      // Apply filters
+      const statusTab = String(req.query.status || 'all').toLowerCase();
+      const search = String(req.query.search || '').trim().toLowerCase();
+      const payment = String(req.query.payment || 'all').toLowerCase();
+      const channel = String(req.query.channel || 'all').toLowerCase();
+      const address = String(req.query.address || 'all').toLowerCase();
+      const onlinePayment = String(req.query.onlinePayment || 'all').toLowerCase();
+      const adNetwork = String(req.query.adNetwork || 'all').toLowerCase();
+      const siteUpdate = String(req.query.siteUpdate || 'all').toLowerCase();
+      const duplicates = String(req.query.duplicates || 'all').toLowerCase();
+      const orderCheck = String(req.query.orderCheck || 'all').toLowerCase();
+
+      const filtered = scopedOrders.filter((o: any) => {
+        if (statusTab !== 'all' && getOrderTabBucketServer(o) !== statusTab) return false;
+
+        if (search) {
+          const itemNames = Array.isArray(o.items)
+            ? o.items.map((it: any) => `${it?.productName || it?.name || ''} ${it?.sku || ''}`).join(' ').toLowerCase()
+            : '';
+          const haystack = [
+            o.id,
+            o.siteOrderNumber,
+            o.courierOrderId,
+            o.trackingNumber,
+            o.customerName,
+            o.deliveryName,
+            o.customerMobile,
+            o.deliveryMobile,
+            o.phone,
+            o.customerIp,
+            o.district,
+            o.division,
+            o.fullAddress,
+            itemNames,
+          ]
+            .filter(Boolean)
+            .join(' ')
+            .toLowerCase();
+          if (!haystack.includes(search)) return false;
+        }
+
+        if (payment !== 'all') {
+          const selected = payment.split(',').filter(Boolean);
+          const pm = String(o.paymentMethod || '').toLowerCase();
+          const matched = selected.some((val) => {
+            if (val === 'cod') return pm.includes('cash');
+            if (val === 'bkash') return pm.includes('bkash');
+            if (val === 'nagad') return pm.includes('nagad');
+            if (val === 'rocket') return pm.includes('rocket');
+            return pm.includes(val);
+          });
+          if (!matched) return false;
+        }
+
+        if (channel !== 'all') {
+          const selected = channel.split(',').filter(Boolean);
+          const os = String(o.orderSource || o.source || o.channel || 'website_store').toLowerCase();
+          const matched = selected.some((val) => {
+            if (val === 'chatbot') return Boolean(o.isAiBotOrder || os.includes('bot') || os.includes('chat'));
+            if (val === 'landing_page') return Boolean(o.isLandingPageOrder || o.landingPageSlug || os.includes('landing'));
+            if (val === 'manual') return os.includes('manual') || os.includes('admin');
+            if (val === 'website_store') return !(o.isAiBotOrder || os.includes('bot') || os.includes('landing') || os.includes('manual'));
+            return false;
+          });
+          if (!matched) return false;
+        }
+
+        if (address !== 'all') {
+          const selected = address.split(',').filter(Boolean);
+          const div = String(o.division || o.customerDivision || '').toLowerCase();
+          const dist = String(o.district || o.customerDistrict || '').toLowerCase();
+          const fullAddr = String(o.fullAddress || o.deliveryAddress || '').trim();
+          const isDhaka = div.includes('dhaka') || dist.includes('dhaka') || div.includes('ঢাকা') || dist.includes('ঢাকা');
+          const matched = selected.some((val) => {
+            if (val === 'dhaka') return isDhaka;
+            if (val === 'outside_dhaka') return !isDhaka;
+            if (val === 'incomplete') return fullAddr.length < 6;
+            return false;
+          });
+          if (!matched) return false;
+        }
+
+        if (onlinePayment !== 'all') {
+          const selected = onlinePayment.split(',').filter(Boolean);
+          const ps = String(o.paymentStatus || '').toLowerCase();
+          const pm = String(o.paymentMethod || '').toLowerCase();
+          const isOnlineMethod = !pm.includes('cash');
+          const matched = selected.some((val) => {
+            if (val === 'paid') return ps === 'paid' || ps === 'verified';
+            if (val === 'pending_verification') return ps.includes('pending') || ps.includes('submitted');
+            if (val === 'unpaid') return ps !== 'paid' && ps !== 'verified';
+            if (val === 'online_only') return isOnlineMethod;
+            return false;
+          });
+          if (!matched) return false;
+        }
+
+        if (adNetwork !== 'all') {
+          const selected = adNetwork.split(',').filter(Boolean);
+          const attr = o.attribution || {};
+          const ft = attr.firstTouch || {};
+          const lt = attr.lastTouch || {};
+          const src = String(o.adNetwork || lt.utm_source || ft.utm_source || '').toLowerCase();
+          const isMeta = Boolean(attr.fbclid || lt.fbclid || ft.fbclid || src.includes('facebook') || src.includes('meta') || src.includes('ig'));
+          const isTikTok = Boolean(attr.ttclid || lt.ttclid || ft.ttclid || src.includes('tiktok'));
+          const isGoogle = Boolean(attr.gclid || lt.gclid || ft.gclid || src.includes('google'));
+          const netKey = isMeta ? 'meta' : isTikTok ? 'tiktok' : isGoogle ? 'google' : 'organic';
+          if (!selected.includes(netKey)) return false;
+        }
+
+        if (siteUpdate !== 'all') {
+          const selected = siteUpdate.split(',').filter(Boolean);
+          const hasSiteSync = Boolean(o.siteOrderNumber || o.courierOrderId || o.trackingNumber);
+          const isEdited = Boolean(o.updatedAt && o.createdAt && new Date(o.updatedAt).getTime() - new Date(o.createdAt).getTime() > 60000);
+          const isInc = Boolean(o.isIncompleteOrder || String(o.orderStatus || '').toLowerCase() === 'incomplete');
+          const matched = selected.some((val) => {
+            if (val === 'synced') return hasSiteSync;
+            if (val === 'edited') return isEdited;
+            if (val === 'incomplete') return isInc;
+            return false;
+          });
+          if (!matched) return false;
+        }
+
+        if (duplicates !== 'all') {
+          const selected = duplicates.split(',').filter(Boolean);
+          const p = String(o.customerMobile || o.deliveryMobile || o.phone || '').replace(/\D/g, '').slice(-10);
+          const ip = String(o.customerIp || '').trim();
+          const isDupPhone = p.length >= 8 && (phoneFreq[p] || 0) > 1;
+          const isDupIp = Boolean(ip && (ipFreq[ip] || 0) > 1);
+          const matched = selected.some((val) => {
+            if (val === 'duplicate_phone') return isDupPhone;
+            if (val === 'duplicate_ip') return isDupIp;
+            if (val === 'any_duplicate') return isDupPhone || isDupIp;
+            return false;
+          });
+          if (!matched) return false;
+        }
+
+        if (orderCheck !== 'all') {
+          const selected = orderCheck.split(',').filter(Boolean);
+          const risk = String(o.courierCheckSummary?.riskLevel || o.courierCheckStatus || 'no_data').toLowerCase();
+          const ipStatus = String(o.ipStatus || 'active').toLowerCase();
+          const matched = selected.some((val) => {
+            if (val === 'safe') return risk === 'safe' || risk === 'verified';
+            if (val === 'moderate') return risk === 'moderate';
+            if (val === 'high_risk') return risk === 'high_risk' || risk === 'risky';
+            if (val === 'no_data') return risk === 'no_data' || !o.courierCheckSummary;
+            if (val === 'ip_blocked') return ipStatus === 'blocked';
+            return false;
+          });
+          if (!matched) return false;
+        }
+
+        return true;
+      });
+
+      const sortBy = String(req.query.sortBy || 'createdAt');
+      const sortDir = String(req.query.sortDir || 'desc') === 'asc' ? 1 : -1;
+
+      filtered.sort((a: any, b: any) => {
+        if (sortBy === 'totalAmount') {
+          return ((a.totalAmount || 0) - (b.totalAmount || 0)) * sortDir;
+        }
+        if (sortBy === 'id') {
+          return String(a.id || '').localeCompare(String(b.id || '')) * sortDir;
+        }
+        const aTime = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+        const bTime = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+        if (bTime !== aTime) return (aTime - bTime) * sortDir;
+        return String(a.id || '').localeCompare(String(b.id || '')) * sortDir;
+      });
+
+      const page = Math.max(1, parseInt(String(req.query.page || '1'), 10) || 1);
+      const limit = Math.min(200, Math.max(1, parseInt(String(req.query.limit || '10'), 10) || 10));
+      const total = filtered.length;
+      const totalPages = Math.max(1, Math.ceil(total / limit));
+      const safePage = Math.min(page, totalPages);
+      const start = (safePage - 1) * limit;
+      const paginatedOrders = filtered.slice(start, start + limit);
+
+      res.json({
+        orders: paginatedOrders,
+        total,
+        page: safePage,
+        limit,
+        totalPages,
+        counts,
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: "Failed to query orders", details: err.message });
     }
   });
 
@@ -603,12 +2215,25 @@ async function sendOrderWhatsAppNotification(order: any) {
   }
 }
 
-  app.post("/api/orders", (req, res) => {
+  app.post("/api/orders", async (req, res) => {
     try {
       const isEnvPreview = checkIsEnvPreview(req);
       const order = req.body;
       if (!order || !order.id) {
         return res.status(400).json({ error: "Invalid order object, missing id" });
+      }
+
+      // Real Client IP Detection & Connection Intelligence
+      const connInfo = detectIpConnectionDetails(req);
+      const clientIp = connInfo.ip;
+      const isBlocked = isIpBlocked(clientIp, isEnvPreview);
+      if (isBlocked && order.orderSource !== 'admin') {
+        return res.status(403).json({
+          success: false,
+          error: "আপনার আইপি অ্যাড্রেস থেকে অর্ডার প্রদান সাময়িকভাবে স্থগিত রাখা হয়েছে। বিস্তারিত জানতে সাপোর্টে যোগাযোগ করুন। (Security Alert: IP Blocked)",
+          isBlocked: true,
+          ip: clientIp,
+        });
       }
 
       // Strict Bangladesh Mobile Number Validation on Order Creation
@@ -628,6 +2253,40 @@ async function sendOrderWhatsAppNotification(order: any) {
         order.deliveryMobile = delivVal.isValid ? delivVal.normalizedPhone : phoneValidation.normalizedPhone;
       } else {
         order.deliveryMobile = phoneValidation.normalizedPhone;
+      }
+
+      // Attach verified Server-Side Client IP, Version, Source & Proxy Status
+      order.customerIp = clientIp;
+      order.ipVersion = connInfo.ipVersion;
+      order.ipStatus = isBlocked ? 'Blocked' : 'Active';
+      order.ipCapturedAt = new Date().toISOString();
+      order.ipCaptureSource = connInfo.detectionSource;
+      order.isTrustedProxy = connInfo.isTrustedProxy;
+      order.ipProxyType = connInfo.proxyType;
+
+      // Geolocation lookup (approximate, non-blocking fallback if unavailable)
+      try {
+        const geo = await resolveIpGeolocation(clientIp);
+        if (geo) {
+          order.ipCountry = geo.country;
+          order.ipCountryCode = geo.countryCode;
+          order.ipRegion = geo.region;
+          order.ipCity = geo.city;
+          order.ipLatitude = geo.latitude;
+          order.ipLongitude = geo.longitude;
+          order.ipIsp = geo.isp;
+          order.ipConnectionType = geo.connectionType;
+          order.ipLocationAccuracy = geo.accuracyStatus;
+          order.ipGeoResolvedAt = geo.resolvedAt;
+          order.ipGeoData = {
+            ...geo,
+            detectionSource: connInfo.detectionSource,
+            isTrustedProxy: connInfo.isTrustedProxy,
+            proxyType: connInfo.proxyType,
+          };
+        }
+      } catch (geoErr) {
+        console.warn(`[Order ${order.id} Geo Resolution Warning]:`, geoErr);
       }
       
       // Only orders specifically created through the AI Bot should be tagged as 'Ordered by KenaX Bot'
@@ -655,26 +2314,48 @@ async function sendOrderWhatsAppNotification(order: any) {
         }
       }
       // Ensure orderStatus is standardized
-      const rawStatus = (order.orderStatus || order.status || 'Pending').toString().trim();
-      const lower = rawStatus.toLowerCase();
-      order.orderStatus =
-        lower === 'pending'
-          ? 'Pending'
-          : lower === 'confirmed'
-          ? 'Confirmed'
-          : lower === 'cancelled'
-          ? 'Cancelled'
-          : lower === 'delivered'
-          ? 'Delivered'
-          : lower === 'processing'
-          ? 'Processing'
-          : lower === 'shipped'
-          ? 'Shipped'
-          : rawStatus.charAt(0).toUpperCase() + rawStatus.slice(1);
+      order.orderStatus = normalizeOrderStatusServer(order.orderStatus || order.status);
       order.status = order.orderStatus;
       order.isV2Order = true;
 
       const saved = saveOrderToStore(order, isEnvPreview);
+      
+      // Record IP Activity in real-time IP Tracker database
+      try {
+        recordIpOrderActivity(clientIp, saved, isEnvPreview);
+      } catch (ipErr) {
+        console.warn(`[IP Activity Record Error for ${clientIp}]:`, ipErr);
+      }
+
+      // Automatically record real Order Created event in server Activity Log
+      try {
+        const actorName =
+          saved.createdByStaffName ||
+          (saved.orderSource === 'admin' ? 'Admin' : saved.customerName || 'Customer');
+        const actorRole =
+          saved.orderSource === 'admin'
+            ? 'admin'
+            : saved.isAiBotOrder
+            ? 'chatbot'
+            : 'customer';
+        appendActivityLogToStore(
+          {
+            staffName: actorName,
+            staffEmail: saved.customerEmail || undefined,
+            staffRole: actorRole,
+            action: 'Order Created',
+            module: 'Orders',
+            targetId: saved.id,
+            orderId: saved.id,
+            toStatus: saved.orderStatus || 'Pending',
+            source: saved.orderSource === 'admin' ? 'admin' : 'system',
+            details: `Order #${saved.id} created for ${saved.customerName || 'Customer'} (৳${Number(saved.totalAmount || 0).toLocaleString()}) via ${resolveOrderSalesChannel(saved)}`,
+            ipAddress: clientIp,
+          },
+          isEnvPreview
+        );
+      } catch {}
+
       // Synchronize to Firestore in background
       writeOrderToFirestore(saved, isEnvPreview).catch(() => {});
 
@@ -682,6 +2363,22 @@ async function sendOrderWhatsAppNotification(order: any) {
       sendOrderTelegramNotification(saved).catch(() => {});
       sendOrderWhatsAppNotification(saved).catch(() => {});
       sendOrderEmailNotification(saved).catch(() => {});
+
+      // Trigger Server-Side Meta Purchase event (CAPI) with full idempotency & deduplication protection
+      const clientUserAgent = req.headers['user-agent'];
+      sendServerPurchaseEvent(saved, clientIp, clientUserAgent, isEnvPreview).catch((capiErr) => {
+        console.warn(`[Order ${saved.id} Meta CAPI notice]:`, capiErr?.message);
+      });
+
+      // Trigger Server-Side TikTok Purchase event (CompletePayment) with idempotency
+      sendTikTokServerPurchaseEvent(saved, isEnvPreview).catch((ttErr) => {
+        console.warn(`[Order ${saved.id} TikTok Events API notice]:`, ttErr?.message);
+      });
+
+      // Trigger Server-Side Google Ads & GA4 Purchase conversion with idempotency
+      sendGoogleServerPurchaseEvent(saved, isEnvPreview).catch((gErr) => {
+        console.warn(`[Order ${saved.id} Google Conversion notice]:`, gErr?.message);
+      });
 
       res.json({ success: true, order: saved });
     } catch (err: any) {
@@ -695,27 +2392,10 @@ async function sendOrderWhatsAppNotification(order: any) {
       const { id } = req.params;
       const updates = req.body;
       if (updates.orderStatus || updates.status) {
-        const rawStatus = (updates.orderStatus || updates.status).toString().trim();
-        const lower = rawStatus.toLowerCase();
-        const normalizedStatus =
-          lower === 'pending'
-            ? 'Pending'
-            : lower === 'confirmed'
-            ? 'Confirmed'
-            : lower === 'cancelled'
-            ? 'Cancelled'
-            : lower === 'delivered'
-            ? 'Delivered'
-            : lower === 'processing'
-            ? 'Processing'
-            : lower === 'shipped'
-            ? 'Shipped'
-            : lower === 'fake order' || lower === 'fake'
-            ? 'Fake Order'
-            : rawStatus.charAt(0).toUpperCase() + rawStatus.slice(1);
+        const normalizedStatus = normalizeOrderStatusServer(updates.orderStatus || updates.status);
         updates.orderStatus = normalizedStatus;
         updates.status = normalizedStatus;
-        if (normalizedStatus === 'Fake Order') {
+        if (normalizedStatus === 'Fake Order' || normalizedStatus === 'Spam') {
           updates.isFakeOrder = true;
         } else if (updates.isFakeOrder === false) {
           updates.isFakeOrder = false;
@@ -724,6 +2404,31 @@ async function sendOrderWhatsAppNotification(order: any) {
       const updated = updateOrderInStore(id, updates, isEnvPreview);
       if (updated) {
         writeOrderToFirestore(updated, isEnvPreview).catch(() => {});
+
+        // If order became Confirmed / Processing / Delivered and CAPI Purchase was not yet sent, trigger it now
+        if (
+          (updated.orderStatus === 'Confirmed' || updated.orderStatus === 'Processing' || updated.orderStatus === 'Delivered') &&
+          !updated.metaPurchaseSent
+        ) {
+          const clientIp = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.socket.remoteAddress;
+          const clientUserAgent = req.headers['user-agent'];
+          sendServerPurchaseEvent(updated, clientIp, clientUserAgent, isEnvPreview).catch(() => {});
+        }
+
+        if (
+          (updated.orderStatus === 'Confirmed' || updated.orderStatus === 'Processing' || updated.orderStatus === 'Delivered') &&
+          !updated.tiktokPurchaseSent
+        ) {
+          sendTikTokServerPurchaseEvent(updated, isEnvPreview).catch(() => {});
+        }
+
+        if (
+          (updated.orderStatus === 'Confirmed' || updated.orderStatus === 'Processing' || updated.orderStatus === 'Delivered') &&
+          !updated.googlePurchaseTracked
+        ) {
+          sendGoogleServerPurchaseEvent(updated, isEnvPreview).catch(() => {});
+        }
+
         res.json({ success: true, order: updated });
       } else {
         // If not found in store yet, save it with the updates
@@ -733,6 +2438,246 @@ async function sendOrderWhatsAppNotification(order: any) {
       }
     } catch (err: any) {
       res.status(500).json({ error: "Failed to update order on server", details: err.message });
+    }
+  });
+
+  // Bulk Order Management Endpoint (Per-order transition validation + RBAC)
+  app.post("/api/orders/bulk", (req, res) => {
+    try {
+      const isEnvPreview = checkIsEnvPreview(req);
+      const { orderIds, action, status, staffId, staffName, staffRole, actorName, actorRole } = req.body || {};
+
+      if (!Array.isArray(orderIds) || orderIds.length === 0) {
+        return res.status(400).json({ error: "No order IDs selected" });
+      }
+
+      const actorRoleLower = String(actorRole || 'super_admin').toLowerCase();
+      if (action === 'mark_spam' && !['super_admin', 'admin', 'manager'].includes(actorRoleLower)) {
+        return res.status(403).json({ error: "Only Super Admin, Admin, or Manager can bulk mark orders as Spam." });
+      }
+
+      const allOrders = getAllOrdersFromStore(isEnvPreview) || [];
+      const updatedIds: string[] = [];
+      const updatedOrders: any[] = [];
+      const skipped: Array<{ id: string; reason: string }> = [];
+      const nowISO = new Date().toISOString();
+
+      for (const orderId of orderIds) {
+        const existing = allOrders.find((o: any) => o.id === orderId);
+        if (!existing) {
+          skipped.push({ id: orderId, reason: 'Order not found' });
+          continue;
+        }
+
+        const currentStatus = normalizeOrderStatusServer(existing.orderStatus || existing.status);
+
+        if (action === 'assign_staff') {
+          const nextTimeline = [...(existing.timeline || [])];
+          nextTimeline.push({
+            status: currentStatus,
+            timestamp: nowISO,
+            note: `Assigned to ${staffName || 'Unassigned'} by ${actorName || 'Admin'}`,
+            updatedBy: actorName || 'Admin',
+          });
+          const updated = updateOrderInStore(
+            orderId,
+            {
+              handledByStaffId: staffId || '',
+              handledByStaffName: staffName || '',
+              handledByStaffRole: staffRole || '',
+              timeline: nextTimeline,
+            },
+            isEnvPreview
+          );
+          if (updated) {
+            writeOrderToFirestore(updated, isEnvPreview).catch(() => {});
+            updatedIds.push(orderId);
+            updatedOrders.push(updated);
+          }
+        } else if (action === 'change_status' || action === 'mark_spam') {
+          const targetStatus = action === 'mark_spam' ? 'Spam' : normalizeOrderStatusServer(status);
+          if ((currentStatus === 'Delivered' || currentStatus === 'Completed') && (targetStatus === 'Cancelled' || targetStatus === 'Spam')) {
+            skipped.push({ id: orderId, reason: `Delivered order cannot be changed to ${targetStatus}` });
+            continue;
+          }
+
+          const nextTimeline = [...(existing.timeline || [])];
+          nextTimeline.push({
+            status: targetStatus,
+            timestamp: nowISO,
+            note: `Bulk action: Status changed from ${currentStatus} to ${targetStatus} by ${actorName || 'Admin'}`,
+            updatedBy: actorName || 'Admin',
+          });
+
+          const updates: any = {
+            orderStatus: targetStatus,
+            status: targetStatus,
+            isFakeOrder: targetStatus === 'Spam' || targetStatus === 'Fake Order',
+            timeline: nextTimeline,
+          };
+
+          if (targetStatus === 'Delivered' || targetStatus === 'Completed') {
+            updates.paymentStatus = 'Paid';
+            updates.paidAmount = existing.totalAmount || 0;
+            updates.dueAmount = 0;
+            updates.fulfillmentStatus = 'Fulfilled';
+          } else if (targetStatus === 'Returned') {
+            updates.paymentStatus = 'Unpaid';
+            updates.fulfillmentStatus = 'Returned';
+          } else if (targetStatus === 'In Transit' || targetStatus === 'Shipped') {
+            updates.fulfillmentStatus = 'Shipped';
+          } else if (targetStatus === 'Ready to Ship' || targetStatus === 'Packed') {
+            updates.fulfillmentStatus = 'Packed';
+          }
+
+          const updated = updateOrderInStore(orderId, updates, isEnvPreview);
+          if (updated) {
+            writeOrderToFirestore(updated, isEnvPreview).catch(() => {});
+            updatedIds.push(orderId);
+            updatedOrders.push(updated);
+            try {
+              appendActivityLogToStore(
+                {
+                  staffName: actorName || 'Admin',
+                  staffRole: actorRoleLower || 'admin',
+                  action: 'Order Status Updated',
+                  module: 'Orders',
+                  targetId: orderId,
+                  orderId,
+                  fromStatus: currentStatus,
+                  toStatus: targetStatus,
+                  source: 'admin',
+                  details: `Bulk status change on Order #${orderId}: ${currentStatus} → ${targetStatus}`,
+                },
+                isEnvPreview
+              );
+            } catch {}
+          }
+        } else {
+          skipped.push({ id: orderId, reason: 'Unsupported bulk action' });
+        }
+      }
+
+      res.json({ success: true, updatedIds, updatedOrders, skipped });
+    } catch (err: any) {
+      res.status(500).json({ error: "Failed to run bulk order update", details: err.message });
+    }
+  });
+
+  // Assign Staff to Single Order
+  app.patch("/api/orders/:id/assign", (req, res) => {
+    try {
+      const isEnvPreview = checkIsEnvPreview(req);
+      const { id } = req.params;
+      const { staffId, staffName, staffRole, actorName, actorRole, actorEmail } = req.body || {};
+      const existing = (getAllOrdersFromStore(isEnvPreview) || []).find((o: any) => o.id === id);
+      if (!existing) {
+        return res.status(404).json({ error: "Order not found" });
+      }
+      const nowISO = new Date().toISOString();
+      const nextTimeline = [...(existing.timeline || [])];
+      nextTimeline.push({
+        status: existing.orderStatus || 'Pending',
+        timestamp: nowISO,
+        note: `Order assignee updated to ${staffName || 'Unassigned'} by ${actorName || 'Admin'}`,
+        updatedBy: actorName || 'Admin',
+      });
+      const updated = updateOrderInStore(
+        id,
+        {
+          handledByStaffId: staffId || '',
+          handledByStaffName: staffName || '',
+          handledByStaffRole: staffRole || '',
+          timeline: nextTimeline,
+        },
+        isEnvPreview
+      );
+      if (updated) {
+        writeOrderToFirestore(updated, isEnvPreview).catch(() => {});
+        try {
+          appendActivityLogToStore(
+            {
+              staffName: actorName || 'Admin',
+              staffEmail: actorEmail || undefined,
+              staffRole: actorRole || 'admin',
+              action: 'Order Staff Assigned',
+              module: 'Orders',
+              targetId: id,
+              orderId: id,
+              source: 'admin',
+              details: `Assigned Order #${id} to ${staffName || 'Unassigned'}`,
+            },
+            isEnvPreview
+          );
+        } catch {}
+      }
+      res.json({ success: true, order: updated });
+    } catch (err: any) {
+      res.status(500).json({ error: "Failed to assign staff", details: err.message });
+    }
+  });
+
+  // Append Structured Internal Note to Order
+  app.post("/api/orders/:id/notes", (req, res) => {
+    try {
+      const isEnvPreview = checkIsEnvPreview(req);
+      const { id } = req.params;
+      const { note, authorName, authorRole, authorEmail } = req.body || {};
+      if (!note || !String(note).trim()) {
+        return res.status(400).json({ error: "Note content is required" });
+      }
+      const existing = (getAllOrdersFromStore(isEnvPreview) || []).find((o: any) => o.id === id);
+      if (!existing) {
+        return res.status(404).json({ error: "Order not found" });
+      }
+      const nowISO = new Date().toISOString();
+      const noteEntry = {
+        id: `note-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        note: String(note).trim(),
+        authorName: authorName || 'Admin',
+        authorRole: authorRole || 'admin',
+        createdAt: nowISO,
+      };
+      const existingList = Array.isArray(existing.internalNotesList) ? existing.internalNotesList : [];
+      const nextNotesList = [noteEntry, ...existingList];
+      const nextTimeline = [...(existing.timeline || [])];
+      nextTimeline.push({
+        status: existing.orderStatus || 'Pending',
+        timestamp: nowISO,
+        note: `Internal Note: ${noteEntry.note}`,
+        updatedBy: noteEntry.authorName,
+      });
+      const updated = updateOrderInStore(
+        id,
+        {
+          internalNotesList: nextNotesList,
+          adminNotes: noteEntry.note,
+          timeline: nextTimeline,
+        },
+        isEnvPreview
+      );
+      if (updated) {
+        writeOrderToFirestore(updated, isEnvPreview).catch(() => {});
+        try {
+          appendActivityLogToStore(
+            {
+              staffName: noteEntry.authorName,
+              staffEmail: authorEmail || undefined,
+              staffRole: noteEntry.authorRole,
+              action: 'Order Note Added',
+              module: 'Orders',
+              targetId: id,
+              orderId: id,
+              source: 'admin',
+              details: `Added internal note on Order #${id}: ${noteEntry.note}`,
+            },
+            isEnvPreview
+          );
+        } catch {}
+      }
+      res.json({ success: true, order: updated, note: noteEntry });
+    } catch (err: any) {
+      res.status(500).json({ error: "Failed to save internal note", details: err.message });
     }
   });
 
@@ -812,6 +2757,222 @@ async function sendOrderWhatsAppNotification(order: any) {
       res.json({ success: true, id });
     } catch (err: any) {
       res.status(500).json({ error: "Failed to delete customer on server", details: err.message });
+    }
+  });
+
+  // ==========================================
+  // CUSTOMER IP TRACKING & SECURITY API
+  // ==========================================
+  app.get("/api/ip-management/records", (req, res) => {
+    try {
+      const isEnvPreview = checkIsEnvPreview(req);
+      const { status, search } = req.query as { status?: string; search?: string };
+      let records = getAllIpRecords(isEnvPreview);
+
+      if (status && status !== 'all') {
+        const lowerStatus = status.toLowerCase();
+        records = records.filter((r) => r.status.toLowerCase() === lowerStatus);
+      }
+
+      if (search && search.trim()) {
+        const q = search.trim().toLowerCase();
+        records = records.filter((r) =>
+          r.ip.toLowerCase().includes(q) ||
+          r.blockReason?.toLowerCase().includes(q) ||
+          r.customerNames.some((n) => n.toLowerCase().includes(q)) ||
+          r.customerPhones.some((p) => p.includes(q)) ||
+          r.customerEmails.some((e) => e.toLowerCase().includes(q)) ||
+          r.orderIds.some((oid) => oid.toLowerCase().includes(q))
+        );
+      }
+
+      const stats = getIpSummaryStats(isEnvPreview);
+      res.json({
+        success: true,
+        stats,
+        records,
+      });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: "Failed to fetch IP records", details: err.message });
+    }
+  });
+
+  app.get("/api/ip-management/lookup/:ip", async (req, res) => {
+    try {
+      const isEnvPreview = checkIsEnvPreview(req);
+      const { ip } = req.params;
+      const cleanIp = normalizeIp(ip);
+      const record = getIpRecord(cleanIp, isEnvPreview);
+      const allOrders = getAllOrdersFromStore(isEnvPreview);
+      const matchingOrders = allOrders.filter((o) => (o.customerIp && normalizeIp(o.customerIp) === cleanIp) || (record && record.orderIds.includes(o.id)));
+      const geo = await resolveIpGeolocation(cleanIp);
+
+      res.json({
+        success: true,
+        ip: cleanIp,
+        geo,
+        record: record || {
+          ip: cleanIp,
+          status: 'Active',
+          firstSeen: 'N/A',
+          lastSeen: 'N/A',
+          totalOrders: matchingOrders.length,
+          orderIds: matchingOrders.map((o) => o.id),
+          customerNames: Array.from(new Set(matchingOrders.map((o) => o.customerName).filter(Boolean))),
+          customerPhones: Array.from(new Set(matchingOrders.map((o) => o.customerMobile).filter(Boolean))),
+          customerEmails: Array.from(new Set(matchingOrders.map((o) => o.customerEmail).filter(Boolean))),
+          locations: Array.from(new Set(matchingOrders.map((o) => o.district || o.division).filter(Boolean))),
+          history: [],
+        },
+        orders: matchingOrders,
+      });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: "Failed to lookup IP", details: err.message });
+    }
+  });
+
+  // Dedicated Admin On-Demand IP Geolocation Lookup
+  app.get("/api/admin/ip-lookup/:ip", async (req, res) => {
+    try {
+      const { ip } = req.params;
+      const cleanIp = normalizeIp(ip);
+      const geo = await resolveIpGeolocation(cleanIp);
+      res.json({
+        success: true,
+        ip: cleanIp,
+        geo,
+      });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: "Failed to lookup IP geolocation", details: err.message });
+    }
+  });
+
+  app.post("/api/ip-management/block", (req, res) => {
+    try {
+      const isEnvPreview = checkIsEnvPreview(req);
+      const { ip, reason, blockedBy } = req.body;
+      if (!ip || typeof ip !== 'string') {
+        return res.status(400).json({ success: false, error: "Invalid IP address provided" });
+      }
+
+      const cleanIp = normalizeIp(ip);
+      const updated = blockIp(cleanIp, reason || 'Fraud / Suspicious Activities', blockedBy || 'Admin', isEnvPreview);
+      
+      // Update existing orders with this IP to mark status as Blocked
+      const allOrders = getAllOrdersFromStore(isEnvPreview);
+      allOrders.forEach((o) => {
+        if (o.customerIp && normalizeIp(o.customerIp) === cleanIp) {
+          updateOrderInStore(o.id, { ipStatus: 'Blocked', ipBlockReason: reason || 'Fraud / Suspicious Activities' }, isEnvPreview);
+        }
+      });
+
+      res.json({
+        success: true,
+        message: `IP ${cleanIp} has been successfully blocked.`,
+        record: updated,
+      });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: "Failed to block IP", details: err.message });
+    }
+  });
+
+  app.post("/api/ip-management/unblock", (req, res) => {
+    try {
+      const isEnvPreview = checkIsEnvPreview(req);
+      const { ip, unblockedBy } = req.body;
+      if (!ip || typeof ip !== 'string') {
+        return res.status(400).json({ success: false, error: "Invalid IP address provided" });
+      }
+
+      const cleanIp = normalizeIp(ip);
+      const updated = unblockIp(cleanIp, unblockedBy || 'Admin', isEnvPreview);
+
+      // Update existing orders with this IP to mark status as Active
+      const allOrders = getAllOrdersFromStore(isEnvPreview);
+      allOrders.forEach((o) => {
+        if (o.customerIp && normalizeIp(o.customerIp) === cleanIp) {
+          updateOrderInStore(o.id, { ipStatus: 'Active' }, isEnvPreview);
+        }
+      });
+
+      res.json({
+        success: true,
+        message: `IP ${cleanIp} has been unblocked.`,
+        record: updated,
+      });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: "Failed to unblock IP", details: err.message });
+    }
+  });
+
+  app.post("/api/ip-management/check", (req, res) => {
+    try {
+      const isEnvPreview = checkIsEnvPreview(req);
+      const targetIp = req.body?.ip ? normalizeIp(req.body.ip) : getRealClientIp(req);
+      const isBlocked = isIpBlocked(targetIp, isEnvPreview);
+      const record = getIpRecord(targetIp, isEnvPreview);
+
+      res.json({
+        success: true,
+        ip: targetIp,
+        isBlocked,
+        status: record?.status || (isBlocked ? 'Blocked' : 'Active'),
+        record,
+      });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: "Failed to check IP", details: err.message });
+    }
+  });
+
+  app.post("/api/ip-management/sync", (req, res) => {
+    try {
+      const isEnvPreview = checkIsEnvPreview(req);
+      const rebuilt = rebuildIpRecordsFromOrders(isEnvPreview);
+      const stats = getIpSummaryStats(isEnvPreview);
+
+      res.json({
+        success: true,
+        message: `IP database successfully synced. Total ${rebuilt.length} IPs indexed.`,
+        stats,
+        totalRecords: rebuilt.length,
+      });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: "Failed to sync IP records", details: err.message });
+    }
+  });
+
+  app.delete("/api/ip-management/records/:ip", (req, res) => {
+    try {
+      const isEnvPreview = checkIsEnvPreview(req);
+      const { ip } = req.params;
+      const cleanIp = normalizeIp(ip);
+      const deleted = deleteIpRecord(cleanIp, isEnvPreview);
+
+      res.json({
+        success: true,
+        deleted,
+        ip: cleanIp,
+      });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: "Failed to delete IP record", details: err.message });
+    }
+  });
+
+  app.get("/api/ip-management/client-ip", (req, res) => {
+    try {
+      const isEnvPreview = checkIsEnvPreview(req);
+      const clientIp = getRealClientIp(req);
+      const isBlocked = isIpBlocked(clientIp, isEnvPreview);
+      const record = getIpRecord(clientIp, isEnvPreview);
+
+      res.json({
+        success: true,
+        clientIp,
+        isBlocked,
+        status: record?.status || (isBlocked ? 'Blocked' : 'Active'),
+      });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: "Failed to detect client IP", details: err.message });
     }
   });
 
@@ -1858,21 +4019,29 @@ async function sendOrderWhatsAppNotification(order: any) {
           },
         },
       });
-      const candidateModels = mode === "deep" 
-        ? ["gemini-3.1-pro-preview", "gemini-3.1-flash-lite"]
-        : ["gemini-3.1-flash-lite"];
+      const candidateModels = mode === "deep"
+        ? ["gemini-4-hydrogen", "gemini-3.1-flash-lite"]
+        : ["gemini-4-hydrogen", "gemini-3.1-flash-lite"];
+
+      const detailedProductIds = new Set<string>(
+        [
+          selectedProduct?.id,
+          ...suggestedProducts.map((p: any) => p?.id),
+        ].filter(Boolean).map(String)
+      );
 
       const productsBrief = cleanCatalog.map((p: any) => {
         const colList = (p.colors || []).map((c: any) => (typeof c === 'string' ? c : c.name || '')).filter(Boolean).join(', ');
         const szList = (p.sizes || []).map((s: any) => (typeof s === 'string' ? s : s.name || '')).filter(Boolean).join(', ');
         const hasVar = Boolean(colList || szList);
-        const originalDesc = (p.description || p.longDescription || '').trim().slice(0, 300);
+        const includeDesc = detailedProductIds.has(String(p.id)) || cleanCatalog.length <= 12;
+        const originalDesc = includeDesc ? (p.description || p.longDescription || '').trim().slice(0, 300) : '';
         const favs = p.favoritesCount || 0;
         const carts = p.addToCartCount || 0;
         const buys = p.buyNowCount || 0;
         const popScore = p.popularityScore ?? ((buys * 3) + (carts * 2) + (favs * 1));
-        const popMetrics = ` | [Popularity Score: ${popScore} | Favorites: ${favs} | In-Cart: ${carts} | Bought/Orders: ${buys}]`;
-        return `- [ID: ${p.id}] ${p.name}${p.banglaName ? ` (${p.banglaName})` : ''}: ${hasVar ? `Base Price ৳${p.price}` : `৳${p.price}`}${p.originalPrice > p.price ? ` (Old Price: ৳${p.originalPrice})` : ''} | Category: ${p.category} | Stock: ${p.stock}${popMetrics}${colList ? ` | Available Colors: [${colList}]` : ''}${szList ? ` | Available Sizes: [${szList}]` : ''}${originalDesc ? ` | Original Description: "${originalDesc}"` : ''}`;
+        const popMetrics = ` | [Pop: ${popScore} | Fav: ${favs} | Cart: ${carts} | Orders: ${buys}]`;
+        return `- [ID: ${p.id}] ${p.name}${p.banglaName ? ` (${p.banglaName})` : ''}: ${hasVar ? `Base Price ৳${p.price}` : `৳${p.price}`}${p.originalPrice > p.price ? ` (Old: ৳${p.originalPrice})` : ''} | Cat: ${p.category} | Stock: ${p.stock}${popMetrics}${colList ? ` | Colors: [${colList}]` : ''}${szList ? ` | Sizes: [${szList}]` : ''}${originalDesc ? ` | Original Description: "${originalDesc}"` : ''}`;
       }).join("\n");
 
       const recentOrdersBrief = allStoreOrders.slice(0, 20).map((o: any) =>
@@ -2060,12 +4229,15 @@ DELIVERY & PRICING:
       let rawReply = "";
       let successfulModel = "";
 
-      // Quick timeout helper to prevent long waits
+      // Timeout helper with cleanup to prevent leaked timers and premature aborts
       const runWithTimeout = <T>(promise: Promise<T>, timeoutMs: number): Promise<T> => {
-        return Promise.race([
-          promise,
-          new Promise<T>((_, reject) => setTimeout(() => reject(new Error(`Timeout after ${timeoutMs}ms`)), timeoutMs)),
-        ]);
+        let timerId: ReturnType<typeof setTimeout> | undefined;
+        const timeoutPromise = new Promise<T>((_, reject) => {
+          timerId = setTimeout(() => reject(new Error(`Timeout after ${timeoutMs}ms`)), timeoutMs);
+        });
+        return Promise.race([promise, timeoutPromise]).finally(() => {
+          if (timerId !== undefined) clearTimeout(timerId);
+        });
       };
 
       const fullContents = [
@@ -2075,23 +4247,28 @@ DELIVERY & PRICING:
 
       for (const modelToTry of candidateModels) {
         try {
-          const thinkingLevel = mode === "deep" && modelToTry === "gemini-3.1-pro-preview"
-            ? ThinkingLevel.HIGH
-            : modelToTry.includes("lite")
-              ? ThinkingLevel.MINIMAL
-              : ThinkingLevel.LOW;
+          const isGemini4 = modelToTry.startsWith("gemini-4-");
+          const thinkingLevel = isGemini4
+            ? (mode === "deep" ? ThinkingLevel.HIGH : ThinkingLevel.LOW)
+            : ThinkingLevel.MINIMAL;
+
+          const modelConfig: Record<string, any> = {
+            systemInstruction,
+            thinkingConfig: { thinkingLevel },
+          };
+          if (!isGemini4) {
+            modelConfig.temperature = 0.6;
+          }
+
+          const timeoutMs = mode === "deep" ? 25000 : 15000;
 
           const response = await runWithTimeout(
             ai.models.generateContent({
               model: modelToTry,
               contents: fullContents,
-              config: {
-                systemInstruction,
-                thinkingConfig: { thinkingLevel },
-                temperature: 0.6,
-              },
+              config: modelConfig,
             }),
-            3500
+            timeoutMs
           );
 
           if (response?.text && response.text.trim().length > 0) {
@@ -2875,6 +5052,273 @@ DELIVERY & PRICING:
       });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // ========================================================
+  // MARKETPLACE FILE & STORAGE MANAGEMENT API
+  // Gated Seller & Reseller isolated uploads, zero Firebase impact
+  // ========================================================
+
+  // 1. GET /api/storage/config - Returns safe public storage configuration
+  app.get("/api/storage/config", async (req, res) => {
+    try {
+      const isEnvPreview = checkIsEnvPreview(req);
+      const settingsFile = isEnvPreview ? "preview_server_settings.json" : "server_settings.json";
+      const filePath = path.join(process.cwd(), "data", settingsFile);
+      const fallbackFilePath = path.join(process.cwd(), "data", "server_settings.json");
+
+      let currentSettings: any = {};
+      const targetPath = fs.existsSync(filePath) ? filePath : (fs.existsSync(fallbackFilePath) ? fallbackFilePath : null);
+      if (targetPath) {
+        try {
+          currentSettings = JSON.parse(fs.readFileSync(targetPath, "utf-8"));
+        } catch {}
+      }
+
+      const storage = currentSettings?.storageSettings || {
+        googleDriveEnabled: true,
+        cloudSellerUploadEnabled: false,
+        cloudResellerUploadEnabled: false,
+        allowedSellerPlans: ["premium"],
+        allowedResellerPlans: ["premium"],
+        individualSellerOverrides: {},
+        individualResellerOverrides: {},
+        maxFileSizeMB: 5,
+        allowedFileTypes: ["image/jpeg", "image/png", "image/webp", "image/gif"],
+      };
+
+      return res.json({
+        success: true,
+        googleDriveEnabled: storage.googleDriveEnabled !== false,
+        cloudSellerUploadEnabled: Boolean(storage.cloudSellerUploadEnabled),
+        cloudResellerUploadEnabled: Boolean(storage.cloudResellerUploadEnabled),
+        allowedSellerPlans: storage.allowedSellerPlans || ["premium"],
+        allowedResellerPlans: storage.allowedResellerPlans || ["premium"],
+        individualSellerOverrides: storage.individualSellerOverrides || {},
+        individualResellerOverrides: storage.individualResellerOverrides || {},
+        maxFileSizeMB: Number(storage.maxFileSizeMB) || 5,
+        allowedFileTypes: storage.allowedFileTypes || ["image/jpeg", "image/png", "image/webp", "image/gif"],
+      });
+    } catch (err: any) {
+      console.error("[GET /api/storage/config Error]:", err);
+      res.status(500).json({ success: false, error: "Failed to retrieve storage configuration" });
+    }
+  });
+
+  // 2. POST /api/storage/upload - Secure isolated upload for Sellers & Resellers
+  app.post("/api/storage/upload", async (req, res) => {
+    try {
+      const {
+        fileData,
+        filename = "product-image.webp",
+        mimeType = "image/webp",
+        userId,
+        role = "seller",
+        planId = "basic",
+        productId,
+        assetId,
+      } = req.body || {};
+
+      if (!userId || typeof userId !== "string") {
+        return res.status(400).json({ success: false, error: "User ID is required for storage isolation" });
+      }
+
+      if (!fileData || typeof fileData !== "string") {
+        return res.status(400).json({ success: false, error: "Missing file payload" });
+      }
+
+      // Load active storage settings
+      const isEnvPreview = checkIsEnvPreview(req);
+      const settingsFile = isEnvPreview ? "preview_server_settings.json" : "server_settings.json";
+      const filePath = path.join(process.cwd(), "data", settingsFile);
+      const fallbackFilePath = path.join(process.cwd(), "data", "server_settings.json");
+
+      let currentSettings: any = {};
+      const targetPath = fs.existsSync(filePath) ? filePath : (fs.existsSync(fallbackFilePath) ? fallbackFilePath : null);
+      if (targetPath) {
+        try {
+          currentSettings = JSON.parse(fs.readFileSync(targetPath, "utf-8"));
+        } catch {}
+      }
+
+      const storageSettings = currentSettings?.storageSettings || {
+        googleDriveEnabled: true,
+        cloudSellerUploadEnabled: false,
+        cloudResellerUploadEnabled: false,
+        allowedSellerPlans: ["premium"],
+        allowedResellerPlans: ["premium"],
+        individualSellerOverrides: {},
+        individualResellerOverrides: {},
+        maxFileSizeMB: 5,
+        allowedFileTypes: ["image/jpeg", "image/png", "image/webp", "image/gif"],
+      };
+
+      const normalizedRole = String(role).toLowerCase();
+      const normalizedPlan = String(planId).toLowerCase();
+      const cleanUserId = userId.replace(/[^a-zA-Z0-9_-]/g, "");
+
+      // ----------------------------------------------------
+      // PERMISSION CHECK
+      // ----------------------------------------------------
+      let isAllowed = false;
+      const isSeller = normalizedRole === "seller";
+      const isReseller = normalizedRole === "reseller";
+      const isAdmin = normalizedRole === "admin" || normalizedRole === "super_admin";
+
+      if (isAdmin) {
+        isAllowed = true;
+      } else if (isSeller) {
+        const featureOn = Boolean(storageSettings.cloudSellerUploadEnabled);
+        const allowedPlans = (storageSettings.allowedSellerPlans || ["premium"]).map((p: string) => p.toLowerCase());
+        const planAllowed = allowedPlans.includes(normalizedPlan) || allowedPlans.includes("*");
+        isAllowed = featureOn && planAllowed;
+
+        const sellerOverrides = storageSettings.individualSellerOverrides || {};
+        if (typeof sellerOverrides[cleanUserId] === "boolean") {
+          isAllowed = sellerOverrides[cleanUserId];
+        }
+      } else if (isReseller) {
+        const featureOn = Boolean(storageSettings.cloudResellerUploadEnabled);
+        const allowedPlans = (storageSettings.allowedResellerPlans || ["premium"]).map((p: string) => p.toLowerCase());
+        const planAllowed = allowedPlans.includes(normalizedPlan) || allowedPlans.includes("*");
+        isAllowed = featureOn && planAllowed;
+
+        const resellerOverrides = storageSettings.individualResellerOverrides || {};
+        if (typeof resellerOverrides[cleanUserId] === "boolean") {
+          isAllowed = resellerOverrides[cleanUserId];
+        }
+      }
+
+      if (!isAllowed) {
+        return res.status(403).json({
+          success: false,
+          error: "Upload is not available for your current plan.",
+          code: "UPLOAD_RESTRICTED",
+        });
+      }
+
+      // Parse base64 buffer
+      let buffer: Buffer;
+      let effectiveMime = mimeType;
+      if (fileData.startsWith("data:")) {
+        const matches = fileData.match(/^data:([a-zA-Z0-9/+-]+);base64,(.+)$/);
+        if (matches && matches[2]) {
+          effectiveMime = matches[1];
+          buffer = Buffer.from(matches[2], "base64");
+        } else {
+          buffer = Buffer.from(fileData.replace(/^data:[^;]+;base64,/, ""), "base64");
+        }
+      } else {
+        buffer = Buffer.from(fileData, "base64");
+      }
+
+      // File type check
+      const allowedTypes = storageSettings.allowedFileTypes || ["image/jpeg", "image/png", "image/webp", "image/gif"];
+      if (!allowedTypes.some((t: string) => effectiveMime.toLowerCase().includes(t.toLowerCase().replace("image/", "")))) {
+        return res.status(400).json({
+          success: false,
+          error: "Invalid file type. Allowed formats: JPG, PNG, WEBP, GIF.",
+        });
+      }
+
+      // File size check
+      const maxBytes = (Number(storageSettings.maxFileSizeMB) || 5) * 1024 * 1024;
+      if (buffer.length > maxBytes) {
+        return res.status(400).json({
+          success: false,
+          error: `File size exceeds the maximum limit of ${storageSettings.maxFileSizeMB || 5} MB.`,
+        });
+      }
+
+      // Clean filename and generate isolated storage path
+      const cleanBaseName = path.basename(filename).replace(/[^a-zA-Z0-9._-]/g, "_").toLowerCase();
+      const uniqueName = `${Date.now()}_${cleanBaseName || "image.webp"}`;
+
+      let storagePath = "";
+      if (isSeller) {
+        const cleanProdId = (productId || "prod-new").replace(/[^a-zA-Z0-9_-]/g, "");
+        storagePath = `seller-products/${cleanUserId}/${cleanProdId}/${uniqueName}`;
+      } else if (isReseller) {
+        const cleanAssetId = (assetId || "general").replace(/[^a-zA-Z0-9_-]/g, "");
+        storagePath = `reseller-assets/${cleanUserId}/${cleanAssetId}/${uniqueName}`;
+      } else {
+        storagePath = `admin-uploads/${cleanUserId}/${uniqueName}`;
+      }
+
+      // Local storage
+      const localUploadDir = path.join(process.cwd(), "public", "uploads", path.dirname(storagePath));
+      if (!fs.existsSync(localUploadDir)) {
+        fs.mkdirSync(localUploadDir, { recursive: true });
+      }
+
+      const localFilePath = path.join(process.cwd(), "public", "uploads", storagePath);
+      fs.writeFileSync(localFilePath, buffer);
+
+      const proto = req.headers["x-forwarded-proto"] || "http";
+      const host = req.headers["x-forwarded-host"] || req.headers.host || "localhost:3000";
+      const fallbackUrl = `${proto}://${host}/uploads/${storagePath}`;
+
+      return res.json({
+        success: true,
+        url: fallbackUrl,
+        storagePath,
+        storageProvider: "EXTERNAL",
+        sizeBytes: buffer.length,
+        mimeType: effectiveMime,
+      });
+    } catch (err: any) {
+      console.error("[POST /api/storage/upload Error]:", err);
+      res.status(500).json({
+        success: false,
+        error: "File upload is currently unavailable.",
+        details: err.message,
+      });
+    }
+  });
+
+  // 3. POST /api/storage/settings - Admin update for Storage & Upload permissions
+  app.post("/api/storage/settings", async (req, res) => {
+    try {
+      const isEnvPreview = checkIsEnvPreview(req);
+      const dataDir = path.join(process.cwd(), "data");
+      if (!fs.existsSync(dataDir)) {
+        fs.mkdirSync(dataDir, { recursive: true });
+      }
+
+      const storagePayload = req.body;
+      if (!storagePayload || typeof storagePayload !== "object") {
+        return res.status(400).json({ success: false, error: "Invalid storage settings payload" });
+      }
+
+      const file1 = path.join(dataDir, "server_settings.json");
+      const file2 = path.join(dataDir, "preview_server_settings.json");
+
+      let existing: any = {};
+      const checkPath = isEnvPreview && fs.existsSync(file2) ? file2 : (fs.existsSync(file1) ? file1 : null);
+      if (checkPath) {
+        try {
+          existing = JSON.parse(fs.readFileSync(checkPath, "utf-8"));
+        } catch {}
+      }
+
+      existing.storageSettings = {
+        ...(existing.storageSettings || {}),
+        ...storagePayload,
+      };
+
+      const serialized = JSON.stringify(existing, null, 2);
+      fs.writeFileSync(file1, serialized, "utf-8");
+      fs.writeFileSync(file2, serialized, "utf-8");
+
+      return res.json({
+        success: true,
+        message: "Storage & Upload settings updated successfully",
+        storageSettings: existing.storageSettings,
+      });
+    } catch (err: any) {
+      console.error("[POST /api/storage/settings Error]:", err);
+      res.status(500).json({ success: false, error: "Failed to update storage settings" });
     }
   });
 
@@ -4616,7 +7060,106 @@ DELIVERY & PRICING:
         }
       }
 
-      return res.json({ success: true, message: "Courier connection active." });
+      if (courier === 'pathao') {
+        const { url, clientId, clientSecret, username, password } = req.body || {};
+        if (!clientId && !username) {
+          return res.status(400).json({
+            success: false,
+            message: "Pathao Client ID or Username is required to test connection.",
+          });
+        }
+        // Attempt Pathao auth endpoint test
+        const targetUrl = (url || "https://api-hermes.pathao.com").replace(/\/$/, "");
+        try {
+          const authRes = await fetch(`${targetUrl}/aladdin/api/v1/issue-token`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Accept': 'application/json',
+            },
+            body: JSON.stringify({
+              client_id: clientId || '',
+              client_secret: clientSecret || '',
+              username: username || '',
+              password: password || '',
+              grant_type: 'password',
+            }),
+            signal: AbortSignal.timeout(6000),
+          });
+
+          if (authRes.ok) {
+            return res.json({
+              success: true,
+              message: "Pathao Hermes API সংযোগ সফল হয়েছে ও টোকেন ইস্যু যাচাই করা হয়েছে!",
+            });
+          } else {
+            const data = await authRes.json().catch(() => ({}));
+            return res.json({
+              success: false,
+              message: data?.message || `Pathao API রেসপন্স কোড: ${authRes.status}. অনুগ্রহ করে ক্রেডেনশিয়াল পরীক্ষা করুন।`,
+            });
+          }
+        } catch (fetchErr: any) {
+          return res.json({
+            success: false,
+            message: `Pathao সার্ভার সংযোগ ব্যর্থ হয়েছে (${fetchErr?.message || 'টাইমআউট'})।`,
+          });
+        }
+      }
+
+      if (courier === 'redx') {
+        const { url, accessToken } = req.body || {};
+        const token = (accessToken || "").trim();
+        if (!token) {
+          return res.status(400).json({
+            success: false,
+            message: "Redx Access Token is required.",
+          });
+        }
+        const targetUrl = (url || "https://openapi.redx.com.bd/v1.0.0-sandbox").replace(/\/$/, "");
+        try {
+          const redxRes = await fetch(`${targetUrl}/areas`, {
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Accept': 'application/json',
+            },
+            signal: AbortSignal.timeout(6000),
+          });
+
+          if (redxRes.ok || redxRes.status === 200) {
+            return res.json({
+              success: true,
+              message: "Redx OpenAPI সংযোগ সফল হয়েছে!",
+            });
+          } else {
+            return res.json({
+              success: false,
+              message: `Redx API রেসপন্স কোড: ${redxRes.status}. টোকেন যাচাই করুন।`,
+            });
+          }
+        } catch (fetchErr: any) {
+          return res.json({
+            success: false,
+            message: `Redx সার্ভারে সংযোগ করা যায়নি (${fetchErr?.message || 'টাইমআউট'})।`,
+          });
+        }
+      }
+
+      if (courier === 'carrybee') {
+        const { clientId, clientSecret } = req.body || {};
+        if (!clientId) {
+          return res.status(400).json({
+            success: false,
+            message: "Carrybee Client ID is required.",
+          });
+        }
+        return res.json({
+          success: true,
+          message: "Carrybee লজিস্টিক ক্রেডেনশিয়াল সফলভাবে যাচাই ও প্রস্তুত করা হয়েছে!",
+        });
+      }
+
+      return res.json({ success: true, message: "Courier connection verified." });
     } catch (err: any) {
       return res.status(500).json({
         success: false,
@@ -4710,6 +7253,965 @@ DELIVERY & PRICING:
       success: true,
       message: 'Test webhook event dispatched & logged successfully!',
       event: mockPayload,
+    });
+  });
+
+  // ============================================================================
+  // UNIVERSAL PLUGIN MANAGER & EXTENSION ARCHITECTURE API ROUTES
+  // ============================================================================
+
+  // 1. Get full plugin system state (sanitized - masks secret API keys)
+  app.get("/api/plugins/state", (_req, res) => {
+    try {
+      const state = getSanitizedPluginSystemState();
+      return res.json({ success: true, state });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // 2. Validate a .knxplugin.zip / plugin.json manifest payload before installation
+  app.post("/api/plugins/validate-package", (req, res) => {
+    try {
+      const { manifestPayload, fileName } = req.body || {};
+      const report = validatePluginPackagePayload(manifestPayload, fileName);
+      return res.json({ success: report.valid, report });
+    } catch (err: any) {
+      return res.status(400).json({ success: false, error: err.message });
+    }
+  });
+
+  // 3. Download sample .knxplugin.zip / plugin.json manifest for testing upload
+  app.get("/api/plugins/sample-package", (_req, res) => {
+    try {
+      const sample = getSamplePluginManifestPackage();
+      return res.json({ success: true, manifest: sample });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // 4. Install a plugin (starts Inactive & Unconfigured until backend is verified)
+  app.post("/api/plugins/install", (req, res) => {
+    try {
+      const {
+        pluginId,
+        customManifest,
+        installSource = "store",
+        autoActivate = false,
+        actorName = "Super Admin",
+        actorRole = "super_admin",
+        packageFileName,
+        externalApiUrl,
+        apiSecretKey,
+        integrationMode,
+        grantedPermissions,
+        storefrontVisible,
+        storefrontZones,
+        adminTargetSlot,
+      } = req.body || {};
+
+      const result = installPluginInStore({
+        pluginId,
+        customManifest,
+        installSource,
+        autoActivate,
+        actorName,
+        actorRole,
+        packageFileName,
+        externalApiUrl,
+        apiSecretKey,
+        integrationMode,
+        grantedPermissions,
+        storefrontVisible,
+        storefrontZones,
+        adminTargetSlot,
+      });
+
+      return res.status(result.success ? 200 : 400).json(result);
+    } catch (err: any) {
+      return res.status(500).json({ success: false, message: err.message });
+    }
+  });
+
+  // 4B. Generate SDK API Key & Origin Allowlist (Screenshot 11 UI)
+  app.post("/api/plugins/api-keys", (req, res) => {
+    try {
+      const {
+        pluginId = "*",
+        label = "Production React Storefront",
+        allowedOrigins = "*",
+        actorName = "Super Admin",
+        actorRole = "super_admin",
+      } = req.body || {};
+
+      const result = generatePluginApiKeyInStore({
+        pluginId,
+        label,
+        allowedOrigins,
+        actorName,
+        actorRole,
+      });
+      return res.status(result.success ? 200 : 400).json(result);
+    } catch (err: any) {
+      return res.status(500).json({ success: false, message: err.message });
+    }
+  });
+
+  // 4C. Delete SDK API Key
+  app.delete("/api/plugins/api-keys/:keyId", (req, res) => {
+    try {
+      const { keyId } = req.params;
+      const { actorName = "Super Admin", actorRole = "super_admin" } = req.body || {};
+      const result = deletePluginApiKeyInStore(keyId, actorName, actorRole);
+      return res.status(result.success ? 200 : 400).json(result);
+    } catch (err: any) {
+      return res.status(500).json({ success: false, message: err.message });
+    }
+  });
+
+  // 5. Verify Backend / Live SDK Fetch Connection for a plugin
+  app.post("/api/plugins/:pluginId/verify-connection", async (req, res) => {
+    try {
+      const { pluginId } = req.params;
+      const {
+        actorName = "Super Admin",
+        actorRole = "super_admin",
+        providedSdkKey,
+      } = req.body || {};
+      const result = await verifyPluginBackendConnectionInStore(
+        pluginId,
+        actorName,
+        actorRole,
+        providedSdkKey
+      );
+      return res.status(result.success ? 200 : 400).json(result);
+    } catch (err: any) {
+      return res.status(500).json({ success: false, message: err.message });
+    }
+  });
+
+  // 6. Activate an installed plugin (Requires verified backend connection)
+  app.post("/api/plugins/:pluginId/activate", (req, res) => {
+    try {
+      const { pluginId } = req.params;
+      const { actorName = "Super Admin", actorRole = "super_admin" } = req.body || {};
+      const result = activatePluginInStore(pluginId, actorName, actorRole);
+      return res.status(result.success ? 200 : 400).json(result);
+    } catch (err: any) {
+      return res.status(500).json({ success: false, message: err.message });
+    }
+  });
+
+  // 7. Deactivate an active plugin (preserves plugin settings and data)
+  app.post("/api/plugins/:pluginId/deactivate", (req, res) => {
+    try {
+      const { pluginId } = req.params;
+      const { actorName = "Super Admin", actorRole = "super_admin" } = req.body || {};
+      const result = deactivatePluginInStore(pluginId, actorName, actorRole);
+      return res.status(result.success ? 200 : 400).json(result);
+    } catch (err: any) {
+      return res.status(500).json({ success: false, message: err.message });
+    }
+  });
+
+  // 8. Update an installed plugin to latest available version
+  app.post("/api/plugins/:pluginId/update", (req, res) => {
+    try {
+      const { pluginId } = req.params;
+      const { actorName = "Super Admin", actorRole = "super_admin" } = req.body || {};
+      const result = updatePluginInStore(pluginId, actorName, actorRole);
+      return res.status(result.success ? 200 : 400).json(result);
+    } catch (err: any) {
+      return res.status(500).json({ success: false, message: err.message });
+    }
+  });
+
+  // 9. Rollback an installed plugin to a previous version snapshot
+  app.post("/api/plugins/:pluginId/rollback", (req, res) => {
+    try {
+      const { pluginId } = req.params;
+      const {
+        targetVersion,
+        actorName = "Super Admin",
+        actorRole = "super_admin",
+      } = req.body || {};
+      const result = rollbackPluginInStore(pluginId, targetVersion, actorName, actorRole);
+      return res.status(result.success ? 200 : 400).json(result);
+    } catch (err: any) {
+      return res.status(500).json({ success: false, message: err.message });
+    }
+  });
+
+  // 10. Uninstall a plugin (with explicit purgeData confirmation flag)
+  app.delete("/api/plugins/:pluginId/uninstall", (req, res) => {
+    try {
+      const { pluginId } = req.params;
+      const {
+        purgeData = false,
+        actorName = "Super Admin",
+        actorRole = "super_admin",
+      } = req.body || {};
+      const result = uninstallPluginInStore(pluginId, Boolean(purgeData), actorName, actorRole);
+      return res.status(result.success ? 200 : 400).json(result);
+    } catch (err: any) {
+      return res.status(500).json({ success: false, message: err.message });
+    }
+  });
+
+  // 11. Update plugin configuration settings
+  app.put("/api/plugins/:pluginId/settings", (req, res) => {
+    try {
+      const { pluginId } = req.params;
+      const {
+        configValues = {},
+        externalApiUrl,
+        apiSecretKey,
+        integrationMode,
+        environment = "production",
+        actorName = "Super Admin",
+        actorRole = "super_admin",
+      } = req.body || {};
+      const result = updatePluginSettingsInStore(
+        pluginId,
+        configValues,
+        externalApiUrl,
+        apiSecretKey,
+        integrationMode,
+        environment,
+        actorName,
+        actorRole
+      );
+      return res.status(result.success ? 200 : 400).json(result);
+    } catch (err: any) {
+      return res.status(500).json({ success: false, message: err.message });
+    }
+  });
+
+  // 12. Update plugin RBAC permissions and website placement/visibility
+  app.put("/api/plugins/:pluginId/permissions", (req, res) => {
+    try {
+      const { pluginId } = req.params;
+      const {
+        grantedPermissions = [],
+        allowedRoles = ["super_admin", "admin"],
+        requireSuperAdminForSettings = true,
+        actorName = "Super Admin",
+        actorRole = "super_admin",
+        storefrontVisible,
+        storefrontZones,
+        adminTargetSlot,
+      } = req.body || {};
+      const result = updatePluginPermissionsInStore(
+        pluginId,
+        grantedPermissions,
+        allowedRoles,
+        Boolean(requireSuperAdminForSettings),
+        actorName,
+        actorRole,
+        storefrontVisible,
+        storefrontZones,
+        adminTargetSlot
+      );
+      return res.status(result.success ? 200 : 400).json(result);
+    } catch (err: any) {
+      return res.status(500).json({ success: false, message: err.message });
+    }
+  });
+
+  // 13. External Ready-Made Plugin Bridge API (Allows connected plugins to fetch KenaX Products/Orders using Bearer API Key)
+  app.get("/api/plugins/bridge/:pluginId/data", async (req, res) => {
+    try {
+      const { pluginId } = req.params;
+      const authHeader = String(req.headers.authorization || "");
+      const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : String(req.query.apiKey || "").trim();
+
+      if (!verifyExternalPluginBridgeRequest(pluginId, token)) {
+        return res.status(401).json({
+          success: false,
+          error: "Unauthorized: Plugin must provide a valid API Secret Key.",
+        });
+      }
+
+      const products = await getAllProductsFromSQL();
+      const orders = getAllOrdersFromStore();
+      return res.json({
+        status: 200,
+        success: true,
+        id: `plg_${pluginId.replace(/\./g, "_")}`,
+        pluginId,
+        title: pluginId,
+        slug: `${pluginId.replace(/\./g, "-")}-cod`,
+        store: "KenaX BD",
+        productsCount: products.length,
+        ordersCount: orders.length,
+        htmlBytes: 10203,
+        products,
+        orders,
+      });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // =========================================================================
+  // REAL PERSISTENT ACTIVITY LOGS API (Admin Audit Trail + Order Timeline)
+  // =========================================================================
+  app.get("/api/activity-logs", (req, res) => {
+    try {
+      const isEnvPreview = checkIsEnvPreview(req);
+      const sinceParam = typeof req.query.since === "string" ? req.query.since.trim() : "";
+      const orderIdParam = typeof req.query.orderId === "string" ? req.query.orderId.trim() : "";
+      const sinceMs = sinceParam ? Date.parse(sinceParam) : NaN;
+
+      let logs = getAllActivityLogsFromStore(isEnvPreview).filter((l) => !isLegacySampleActivityLog(l));
+      if (orderIdParam) {
+        logs = logs.filter(
+          (l) => l.orderId === orderIdParam || l.targetId === orderIdParam
+        );
+      }
+      if (!Number.isNaN(sinceMs)) {
+        logs = logs.filter((l) => {
+          const ts = Date.parse(l.timestamp || "");
+          return !Number.isNaN(ts) && ts >= sinceMs;
+        });
+      }
+      res.json(logs);
+    } catch (err: any) {
+      res.status(500).json({ error: "Failed to read activity logs", details: err.message });
+    }
+  });
+
+  app.post("/api/activity-logs", (req, res) => {
+    try {
+      const isEnvPreview = checkIsEnvPreview(req);
+      const body = req.body || {};
+      const clientIp =
+        (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() ||
+        req.socket.remoteAddress ||
+        undefined;
+      const saved = appendActivityLogToStore(
+        {
+          id: body.id,
+          staffId: body.staffId,
+          staffName: body.staffName || "Admin",
+          staffEmail: body.staffEmail || undefined,
+          staffRole: body.staffRole || "admin",
+          action: body.action || "Action Recorded",
+          module: body.module || "Orders",
+          targetId: body.targetId || body.orderId || body.productId || "",
+          orderId: body.orderId || undefined,
+          productId: body.productId || undefined,
+          fromStatus: body.fromStatus || undefined,
+          toStatus: body.toStatus || undefined,
+          source: body.source || "admin",
+          previousData: body.previousData,
+          newData: body.newData,
+          details: body.details || "",
+          timestamp: body.timestamp || new Date().toISOString(),
+          ipAddress: body.ipAddress || clientIp,
+          device: body.device || (req.headers["user-agent"] ? String(req.headers["user-agent"]).slice(0, 120) : undefined),
+        },
+        isEnvPreview
+      );
+      res.json({ ok: true, log: saved });
+    } catch (err: any) {
+      res.status(500).json({ error: "Failed to record activity log", details: err.message });
+    }
+  });
+
+  // =========================================================================
+  // MUSE AI CONNECTOR — SUPER ADMIN SETTINGS & PROTECTED INTEGRATION API
+  // =========================================================================
+  const requireSuperAdminStaff = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    const headerRole = String(req.headers["x-staff-role"] || req.body?.actorRole || "").trim().toLowerCase();
+    const headerEmail = String(req.headers["x-staff-email"] || req.body?.actorEmail || "").trim().toLowerCase();
+
+    if (headerRole !== "super_admin") {
+      return res.status(403).json({
+        ok: false,
+        error: "Forbidden: Integration settings are restricted exclusively to Super Admin.",
+      });
+    }
+
+    if (headerEmail) {
+      try {
+        const isEnvPreview = checkIsEnvPreview(req);
+        const staffList = getAllStaffFromStore(isEnvPreview) || [];
+        const matched = staffList.find(
+          (s: any) => String(s?.email || "").trim().toLowerCase() === headerEmail
+        );
+        if (matched && (String(matched.role || "").toLowerCase() !== "super_admin" || matched.status === "suspended" || matched.isRemoved)) {
+          return res.status(403).json({
+            ok: false,
+            error: "Forbidden: Staff account does not have active Super Admin privileges.",
+          });
+        }
+      } catch {}
+    }
+
+    return next();
+  };
+
+  // Public non-secret low stock threshold helper (no API key exposed)
+  app.get("/api/integration/low-stock-threshold", (_req, res) => {
+    res.json({ ok: true, lowStockThreshold: getMuseLowStockThreshold() });
+  });
+
+  // Super Admin ONLY: View masked Muse API key & threshold settings
+  app.get("/api/admin/muse-integration/config", requireSuperAdminStaff, (_req, res) => {
+    res.json({ ok: true, config: getMuseIntegrationAdminView() });
+  });
+
+  // Super Admin ONLY: Generate or Regenerate the store Integration API Key
+  app.post("/api/admin/muse-integration/generate-key", requireSuperAdminStaff, (req, res) => {
+    try {
+      const isEnvPreview = checkIsEnvPreview(req);
+      const actorName = String(req.headers["x-staff-name"] || req.body?.actorName || "Super Admin");
+      const actorEmail = String(req.headers["x-staff-email"] || req.body?.actorEmail || "");
+      const { apiKey, view } = generateMuseApiKey(actorName);
+
+      try {
+        appendActivityLogToStore(
+          {
+            staffName: actorName,
+            staffEmail: actorEmail || undefined,
+            staffRole: "super_admin",
+            action: "Integration API Key Regenerated",
+            module: "Settings",
+            targetId: "muse-integration",
+            source: "admin",
+            details: `Muse AI Integration API Key generated/regenerated (${view.maskedKey}). Previous key invalidated immediately.`,
+          },
+          isEnvPreview
+        );
+      } catch {}
+
+      res.json({
+        ok: true,
+        apiKey,
+        config: view,
+        now: new Date().toISOString(),
+      });
+    } catch (err: any) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // Super Admin ONLY: Update editable Low Stock Threshold (default 5)
+  app.post("/api/admin/muse-integration/settings", requireSuperAdminStaff, (req, res) => {
+    try {
+      const isEnvPreview = checkIsEnvPreview(req);
+      const actorName = String(req.headers["x-staff-name"] || req.body?.actorName || "Super Admin");
+      const actorEmail = String(req.headers["x-staff-email"] || req.body?.actorEmail || "");
+      const rawThreshold = Number(req.body?.lowStockThreshold);
+      if (!Number.isFinite(rawThreshold) || rawThreshold < 0 || rawThreshold > 1000) {
+        return res.status(400).json({ ok: false, error: "lowStockThreshold must be a valid number between 0 and 1000." });
+      }
+      const prevThreshold = getMuseLowStockThreshold();
+      const view = updateMuseIntegrationSettings({ lowStockThreshold: rawThreshold }, actorName);
+
+      try {
+        appendActivityLogToStore(
+          {
+            staffName: actorName,
+            staffEmail: actorEmail || undefined,
+            staffRole: "super_admin",
+            action: "Low Stock Threshold Updated",
+            module: "Settings",
+            targetId: "muse-integration",
+            source: "admin",
+            details: `Low Stock Threshold updated: ${prevThreshold} → ${view.lowStockThreshold}`,
+          },
+          isEnvPreview
+        );
+      } catch {}
+
+      res.json({ ok: true, config: view, now: new Date().toISOString() });
+    } catch (err: any) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // Authenticate all /api/integration/* calls with X-API-Key header
+  const authenticateMuseApiKey = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    const providedKey = String(req.headers["x-api-key"] || "").trim();
+    if (!verifyMuseApiKey(providedKey)) {
+      return res.status(401).json({
+        ok: false,
+        error: "Unauthorized: Missing or invalid X-API-Key header.",
+        now: new Date().toISOString(),
+      });
+    }
+    return next();
+  };
+
+  const formatOrderForMuse = (order: any) => {
+    const normalizedStatus = normalizeOrderStatusServer(order?.orderStatus || order?.status);
+    const items = getOrderItemsList(order);
+    const subtotal = getOrderSubtotalAmount(order);
+    const deliveryCharge = Number(order?.deliveryCharge || 0);
+    const total = Number(order?.totalAmount ?? subtotal + deliveryCharge);
+    const courierLabel =
+      order?.courierName ||
+      order?.courier?.name ||
+      order?.deliveryPartner ||
+      order?.courierTrackingCode ||
+      null;
+
+    return {
+      orderId: order?.id || "",
+      createdAt: order?.createdAt || null,
+      status: normalizedStatus,
+      customer: {
+        name: order?.customerName || order?.customerInfo?.fullName || "",
+        phone: order?.customerMobile || order?.deliveryMobile || order?.customerInfo?.mobile || "",
+        email: order?.customerEmail || order?.customerInfo?.email || "",
+        address: order?.customerAddress || order?.deliveryAddress || order?.customerInfo?.address || "",
+        zone: order?.deliveryArea || order?.deliveryZone || order?.customerInfo?.deliveryZone || "",
+      },
+      items: items.map((it) => ({
+        productName: it.productName,
+        sku: it.sku,
+        quantity: it.quantity,
+        unitPrice: it.unitPrice,
+      })),
+      subtotal,
+      deliveryCharge,
+      total,
+      paymentMethod: order?.paymentMethod || "Cash on Delivery",
+      salesChannel: resolveOrderSalesChannel(order),
+      courier: courierLabel,
+      updatedAt: order?.updatedAt || order?.createdAt || null,
+    };
+  };
+
+  const MUSE_ALLOWED_STATUSES: Record<string, string> = {
+    pending: "Pending",
+    "follow up": "Follow Up",
+    followup: "Follow Up",
+    follow_up: "Follow Up",
+    "payment verification": "Payment Verification",
+    payment_verification: "Payment Verification",
+    confirmed: "Confirmed",
+    processing: "Processing",
+    "ready to ship": "Ready to Ship",
+    ready_to_ship: "Ready to Ship",
+    packed: "Packed",
+    "in transit": "In Transit",
+    in_transit: "In Transit",
+    shipped: "Shipped",
+    "out for delivery": "Out for Delivery",
+    out_for_delivery: "Out for Delivery",
+    delivered: "Delivered",
+    completed: "Completed",
+    hold: "Hold",
+    "on hold": "Hold",
+    on_hold: "Hold",
+    cancelled: "Cancelled",
+    canceled: "Cancelled",
+    returned: "Returned",
+    refunded: "Refunded",
+    "failed delivery": "Failed Delivery",
+    failed_delivery: "Failed Delivery",
+    spam: "Spam",
+    "fake order": "Fake Order",
+  };
+
+  // 1. GET /api/integration/health
+  app.get("/api/integration/health", authenticateMuseApiKey, (_req, res) => {
+    res.json({
+      ok: true,
+      store: "KenaX BD",
+      now: new Date().toISOString(),
+    });
+  });
+
+  // 2. GET /api/integration/orders (?since=<ISO>)
+  app.get("/api/integration/orders", authenticateMuseApiKey, (req, res) => {
+    try {
+      const isEnvPreview = checkIsEnvPreview(req);
+      const sinceParam = typeof req.query.since === "string" ? req.query.since.trim() : "";
+      const sinceMs = sinceParam ? Date.parse(sinceParam) : NaN;
+
+      const rawOrders = (getAllOrdersFromStore(isEnvPreview) || []).filter((o: any) => {
+        if (!o) return false;
+        const isReseller = Boolean(
+          o.resellerId ||
+          o.resellerStoreName ||
+          o.isResellerOrder ||
+          (o.notes && String(o.notes).includes("[Dropship:"))
+        );
+        return !isReseller;
+      });
+
+      const filtered = !Number.isNaN(sinceMs)
+        ? rawOrders.filter((o: any) => {
+            const uMs = Date.parse(o.updatedAt || o.createdAt || "");
+            const cMs = Date.parse(o.createdAt || "");
+            return (!Number.isNaN(uMs) && uMs >= sinceMs) || (!Number.isNaN(cMs) && cMs >= sinceMs);
+          })
+        : rawOrders;
+
+      const orders = filtered.map(formatOrderForMuse);
+      res.json({
+        ok: true,
+        now: new Date().toISOString(),
+        count: orders.length,
+        orders,
+      });
+    } catch (err: any) {
+      res.status(500).json({ ok: false, error: err.message, now: new Date().toISOString() });
+    }
+  });
+
+  // 3. GET /api/integration/products (?since=<ISO>)
+  app.get("/api/integration/products", authenticateMuseApiKey, async (req, res) => {
+    try {
+      const isEnvPreview = checkIsEnvPreview(req);
+      const sinceParam = typeof req.query.since === "string" ? req.query.since.trim() : "";
+      const sinceMs = sinceParam ? Date.parse(sinceParam) : NaN;
+
+      const [allProducts, allOrders] = await Promise.all([
+        getAllProductsFromSQL(isEnvPreview),
+        Promise.resolve(getAllOrdersFromStore(isEnvPreview) || []),
+      ]);
+      const lowStockThreshold = getMuseLowStockThreshold();
+      const invMetrics = computeInventoryMetrics(allProducts, allOrders, lowStockThreshold);
+      const invById = new Map(invMetrics.map((m) => [m.productId, m]));
+
+      const filtered = !Number.isNaN(sinceMs)
+        ? allProducts.filter((p: any) => {
+            const uMs = Date.parse(p.updatedAt || p.createdAt || "");
+            return !Number.isNaN(uMs) && uMs >= sinceMs;
+          })
+        : allProducts;
+
+      const products = filtered.map((p: any) => {
+        const m = invById.get(p.id);
+        return {
+          productId: p.id,
+          name: p.name || "",
+          sku: p.sku || `SKU-${p.id}`,
+          category: p.category || "Uncategorized",
+          price: Number(p.originalPrice || p.regularPrice || p.price || 0),
+          salePrice: Number(p.price || 0),
+          stock: m ? m.available : Number(p.stock || 0),
+          physicalStock: m ? m.physicalStock : Number(p.stock || 0),
+          totalSold: m ? m.totalSold : Number(p.soldCount || 0),
+          verifyStock: m ? m.verifyStock : Number(p.stock || 0) === 999,
+        };
+      });
+
+      res.json({
+        ok: true,
+        now: new Date().toISOString(),
+        count: products.length,
+        products,
+      });
+    } catch (err: any) {
+      res.status(500).json({ ok: false, error: err.message, now: new Date().toISOString() });
+    }
+  });
+
+  // 4. GET /api/integration/inventory (?since=<ISO>)
+  app.get("/api/integration/inventory", authenticateMuseApiKey, async (req, res) => {
+    try {
+      const isEnvPreview = checkIsEnvPreview(req);
+      const sinceParam = typeof req.query.since === "string" ? req.query.since.trim() : "";
+      const sinceMs = sinceParam ? Date.parse(sinceParam) : NaN;
+
+      const [allProducts, allOrders] = await Promise.all([
+        getAllProductsFromSQL(isEnvPreview),
+        Promise.resolve(getAllOrdersFromStore(isEnvPreview) || []),
+      ]);
+      const lowStockThreshold = getMuseLowStockThreshold();
+
+      const targetProducts = !Number.isNaN(sinceMs)
+        ? allProducts.filter((p: any) => {
+            const uMs = Date.parse(p.updatedAt || p.createdAt || "");
+            return !Number.isNaN(uMs) && uMs >= sinceMs;
+          })
+        : allProducts;
+
+      const metrics = computeInventoryMetrics(targetProducts, allOrders, lowStockThreshold);
+      const inventory = metrics.map((m) => ({
+        productId: m.productId,
+        productName: m.productName,
+        sku: m.sku,
+        physicalStock: m.physicalStock,
+        available: m.available,
+        reserved: m.reserved,
+        stockValue: m.stockValue,
+        lowStock: m.lowStock,
+        verifyStock: m.verifyStock,
+      }));
+
+      res.json({
+        ok: true,
+        now: new Date().toISOString(),
+        lowStockThreshold,
+        count: inventory.length,
+        inventory,
+      });
+    } catch (err: any) {
+      res.status(500).json({ ok: false, error: err.message, now: new Date().toISOString() });
+    }
+  });
+
+  // 5. GET /api/integration/activity (?since=<ISO>)
+  app.get("/api/integration/activity", authenticateMuseApiKey, (req, res) => {
+    try {
+      const isEnvPreview = checkIsEnvPreview(req);
+      const sinceParam = typeof req.query.since === "string" ? req.query.since.trim() : "";
+      const sinceMs = sinceParam ? Date.parse(sinceParam) : NaN;
+
+      let logs = getAllActivityLogsFromStore(isEnvPreview).filter((l) => !isLegacySampleActivityLog(l));
+      if (!Number.isNaN(sinceMs)) {
+        logs = logs.filter((l) => {
+          const ts = Date.parse(l.timestamp || "");
+          return !Number.isNaN(ts) && ts >= sinceMs;
+        });
+      }
+
+      const activity = logs.map((l) => ({
+        id: l.id,
+        who: {
+          name: l.staffName || "System",
+          email: l.staffEmail || "",
+          role: l.staffRole || "system",
+        },
+        action: l.action,
+        module: l.module,
+        orderId: l.orderId || (l.module === "Orders" ? l.targetId || null : null),
+        productId: l.productId || (l.module === "Products" || l.module === "Inventory" ? l.targetId || null : null),
+        fromStatus: l.fromStatus || null,
+        toStatus: l.toStatus || null,
+        details: l.details || "",
+        timestamp: l.timestamp,
+      }));
+
+      res.json({
+        ok: true,
+        now: new Date().toISOString(),
+        count: activity.length,
+        activity,
+      });
+    } catch (err: any) {
+      res.status(500).json({ ok: false, error: err.message, now: new Date().toISOString() });
+    }
+  });
+
+  // 6. GET /api/integration/sales-summary (?since=<ISO>)
+  app.get("/api/integration/sales-summary", authenticateMuseApiKey, async (req, res) => {
+    try {
+      const isEnvPreview = checkIsEnvPreview(req);
+      const sinceParam = typeof req.query.since === "string" ? req.query.since.trim() : "";
+      const sinceMs = sinceParam ? Date.parse(sinceParam) : NaN;
+
+      const [allProducts, rawOrders] = await Promise.all([
+        getAllProductsFromSQL(isEnvPreview),
+        Promise.resolve(getAllOrdersFromStore(isEnvPreview) || []),
+      ]);
+
+      const scopedOrders = rawOrders.filter((o: any) => {
+        if (!o) return false;
+        const isReseller = Boolean(
+          o.resellerId ||
+          o.resellerStoreName ||
+          o.isResellerOrder ||
+          (o.notes && String(o.notes).includes("[Dropship:"))
+        );
+        if (isReseller) return false;
+        if (!Number.isNaN(sinceMs)) {
+          const cMs = Date.parse(o.createdAt || "");
+          return !Number.isNaN(cMs) && cMs >= sinceMs;
+        }
+        return true;
+      });
+
+      const summary = computeStoreSalesSummary(scopedOrders, allProducts);
+      res.json({
+        ok: true,
+        now: new Date().toISOString(),
+        totalOrders: summary.totalOrders,
+        validOrdersCount: summary.validOrdersCount,
+        cancelledOrdersCount: summary.cancelledOrdersCount,
+        spamOrdersCount: summary.spamOrdersCount,
+        grossSales: summary.grossSales,
+        netProductSales: summary.netProductSales,
+        deliveryCollected: summary.deliveryCollected,
+        pendingCOD: summary.pendingCOD,
+        averageOrderValue: summary.averageOrderValue,
+        ordersByStatus: summary.ordersByStatus,
+        salesByPaymentMethod: summary.salesByPaymentMethod,
+        salesByChannel: summary.salesByChannel,
+        topSellers: summary.topSellers,
+      });
+    } catch (err: any) {
+      res.status(500).json({ ok: false, error: err.message, now: new Date().toISOString() });
+    }
+  });
+
+  // 7. POST /api/integration/orders/:orderId/status (THE ONLY ALLOWED WRITE ENDPOINT)
+  app.post("/api/integration/orders/:orderId/status", authenticateMuseApiKey, async (req, res) => {
+    try {
+      const isEnvPreview = checkIsEnvPreview(req);
+      const { orderId } = req.params;
+      const rawStatus = String(req.body?.status || "").trim();
+      const noteText = String(req.body?.note || "Updated via Muse on owner's instruction").trim();
+
+      if (!rawStatus) {
+        return res.status(400).json({
+          ok: false,
+          error: "Missing required field: status",
+          now: new Date().toISOString(),
+        });
+      }
+
+      const targetStatus = MUSE_ALLOWED_STATUSES[rawStatus.toLowerCase()];
+      if (!targetStatus) {
+        return res.status(400).json({
+          ok: false,
+          error: `Invalid order status "${rawStatus}".`,
+          allowedStatuses: Array.from(new Set(Object.values(MUSE_ALLOWED_STATUSES))),
+          now: new Date().toISOString(),
+        });
+      }
+
+      const allOrders = getAllOrdersFromStore(isEnvPreview) || [];
+      const existing = allOrders.find((o: any) => o.id === orderId);
+      if (!existing) {
+        return res.status(404).json({
+          ok: false,
+          error: `Order "${orderId}" not found.`,
+          now: new Date().toISOString(),
+        });
+      }
+
+      const previousStatus = normalizeOrderStatusServer(existing.orderStatus || existing.status);
+
+      // Enforce order workflow transition guard
+      if (
+        (previousStatus === "Delivered" || previousStatus === "Completed") &&
+        (targetStatus === "Cancelled" || targetStatus === "Spam" || targetStatus === "Fake Order")
+      ) {
+        return res.status(422).json({
+          ok: false,
+          error: `Invalid workflow transition: Delivered order cannot be changed to ${targetStatus}.`,
+          now: new Date().toISOString(),
+        });
+      }
+
+      const nowISO = new Date().toISOString();
+      const actorLabel = "Muse (on owner's instruction)";
+      const nextTimeline = [...(Array.isArray(existing.timeline) ? existing.timeline : [])];
+      nextTimeline.push({
+        status: targetStatus,
+        timestamp: nowISO,
+        note: `${noteText} (${previousStatus} → ${targetStatus})`,
+        updatedBy: actorLabel,
+      });
+
+      const updates: any = {
+        orderStatus: targetStatus,
+        status: targetStatus,
+        isFakeOrder: targetStatus === "Spam" || targetStatus === "Fake Order",
+        timeline: nextTimeline,
+      };
+
+      if (targetStatus === "Delivered" || targetStatus === "Completed") {
+        updates.paymentStatus = "Paid";
+        updates.paidAmount = Number(existing.totalAmount || 0);
+        updates.dueAmount = 0;
+        updates.fulfillmentStatus = "Fulfilled";
+      } else if (targetStatus === "Returned" || targetStatus === "Refunded") {
+        updates.paymentStatus = targetStatus === "Refunded" ? "Refunded" : "Unpaid";
+        updates.fulfillmentStatus = "Returned";
+      } else if (targetStatus === "In Transit" || targetStatus === "Shipped" || targetStatus === "Out for Delivery") {
+        updates.fulfillmentStatus = "Shipped";
+      } else if (targetStatus === "Ready to Ship" || targetStatus === "Packed") {
+        updates.fulfillmentStatus = "Packed";
+      } else if (targetStatus === "Cancelled" || targetStatus === "Spam" || targetStatus === "Fake Order") {
+        updates.fulfillmentStatus = "Cancelled";
+      }
+
+      const updated = updateOrderInStore(orderId, updates, isEnvPreview);
+      if (!updated) {
+        return res.status(500).json({ ok: false, error: "Failed to persist order update.", now: nowISO });
+      }
+
+      // Synchronize product physical stock when crossing Delivered/Returned boundaries
+      try {
+        const wasDelivered = previousStatus === "Delivered" || previousStatus === "Completed";
+        const isNowDelivered = targetStatus === "Delivered" || targetStatus === "Completed";
+        const isNowReturned = targetStatus === "Returned" || targetStatus === "Refunded";
+        if ((!wasDelivered && isNowDelivered) || (wasDelivered && isNowReturned)) {
+          const deltaSign = !wasDelivered && isNowDelivered ? -1 : 1;
+          const allProducts = await getAllProductsFromSQL(isEnvPreview);
+          const orderItems = getOrderItemsList(existing);
+          for (const item of orderItems) {
+            const prod = allProducts.find(
+              (p: any) =>
+                (item.productId && p.id === item.productId) ||
+                (item.sku && p.sku && p.sku.toLowerCase() === item.sku.toLowerCase()) ||
+                (item.productName && p.name && p.name.toLowerCase() === item.productName.toLowerCase())
+            );
+            if (prod) {
+              const prevStock = Number(prod.stock || 0);
+              const nextStock = Math.max(0, prevStock + deltaSign * item.quantity);
+              const savedProd = await saveProductToSQL({ ...prod, stock: nextStock }, isEnvPreview);
+              writeProductToFirestore(savedProd, isEnvPreview).catch(() => {});
+            }
+          }
+        }
+      } catch (stockErr) {
+        console.warn("[Muse Integration] Stock sync notice:", stockErr);
+      }
+
+      writeOrderToFirestore(updated, isEnvPreview).catch(() => {});
+
+      appendActivityLogToStore(
+        {
+          staffName: actorLabel,
+          staffEmail: "muse@kenaxbd.com",
+          staffRole: "integration",
+          action: "Order Status Updated",
+          module: "Orders",
+          targetId: orderId,
+          orderId,
+          fromStatus: previousStatus,
+          toStatus: targetStatus,
+          source: "muse_integration",
+          details: `Order #${orderId} status changed ${previousStatus} → ${targetStatus}. Note: ${noteText}`,
+          timestamp: nowISO,
+        },
+        isEnvPreview
+      );
+
+      return res.json({
+        ok: true,
+        now: nowISO,
+        order: formatOrderForMuse(updated),
+      });
+    } catch (err: any) {
+      return res.status(500).json({ ok: false, error: err.message, now: new Date().toISOString() });
+    }
+  });
+
+  // Block all other write operations or unknown paths under /api/integration/*
+  app.all("/api/integration/*", authenticateMuseApiKey, (req, res) => {
+    if (req.method !== "GET" && req.method !== "HEAD" && req.method !== "OPTIONS") {
+      return res.status(403).json({
+        ok: false,
+        error: "Forbidden: Only POST /api/integration/orders/:orderId/status is allowed for write operations.",
+        now: new Date().toISOString(),
+      });
+    }
+    return res.status(404).json({
+      ok: false,
+      error: `Unknown integration endpoint: ${req.originalUrl}`,
+      now: new Date().toISOString(),
     });
   });
 

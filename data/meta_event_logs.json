@@ -1,0 +1,722 @@
+[
+  {
+    "id": "log_1792504945134_ye4qr",
+    "eventName": "PageView",
+    "eventId": "pageview-1792486982455-l2ru1g",
+    "status": "skipped",
+    "errorMessage": "Meta CAPI not configured (missing Pixel ID or Access Token)",
+    "payloadSummary": {
+      "eventName": "PageView"
+    },
+    "sentAt": "2026-10-20T14:02:25.134Z",
+    "timestamp": "2:02:25 PM"
+  },
+  {
+    "id": "log_1792504935282_pfj6w",
+    "eventName": "PageView",
+    "eventId": "pageview-1792486972600-ms2je1",
+    "status": "skipped",
+    "errorMessage": "Meta CAPI not configured (missing Pixel ID or Access Token)",
+    "payloadSummary": {
+      "eventName": "PageView"
+    },
+    "sentAt": "2026-10-20T14:02:15.282Z",
+    "timestamp": "2:02:15 PM"
+  },
+  {
+    "id": "log_1792504934788_jrewi",
+    "eventName": "PageView",
+    "eventId": "pageview-1792486972106-yqkuci",
+    "status": "skipped",
+    "errorMessage": "Meta CAPI not configured (missing Pixel ID or Access Token)",
+    "payloadSummary": {
+      "eventName": "PageView"
+    },
+    "sentAt": "2026-10-20T14:02:14.788Z",
+    "timestamp": "2:02:14 PM"
+  },
+  {
+    "id": "log_1792504934786_43uv1",
+    "eventName": "PageView",
+    "eventId": "pageview-1792486972101-kcdgbu",
+    "status": "skipped",
+    "errorMessage": "Meta CAPI not configured (missing Pixel ID or Access Token)",
+    "payloadSummary": {
+      "eventName": "PageView"
+    },
+    "sentAt": "2026-10-20T14:02:14.786Z",
+    "timestamp": "2:02:14 PM"
+  },
+  {
+    "id": "log_1792504927434_pc23c",
+    "eventName": "PageView",
+    "eventId": "pageview-1792486964671-q8xvii",
+    "status": "skipped",
+    "errorMessage": "Meta CAPI not configured (missing Pixel ID or Access Token)",
+    "payloadSummary": {
+      "eventName": "PageView"
+    },
+    "sentAt": "2026-10-20T14:02:07.434Z",
+    "timestamp": "2:02:07 PM"
+  },
+  {
+    "id": "log_1792504919443_amtzw",
+    "eventName": "PageView",
+    "eventId": "pageview-1792486956760-z65pk7",
+    "status": "skipped",
+    "errorMessage": "Meta CAPI not configured (missing Pixel ID or Access Token)",
+    "payloadSummary": {
+      "eventName": "PageView"
+    },
+    "sentAt": "2026-10-20T14:01:59.443Z",
+    "timestamp": "2:01:59 PM"
+  },
+  {
+    "id": "log_1792504909478_vpei0",
+    "eventName": "PageView",
+    "eventId": "pageview-1792486946798-99g8b1",
+    "status": "skipped",
+    "errorMessage": "Meta CAPI not configured (missing Pixel ID or Access Token)",
+    "payloadSummary": {
+      "eventName": "PageView"
+    },
+    "sentAt": "2026-10-20T14:01:49.478Z",
+    "timestamp": "2:01:49 PM"
+  },
+  {
+    "id": "log_1792504899431_3jky6",
+    "eventName": "PageView",
+    "eventId": "pageview-1792486936750-zvbpi3",
+    "status": "skipped",
+    "errorMessage": "Meta CAPI not configured (missing Pixel ID or Access Token)",
+    "payloadSummary": {
+      "eventName": "PageView"
+    },
+    "sentAt": "2026-10-20T14:01:39.431Z",
+    "timestamp": "2:01:39 PM"
+  },
+  {
+    "id": "log_1792504895666_7b1s3",
+    "eventName": "PageView",
+    "eventId": "pageview-1792486932986-rppdr6",
+    "status": "skipped",
+    "errorMessage": "Meta CAPI not configured (missing Pixel ID or Access Token)",
+    "payloadSummary": {
+      "eventName": "PageView"
+    },
+    "sentAt": "2026-10-20T14:01:35.666Z",
+    "timestamp": "2:01:35 PM"
+  },
+  {
+    "id": "log_1792504851678_jufq4",
+    "eventName": "PageView",
+    "eventId": "pageview-1792486888999-pthak6",
+    "status": "skipped",
+    "errorMessage": "Meta CAPI not configured (missing Pixel ID or Access Token)",
+    "payloadSummary": {
+      "eventName": "PageView"
+    },
+    "sentAt": "2026-10-20T14:00:51.678Z",
+    "timestamp": "2:00:51 PM"
+  },
+  {
+    "id": "log_1792504790059_fx312",
+    "eventName": "PageView",
+    "eventId": "pageview-1792486827378-ot1f8b",
+    "status": "skipped",
+    "errorMessage": "Meta CAPI not configured (missing Pixel ID or Access Token)",
+    "payloadSummary": {
+      "eventName": "PageView"
+    },
+    "sentAt": "2026-10-20T13:59:50.059Z",
+    "timestamp": "1:59:50 PM"
+  },
+  {
+    "id": "log_1792504730114_yoino",
+    "eventName": "PageView",
+    "eventId": "pageview-1792486767436-3duyxx",
+    "status": "skipped",
+    "errorMessage": "Meta CAPI not configured (missing Pixel ID or Access Token)",
+    "payloadSummary": {
+      "eventName": "PageView"
+    },
+    "sentAt": "2026-10-20T13:58:50.114Z",
+    "timestamp": "1:58:50 PM"
+  },
+  {
+    "id": "log_1792504670043_9ovt2",
+    "eventName": "PageView",
+    "eventId": "pageview-1792486707363-h6wms5",
+    "status": "skipped",
+    "errorMessage": "Meta CAPI not configured (missing Pixel ID or Access Token)",
+    "payloadSummary": {
+      "eventName": "PageView"
+    },
+    "sentAt": "2026-10-20T13:57:50.043Z",
+    "timestamp": "1:57:50 PM"
+  },
+  {
+    "id": "log_1792504610100_isfcs",
+    "eventName": "PageView",
+    "eventId": "pageview-1792486647419-vgrcmr",
+    "status": "skipped",
+    "errorMessage": "Meta CAPI not configured (missing Pixel ID or Access Token)",
+    "payloadSummary": {
+      "eventName": "PageView"
+    },
+    "sentAt": "2026-10-20T13:56:50.100Z",
+    "timestamp": "1:56:50 PM"
+  },
+  {
+    "id": "log_1792504550081_ppasw",
+    "eventName": "PageView",
+    "eventId": "pageview-1792486587402-cxyrha",
+    "status": "skipped",
+    "errorMessage": "Meta CAPI not configured (missing Pixel ID or Access Token)",
+    "payloadSummary": {
+      "eventName": "PageView"
+    },
+    "sentAt": "2026-10-20T13:55:50.081Z",
+    "timestamp": "1:55:50 PM"
+  },
+  {
+    "id": "log_1792504491740_box2e",
+    "eventName": "PageView",
+    "eventId": "pageview-1792486529061-gidlxh",
+    "status": "skipped",
+    "errorMessage": "Meta CAPI not configured (missing Pixel ID or Access Token)",
+    "payloadSummary": {
+      "eventName": "PageView"
+    },
+    "sentAt": "2026-10-20T13:54:51.740Z",
+    "timestamp": "1:54:51 PM"
+  },
+  {
+    "id": "log_1792504430063_j9u4t",
+    "eventName": "PageView",
+    "eventId": "pageview-1792486467385-lv1a51",
+    "status": "skipped",
+    "errorMessage": "Meta CAPI not configured (missing Pixel ID or Access Token)",
+    "payloadSummary": {
+      "eventName": "PageView"
+    },
+    "sentAt": "2026-10-20T13:53:50.063Z",
+    "timestamp": "1:53:50 PM"
+  },
+  {
+    "id": "log_1792504370216_6tblk",
+    "eventName": "PageView",
+    "eventId": "pageview-1792486407533-dixbdl",
+    "status": "skipped",
+    "errorMessage": "Meta CAPI not configured (missing Pixel ID or Access Token)",
+    "payloadSummary": {
+      "eventName": "PageView"
+    },
+    "sentAt": "2026-10-20T13:52:50.216Z",
+    "timestamp": "1:52:50 PM"
+  },
+  {
+    "id": "log_1792504310074_ctfhs",
+    "eventName": "PageView",
+    "eventId": "pageview-1792486347397-h60oge",
+    "status": "skipped",
+    "errorMessage": "Meta CAPI not configured (missing Pixel ID or Access Token)",
+    "payloadSummary": {
+      "eventName": "PageView"
+    },
+    "sentAt": "2026-10-20T13:51:50.074Z",
+    "timestamp": "1:51:50 PM"
+  },
+  {
+    "id": "log_1792504269985_fqcog",
+    "eventName": "PageView",
+    "eventId": "pageview-1792486307308-moy9ul",
+    "status": "skipped",
+    "errorMessage": "Meta CAPI not configured (missing Pixel ID or Access Token)",
+    "payloadSummary": {
+      "eventName": "PageView"
+    },
+    "sentAt": "2026-10-20T13:51:09.985Z",
+    "timestamp": "1:51:09 PM"
+  },
+  {
+    "id": "log_1792504260046_oi4fb",
+    "eventName": "PageView",
+    "eventId": "pageview-1792486297368-hiefn7",
+    "status": "skipped",
+    "errorMessage": "Meta CAPI not configured (missing Pixel ID or Access Token)",
+    "payloadSummary": {
+      "eventName": "PageView"
+    },
+    "sentAt": "2026-10-20T13:51:00.046Z",
+    "timestamp": "1:51:00 PM"
+  },
+  {
+    "id": "log_1792504250001_3tao6",
+    "eventName": "PageView",
+    "eventId": "pageview-1792486287319-n7qbqs",
+    "status": "skipped",
+    "errorMessage": "Meta CAPI not configured (missing Pixel ID or Access Token)",
+    "payloadSummary": {
+      "eventName": "PageView"
+    },
+    "sentAt": "2026-10-20T13:50:50.001Z",
+    "timestamp": "1:50:50 PM"
+  },
+  {
+    "id": "log_1792504239969_4o7q2",
+    "eventName": "PageView",
+    "eventId": "pageview-1792486277289-rpp5fc",
+    "status": "skipped",
+    "errorMessage": "Meta CAPI not configured (missing Pixel ID or Access Token)",
+    "payloadSummary": {
+      "eventName": "PageView"
+    },
+    "sentAt": "2026-10-20T13:50:39.969Z",
+    "timestamp": "1:50:39 PM"
+  },
+  {
+    "id": "log_1792504229993_dbuxp",
+    "eventName": "PageView",
+    "eventId": "pageview-1792486267314-jazbve",
+    "status": "skipped",
+    "errorMessage": "Meta CAPI not configured (missing Pixel ID or Access Token)",
+    "payloadSummary": {
+      "eventName": "PageView"
+    },
+    "sentAt": "2026-10-20T13:50:29.993Z",
+    "timestamp": "1:50:29 PM"
+  },
+  {
+    "id": "log_1792504219963_nvbvr",
+    "eventName": "PageView",
+    "eventId": "pageview-1792486257285-6d612m",
+    "status": "skipped",
+    "errorMessage": "Meta CAPI not configured (missing Pixel ID or Access Token)",
+    "payloadSummary": {
+      "eventName": "PageView"
+    },
+    "sentAt": "2026-10-20T13:50:19.963Z",
+    "timestamp": "1:50:19 PM"
+  },
+  {
+    "id": "log_1792504209422_k7jp9",
+    "eventName": "PageView",
+    "eventId": "pageview-1792486246742-uzpe5b",
+    "status": "skipped",
+    "errorMessage": "Meta CAPI not configured (missing Pixel ID or Access Token)",
+    "payloadSummary": {
+      "eventName": "PageView"
+    },
+    "sentAt": "2026-10-20T13:50:09.422Z",
+    "timestamp": "1:50:09 PM"
+  },
+  {
+    "id": "log_1792504199430_mwh34",
+    "eventName": "PageView",
+    "eventId": "pageview-1792486236751-0ridji",
+    "status": "skipped",
+    "errorMessage": "Meta CAPI not configured (missing Pixel ID or Access Token)",
+    "payloadSummary": {
+      "eventName": "PageView"
+    },
+    "sentAt": "2026-10-20T13:49:59.431Z",
+    "timestamp": "1:49:59 PM"
+  },
+  {
+    "id": "log_1792504189483_cfrll",
+    "eventName": "PageView",
+    "eventId": "pageview-1792486226797-z0kq8g",
+    "status": "skipped",
+    "errorMessage": "Meta CAPI not configured (missing Pixel ID or Access Token)",
+    "payloadSummary": {
+      "eventName": "PageView"
+    },
+    "sentAt": "2026-10-20T13:49:49.483Z",
+    "timestamp": "1:49:49 PM"
+  },
+  {
+    "id": "log_1792504179388_y3yyn",
+    "eventName": "PageView",
+    "eventId": "pageview-1792486216710-oey8yq",
+    "status": "skipped",
+    "errorMessage": "Meta CAPI not configured (missing Pixel ID or Access Token)",
+    "payloadSummary": {
+      "eventName": "PageView"
+    },
+    "sentAt": "2026-10-20T13:49:39.388Z",
+    "timestamp": "1:49:39 PM"
+  },
+  {
+    "id": "log_1792504169426_5w8hx",
+    "eventName": "PageView",
+    "eventId": "pageview-1792486206733-14jzas",
+    "status": "skipped",
+    "errorMessage": "Meta CAPI not configured (missing Pixel ID or Access Token)",
+    "payloadSummary": {
+      "eventName": "PageView"
+    },
+    "sentAt": "2026-10-20T13:49:29.426Z",
+    "timestamp": "1:49:29 PM"
+  },
+  {
+    "id": "log_1792504160125_t0s1e",
+    "eventName": "PageView",
+    "eventId": "pageview-1792486197444-k96dke",
+    "status": "skipped",
+    "errorMessage": "Meta CAPI not configured (missing Pixel ID or Access Token)",
+    "payloadSummary": {
+      "eventName": "PageView"
+    },
+    "sentAt": "2026-10-20T13:49:20.125Z",
+    "timestamp": "1:49:20 PM"
+  },
+  {
+    "id": "log_1792504159079_78n2f",
+    "eventName": "PageView",
+    "eventId": "pageview-1792486196395-igkhdq",
+    "status": "skipped",
+    "errorMessage": "Meta CAPI not configured (missing Pixel ID or Access Token)",
+    "payloadSummary": {
+      "eventName": "PageView"
+    },
+    "sentAt": "2026-10-20T13:49:19.079Z",
+    "timestamp": "1:49:19 PM"
+  },
+  {
+    "id": "log_1792504159077_uhac8",
+    "eventName": "PageView",
+    "eventId": "pageview-1792486196378-fy9682",
+    "status": "skipped",
+    "errorMessage": "Meta CAPI not configured (missing Pixel ID or Access Token)",
+    "payloadSummary": {
+      "eventName": "PageView"
+    },
+    "sentAt": "2026-10-20T13:49:19.077Z",
+    "timestamp": "1:49:19 PM"
+  },
+  {
+    "id": "log_1792503546636_l1m1d",
+    "eventName": "PageView",
+    "eventId": "pageview-1792485583355-kl2xzw",
+    "status": "skipped",
+    "errorMessage": "Meta CAPI not configured (missing Pixel ID or Access Token)",
+    "payloadSummary": {
+      "eventName": "PageView"
+    },
+    "sentAt": "2026-10-20T13:39:06.636Z",
+    "timestamp": "1:39:06 PM"
+  },
+  {
+    "id": "log_1792503486670_atp46",
+    "eventName": "PageView",
+    "eventId": "pageview-1792485523392-ruwkul",
+    "status": "skipped",
+    "errorMessage": "Meta CAPI not configured (missing Pixel ID or Access Token)",
+    "payloadSummary": {
+      "eventName": "PageView"
+    },
+    "sentAt": "2026-10-20T13:38:06.670Z",
+    "timestamp": "1:38:06 PM"
+  },
+  {
+    "id": "log_1792503428119_un1uq",
+    "eventName": "PageView",
+    "eventId": "pageview-1792485464845-fh0mao",
+    "status": "skipped",
+    "errorMessage": "Meta CAPI not configured (missing Pixel ID or Access Token)",
+    "payloadSummary": {
+      "eventName": "PageView"
+    },
+    "sentAt": "2026-10-20T13:37:08.120Z",
+    "timestamp": "1:37:08 PM"
+  },
+  {
+    "id": "log_1792503366659_jn3b6",
+    "eventName": "PageView",
+    "eventId": "pageview-1792485403378-rplr8x",
+    "status": "skipped",
+    "errorMessage": "Meta CAPI not configured (missing Pixel ID or Access Token)",
+    "payloadSummary": {
+      "eventName": "PageView"
+    },
+    "sentAt": "2026-10-20T13:36:06.659Z",
+    "timestamp": "1:36:06 PM"
+  },
+  {
+    "id": "log_1792503306617_ofdkf",
+    "eventName": "PageView",
+    "eventId": "pageview-1792485343339-eh5qns",
+    "status": "skipped",
+    "errorMessage": "Meta CAPI not configured (missing Pixel ID or Access Token)",
+    "payloadSummary": {
+      "eventName": "PageView"
+    },
+    "sentAt": "2026-10-20T13:35:06.617Z",
+    "timestamp": "1:35:06 PM"
+  },
+  {
+    "id": "log_1792503246646_ygob2",
+    "eventName": "PageView",
+    "eventId": "pageview-1792485283368-akckeq",
+    "status": "skipped",
+    "errorMessage": "Meta CAPI not configured (missing Pixel ID or Access Token)",
+    "payloadSummary": {
+      "eventName": "PageView"
+    },
+    "sentAt": "2026-10-20T13:34:06.646Z",
+    "timestamp": "1:34:06 PM"
+  },
+  {
+    "id": "log_1792503186610_kf3hd",
+    "eventName": "PageView",
+    "eventId": "pageview-1792485223335-vh95vc",
+    "status": "skipped",
+    "errorMessage": "Meta CAPI not configured (missing Pixel ID or Access Token)",
+    "payloadSummary": {
+      "eventName": "PageView"
+    },
+    "sentAt": "2026-10-20T13:33:06.610Z",
+    "timestamp": "1:33:06 PM"
+  },
+  {
+    "id": "log_1792503126716_wnueu",
+    "eventName": "PageView",
+    "eventId": "pageview-1792485163439-lrukoy",
+    "status": "skipped",
+    "errorMessage": "Meta CAPI not configured (missing Pixel ID or Access Token)",
+    "payloadSummary": {
+      "eventName": "PageView"
+    },
+    "sentAt": "2026-10-20T13:32:06.716Z",
+    "timestamp": "1:32:06 PM"
+  },
+  {
+    "id": "log_1792503068248_t3izf",
+    "eventName": "PageView",
+    "eventId": "pageview-1792485104972-9g1hcu",
+    "status": "skipped",
+    "errorMessage": "Meta CAPI not configured (missing Pixel ID or Access Token)",
+    "payloadSummary": {
+      "eventName": "PageView"
+    },
+    "sentAt": "2026-10-20T13:31:08.248Z",
+    "timestamp": "1:31:08 PM"
+  },
+  {
+    "id": "log_1792503006704_9cbjt",
+    "eventName": "PageView",
+    "eventId": "pageview-1792485043429-6266ec",
+    "status": "skipped",
+    "errorMessage": "Meta CAPI not configured (missing Pixel ID or Access Token)",
+    "payloadSummary": {
+      "eventName": "PageView"
+    },
+    "sentAt": "2026-10-20T13:30:06.704Z",
+    "timestamp": "1:30:06 PM"
+  },
+  {
+    "id": "log_1792502946605_bahe7",
+    "eventName": "PageView",
+    "eventId": "pageview-1792484983329-rpgop0",
+    "status": "skipped",
+    "errorMessage": "Meta CAPI not configured (missing Pixel ID or Access Token)",
+    "payloadSummary": {
+      "eventName": "PageView"
+    },
+    "sentAt": "2026-10-20T13:29:06.605Z",
+    "timestamp": "1:29:06 PM"
+  },
+  {
+    "id": "log_1792502886701_z26oi",
+    "eventName": "PageView",
+    "eventId": "pageview-1792484923422-mymc2u",
+    "status": "skipped",
+    "errorMessage": "Meta CAPI not configured (missing Pixel ID or Access Token)",
+    "payloadSummary": {
+      "eventName": "PageView"
+    },
+    "sentAt": "2026-10-20T13:28:06.701Z",
+    "timestamp": "1:28:06 PM"
+  },
+  {
+    "id": "log_1792502826644_60iwx",
+    "eventName": "PageView",
+    "eventId": "pageview-1792484863369-ooay21",
+    "status": "skipped",
+    "errorMessage": "Meta CAPI not configured (missing Pixel ID or Access Token)",
+    "payloadSummary": {
+      "eventName": "PageView"
+    },
+    "sentAt": "2026-10-20T13:27:06.644Z",
+    "timestamp": "1:27:06 PM"
+  },
+  {
+    "id": "log_1792502766708_eb19d",
+    "eventName": "PageView",
+    "eventId": "pageview-1792484803432-4s7vt2",
+    "status": "skipped",
+    "errorMessage": "Meta CAPI not configured (missing Pixel ID or Access Token)",
+    "payloadSummary": {
+      "eventName": "PageView"
+    },
+    "sentAt": "2026-10-20T13:26:06.708Z",
+    "timestamp": "1:26:06 PM"
+  },
+  {
+    "id": "log_1792502708408_yhkyt",
+    "eventName": "PageView",
+    "eventId": "pageview-1792484745128-gxfgjs",
+    "status": "skipped",
+    "errorMessage": "Meta CAPI not configured (missing Pixel ID or Access Token)",
+    "payloadSummary": {
+      "eventName": "PageView"
+    },
+    "sentAt": "2026-10-20T13:25:08.408Z",
+    "timestamp": "1:25:08 PM"
+  },
+  {
+    "id": "log_1792502646713_ipcf4",
+    "eventName": "PageView",
+    "eventId": "pageview-1792484683435-xenp4e",
+    "status": "skipped",
+    "errorMessage": "Meta CAPI not configured (missing Pixel ID or Access Token)",
+    "payloadSummary": {
+      "eventName": "PageView"
+    },
+    "sentAt": "2026-10-20T13:24:06.713Z",
+    "timestamp": "1:24:06 PM"
+  },
+  {
+    "id": "log_1792502586594_41368",
+    "eventName": "PageView",
+    "eventId": "pageview-1792484623316-94p1va",
+    "status": "skipped",
+    "errorMessage": "Meta CAPI not configured (missing Pixel ID or Access Token)",
+    "payloadSummary": {
+      "eventName": "PageView"
+    },
+    "sentAt": "2026-10-20T13:23:06.594Z",
+    "timestamp": "1:23:06 PM"
+  },
+  {
+    "id": "log_1792502526749_v4cy4",
+    "eventName": "PageView",
+    "eventId": "pageview-1792484563468-s1dba1",
+    "status": "skipped",
+    "errorMessage": "Meta CAPI not configured (missing Pixel ID or Access Token)",
+    "payloadSummary": {
+      "eventName": "PageView"
+    },
+    "sentAt": "2026-10-20T13:22:06.749Z",
+    "timestamp": "1:22:06 PM"
+  },
+  {
+    "id": "log_1792502461565_mlh83",
+    "eventName": "PageView",
+    "eventId": "pageview-1792484498289-4mj0y4",
+    "status": "skipped",
+    "errorMessage": "Meta CAPI not configured (missing Pixel ID or Access Token)",
+    "payloadSummary": {
+      "eventName": "PageView"
+    },
+    "sentAt": "2026-10-20T13:21:01.565Z",
+    "timestamp": "1:21:01 PM"
+  },
+  {
+    "id": "log_1792502451595_p2zpn",
+    "eventName": "PageView",
+    "eventId": "pageview-1792484488311-ymxrwo",
+    "status": "skipped",
+    "errorMessage": "Meta CAPI not configured (missing Pixel ID or Access Token)",
+    "payloadSummary": {
+      "eventName": "PageView"
+    },
+    "sentAt": "2026-10-20T13:20:51.595Z",
+    "timestamp": "1:20:51 PM"
+  },
+  {
+    "id": "log_1792502441567_ojy9z",
+    "eventName": "PageView",
+    "eventId": "pageview-1792484478292-vy2z9n",
+    "status": "skipped",
+    "errorMessage": "Meta CAPI not configured (missing Pixel ID or Access Token)",
+    "payloadSummary": {
+      "eventName": "PageView"
+    },
+    "sentAt": "2026-10-20T13:20:41.567Z",
+    "timestamp": "1:20:41 PM"
+  },
+  {
+    "id": "log_1792502431577_9m2tx",
+    "eventName": "PageView",
+    "eventId": "pageview-1792484468301-vrz5kn",
+    "status": "skipped",
+    "errorMessage": "Meta CAPI not configured (missing Pixel ID or Access Token)",
+    "payloadSummary": {
+      "eventName": "PageView"
+    },
+    "sentAt": "2026-10-20T13:20:31.577Z",
+    "timestamp": "1:20:31 PM"
+  },
+  {
+    "id": "log_1792502421563_t12ap",
+    "eventName": "PageView",
+    "eventId": "pageview-1792484458289-3cy9mr",
+    "status": "skipped",
+    "errorMessage": "Meta CAPI not configured (missing Pixel ID or Access Token)",
+    "payloadSummary": {
+      "eventName": "PageView"
+    },
+    "sentAt": "2026-10-20T13:20:21.563Z",
+    "timestamp": "1:20:21 PM"
+  },
+  {
+    "id": "log_1792502411575_ydidy",
+    "eventName": "PageView",
+    "eventId": "pageview-1792484448297-ouyx5r",
+    "status": "skipped",
+    "errorMessage": "Meta CAPI not configured (missing Pixel ID or Access Token)",
+    "payloadSummary": {
+      "eventName": "PageView"
+    },
+    "sentAt": "2026-10-20T13:20:11.575Z",
+    "timestamp": "1:20:11 PM"
+  },
+  {
+    "id": "log_1792502402726_s5twu",
+    "eventName": "PageView",
+    "eventId": "pageview-1792484439436-mkux8h",
+    "status": "skipped",
+    "errorMessage": "Meta CAPI not configured (missing Pixel ID or Access Token)",
+    "payloadSummary": {
+      "eventName": "PageView"
+    },
+    "sentAt": "2026-10-20T13:20:02.726Z",
+    "timestamp": "1:20:02 PM"
+  },
+  {
+    "id": "log_1792502401129_n1gax",
+    "eventName": "PageView",
+    "eventId": "pageview-1792484437459-j905zo",
+    "status": "skipped",
+    "errorMessage": "Meta CAPI not configured (missing Pixel ID or Access Token)",
+    "payloadSummary": {
+      "eventName": "PageView"
+    },
+    "sentAt": "2026-10-20T13:20:01.129Z",
+    "timestamp": "1:20:01 PM"
+  },
+  {
+    "id": "log_1792502401115_4h5xq",
+    "eventName": "PageView",
+    "eventId": "pageview-1792484437453-xhtr76",
+    "status": "skipped",
+    "errorMessage": "Meta CAPI not configured (missing Pixel ID or Access Token)",
+    "payloadSummary": {
+      "eventName": "PageView"
+    },
+    "sentAt": "2026-10-20T13:20:01.115Z",
+    "timestamp": "1:20:01 PM"
+  }
+]

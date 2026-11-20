@@ -1,5 +1,10 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import {
+  SaasDonutChart,
+  SaasBarChart,
+  CollapsibleAnalyticsPanel,
+} from './charts/AdminCharts';
+import {
   Sliders,
   Plus,
   Edit3,
@@ -339,6 +344,35 @@ export const AdminTagBannersManager: React.FC<AdminTagBannersManagerProps> = ({
     return list;
   }, [effectiveNavItems, tagBanners]);
 
+  const tagBannerAnalytics = useMemo(() => {
+    let customCount = 0;
+    let defaultCount = 0;
+
+    const slideBars = unifiedTagList.slice(0, 8).map(({ tag }) => {
+      const hasCustom = Boolean(tagBanners[tag.toLowerCase()] || tagBanners[tag]);
+      const slides = getTagSlides(tag, tagBanners);
+      return {
+        id: tag,
+        label: tag,
+        value: slides.length,
+        secondaryValue: hasCustom ? 1 : 0,
+      };
+    });
+
+    unifiedTagList.forEach(({ tag }) => {
+      const hasCustom = Boolean(tagBanners[tag.toLowerCase()] || tagBanners[tag]);
+      if (hasCustom) customCount++;
+      else defaultCount++;
+    });
+
+    const configSlices = [
+      { id: 'custom', label: 'Customized', value: customCount, color: '#059669' },
+      { id: 'default', label: 'Default Preset', value: defaultCount, color: '#64748B' },
+    ];
+
+    return { configSlices, slideBars };
+  }, [unifiedTagList, tagBanners]);
+
   const handleOpenEditor = (tag: string) => {
     setEditingTag(tag);
     setIsEditorOpen(true);
@@ -473,6 +507,27 @@ export const AdminTagBannersManager: React.FC<AdminTagBannersManagerProps> = ({
           </div>
         </div>
       )}
+
+      {/* Tag Banners Analytics */}
+      <CollapsibleAnalyticsPanel title="Tag Collection Banner Coverage" defaultOpen={true}>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <SaasDonutChart
+            title="Banner Customization Status"
+            subtitle="Custom artwork vs default template tags"
+            data={tagBannerAnalytics.configSlices}
+            centerLabel="Collections"
+          />
+          <SaasBarChart
+            title="Active Slides per Tag Collection"
+            subtitle="Click any tag bar to open its banner editor"
+            data={tagBannerAnalytics.slideBars}
+            primaryLabel="Slides"
+            onSelectBar={(bar) => {
+              if (bar.id) handleOpenEditor(bar.id);
+            }}
+          />
+        </div>
+      </CollapsibleAnalyticsPanel>
 
       {/* Synchronized Banners Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">

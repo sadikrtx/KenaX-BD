@@ -135,7 +135,11 @@ export async function getAllWhatsAppMessagesAsync(): Promise<WhatsAppMessageReco
       });
     }
   } catch (err: any) {
-    console.warn('[WhatsApp Store] Firestore fetch notice:', err.message);
+    if (isWhatsAppFirestoreUnavailableError(err)) {
+      whatsappFirestoreUnavailable = true;
+    } else {
+      console.info('[WhatsApp Store] Firestore fetch fallback:', err.message);
+    }
   }
 
   const combined = Array.from(map.values()).sort(
@@ -349,7 +353,11 @@ export async function getPinnedWhatsAppChatsFromStore(): Promise<string[]> {
         } catch {}
         return list;
       }
-    } catch {}
+    } catch (err: any) {
+      if (isWhatsAppFirestoreUnavailableError(err)) {
+        whatsappFirestoreUnavailable = true;
+      }
+    }
   }
 
   try {
@@ -393,7 +401,11 @@ export async function togglePinnedWhatsAppChatInStore(phone: string): Promise<st
         { merge: true }
       );
     } catch (err: any) {
-      console.warn('[WhatsApp Store] Pinned chats Firestore save notice:', err.message);
+      if (isWhatsAppFirestoreUnavailableError(err)) {
+        whatsappFirestoreUnavailable = true;
+      } else {
+        console.info('[WhatsApp Store] Pinned chats Firestore save fallback:', err.message);
+      }
     }
   }
 
@@ -431,7 +443,28 @@ export function logWhatsAppWebhook(log: WhatsAppWebhookLog): void {
 
 // Write to Firestore asynchronously
 let firestoreDb: any = null;
+let whatsappFirestoreUnavailable = false;
+
+function isWhatsAppFirestoreUnavailableError(err: any): boolean {
+  if (!err) return false;
+  const code = String(err.code || err.name || '').toLowerCase();
+  const msg = String(err.message || err.toString?.() || '');
+  return (
+    code === 'permission-denied' ||
+    code === 'unauthenticated' ||
+    code === 'resource-exhausted' ||
+    code === '7' ||
+    code === '429' ||
+    msg.includes('PERMISSION_DENIED') ||
+    msg.includes('permission-denied') ||
+    msg.includes('Missing or insufficient permissions') ||
+    msg.includes('Quota limit exceeded') ||
+    msg.includes('resource-exhausted')
+  );
+}
+
 function getFirestoreInstance() {
+  if (whatsappFirestoreUnavailable) return null;
   if (firestoreDb) return firestoreDb;
   try {
     const configPath = path.join(process.cwd(), 'firebase-applet-config.json');
@@ -455,7 +488,11 @@ export async function syncWhatsAppMessageToFirestore(msg: WhatsAppMessageRecord)
       syncedAt: new Date().toISOString(),
     }, { merge: true });
   } catch (err: any) {
-    console.warn('[Firestore Sync] WhatsApp message sync notice:', err.message);
+    if (isWhatsAppFirestoreUnavailableError(err)) {
+      whatsappFirestoreUnavailable = true;
+      return;
+    }
+    console.info('[Firestore Sync] WhatsApp message sync fallback:', err.message);
   }
 }
 
@@ -471,7 +508,11 @@ export async function syncWhatsAppStatusToFirestore(messageId: string, status: W
     if (error) payload.error = error;
     await setDoc(doc(db, 'whatsapp_messages', safeDocId), payload, { merge: true });
   } catch (err: any) {
-    console.warn('[Firestore Sync] WhatsApp status update notice:', err.message);
+    if (isWhatsAppFirestoreUnavailableError(err)) {
+      whatsappFirestoreUnavailable = true;
+      return;
+    }
+    console.info('[Firestore Sync] WhatsApp status update fallback:', err.message);
   }
 }
 
@@ -485,6 +526,10 @@ export async function syncWhatsAppWebhookLogToFirestore(log: WhatsAppWebhookLog)
       syncedAt: new Date().toISOString(),
     }, { merge: true });
   } catch (err: any) {
-    console.warn('[Firestore Sync] WhatsApp webhook log notice:', err.message);
+    if (isWhatsAppFirestoreUnavailableError(err)) {
+      whatsappFirestoreUnavailable = true;
+      return;
+    }
+    console.info('[Firestore Sync] WhatsApp webhook log fallback:', err.message);
   }
 }

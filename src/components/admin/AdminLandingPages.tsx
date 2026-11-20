@@ -41,6 +41,7 @@ import {
   FileText,
   SlidersHorizontal,
   LayoutGrid,
+  CreditCard,
 } from 'lucide-react';
 import {
   Product,
@@ -51,11 +52,15 @@ import {
   LandingPageFeature,
   LandingPageReview,
   ColorVariation,
+  SiteSettings,
 } from '../../types';
 import { hasPermission } from '../../lib/permissions';
 import { getOptimizedImageUrl } from '../../utils/imageOptimizer';
 import { ProductLandingPageView } from '../ProductLandingPageView';
 import { ProductVideoPlayer } from '../ProductVideoPlayer';
+import { useLanguage } from '../../context/LanguageContext';
+import { PluginSlotRenderer } from './PluginSlotRenderer';
+import { SaasBarChart, SaasDonutChart, CollapsibleAnalyticsPanel } from './charts/AdminCharts';
 
 interface AdminLandingPagesProps {
   products: Product[];
@@ -64,6 +69,8 @@ interface AdminLandingPagesProps {
   currentRole: UserRole;
   currentStaff: StaffUser | null;
   onPreviewLandingPage?: (product: Product) => void;
+  settings?: SiteSettings;
+  onUpdateSettings?: (settings: SiteSettings) => void;
 }
 
 export const COLOR_THEMES = [
@@ -154,6 +161,9 @@ export const AdminLandingPages: React.FC<AdminLandingPagesProps> = ({
   currentRole,
   currentStaff,
 }) => {
+  const { language } = useLanguage();
+  const isBn = language === 'bn';
+
   const staffPermissions = currentStaff?.permissions || [];
   const canManage =
     hasPermission(currentRole, staffPermissions, 'landing_pages.manage') ||
@@ -176,6 +186,7 @@ export const AdminLandingPages: React.FC<AdminLandingPagesProps> = ({
     | 'why_us'
     | 'reviews'
     | 'order_form'
+    | 'payments'
     | 'similar'
     | 'ad_tracking'
   >('basic');
@@ -195,6 +206,10 @@ export const AdminLandingPages: React.FC<AdminLandingPagesProps> = ({
     badges: DEFAULT_BADGES,
     customOrderTitle: 'অর্ডার করতে নিচের ফর্মে আপনার নাম, ঠিকানা ও মোবাইল নাম্বার লিখুন',
     customOrderSubtitle: 'পণ্য হাতে পেয়ে দেখে ডেলিভারি ম্যানের কাছে পেমেন্ট করার ১০০% নিশ্চয়তা',
+    allowCashOnDelivery: true,
+    allowDeliveryAdvance: false,
+    allowFullAdvance: false,
+    paymentMode: 'inherit',
     customButtonText: 'ক্যাশ অন ডেলিভারিতে অর্ডার কনফার্ম করুন',
     showSimilarProducts: true,
     similarSectionTitle: 'সম্পর্কিত অন্যান্য আকর্ষণীয় পণ্যসমূহ',
@@ -247,6 +262,35 @@ export const AdminLandingPages: React.FC<AdminLandingPagesProps> = ({
     const notSet = total - (active + inactive);
     return { total, active, inactive, notSet };
   }, [products]);
+
+  const lpAnalytics = useMemo(() => {
+    const statusSlices = [
+      { id: 'active', label: isBn ? 'সক্রিয় (Active)' : 'Active', value: stats.active, color: '#059669' },
+      { id: 'inactive', label: isBn ? 'পজ করা (Paused)' : 'Paused', value: stats.inactive, color: '#D97706' },
+      { id: 'not_set', label: isBn ? 'সাধারণ স্টোর' : 'Standard', value: stats.notSet, color: '#64748B' },
+    ];
+
+    const catMap = new Map<string, { active: number; total: number }>();
+    products.forEach((p) => {
+      const cat = p.category || 'Uncategorized';
+      const entry = catMap.get(cat) || { active: 0, total: 0 };
+      entry.total += 1;
+      if (p.landingPage?.enabled) entry.active += 1;
+      catMap.set(cat, entry);
+    });
+
+    const categoryBars = Array.from(catMap.entries())
+      .map(([label, counts]) => ({
+        id: label,
+        label,
+        value: counts.active,
+        secondaryValue: counts.total,
+      }))
+      .sort((a, b) => b.value - a.value || b.secondaryValue - a.secondaryValue)
+      .slice(0, 8);
+
+    return { statusSlices, categoryBars };
+  }, [products, stats, isBn]);
 
   // Handle Quick Active/Inactive Toggle
   const handleToggleActive = (product: Product, e?: React.MouseEvent) => {
@@ -677,16 +721,72 @@ export const AdminLandingPages: React.FC<AdminLandingPagesProps> = ({
   };
 
   const tabsList = [
-    { id: 'basic', label: 'হেডলাইন ও স্লাগ', icon: Globe, count: null },
-    { id: 'overview', label: 'প্রোডাক্ট বিবরণ ও ওভারভিউ', icon: FileText, count: null },
-    { id: 'theme', label: 'থিম কালার ও ব্যানার', icon: Palette, count: null },
-    { id: 'urgency', label: 'কাউন্টডাউন ও ডেলিভারি ফি', icon: Clock, count: null },
-    { id: 'features', label: 'ফিচার ও সুবিধাসমূহ', icon: CheckCircle2, count: lpForm.features?.length || 0 },
-    { id: 'why_us', label: 'কেন আমাদের থেকে কিনবেন?', icon: HeartHandshake, count: lpForm.whyChooseUs?.length || 0 },
-    { id: 'reviews', label: 'কাস্টমার রিভিউ', icon: Star, count: lpForm.customReviews?.length || 0 },
-    { id: 'order_form', label: 'অর্ডার ফর্ম ও বাটন', icon: ShoppingBag, count: null },
-    { id: 'similar', label: 'সিমিলার প্রোডাক্ট সেকশন', icon: Layers, count: null },
-    { id: 'ad_tracking', label: 'Facebook Ad Tracking', icon: Share2, count: null },
+    {
+      id: 'basic',
+      label: isBn ? 'হেডলাইন ও স্লাগ' : 'Headline & Slug',
+      icon: Globe,
+      count: null,
+    },
+    {
+      id: 'overview',
+      label: isBn ? 'প্রোডাক্ট বিবরণ ও ওভারভিউ' : 'Product Overview',
+      icon: FileText,
+      count: null,
+    },
+    {
+      id: 'theme',
+      label: isBn ? 'থিম কালার ও ব্যানার' : 'Theme & Banner',
+      icon: Palette,
+      count: null,
+    },
+    {
+      id: 'urgency',
+      label: isBn ? 'কাউন্টডাউন ও ডেলিভারি ফি' : 'Countdown & Delivery',
+      icon: Clock,
+      count: null,
+    },
+    {
+      id: 'features',
+      label: isBn ? 'ফিচার ও সুবিধাসমূহ' : 'Features & Benefits',
+      icon: CheckCircle2,
+      count: lpForm.features?.length || 0,
+    },
+    {
+      id: 'why_us',
+      label: isBn ? 'কেন আমাদের থেকে কিনবেন?' : 'Why Choose Us?',
+      icon: HeartHandshake,
+      count: lpForm.whyChooseUs?.length || 0,
+    },
+    {
+      id: 'reviews',
+      label: isBn ? 'কাস্টমার রিভিউ' : 'Customer Reviews',
+      icon: Star,
+      count: lpForm.customReviews?.length || 0,
+    },
+    {
+      id: 'order_form',
+      label: isBn ? 'অর্ডার ফর্ম ও বাটন' : 'Order Form & Button',
+      icon: ShoppingBag,
+      count: null,
+    },
+    {
+      id: 'payments',
+      label: isBn ? 'পেমেন্ট মেথড ও সেটিংস' : 'Payment Methods',
+      icon: CreditCard,
+      count: null,
+    },
+    {
+      id: 'similar',
+      label: isBn ? 'সিমিলার প্রোডাক্ট' : 'Similar Products',
+      icon: Layers,
+      count: null,
+    },
+    {
+      id: 'ad_tracking',
+      label: isBn ? 'Facebook Ad Tracking' : 'Facebook Tracking',
+      icon: Share2,
+      count: null,
+    },
   ];
 
   return (
@@ -699,6 +799,13 @@ export const AdminLandingPages: React.FC<AdminLandingPagesProps> = ({
         </div>
       )}
 
+      {/* Extension Slot: FLOWORA CLONE BUILDER -> Website Builder Menu */}
+      <PluginSlotRenderer
+        slot="admin.landing_pages.builder_panel"
+        userRole={currentRole}
+        products={products}
+      />
+
       {/* Header Banner */}
       <div className="bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 rounded-3xl p-6 sm:p-8 text-white shadow-xl relative overflow-hidden border border-slate-800">
         <div className="absolute top-0 right-0 w-96 h-96 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none -mr-20 -mt-20" />
@@ -708,37 +815,70 @@ export const AdminLandingPages: React.FC<AdminLandingPagesProps> = ({
           <div className="space-y-2 max-w-2xl">
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-500/20 text-indigo-300 text-xs font-bold border border-indigo-500/30">
               <Sparkles className="w-3.5 h-3.5" />
-              <span>Facebook Ads Direct Conversion Engine</span>
+              <span>{isBn ? 'Facebook Ads Direct Conversion Engine' : 'Facebook Ads Direct Conversion Engine'}</span>
             </div>
             <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-white">
-              প্রোডাক্ট ল্যান্ডিং পেজ ম্যানেজার
+              {isBn ? 'প্রোডাক্ট ল্যান্ডিং পেজ ম্যানেজার' : 'Product Landing Page Manager'}
             </h1>
             <p className="text-xs sm:text-sm text-slate-300 leading-relaxed">
-              প্রতিটি প্রোডাক্টের জন্য আলাদা আল্ট্রা-হাই কনভার্সন ল্যান্ডিং পেজ তৈরি করুন। ফেসবুক বিজ্ঞাপনে সরাসরি লিংক ব্যবহার করে দ্রুত ১-ক্লিক ক্যাশ অন ডেলিভারি সেল বাড়ান।
+              {isBn
+                ? 'প্রতিটি প্রোডাক্টের জন্য আলাদা আল্ট্রা-হাই কনভার্সন ল্যান্ডিং পেজ তৈরি করুন। ফেসবুক বিজ্ঞাপনে সরাসরি লিংক ব্যবহার করে দ্রুত ১-ক্লিক ক্যাশ অন ডেলিভারি সেল বাড়ান।'
+                : 'Create ultra-high conversion custom landing pages for each product. Boost 1-click cash-on-delivery orders directly from Facebook Ads.'}
             </p>
           </div>
 
           {/* KPI Mini Badges */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <div className="bg-white/10 backdrop-blur-xs p-3.5 rounded-2xl border border-white/10 text-center">
-              <span className="text-xs font-medium text-slate-300">মোট প্রোডাক্ট</span>
+              <span className="text-xs font-medium text-slate-300">{isBn ? 'মোট প্রোডাক্ট' : 'Total Products'}</span>
               <p className="text-xl sm:text-2xl font-black text-white mt-0.5">{stats.total}</p>
             </div>
             <div className="bg-emerald-500/20 backdrop-blur-xs p-3.5 rounded-2xl border border-emerald-500/30 text-center">
-              <span className="text-xs font-medium text-emerald-300">সক্রিয় পেজ (Active)</span>
+              <span className="text-xs font-medium text-emerald-300">{isBn ? 'সক্রিয় পেজ (Active)' : 'Active Pages'}</span>
               <p className="text-xl sm:text-2xl font-black text-emerald-400 mt-0.5">{stats.active}</p>
             </div>
             <div className="bg-amber-500/20 backdrop-blur-xs p-3.5 rounded-2xl border border-amber-500/30 text-center">
-              <span className="text-xs font-medium text-amber-300">পজ করা (Paused)</span>
+              <span className="text-xs font-medium text-amber-300">{isBn ? 'পজ করা (Paused)' : 'Paused'}</span>
               <p className="text-xl sm:text-2xl font-black text-amber-400 mt-0.5">{stats.inactive}</p>
             </div>
             <div className="bg-slate-800/80 backdrop-blur-xs p-3.5 rounded-2xl border border-slate-700 text-center">
-              <span className="text-xs font-medium text-slate-400">সাধারণ স্টোর</span>
+              <span className="text-xs font-medium text-slate-400">{isBn ? 'সাধারণ স্টোর' : 'Standard Store'}</span>
               <p className="text-xl sm:text-2xl font-black text-slate-200 mt-0.5">{stats.notSet}</p>
             </div>
           </div>
         </div>
       </div>
+
+      <CollapsibleAnalyticsPanel
+        title={isBn ? 'ল্যান্ডিং পেজ অ্যানালিটিক্স ও গ্রাফ' : 'Landing Page Analytics & Coverage'}
+        defaultOpen={true}
+      >
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <SaasDonutChart
+            title={isBn ? 'ল্যান্ডিং পেজ স্ট্যাটাস অনুপাত' : 'Landing Page Status Share'}
+            subtitle={isBn ? 'স্লাইসে ক্লিক করে ফিল্টার করুন' : 'Click a slice to filter pages'}
+            data={lpAnalytics.statusSlices}
+            centerLabel={isBn ? 'মোট পণ্য' : 'Products'}
+            onSelectSlice={(item) => {
+              if (item.id === 'active' || item.id === 'inactive' || item.id === 'not_set') {
+                setStatusFilter((prev) => (prev === item.id ? 'all' : (item.id as 'active' | 'inactive' | 'not_set')));
+              }
+            }}
+          />
+          <SaasBarChart
+            title={isBn ? 'ক্যাটাগরি অনুযায়ী অ্যাক্টিভ ল্যান্ডিং পেজ' : 'Active Pages vs Catalog by Category'}
+            subtitle={isBn ? 'বারে ক্লিক করে ক্যাটাগরি ফিল্টার করুন' : 'Active landing pages vs total products'}
+            data={lpAnalytics.categoryBars}
+            primaryLabel={isBn ? 'সক্রিয় পেজ' : 'Active Pages'}
+            secondaryLabel={isBn ? 'মোট পণ্য' : 'Total Products'}
+            barColor="#4F46E5"
+            secondaryColor="#94A3B8"
+            onSelectBar={(item) => {
+              if (item.id) setCategoryFilter((prev) => (prev === item.id ? 'all' : item.id!));
+            }}
+          />
+        </div>
+      </CollapsibleAnalyticsPanel>
 
       {/* Action and Filter Bar */}
       <div className="bg-white dark:bg-slate-900 p-4 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-xs flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-4">
@@ -747,7 +887,7 @@ export const AdminLandingPages: React.FC<AdminLandingPagesProps> = ({
           <Search className="w-4 h-4 text-slate-400 dark:text-slate-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
           <input
             type="text"
-            placeholder="প্রোডাক্টের নাম, SKU বা স্লাগ লিখে খুঁজুন..."
+            placeholder={isBn ? 'প্রোডাক্টের নাম, SKU বা স্লাগ লিখে খুঁজুন...' : 'Search by name, SKU or slug...'}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 pl-10 pr-4 py-2.5 rounded-2xl text-xs font-medium text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white dark:focus:bg-slate-800"
@@ -764,7 +904,7 @@ export const AdminLandingPages: React.FC<AdminLandingPagesProps> = ({
                 : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
             }`}
           >
-            সবগুলো ({stats.total})
+            {isBn ? `সবগুলো (${stats.total})` : `All (${stats.total})`}
           </button>
           <button
             onClick={() => setStatusFilter('active')}
@@ -775,7 +915,7 @@ export const AdminLandingPages: React.FC<AdminLandingPagesProps> = ({
             }`}
           >
             <span className="w-2 h-2 rounded-full bg-emerald-400" />
-            <span>সক্রিয় ({stats.active})</span>
+            <span>{isBn ? `সক্রিয় (${stats.active})` : `Active (${stats.active})`}</span>
           </button>
           <button
             onClick={() => setStatusFilter('inactive')}
@@ -785,7 +925,7 @@ export const AdminLandingPages: React.FC<AdminLandingPagesProps> = ({
                 : 'bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/60'
             }`}
           >
-            পজ করা ({stats.inactive})
+            {isBn ? `পজ করা (${stats.inactive})` : `Paused (${stats.inactive})`}
           </button>
           <button
             onClick={() => setStatusFilter('not_set')}
@@ -795,7 +935,7 @@ export const AdminLandingPages: React.FC<AdminLandingPagesProps> = ({
                 : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
             }`}
           >
-            সাধারণ ({stats.notSet})
+            {isBn ? `সাধারণ (${stats.notSet})` : `Standard (${stats.notSet})`}
           </button>
         </div>
 
@@ -806,7 +946,7 @@ export const AdminLandingPages: React.FC<AdminLandingPagesProps> = ({
             onChange={(e) => setCategoryFilter(e.target.value)}
             className="px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500"
           >
-            <option value="all">সব ক্যাটাগরি</option>
+            <option value="all">{isBn ? 'সব ক্যাটাগরি' : 'All Categories'}</option>
             {categories.map((c) => (
               <option key={c.id} value={c.name}>
                 {c.name}
@@ -843,9 +983,11 @@ export const AdminLandingPages: React.FC<AdminLandingPagesProps> = ({
           <div className="w-16 h-16 rounded-2xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 flex items-center justify-center mx-auto mb-4">
             <Sparkles className="w-8 h-8" />
           </div>
-          <h3 className="text-base font-bold text-slate-800 dark:text-slate-200">কোনো প্রোডাক্ট পাওয়া যায়নি</h3>
+          <h3 className="text-base font-bold text-slate-800 dark:text-slate-200">
+            {isBn ? 'কোনো প্রোডাক্ট পাওয়া যায়নি' : 'No Products Found'}
+          </h3>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-            আপনার ফিল্টার বা সার্চ শব্দের সাথে কোনো প্রোডাক্ট মেলেনি।
+            {isBn ? 'আপনার ফিল্টার বা সার্চ শব্দের সাথে কোনো প্রোডাক্ট মেলেনি।' : 'No products matched your search or filter criteria.'}
           </p>
           <button
             onClick={() => {
@@ -855,7 +997,7 @@ export const AdminLandingPages: React.FC<AdminLandingPagesProps> = ({
             }}
             className="mt-4 px-4 py-2 bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 rounded-xl text-xs font-bold hover:bg-slate-800 dark:hover:bg-slate-200 cursor-pointer"
           >
-            সব ফিল্টার ক্লিয়ার করুন
+            {isBn ? 'সব ফিল্টার ক্লিয়ার করুন' : 'Clear All Filters'}
           </button>
         </div>
       ) : viewMode === 'cards' ? (
@@ -1195,20 +1337,37 @@ export const AdminLandingPages: React.FC<AdminLandingPagesProps> = ({
               </div>
             </div>
 
-            {/* Mobile Section Dropdown & Quick Scroll */}
-            <div className="md:hidden bg-slate-100 p-2.5 border-b border-slate-200 flex items-center gap-2">
-              <label className="text-[11px] font-bold text-slate-600 shrink-0">সেকশন:</label>
-              <select
-                value={editorTab}
-                onChange={(e) => setEditorTab(e.target.value as any)}
-                className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-              >
-                {tabsList.map((tab) => (
-                  <option key={tab.id} value={tab.id}>
-                    {tab.label} {tab.count !== null ? `(${tab.count})` : ''}
-                  </option>
-                ))}
-              </select>
+            {/* Mobile Section Horizontal Scroll Pills Bar */}
+            <div className="md:hidden bg-slate-900 border-b border-slate-800 p-2 overflow-x-auto no-scrollbar shadow-inner">
+              <div className="flex items-center gap-1.5 min-w-max px-1">
+                {tabsList.map((tab) => {
+                  const Icon = tab.icon;
+                  const isActive = editorTab === tab.id;
+                  return (
+                    <button
+                      key={tab.id}
+                      onClick={() => setEditorTab(tab.id as any)}
+                      className={`px-3 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer shrink-0 ${
+                        isActive
+                          ? 'bg-gradient-to-r from-indigo-600 to-indigo-500 text-white shadow-md shadow-indigo-900/50 ring-1 ring-indigo-400/50'
+                          : 'bg-slate-800/80 text-slate-300 hover:bg-slate-800 hover:text-white border border-slate-700/50'
+                      }`}
+                    >
+                      <Icon className={`w-3.5 h-3.5 shrink-0 ${isActive ? 'text-white' : 'text-slate-400'}`} />
+                      <span>{tab.label}</span>
+                      {tab.count !== null && tab.count > 0 && (
+                        <span
+                          className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+                            isActive ? 'bg-white/20 text-white' : 'bg-slate-700 text-slate-300'
+                          }`}
+                        >
+                          {tab.count}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
 
             {/* Main Editor Body: Responsive Two-Column Layout on PC, Clean Stacked on Mobile */}
@@ -1216,7 +1375,7 @@ export const AdminLandingPages: React.FC<AdminLandingPagesProps> = ({
               {/* Desktop Left Tab Navigation Column */}
               <div className="hidden md:flex flex-col w-64 lg:w-72 bg-slate-50 border-r border-slate-200 p-3 space-y-1 overflow-y-auto shrink-0">
                 <p className="text-[10px] font-black uppercase tracking-wider text-slate-400 px-3 py-2">
-                  কাস্টমাইজেশন সেকশন
+                  {isBn ? 'কাস্টমাইজেশন সেকশন' : 'Customization Sections'}
                 </p>
                 {tabsList.map((tab) => {
                   const Icon = tab.icon;
@@ -2483,6 +2642,170 @@ export const AdminLandingPages: React.FC<AdminLandingPagesProps> = ({
                           />
                         </div>
                       </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* 7.5. PAYMENT METHODS & ADVANCE OPTIONS */}
+                {editorTab === 'payments' && (
+                  <div className="space-y-6 max-w-3xl">
+                    <div className="border-b border-slate-100 pb-3">
+                      <h3 className="text-base font-black text-slate-900 flex items-center gap-2">
+                        <CreditCard className="w-5 h-5 text-indigo-600" />
+                        <span>পেমেন্ট মেথড ও অগ্রিম ডেলিভারি সেটিংস</span>
+                      </h3>
+                      <p className="text-xs text-slate-500 mt-1">
+                        এই ল্যান্ডিং পেজে কাস্টমারদের জন্য কোন কোন পেমেন্ট অপশন উন্মুক্ত থাকবে তা নির্ধারণ করুন।
+                      </p>
+                    </div>
+
+                    {/* Quick Preset Buttons */}
+                    <div className="p-4 rounded-2xl bg-indigo-50/60 border border-indigo-100 space-y-3">
+                      <span className="text-xs font-bold text-indigo-900 flex items-center gap-1.5 font-bangla">
+                        <Sparkles className="w-4 h-4 text-indigo-600" />
+                        <span>দ্রুত কনফিগারেশন প্রিসেট:</span>
+                      </span>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setLpForm((prev) => ({
+                              ...prev,
+                              allowCashOnDelivery: true,
+                              allowDeliveryAdvance: false,
+                              allowFullAdvance: false,
+                            }));
+                          }}
+                          className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                            lpForm.allowCashOnDelivery && !lpForm.allowDeliveryAdvance && !lpForm.allowFullAdvance
+                              ? 'bg-indigo-600 text-white shadow-xs'
+                              : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50'
+                          }`}
+                        >
+                          📦 শুধু ক্যাশ অন ডেলিভারি (Default COD Only)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setLpForm((prev) => ({
+                              ...prev,
+                              allowCashOnDelivery: true,
+                              allowDeliveryAdvance: true,
+                              allowFullAdvance: false,
+                            }));
+                          }}
+                          className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                            lpForm.allowCashOnDelivery && lpForm.allowDeliveryAdvance && !lpForm.allowFullAdvance
+                              ? 'bg-indigo-600 text-white shadow-xs'
+                              : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50'
+                          }`}
+                        >
+                          🚚 ক্যাশ অন ডেলিভারি + ডেলিভারি চার্জ অগ্রিম
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setLpForm((prev) => ({
+                              ...prev,
+                              allowCashOnDelivery: true,
+                              allowDeliveryAdvance: true,
+                              allowFullAdvance: true,
+                            }));
+                          }}
+                          className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                            lpForm.allowCashOnDelivery && lpForm.allowDeliveryAdvance && lpForm.allowFullAdvance
+                              ? 'bg-indigo-600 text-white shadow-xs'
+                              : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50'
+                          }`}
+                        >
+                          ✨ সকল পেমেন্ট অপশন (COD + ডেলিভারি অগ্রিম + ফুল অগ্রিম)
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Detailed Payment Toggles */}
+                    <div className="space-y-4 pt-2">
+                      {/* 1. Cash on Delivery */}
+                      <label className="flex items-start justify-between p-4 rounded-2xl border-2 transition-all cursor-pointer bg-white border-slate-200 hover:border-slate-300">
+                        <div className="space-y-1 pr-4">
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-black text-slate-900 font-bangla">
+                              ১. ক্যাশ অন ডেলিভারি (Cash on Delivery)
+                            </span>
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
+                              সর্বোচ্চ সেল কনভার্সন
+                            </span>
+                          </div>
+                          <p className="text-xs text-slate-500 font-bangla leading-relaxed">
+                            কাস্টমার কোনো অগ্রিম ছাড়াই পণ্য হাতে পাওয়ার পর ডেলিভারিম্যানকে টাকা পরিশোধ করবেন।
+                          </p>
+                        </div>
+                        <input
+                          type="checkbox"
+                          checked={lpForm.allowCashOnDelivery !== false}
+                          onChange={(e) =>
+                            setLpForm((prev) => ({ ...prev, allowCashOnDelivery: e.target.checked }))
+                          }
+                          className="w-5 h-5 rounded text-indigo-600 focus:ring-indigo-500 mt-1 cursor-pointer shrink-0"
+                        />
+                      </label>
+
+                      {/* 2. Delivery Charge Advance */}
+                      <label className="flex items-start justify-between p-4 rounded-2xl border-2 transition-all cursor-pointer bg-white border-slate-200 hover:border-slate-300">
+                        <div className="space-y-1 pr-4">
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-black text-slate-900 font-bangla">
+                              ২. ডেলিভারি চার্জ অগ্রিম (Delivery Charge Advance)
+                            </span>
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-100 text-indigo-800">
+                              রিটার্ন ও ফেক অর্ডার প্রতিরোধ
+                            </span>
+                          </div>
+                          <p className="text-xs text-slate-500 font-bangla leading-relaxed">
+                            কাস্টমার শুধুমাত্র ডেলিভারি চার্জ (যেমন: ৳৭০/৳১৩০) বিকাশ/নগদে অগ্রিম পরিশোধ করবেন এবং মূল প্রোডাক্ট মূল্য ডেলিভারির সময় দিবেন।
+                          </p>
+                        </div>
+                        <input
+                          type="checkbox"
+                          checked={lpForm.allowDeliveryAdvance === true}
+                          onChange={(e) =>
+                            setLpForm((prev) => ({ ...prev, allowDeliveryAdvance: e.target.checked }))
+                          }
+                          className="w-5 h-5 rounded text-indigo-600 focus:ring-indigo-500 mt-1 cursor-pointer shrink-0"
+                        />
+                      </label>
+
+                      {/* 3. Full Advance Payment */}
+                      <label className="flex items-start justify-between p-4 rounded-2xl border-2 transition-all cursor-pointer bg-white border-slate-200 hover:border-slate-300">
+                        <div className="space-y-1 pr-4">
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-black text-slate-900 font-bangla">
+                              ৩. সম্পূর্ণ মূল্য অগ্রিম পরিশোধ (Full Advance Payment)
+                            </span>
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800">
+                              ফুল পেমেন্ট
+                            </span>
+                          </div>
+                          <p className="text-xs text-slate-500 font-bangla leading-relaxed">
+                            কাস্টমার অর্ডার দেওয়ার সময় পুরো অর্ডার ও ডেলিভারি ফি বিকাশ/নগদে অগ্রিম পরিশোধ করবেন।
+                          </p>
+                        </div>
+                        <input
+                          type="checkbox"
+                          checked={lpForm.allowFullAdvance === true}
+                          onChange={(e) =>
+                            setLpForm((prev) => ({ ...prev, allowFullAdvance: e.target.checked }))
+                          }
+                          className="w-5 h-5 rounded text-indigo-600 focus:ring-indigo-500 mt-1 cursor-pointer shrink-0"
+                        />
+                      </label>
+                    </div>
+
+                    <div className="p-4 rounded-2xl bg-amber-50/80 border border-amber-200 text-xs text-amber-900 font-bangla leading-relaxed flex items-start gap-2.5">
+                      <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                      <span>
+                        <strong>নোট:</strong> বিকাশ/নগদ পেমেন্ট নাম্বারগুলো মূল <strong>'Payment Gateways'</strong> ও <strong>'Delivery Advance'</strong> প্যানেলে সেট করা পার্মানেন্ট নাম্বার থেকে স্বয়ংক্রিয়ভাবে প্রদর্শিত হবে।
+                      </span>
                     </div>
                   </div>
                 )}

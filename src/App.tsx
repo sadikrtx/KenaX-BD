@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Store } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Header } from './components/Header';
 import { HeroBanner } from './components/HeroBanner';
@@ -19,15 +19,6 @@ import { AuthPageView } from './components/AuthPageView';
 
 // Portals & Core Views: Lazy loaded with suspense to ensure ultra-fast initial storefront load
 const AdminPortal = React.lazy(() => import('./components/AdminPortal'));
-const SellerPortal = React.lazy(() =>
-  import('./components/seller/SellerPortal').then((m) => ({ default: m.SellerPortal }))
-);
-const ResellerPortal = React.lazy(() =>
-  import('./components/reseller/ResellerPortal').then((m) => ({ default: m.ResellerPortal }))
-);
-const PartnerLoginPage = React.lazy(() =>
-  import('./components/partner/PartnerLoginPage').then((m) => ({ default: m.PartnerLoginPage }))
-);
 
 // Secondary Views & Modals: Lazy-loaded on demand for maximum initial load performance
 const CustomerDashboard = React.lazy(() =>
@@ -65,6 +56,7 @@ const AdminLoginModal = React.lazy(() =>
 );
 
 // High-Performance Core Views: Direct imports for instant initial UI paint
+import { OfferPopupModal } from './components/OfferPopupModal';
 import { CustomerFloatingChat } from './components/CustomerFloatingChat';
 import { CheckoutModal } from './components/CheckoutModal';
 import { CheckoutPageView } from './components/CheckoutPageView';
@@ -101,7 +93,6 @@ import {
   CartActivity,
   CartActivityItem,
   DEFAULT_HERO_SIDE_BANNER,
-  PartnerUser,
 } from './types';
 import { INITIAL_PRODUCTS, PRODUCTION_PRODUCTS } from './data/initialProducts';
 import { isPreviewEnvironment } from './utils/envHelper';
@@ -119,6 +110,7 @@ import {
   saveOrderToDB,
   saveProductToDB,
   deleteProductFromDB,
+  logStockAdjustmentToDB,
   subscribeToProducts,
   updateOrderInDB,
   getCartActivitiesFromDB,
@@ -170,8 +162,59 @@ import {
   trackPixelSearch,
   trackPixelContact,
 } from './utils/pixelTracker';
+import { captureUrlAttribution, getAttributionForOrder } from './utils/attribution';
 
 export default function App() {
+  // Purge any legacy Reseller Hub, Seller Hub, and Partner Login Portal keys from browser storage
+  useEffect(() => {
+    try {
+      const explicitKeysToPurge = [
+        'kenax_current_partner',
+        'kenax_partners_v1',
+        'kenax_partner_payouts_v1',
+        'kenax_sellers_v1',
+        'kenax_seller_plans_v1',
+        'kenax_seller_payouts_v1',
+        'kenax_active_seller_session_v1',
+        'kenax_resellers_v1',
+        'kenax_reseller_plans_v1',
+        'kenax_reseller_payouts_v1',
+        'kenax_active_reseller_session_v1',
+        'kenax_reseller_campaigns_v1',
+        'kenax_reseller_ads_v1',
+        'kenax_reseller_landing_pages_v1',
+        'kenax_reseller_substores_v1',
+        'kenax_reseller_tickets_v1',
+        'kenax_reseller_team_chat_v1',
+        'kenax_role_permission_matrix_v1',
+        'kenax_plan_rule_matrix_seller_v1',
+        'kenax_plan_rule_matrix_reseller_v1',
+      ];
+      explicitKeysToPurge.forEach((k) => {
+        localStorage.removeItem(k);
+        sessionStorage.removeItem(k);
+      });
+
+      const purgeMatchingStorage = (storage: Storage) => {
+        const keys = Object.keys(storage);
+        for (const key of keys) {
+          const lower = key.toLowerCase();
+          if (
+            lower.includes('reseller') ||
+            lower.includes('partner') ||
+            lower.includes('permission_matrix') ||
+            lower.includes('plan_rule_matrix') ||
+            (lower.includes('seller') && !lower.includes('bestseller'))
+          ) {
+            storage.removeItem(key);
+          }
+        }
+      };
+      purgeMatchingStorage(localStorage);
+      purgeMatchingStorage(sessionStorage);
+    } catch {}
+  }, []);
+
   // Navigation View State with Full Refresh & Direct Route Persistence
   const [currentView, setCurrentView] = useState<string>(() => {
     try {
@@ -179,20 +222,10 @@ export default function App() {
       const hash = (window.location.hash || '').toLowerCase();
       const params = new URLSearchParams(window.location.search);
       const urlView = params.get('view');
-      const portalParam = params.get('portal');
 
       // 1. Direct Multi-Page URL Pathname Routes
-      if (pathname === '/seller' || pathname === '/seller-portal' || pathname === '/seller/dashboard') {
-        return 'seller-portal';
-      }
-      if (pathname === '/reseller' || pathname === '/reseller-portal' || pathname === '/reseller/dashboard') {
-        return 'reseller-portal';
-      }
       if (pathname === '/admin' || pathname === '/admin-dashboard' || pathname === '/admin-portal' || pathname === '/admin/dashboard') {
         return 'admin-dashboard';
-      }
-      if (pathname === '/partner-login' || pathname === '/partner' || pathname === '/seller-login' || pathname === '/reseller-login') {
-        return 'partner-login';
       }
       if (pathname === '/checkout') return 'checkout';
       if (pathname === '/track' || pathname === '/track-order') return 'track-order';
@@ -225,41 +258,41 @@ export default function App() {
         return `tag:${params.get('tag')}`;
       }
 
-      // 6. Dedicated Partner Portals (?portal=seller, ?portal=reseller, ?portal=partner-login)
-      if (portalParam === 'seller') return 'seller-portal';
-      if (portalParam === 'reseller') return 'reseller-portal';
-      if (portalParam === 'partner-login' || portalParam === 'partner') return 'partner-login';
-
-      // 7. Explicit view route (?view=...)
+      // 6. Explicit view route (?view=...)
       if (urlView) {
         if (urlView === 'home') return 'home';
         if (urlView === 'checkout') return 'checkout';
         if (urlView === 'login' || urlView === 'register' || urlView === 'auth') {
           return 'auth';
         }
-        if (urlView === 'seller-portal' || urlView === 'seller') return 'seller-portal';
-        if (urlView === 'reseller-portal' || urlView === 'reseller') return 'reseller-portal';
-        if (urlView === 'partner-login') return 'partner-login';
+        if (
+          urlView === 'seller-portal' ||
+          urlView === 'seller' ||
+          urlView === 'reseller-portal' ||
+          urlView === 'reseller' ||
+          urlView === 'partner-login' ||
+          urlView === 'partner'
+        ) {
+          return 'home';
+        }
         return urlView;
       }
 
-      // 8. Direct persistent saved view
+      // 7. Direct persistent saved view
       const savedView = localStorage.getItem('kenax_current_view');
       if (savedView) {
         if (savedView === 'admin-dashboard' || savedView === 'admin') {
-          const hasStaff =
-            localStorage.getItem('kenax_current_staff') ||
-            localStorage.getItem('kenax_authenticated_staff') ||
-            localStorage.getItem('preview_kenax_current_staff');
-          if (hasStaff) return 'admin-dashboard';
+          localStorage.setItem('kenax_current_view', 'home');
           return 'home';
         }
-        if (savedView === 'seller-portal' || savedView === 'reseller-portal') {
-          const hasPartner = localStorage.getItem('kenax_current_partner');
-          if (hasPartner) return savedView;
-          return 'partner-login';
-        }
-        if (savedView === 'product' || savedView === 'landing-page') {
+        if (
+          savedView === 'seller-portal' ||
+          savedView === 'reseller-portal' ||
+          savedView === 'partner-login' ||
+          savedView === 'product' ||
+          savedView === 'landing-page'
+        ) {
+          localStorage.setItem('kenax_current_view', 'home');
           return 'home';
         }
         return savedView;
@@ -268,18 +301,6 @@ export default function App() {
     return 'home';
   });
   const [selectedTrackOrder, setSelectedTrackOrder] = useState<Order | null>(null);
-
-  // Partner (Seller & Reseller) State
-  const [currentPartner, setCurrentPartner] = useState<PartnerUser | null>(() => {
-    try {
-      const saved = localStorage.getItem('kenax_current_partner');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (parsed && parsed.id) return parsed;
-      }
-    } catch {}
-    return null;
-  });
   const [currentRole, setCurrentRole] = useState<UserRole>(() => {
     try {
       const savedStaff =
@@ -502,6 +523,7 @@ export default function App() {
   }, [currentStaff]);
 
   const [isAdminLoginOpen, setIsAdminLoginOpen] = useState(false);
+  const [isAdminPortalAuthenticated, setIsAdminPortalAuthenticated] = useState(false);
 
   // Cart Activities for Admin / Manager / Moderator Tracking
   const [cartActivities, setCartActivities] = useState<CartActivity[]>(() => {
@@ -896,6 +918,16 @@ export default function App() {
   const handleNavigate = (view: string, tab?: 'orders' | 'cart' | 'addresses' | 'wishlist') => {
     let targetView = view;
     const cleanView = (view || '').trim().toLowerCase();
+
+    if (cleanView === 'admin' || cleanView === '/admin' || cleanView === 'admin-dashboard' || cleanView === 'admin-portal') {
+      setIsAdminPortalAuthenticated(false);
+      setCurrentView('admin-dashboard');
+      try {
+        window.history.pushState({}, '', '/admin');
+      } catch {}
+      window.scrollTo({ top: 0, behavior: 'instant' });
+      return;
+    }
 
     if (cleanView === 'cart' || cleanView === 'view:cart') {
       setIsCartOpen(true);
@@ -1319,21 +1351,9 @@ export default function App() {
         const lpSlug = urlParams.get('lp') || urlParams.get('landing') || urlParams.get('offer');
         const urlTag = urlParams.get('tag');
         const urlView = urlParams.get('view');
-        const portalParam = urlParams.get('portal');
 
-        if (pathname === '/seller' || pathname === '/seller-portal' || portalParam === 'seller') {
-          setCurrentView('seller-portal');
-          return;
-        }
-        if (pathname === '/reseller' || pathname === '/reseller-portal' || portalParam === 'reseller') {
-          setCurrentView('reseller-portal');
-          return;
-        }
-        if (pathname === '/partner-login' || portalParam === 'partner-login' || portalParam === 'partner') {
-          setCurrentView('partner-login');
-          return;
-        }
         if (pathname === '/admin' || pathname === '/admin-dashboard' || hash === '#admin' || urlView === 'admin') {
+          setIsAdminPortalAuthenticated(false);
           setCurrentView('admin-dashboard');
           return;
         }
@@ -1411,39 +1431,10 @@ export default function App() {
         url.searchParams.delete('tag');
         url.searchParams.delete('tab');
         url.searchParams.delete('orderId');
+        url.searchParams.delete('portal');
         localStorage.removeItem('kenax_landing_page_active');
         const cleanSearch = url.searchParams.toString() ? '?' + url.searchParams.toString() : '';
         window.history.replaceState(null, '', url.pathname + cleanSearch);
-      } else if (currentView === 'seller-portal' || currentView === 'seller') {
-        url.searchParams.delete('product');
-        url.searchParams.delete('lp');
-        url.searchParams.delete('landing');
-        url.searchParams.delete('offer');
-        url.searchParams.delete('tag');
-        url.searchParams.delete('view');
-        url.searchParams.set('portal', 'seller');
-        document.title = siteSettings.storeName ? `Seller Dashboard - ${siteSettings.storeName}` : 'Seller Dashboard - KenaX BD';
-        window.history.replaceState(null, '', url.pathname + '?' + url.searchParams.toString());
-      } else if (currentView === 'reseller-portal' || currentView === 'reseller') {
-        url.searchParams.delete('product');
-        url.searchParams.delete('lp');
-        url.searchParams.delete('landing');
-        url.searchParams.delete('offer');
-        url.searchParams.delete('tag');
-        url.searchParams.delete('view');
-        url.searchParams.set('portal', 'reseller');
-        document.title = siteSettings.storeName ? `Reseller Dashboard - ${siteSettings.storeName}` : 'Reseller Dashboard - KenaX BD';
-        window.history.replaceState(null, '', url.pathname + '?' + url.searchParams.toString());
-      } else if (currentView === 'partner-login') {
-        url.searchParams.delete('product');
-        url.searchParams.delete('lp');
-        url.searchParams.delete('landing');
-        url.searchParams.delete('offer');
-        url.searchParams.delete('tag');
-        url.searchParams.delete('view');
-        url.searchParams.set('portal', 'partner-login');
-        document.title = 'Partner Login - KenaX BD Marketplace';
-        window.history.replaceState(null, '', url.pathname + '?' + url.searchParams.toString());
       } else if (currentView === 'admin-dashboard' || currentView === 'admin' || currentView === 'moderator-dashboard') {
         url.searchParams.delete('product');
         url.searchParams.delete('lp');
@@ -1523,7 +1514,7 @@ export default function App() {
       }
 
       // Track Multi-Channel PageView (Meta Pixel, TikTok, GA4)
-      trackPixelPageView(document.title, siteSettings);
+      trackPixelPageView(document.title, window.location.href, siteSettings);
     } catch {}
   }, [currentView, selectedProductForDetail?.id, selectedTag, selectedCategory, authPageTab, siteSettings]);
 
@@ -2115,6 +2106,11 @@ export default function App() {
 
     // Immediately launch the delivery van animation for instant visual feedback on both Desktop/PC and Mobile
     processingOrderRef.current = newOrder;
+    // Attach Multi-Touch Marketing Attribution (UTM parameters, fbclid, session)
+    if (!newOrder.attribution) {
+      newOrder.attribution = getAttributionForOrder();
+    }
+
     setProcessingOrder(newOrder);
     setIsProcessingAnimationOpen(true);
 
@@ -2273,10 +2269,12 @@ export default function App() {
   };
 
   const handleStaffLogout = () => {
+    setIsAdminPortalAuthenticated(false);
     setCurrentStaff(null);
     setCurrentRole('customer');
     localStorage.removeItem('kenax_current_staff');
     localStorage.removeItem('kenax_authenticated_staff');
+    localStorage.removeItem('preview_kenax_current_staff');
     localStorage.removeItem('kenax_authenticated_role');
     localStorage.removeItem('kenax_current_view');
     localStorage.removeItem('kenax_admin_active_tab');
@@ -2284,8 +2282,9 @@ export default function App() {
       const url = new URL(window.location.href);
       url.searchParams.delete('view');
       url.searchParams.delete('tab');
+      const cleanPath = url.pathname.toLowerCase().startsWith('/admin') ? '/' : url.pathname;
       const cleanSearch = url.searchParams.toString() ? '?' + url.searchParams.toString() : '';
-      window.history.replaceState(null, '', url.pathname + cleanSearch);
+      window.history.replaceState(null, '', cleanPath + cleanSearch);
     } catch {}
     setCurrentView('home');
   };
@@ -2391,7 +2390,8 @@ export default function App() {
     courier?: string,
     tracking?: string,
     handledByStaff?: { id?: string; name?: string; role?: string },
-    adminNotes?: string
+    adminNotes?: string,
+    trackingUrl?: string
   ) => {
     const existing = orders.find((o) => o.id === orderId);
     const nowISO = new Date().toISOString();
@@ -2402,10 +2402,30 @@ export default function App() {
     const activeStaffRole = handledByStaff?.role || currentStaff?.role || 'Super Admin';
     const activeStaffId = handledByStaff?.id || currentStaff?.id || '';
 
+    const effectiveCourier = courier || existing?.courierName;
+    const effectiveTracking = tracking !== undefined ? tracking : existing?.trackingNumber;
+    let effectiveTrackingUrl = trackingUrl !== undefined ? trackingUrl : existing?.trackingUrl;
+
+    // Auto-generate standard direct courier tracking link if trackingNumber is present and no custom URL
+    if (effectiveTracking && (!effectiveTrackingUrl || effectiveTrackingUrl.trim() === '')) {
+      const c = (effectiveCourier || '').toLowerCase();
+      if (c.includes('steadfast')) {
+        effectiveTrackingUrl = `https://steadfast.com.bd/t/${encodeURIComponent(effectiveTracking)}`;
+      } else if (c.includes('pathao')) {
+        effectiveTrackingUrl = `https://merchant.pathao.com/tracking?consignment_id=${encodeURIComponent(effectiveTracking)}`;
+      } else if (c.includes('redx')) {
+        effectiveTrackingUrl = `https://redx.com.bd/track-order?trackingId=${encodeURIComponent(effectiveTracking)}`;
+      } else if (c.includes('paperfly')) {
+        effectiveTrackingUrl = `https://paperfly.com.bd/tracking?id=${encodeURIComponent(effectiveTracking)}`;
+      } else if (c.includes('ecourier')) {
+        effectiveTrackingUrl = `https://ecourier.com.bd/tracking?ref=${encodeURIComponent(effectiveTracking)}`;
+      }
+    }
+
     updatedTimeline.push({
       status,
       timestamp: nowISO,
-      note: `Status updated to ${status}${courier ? ` via ${courier}` : ''}${tracking ? ` (Tracking: ${tracking})` : ''}${adminNotes ? ` | Note: ${adminNotes}` : ''}`,
+      note: `Status updated to ${status}${effectiveCourier ? ` via ${effectiveCourier}` : ''}${effectiveTracking ? ` (Tracking: ${effectiveTracking})` : ''}${adminNotes ? ` | Note: ${adminNotes}` : ''}`,
       updatedBy: activeStaffName,
     });
 
@@ -2452,13 +2472,121 @@ export default function App() {
       };
     }
 
+    // ========================================================
+    // INVENTORY & STOCK CONTROL AUTOMATION
+    // 1. Order Delivered / Completed: Deduct ordered quantities from product stocks (1 item -> 1 less, 2 items -> 2 less)
+    // 2. Order Returned / Cancelled from previously Delivered: Smartly restore stock
+    // 3. Keep stockLogs & Firestore & localStorage in perfect sync
+    // ========================================================
+    const orderItems: OrderItem[] = (existing?.items && existing.items.length > 0)
+      ? existing.items
+      : (existing as any)?.productId
+      ? [{
+          productId: (existing as any).productId,
+          productName: (existing as any).productName || 'Product',
+          quantity: (existing as any).quantity || 1,
+          price: existing?.totalAmount || 0,
+          total: existing?.totalAmount || 0,
+          productImage: '',
+        }]
+      : [];
+
+    let stockStatusUpdates: Partial<Order> = {};
+
+    if (isDeliveredOrCompleted && !existing?.stockDeducted && orderItems.length > 0) {
+      stockStatusUpdates = {
+        stockDeducted: true,
+        stockDeductedAt: nowISO,
+      };
+
+      setProducts((currentProducts) => {
+        const nextProducts = [...currentProducts];
+        orderItems.forEach((item) => {
+          const qty = Math.max(1, item.quantity || 1);
+          const pIndex = nextProducts.findIndex((p) =>
+            p.id === item.productId ||
+            (item.sku && p.sku && p.sku.toLowerCase() === item.sku.toLowerCase()) ||
+            p.name.trim().toLowerCase() === (item.productName || item.name || '').trim().toLowerCase()
+          );
+
+          if (pIndex !== -1) {
+            const prod = nextProducts[pIndex];
+            const prevStock = prod.stock;
+            const newStock = Math.max(0, prevStock - qty);
+            const updatedProd = { ...prod, stock: newStock, updatedAt: nowISO };
+            nextProducts[pIndex] = updatedProd;
+
+            saveProductToDB(updatedProd).catch((e) => console.warn('Sync product stock after delivery:', e));
+
+            logStockAdjustmentToDB({
+              productId: prod.id,
+              productName: prod.name,
+              sku: prod.sku,
+              staffId: activeStaffId || 'staff-delivery',
+              staffName: activeStaffName || 'ডেলিভারি কনফার্মেশন',
+              staffRole: activeStaffRole || 'Staff',
+              previousStock: prevStock,
+              newStock,
+              quantityChanged: -qty,
+              reason: `অর্ডার ডেলিভার্ড: #${orderId} (${qty}টি পণ্য ডেলিভারি সম্পন্ন)`,
+              orderId,
+            }).catch((err) => console.warn('Sync stock log after delivery:', err));
+          }
+        });
+        return nextProducts;
+      });
+    } else if (existing?.stockDeducted && (isReturnedStatus || status === 'Cancelled' || status === 'Rejected') && orderItems.length > 0) {
+      stockStatusUpdates = {
+        stockDeducted: false,
+        stockDeductedAt: undefined,
+      };
+
+      setProducts((currentProducts) => {
+        const nextProducts = [...currentProducts];
+        orderItems.forEach((item) => {
+          const qty = Math.max(1, item.quantity || 1);
+          const pIndex = nextProducts.findIndex((p) =>
+            p.id === item.productId ||
+            (item.sku && p.sku && p.sku.toLowerCase() === item.sku.toLowerCase()) ||
+            p.name.trim().toLowerCase() === (item.productName || item.name || '').trim().toLowerCase()
+          );
+
+          if (pIndex !== -1) {
+            const prod = nextProducts[pIndex];
+            const prevStock = prod.stock;
+            const newStock = prevStock + qty;
+            const updatedProd = { ...prod, stock: newStock, updatedAt: nowISO };
+            nextProducts[pIndex] = updatedProd;
+
+            saveProductToDB(updatedProd).catch((e) => console.warn('Sync product stock restoration:', e));
+
+            logStockAdjustmentToDB({
+              productId: prod.id,
+              productName: prod.name,
+              sku: prod.sku,
+              staffId: activeStaffId || 'staff-delivery',
+              staffName: activeStaffName || 'স্টক রিস্টোর',
+              staffRole: activeStaffRole || 'Staff',
+              previousStock: prevStock,
+              newStock,
+              quantityChanged: +qty,
+              reason: `স্টক ফেরত (${status}): #${orderId} (+${qty}টি পণ্য ইনভেন্টরিতে ফেরত)`,
+              orderId,
+            }).catch((err) => console.warn('Sync stock log restoration:', err));
+          }
+        });
+        return nextProducts;
+      });
+    }
+
     const updates: Partial<Order> = {
       orderStatus: status,
       status: status as any,
-      isFakeOrder: status === 'Fake Order' ? true : false,
+      isFakeOrder: status === 'Fake Order' || status === 'Spam',
       isV2Order: true,
-      courierName: courier || existing?.courierName,
-      trackingNumber: tracking || existing?.trackingNumber,
+      courierName: effectiveCourier,
+      trackingNumber: effectiveTracking,
+      trackingUrl: effectiveTrackingUrl,
       adminNotes: adminNotes !== undefined ? adminNotes : existing?.adminNotes,
       timeline: updatedTimeline,
       updatedAt: nowISO,
@@ -2470,6 +2598,7 @@ export default function App() {
       confirmedByStaffRole,
       confirmedAt,
       ...paymentUpdates,
+      ...stockStatusUpdates,
     };
 
     setOrders((prev) =>
@@ -2542,6 +2671,19 @@ export default function App() {
     }
   };
 
+  // Full order editing by Admin (update items, prices, delivery fee, customer info, COD amount, notes)
+  const handleUpdateOrder = async (orderId: string, updates: Partial<Order>) => {
+    const nowISO = new Date().toISOString();
+    const finalUpdates: Partial<Order> = {
+      ...updates,
+      updatedAt: nowISO,
+    };
+    setOrders((prev) =>
+      prev.map((o) => (o.id === orderId ? { ...o, ...finalUpdates } : o))
+    );
+    await updateOrderInDB(orderId, finalUpdates);
+  };
+
   // Manual order creation by Staff (Admin, Moderator, Manager) or Customer Bot
   const handleAddOrder = async (newOrder: Order) => {
     const rawStatus = (newOrder.orderStatus || (newOrder as any).status || 'Pending').toString().trim();
@@ -2563,7 +2705,7 @@ export default function App() {
       orderStatus: normalizedStatus,
       status: normalizedStatus as any,
       isV2Order: true,
-      orderSource: isBot ? 'chatbot' : (newOrder.orderSource || 'manual'),
+      orderSource: isBot ? 'chatbot' : (newOrder.orderSource || 'website_store'),
       isAiBotOrder: isBot,
       createdByStaffName: isBot
         ? 'Ordered by KenaX Bot'
@@ -2723,8 +2865,8 @@ export default function App() {
 
   const handleNavigateToStoreFromAdmin = () => {
     // Admin "View Store" Restriction:
-    // When an admin navigates from the admin dashboard to the storefront, they only see the store from their own
-    // account and cannot access or manipulate other customers' accounts or private data.
+    // Leaving the Admin Panel locks the /admin portal again so visiting /admin next time requires Staff Portal login first.
+    setIsAdminPortalAuthenticated(false);
     if (currentStaff) {
       const adminCustomerProfile: CustomerRecord = {
         id: `staff-cust-${currentStaff.id}`,
@@ -2748,8 +2890,9 @@ export default function App() {
       const url = new URL(window.location.href);
       url.searchParams.delete('view');
       url.searchParams.delete('tab');
+      const cleanPath = url.pathname.toLowerCase().startsWith('/admin') ? '/' : url.pathname;
       const cleanSearch = url.searchParams.toString() ? '?' + url.searchParams.toString() : '';
-      window.history.replaceState(null, '', url.pathname + cleanSearch);
+      window.history.replaceState(null, '', cleanPath + cleanSearch);
     } catch {}
     setCurrentView('home');
   };
@@ -2764,47 +2907,35 @@ export default function App() {
     ['super_admin', 'admin', 'manager', 'moderator'].includes(currentStaff.role);
 
   if (isAdminView) {
-    if (!isStaff) {
+    if (!isStaff || !isAdminPortalAuthenticated) {
       return (
-        <div className="min-h-screen bg-slate-900 text-slate-100 flex flex-col items-center justify-center p-4">
-          <div className="max-w-md w-full bg-slate-950 border border-slate-800 rounded-3xl p-8 shadow-2xl text-center space-y-6">
-            <div className="w-16 h-16 rounded-2xl bg-sky-500/10 border border-sky-500/20 text-sky-400 flex items-center justify-center mx-auto">
-              <ShieldCheck className="w-8 h-8" />
-            </div>
-            <div className="space-y-2">
-              <h2 className="text-xl font-black text-white">Staff Authentication Required</h2>
-              <p className="text-xs text-slate-400 leading-relaxed">
-                Access to the Admin, Manager, and Moderator dashboards is restricted to authorized personnel only. Customer accounts cannot view internal store data.
-              </p>
-            </div>
-            <div className="space-y-3 pt-2">
-              <button
-                onClick={() => setIsAdminLoginOpen(true)}
-                className="w-full py-3 px-4 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs shadow-md transition-colors cursor-pointer flex items-center justify-center gap-2"
-              >
-                <Lock className="w-4 h-4" />
-                <span>Staff Sign In</span>
-              </button>
-              <button
-                onClick={handleNavigateToStoreFromAdmin}
-                className="w-full py-3 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs transition-colors cursor-pointer"
-              >
-                Return to Store
-              </button>
-            </div>
-          </div>
-          <AdminLoginModal
-            isOpen={isAdminLoginOpen}
-            onClose={() => setIsAdminLoginOpen(false)}
-            onLoginSuccess={(staff) => {
-              setCurrentStaff(staff);
-              setCurrentRole(staff.role);
-              localStorage.setItem('kenax_current_staff', JSON.stringify(staff));
-              setIsAdminLoginOpen(false);
-              setCurrentView('admin-dashboard');
-            }}
-            staffList={staffList}
-          />
+        <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col items-center justify-center p-4">
+          <React.Suspense
+            fallback={
+              <div className="flex flex-col items-center gap-3 text-center">
+                <div className="w-12 h-12 rounded-2xl bg-sky-500/10 border border-sky-500/30 flex items-center justify-center text-sky-400">
+                  <ShieldCheck className="w-6 h-6 animate-pulse" />
+                </div>
+                <p className="text-xs font-bold text-slate-300">Loading Staff Portal...</p>
+              </div>
+            }
+          >
+            <AdminLoginModal
+              isOpen={true}
+              onClose={handleNavigateToStoreFromAdmin}
+              onLoginSuccess={(staff) => {
+                setCurrentStaff(staff);
+                setCurrentRole(staff.role);
+                setIsAdminPortalAuthenticated(true);
+                localStorage.setItem('kenax_current_staff', JSON.stringify(staff));
+                localStorage.setItem('kenax_authenticated_staff', JSON.stringify(staff));
+                localStorage.setItem('kenax_authenticated_role', staff.role);
+                setIsAdminLoginOpen(false);
+                setCurrentView('admin-dashboard');
+              }}
+              staffList={staffList}
+            />
+          </React.Suspense>
         </div>
       );
     }
@@ -2854,6 +2985,7 @@ export default function App() {
           onAddProduct={handleAddProduct}
           onDeleteProduct={handleDeleteProduct}
           onUpdateOrderStatus={handleUpdateOrderStatus}
+          onUpdateOrder={handleUpdateOrder}
           onAddOrder={handleAddOrder}
           onUpdateSettings={handleUpdateSettings}
           currentRole={currentStaff?.role || currentRole}
@@ -2894,155 +3026,6 @@ export default function App() {
               localStorage.setItem('kenax_authenticated_staff', JSON.stringify(updated));
               localStorage.setItem('kenax_authenticated_role', role);
             }
-          }}
-          onNavigateToPartnerPortal={(partner) => {
-            setCurrentPartner(partner);
-            safeSetLocalStorage('kenax_current_partner', JSON.stringify(partner));
-            if (partner.type === 'seller') {
-              setCurrentView('seller-portal');
-            } else {
-              setCurrentView('reseller-portal');
-            }
-          }}
-        />
-      </React.Suspense>
-    );
-  }
-
-  // ================= DEDICATED SELLER HUB (VENDOR PORTAL) =================
-  if (currentView === 'seller-portal') {
-    if (!currentPartner || currentPartner.type !== 'seller') {
-      return (
-        <React.Suspense fallback={<div className="min-h-screen bg-slate-900" />}>
-          <PartnerLoginPage
-            initialRole="seller"
-            onLoginSuccess={(p) => {
-              setCurrentPartner(p);
-              safeSetLocalStorage('kenax_current_partner', JSON.stringify(p));
-              setCurrentView('seller-portal');
-            }}
-            onBackToStore={() => {
-              setCurrentView('home');
-              try {
-                const url = new URL(window.location.href);
-                url.searchParams.delete('portal');
-                window.history.pushState(null, '', url.pathname);
-              } catch {}
-            }}
-          />
-        </React.Suspense>
-      );
-    }
-
-    return (
-      <React.Suspense fallback={<div className="min-h-screen bg-slate-950 flex items-center justify-center text-white text-xs">Loading Seller Portal...</div>}>
-        <SellerPortal
-          currentPartner={currentPartner}
-          products={products}
-          orders={orders}
-          onAddProduct={handleAddProduct}
-          onUpdateProduct={handleUpdateProduct}
-          onDeleteProduct={handleDeleteProduct}
-          onLogout={() => {
-            setCurrentPartner(null);
-            localStorage.removeItem('kenax_current_partner');
-            setCurrentView('home');
-            try {
-              const url = new URL(window.location.href);
-              url.searchParams.delete('portal');
-              window.history.pushState(null, '', url.pathname);
-            } catch {}
-          }}
-          onNavigateToStore={() => {
-            setCurrentView('home');
-            try {
-              const url = new URL(window.location.href);
-              url.searchParams.delete('portal');
-              window.history.pushState(null, '', url.pathname);
-            } catch {}
-          }}
-        />
-      </React.Suspense>
-    );
-  }
-
-  // ================= DEDICATED RESELLER & DROPSHIP HUB =================
-  if (currentView === 'reseller-portal') {
-    if (!currentPartner || currentPartner.type !== 'reseller') {
-      return (
-        <React.Suspense fallback={<div className="min-h-screen bg-slate-900" />}>
-          <PartnerLoginPage
-            initialRole="reseller"
-            onLoginSuccess={(p) => {
-              setCurrentPartner(p);
-              safeSetLocalStorage('kenax_current_partner', JSON.stringify(p));
-              setCurrentView('reseller-portal');
-            }}
-            onBackToStore={() => {
-              setCurrentView('home');
-              try {
-                const url = new URL(window.location.href);
-                url.searchParams.delete('portal');
-                window.history.pushState(null, '', url.pathname);
-              } catch {}
-            }}
-          />
-        </React.Suspense>
-      );
-    }
-
-    return (
-      <React.Suspense fallback={<div className="min-h-screen bg-slate-950 flex items-center justify-center text-white text-xs">Loading Reseller Portal...</div>}>
-        <ResellerPortal
-          currentPartner={currentPartner}
-          products={products}
-          orders={orders}
-          onPlaceOrder={handleAddOrder}
-          onLogout={() => {
-            setCurrentPartner(null);
-            localStorage.removeItem('kenax_current_partner');
-            setCurrentView('home');
-            try {
-              const url = new URL(window.location.href);
-              url.searchParams.delete('portal');
-              window.history.pushState(null, '', url.pathname);
-            } catch {}
-          }}
-          onNavigateToStore={() => {
-            setCurrentView('home');
-            try {
-              const url = new URL(window.location.href);
-              url.searchParams.delete('portal');
-              window.history.pushState(null, '', url.pathname);
-            } catch {}
-          }}
-        />
-      </React.Suspense>
-    );
-  }
-
-  // ================= DEDICATED PARTNER LOGIN VIEW =================
-  if (currentView === 'partner-login') {
-    return (
-      <React.Suspense fallback={<div className="min-h-screen bg-slate-900" />}>
-        <PartnerLoginPage
-          initialRole="seller"
-          onLoginSuccess={(p) => {
-            setCurrentPartner(p);
-            safeSetLocalStorage('kenax_current_partner', JSON.stringify(p));
-            if (p.type === 'seller') {
-              setCurrentView('seller-portal');
-            } else {
-              setCurrentView('reseller-portal');
-            }
-          }}
-          onBackToStore={() => {
-            setCurrentView('home');
-            try {
-              const url = new URL(window.location.href);
-              url.searchParams.delete('portal');
-              window.history.pushState(null, '', url.pathname);
-            } catch {}
           }}
         />
       </React.Suspense>
@@ -3090,7 +3073,6 @@ export default function App() {
         onOpenCustomerAuth={handleOpenCustomerAuth}
         onCustomerLogout={handleCustomerLogout}
         currentStaff={currentStaff}
-        onOpenStaffLogin={() => setIsAdminLoginOpen(true)}
         onStaffLogout={handleStaffLogout}
         onNavigate={handleNavigate}
         onOpenCart={() => setIsCartOpen(true)}
@@ -3105,6 +3087,9 @@ export default function App() {
         onSelectCategory={handleSelectCategory}
         categories={categories}
         products={products}
+        onOpenProductDetail={(prod) => handleOpenProductDetail(prod)}
+        onAddToCart={(prod, qty) => handleAddToCart(prod, qty)}
+        onBuyNow={(prod, qty) => handleBuyNow(prod, qty)}
         customLogoUrl={siteSettings.customLogo}
         siteName={siteSettings.siteName}
         siteSettings={siteSettings}
@@ -3207,7 +3192,7 @@ export default function App() {
               </div>
 
               {/* Products Grid */}
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3 sm:gap-4">
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-3 sm:gap-4">
                 {homeFilteredProducts.slice(0, 12).map((product, index) => (
                   <ProductCard
                     key={`${product.id}_${index}`}
@@ -3712,7 +3697,7 @@ export default function App() {
                 </div>
               </div>
             ) : (
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3 sm:gap-4">
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-3 sm:gap-4">
                 {shopFilteredProducts.map((product, index) => (
                   <ProductCard
                     key={`${product.id}_${index}`}
@@ -3790,9 +3775,9 @@ export default function App() {
               isLoggedIn={Boolean(currentCustomer)}
               onOpenCustomerAuth={() => handleOpenCustomerAuth('login')}
               onNavigate={handleNavigate}
-              onSelectCategory={(cat) => {
+              onSelectCategory={(cat, subcat) => {
                 setSelectedCategory(cat);
-                setSelectedSubcategory('All');
+                setSelectedSubcategory(subcat || 'All');
                 handleNavigate('shop');
               }}
               insideDhakaFee={siteSettings.insideDhakaDeliveryFee}
@@ -3801,6 +3786,7 @@ export default function App() {
               currentCustomer={currentCustomer}
               onBack={handleBackFromProduct}
               previousItem={productNavHistory.length > 0 ? productNavHistory[productNavHistory.length - 1] : null}
+              siteSettings={siteSettings}
             />
           ) : (
             <div className="min-h-[50vh] flex items-center justify-center py-12">
@@ -3962,31 +3948,6 @@ export default function App() {
                 setCurrentView('customer-dashboard');
               }
             }}
-            onStaffLogin={(staff) => {
-              setCurrentStaff(staff);
-              setCurrentRole(staff.role);
-              localStorage.setItem('kenax_current_staff', JSON.stringify(staff));
-              localStorage.setItem('kenax_authenticated_staff', JSON.stringify(staff));
-              localStorage.setItem('kenax_authenticated_role', staff.role);
-
-              const adminCustomerProfile: CustomerRecord = {
-                id: `staff-cust-${staff.id}`,
-                name: staff.name,
-                email: staff.email,
-                mobile: staff.phone || '01700000000',
-                totalOrders: 0,
-                totalSpent: 0,
-                isBlocked: false,
-                status: 'active',
-                registeredAt: staff.createdAt || new Date().toISOString(),
-                createdAt: staff.createdAt || new Date().toISOString(),
-              };
-              setCurrentCustomer(adminCustomerProfile);
-              localStorage.setItem('kenax_current_customer', JSON.stringify(adminCustomerProfile));
-
-              setCurrentView('admin-dashboard');
-            }}
-            staffList={staffList}
             onBack={handleBackFromAuth}
             onNavigate={handleNavigate}
             customLogoUrl={siteSettings.customLogoUrl}
@@ -4189,36 +4150,10 @@ export default function App() {
             }
             setIsCustomerAuthOpen(false);
           }}
-          onStaffLogin={(staff) => {
-            setCurrentStaff(staff);
-            setCurrentRole(staff.role);
-            localStorage.setItem('kenax_current_staff', JSON.stringify(staff));
-            localStorage.setItem('kenax_authenticated_staff', JSON.stringify(staff));
-            localStorage.setItem('kenax_authenticated_role', staff.role);
-
-            const adminCustomerProfile: CustomerRecord = {
-              id: `staff-cust-${staff.id}`,
-              name: staff.name,
-              email: staff.email,
-              mobile: staff.phone || '01700000000',
-              totalOrders: 0,
-              totalSpent: 0,
-              isBlocked: false,
-              status: 'active',
-              registeredAt: staff.createdAt || new Date().toISOString(),
-              createdAt: staff.createdAt || new Date().toISOString(),
-            };
-            setCurrentCustomer(adminCustomerProfile);
-            localStorage.setItem('kenax_current_customer', JSON.stringify(adminCustomerProfile));
-
-            setIsCustomerAuthOpen(false);
-            setCurrentView('admin-dashboard');
-          }}
-          staffList={staffList}
         />
       )}
 
-      {/* Staff Authentication Modal (Admin / Manager / Moderator / Super Admin) */}
+      {/* Dedicated Staff & RBAC Authentication Portal Modal */}
       {isAdminLoginOpen && (
         <AdminLoginModal
           isOpen={isAdminLoginOpen}
@@ -4226,6 +4161,7 @@ export default function App() {
           onLoginSuccess={(staff) => {
             setCurrentStaff(staff);
             setCurrentRole(staff.role);
+            setIsAdminPortalAuthenticated(true);
             localStorage.setItem('kenax_current_staff', JSON.stringify(staff));
             localStorage.setItem('kenax_authenticated_staff', JSON.stringify(staff));
             localStorage.setItem('kenax_authenticated_role', staff.role);
@@ -4290,6 +4226,7 @@ export default function App() {
           products={products}
           onOpenProductDetail={handleOpenProductDetail}
           onAddToCart={handleAddToCart}
+          onBuyNow={(prod, qty) => handleBuyNow(prod, qty)}
         />
       )}
 
@@ -4304,6 +4241,27 @@ export default function App() {
           orders={orders}
           wishlist={wishlist}
           cart={cart}
+        />
+      )}
+
+      {/* Promotional Campaign & Visitor Offer Popup Modal (Manageable via Admin > Get Offers) */}
+      {currentView !== 'admin-dashboard' && (
+        <OfferPopupModal
+          popupSettings={siteSettings.offerPopup}
+          onNavigate={handleNavigate}
+          onSelectCategory={(cat) => {
+            setSelectedCategory(cat);
+            setSelectedSubcategory('All');
+            handleNavigate('shop');
+          }}
+          onSelectProduct={(productId) => {
+            const prod = products.find((p) => p.id === productId);
+            if (prod) {
+              handleOpenProductDetail(prod);
+            } else {
+              handleNavigate('shop');
+            }
+          }}
         />
       )}
     </div>

@@ -1,4 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
+import {
+  SaasDonutChart,
+  SaasBarChart,
+  CollapsibleAnalyticsPanel,
+} from './charts/AdminCharts';
 import {
   ArrowUp,
   ArrowDown,
@@ -178,8 +183,55 @@ export const AdminNavItemsManager: React.FC<AdminNavItemsManagerProps> = ({
     setHomeTabsConfig((prev) => ({ ...prev, hiddenTabs: updated }));
   };
 
+  const navAnalytics = useMemo(() => {
+    const visibleNav = items.filter((i) => i.enabled !== false).length;
+    const hiddenNav = Math.max(0, items.length - visibleNav);
+    const hotNav = items.filter((i) => i.isHot).length;
+
+    const totalHomeTabs = 6; // all, trending, bestsellers, electronics, fashion, home
+    const hiddenHomeTabs = (homeTabsConfig.hiddenTabs || []).length;
+    const visibleHomeTabs = Math.max(0, totalHomeTabs - hiddenHomeTabs);
+
+    const visibilitySlices = [
+      { id: 'visible', label: 'Visible Nav Links', value: visibleNav, color: '#059669' },
+      { id: 'hidden', label: 'Hidden Links', value: hiddenNav, color: '#64748B' },
+    ];
+
+    const breakdownBars = [
+      { id: 'header_nav', label: 'Visible Header Links', value: visibleNav },
+      { id: 'hot_badges', label: 'Hot Badged Links', value: hotNav },
+      { id: 'home_visible', label: 'Visible Home Tabs', value: visibleHomeTabs },
+      { id: 'home_hidden', label: 'Hidden Home Tabs', value: hiddenHomeTabs },
+    ];
+
+    return { visibilitySlices, breakdownBars };
+  }, [items, homeTabsConfig.hiddenTabs]);
+
   return (
     <div className="space-y-6 bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm">
+      <CollapsibleAnalyticsPanel title="Navigation & Tabs Overview" defaultOpen={true}>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <SaasDonutChart
+            title="Header Navigation Visibility"
+            subtitle="Active vs hidden header menu items"
+            data={navAnalytics.visibilitySlices}
+            centerLabel="Nav Items"
+            onSelectSlice={() => setActiveSubTab('header_nav')}
+          />
+          <SaasBarChart
+            title="Navigation & Homepage Tabs Summary"
+            subtitle="Click a bar to switch configuration tab"
+            data={navAnalytics.breakdownBars}
+            primaryLabel="Items"
+            onSelectBar={(bar) =>
+              setActiveSubTab(
+                bar.id === 'home_visible' || bar.id === 'home_hidden' ? 'home_tabs' : 'header_nav'
+              )
+            }
+          />
+        </div>
+      </CollapsibleAnalyticsPanel>
+
       {/* Sub Tab Switcher */}
       <div className="flex items-center gap-2 p-1 bg-slate-100 dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 w-fit">
         <button

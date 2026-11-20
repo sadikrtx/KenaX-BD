@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   UserCheck,
   Plus,
@@ -38,6 +38,12 @@ import {
   validateBangladeshMobile,
   isValidBDMobileNumber,
 } from '../../utils/phoneUtils';
+import {
+  SaasDonutChart,
+  SaasBarChart,
+  CollapsibleAnalyticsPanel,
+  SAAS_CHART_COLORS,
+} from './charts/AdminCharts';
 
 interface AdminStaffProps {
   staffList: StaffUser[];
@@ -169,15 +175,74 @@ export const AdminStaff: React.FC<AdminStaffProps> = ({
   const activeStaff = staffList.filter((s) => !s.isRemoved);
   const deletedStaff = staffList.filter((s) => s.isRemoved);
 
+  const [roleFilter, setRoleFilter] = useState<'all' | UserRole>('all');
+
+  const staffAnalytics = useMemo(() => {
+    const roleCounts: Record<string, { label: string; value: number; color: string }> = {
+      super_admin: { label: 'Super Admin', value: 0, color: '#7C3AED' },
+      manager: { label: 'Manager', value: 0, color: '#0284C7' },
+      moderator: { label: 'Moderator', value: 0, color: '#059669' },
+      user: { label: 'Staff / User', value: 0, color: '#64748B' },
+    };
+
+    activeStaff.forEach((s) => {
+      const key = roleCounts[s.role] ? s.role : 'user';
+      roleCounts[key].value += 1;
+    });
+
+    const roleSlices = Object.entries(roleCounts)
+      .filter(([, item]) => item.value > 0)
+      .map(([id, item]) => ({ id, ...item }));
+
+    const permissionBars = activeStaff
+      .map((s) => ({
+        id: s.id,
+        label: s.name.split(' ')[0] || s.name,
+        value: (s.permissions || DEFAULT_ROLE_PERMISSIONS[s.role] || []).length,
+        secondaryValue: s.isActive ? 1 : 0,
+        color: s.isActive ? '#4F46E5' : '#E11D48',
+        hint: `${s.name} (${s.role.replace('_', ' ')}) • ${s.isActive ? 'Active' : 'Suspended'}`,
+      }))
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 8);
+
+    const activeCount = activeStaff.filter((s) => s.isActive).length;
+    const inactiveCount = activeStaff.length - activeCount;
+
+    return {
+      roleSlices,
+      permissionBars,
+      activeCount,
+      inactiveCount,
+      removedCount: deletedStaff.length,
+    };
+  }, [activeStaff, deletedStaff]);
+
+  const displayedActiveStaff = useMemo(() => {
+    if (roleFilter === 'all') return activeStaff;
+    return activeStaff.filter((s) => s.role === roleFilter);
+  }, [activeStaff, roleFilter]);
+
   return (
     <div className="space-y-6">
       {/* Header */}
       <div className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
-          <h2 className="text-sm sm:text-base font-bold text-slate-900 dark:text-white">Staff Members & RBAC ({activeStaff.length})</h2>
+          <h2 className="text-sm sm:text-base font-bold text-slate-900 dark:text-white">
+            Staff Members &amp; RBAC ({displayedActiveStaff.length}{roleFilter !== 'all' ? ` / ${activeStaff.length}` : ''})
+          </h2>
           <p className="hidden sm:block text-xs text-slate-500 dark:text-slate-400">Manage internal team roles, access levels, and granular permissions</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {roleFilter !== 'all' && (
+            <button
+              type="button"
+              onClick={() => setRoleFilter('all')}
+              className="px-3 py-2 rounded-xl bg-amber-50 dark:bg-amber-950/60 border border-amber-200 dark:border-amber-800 text-amber-700 dark:text-amber-300 font-bold text-xs cursor-pointer"
+            >
+              Filter: {roleFilter.replace('_', ' ')} ×
+            </button>
+          )}
           <button
             onClick={() => setShowMatrix(true)}
             className="px-3.5 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-semibold text-xs transition-colors cursor-pointer flex items-center gap-1.5"
@@ -197,6 +262,38 @@ export const AdminStaff: React.FC<AdminStaffProps> = ({
         </div>
       </div>
 
+      {/* Team & RBAC Analytics */}
+      <CollapsibleAnalyticsPanel
+        title={`Team & Access Analytics (${staffAnalytics.activeCount} Active • ${staffAnalytics.inactiveCount} Suspended • ${staffAnalytics.removedCount} Removed)`}
+      >
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <SaasDonutChart
+            title="Team Role Breakdown"
+            subtitle="Click a role slice to filter the staff directory"
+            data={staffAnalytics.roleSlices}
+            centerLabel="Active Team"
+            emptyText="No active staff records"
+            onSelectSlice={(slice) => {
+              const roleKey = (slice.id || 'user') as UserRole;
+              setRoleFilter((prev) => (prev === roleKey ? 'all' : roleKey));
+            }}
+          />
+          <SaasBarChart
+            title="Granted Permissions per Staff Member"
+            subtitle="Number of RBAC permissions assigned (click bar to edit member)"
+            data={staffAnalytics.permissionBars}
+            primaryLabel="Permissions"
+            orientation="horizontal"
+            barColor="#4F46E5"
+            emptyText="No staff permission data"
+            onSelectBar={(bar) => {
+              const target = activeStaff.find((s) => s.id === bar.id);
+              if (target && currentRole === 'super_admin') openEditModal(target);
+            }}
+          />
+        </div>
+      </CollapsibleAnalyticsPanel>
+
       {/* Active Staff Table / Cards */}
       <div className="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xs overflow-hidden">
         {/* Desktop View */}
@@ -214,7 +311,7 @@ export const AdminStaff: React.FC<AdminStaffProps> = ({
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-              {activeStaff.map((s) => (
+              {displayedActiveStaff.map((s) => (
                 <tr key={s.id} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/60 transition-colors">
                   <td className="py-3.5 px-4">
                     <div className="flex items-center gap-3">

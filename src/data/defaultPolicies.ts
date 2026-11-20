@@ -1,4 +1,4 @@
-import { FAQItem, FlashSaleBannerSettings, StorePolicy } from '../types/index.ts';
+import type { FAQItem, FlashSaleBannerSettings, StorePolicy } from '../types/index.ts';
 
 export const DEFAULT_FLASH_SALE_BANNER: FlashSaleBannerSettings = {
   badge: 'MEGA GADGET FEST',

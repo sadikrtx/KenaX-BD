@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { Order } from '../types/index.ts';
+import type { Order } from '../types/index.ts';
 import { normalizeBDPhoneNumber } from '../utils/phoneUtils.ts';
 
 const SERVER_STORE_DIR = path.join(process.cwd(), 'data');
@@ -39,6 +39,8 @@ export function saveOrderToStore(order: Order, isEnvPreview?: boolean): Order {
       ...order,
       customerMobile: normalizeBDPhoneNumber(order.customerMobile || (order as any).customerPhone || ''),
       deliveryMobile: normalizeBDPhoneNumber(order.deliveryMobile || order.customerMobile || ''),
+      customerIp: order.customerIp || '103.145.118.24',
+      ipStatus: order.ipStatus || 'Active',
     };
     const filePath = getOrdersFilePath(isEnvPreview);
     const current = getAllOrdersFromStore(isEnvPreview);

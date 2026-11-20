@@ -42,8 +42,12 @@ import {
   Phone,
   Facebook,
   MapPin,
+  Calculator,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
 import { AdminProductPriorityManager } from './AdminProductPriorityManager';
+import { SellingPriceCalculator, AppliedPricePayload } from './SellingPriceCalculator';
 import {
   Product,
   UserRole,
@@ -64,6 +68,13 @@ import { getProductStockStatus, getStockStatusInfo } from '../../utils/stockUtil
 import { ProductKeyHighlightsEditor } from './ProductKeyHighlightsEditor';
 import { DEFAULT_PRODUCT_HIGHLIGHTS } from '../../utils/highlightConstants';
 import { getStoredPopularityStats } from '../../utils/productPopularity';
+import { PluginSlotRenderer } from './PluginSlotRenderer';
+import {
+  SaasDonutChart,
+  SaasBarChart,
+  CollapsibleAnalyticsPanel,
+  SAAS_CHART_COLORS,
+} from './charts/AdminCharts';
 
 interface AdminProductsProps {
   products: Product[];
@@ -170,6 +181,9 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
   const [formDiscountValue, setFormDiscountValue] = useState<number | ''>(10);
   // Explicit pricing override flag: when admin inputs selling price directly (e.g. 800), preserve it strictly without percentage round drift
   const [priceLockedByAdmin, setPriceLockedByAdmin] = useState<boolean>(false);
+  // Collapsible Selling Price Calculator inside Add/Edit Product modal
+  const [isPriceCalcOpen, setIsPriceCalcOpen] = useState<boolean>(false);
+  const [calcAppliedNotice, setCalcAppliedNotice] = useState<string | null>(null);
 
   // Variations states
   const [enableColors, setEnableColors] = useState(false);
@@ -476,6 +490,29 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
     }
   };
 
+  const handleApplyCalculatedPrice = (payload: AppliedPricePayload) => {
+    const roundedSelling = Math.max(0, Math.round(payload.sellingPrice));
+    const roundedCost = Math.max(0, Math.round(payload.costPrice));
+    const currentRegular = formOriginalPrice === '' ? 0 : Number(formOriginalPrice);
+
+    if (currentRegular === 0 || currentRegular < roundedSelling) {
+      setFormOriginalPrice(roundedSelling);
+      setFormDiscountType('none');
+      setFormDiscountValue(0);
+      setFormPrice(roundedSelling);
+      setPriceLockedByAdmin(true);
+    } else {
+      handleSellingPriceChange(roundedSelling);
+    }
+
+    setFormCostPrice(roundedCost);
+    setIsPriceCalcOpen(false);
+    setCalcAppliedNotice(
+      `Applied ৳${roundedSelling.toLocaleString('en-BD')} selling price & ৳${roundedCost.toLocaleString('en-BD')} cost (${payload.netMarginPercent.toFixed(1)}% net margin)`
+    );
+    setTimeout(() => setCalcAppliedNotice(null), 5000);
+  };
+
   const handleApplyPreset = (val: number, type: 'percentage' | 'flat') => {
     setFormDiscountType(type);
     setFormDiscountValue(val);
@@ -598,7 +635,7 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
     setFormDiscountValue('');
     setFormPrice('');
     setFormCostPrice('');
-    setFormStock(999);
+    setFormStock(10);
     setFormStockStatus('in_stock');
     setFormSaleBadge('Trending');
     setFormTags(['Shop', 'Trending']);
@@ -639,6 +676,8 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
     setFormPriority('');
     setFormPagePriorities({});
     setPriceLockedByAdmin(false);
+    setIsPriceCalcOpen(false);
+    setCalcAppliedNotice(null);
     setFormKeyHighlights(DEFAULT_PRODUCT_HIGHLIGHTS.map((h, i) => ({ ...h, id: `hl-${Date.now()}-${i}` })));
     setIsModalOpen(true);
   };
@@ -767,6 +806,8 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
       setFormKeyHighlights(DEFAULT_PRODUCT_HIGHLIGHTS.map((h, i) => ({ ...h, id: `hl-${Date.now()}-${i}` })));
     }
 
+    setIsPriceCalcOpen(false);
+    setCalcAppliedNotice(null);
     setIsModalOpen(true);
   };
 
@@ -912,7 +953,10 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
       priority: typeof formPriority === 'number' && formPriority > 0 ? formPriority : undefined,
       pagePriorities: Object.keys(cleanPagePriorities).length > 0 ? cleanPagePriorities : undefined,
       stockStatus: formStockStatus || 'in_stock',
-      stock: (formStockStatus === 'out_of_stock' ? 0 : 999),
+      stock:
+        formStockStatus === 'out_of_stock'
+          ? 0
+          : Math.max(0, Math.round(Number(formStock) || 0)),
       images: finalImages,
       videoUrl: formVideoUrl.trim() || undefined,
       videoAspectRatio: formVideoAspectRatio,
@@ -948,6 +992,13 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
 
   return (
     <div className="space-y-6">
+      {/* Extension Slot: SEO Manager & Inventory Manager -> Product Management */}
+      <PluginSlotRenderer
+        slot="admin.products.editor_panel"
+        userRole={currentRole}
+        products={products}
+      />
+
       {/* Quick Inventory KPI Status Pills */}
       <div className="flex flex-wrap items-center gap-2">
         <button
@@ -1018,6 +1069,50 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
           </span>
         </button>
       </div>
+
+      {/* Catalog Analytics Charts */}
+      <CollapsibleAnalyticsPanel title="Catalog Stock & Category Analytics" defaultOpen={true}>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <SaasDonutChart
+            title="Catalog Stock Availability"
+            subtitle="Click a slice to filter products"
+            centerLabel="Products"
+            onSelectSlice={(s) => {
+              if (s.id) setStockFilter(s.id);
+            }}
+            data={[
+              { id: 'in_stock', label: 'In Stock', value: stockMetrics.inStock, color: '#059669' },
+              { id: 'out_of_stock', label: 'Out of Stock', value: stockMetrics.outOfStock, color: '#E11D48' },
+              { id: 'upcoming', label: 'Upcoming', value: stockMetrics.upcoming, color: '#7C3AED' },
+            ]}
+          />
+
+          <SaasBarChart
+            title="Products by Category"
+            subtitle="Click a category bar to filter"
+            orientation="horizontal"
+            onSelectBar={(b) => {
+              if (b.id) setCategoryFilter(categoryFilter === b.id ? 'all' : b.id);
+            }}
+            data={(() => {
+              const map = new Map<string, number>();
+              products.forEach((p) => {
+                const c = p.category || 'Uncategorized';
+                map.set(c, (map.get(c) || 0) + 1);
+              });
+              return Array.from(map.entries())
+                .sort((a, b) => b[1] - a[1])
+                .slice(0, 7)
+                .map(([label, value], idx) => ({
+                  id: label,
+                  label,
+                  value,
+                  color: SAAS_CHART_COLORS[idx % SAAS_CHART_COLORS.length],
+                }));
+            })()}
+          />
+        </div>
+      </CollapsibleAnalyticsPanel>
 
       {/* Filters & Action Bar */}
       <div className="p-3.5 sm:p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xs flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3">
@@ -1529,26 +1624,33 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                       )}
                     </div>
 
-                    <span
-                      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold shrink-0 ${
-                        product.stock > 10
-                          ? 'bg-emerald-100 text-emerald-800'
-                          : product.stock > 0
-                          ? 'bg-amber-100 text-amber-800'
-                          : 'bg-rose-100 text-rose-800'
-                      }`}
-                    >
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      {product.stock === 999 && (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black bg-amber-100 text-amber-900 border border-amber-300">
+                          Verify stock
+                        </span>
+                      )}
                       <span
-                        className={`w-1.5 h-1.5 rounded-full shrink-0 ${
-                          product.stock > 10
-                            ? 'bg-emerald-600'
+                        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold shrink-0 ${
+                          product.stock > 5
+                            ? 'bg-emerald-100 text-emerald-800'
                             : product.stock > 0
-                            ? 'bg-amber-600'
-                            : 'bg-rose-600'
+                            ? 'bg-amber-100 text-amber-800'
+                            : 'bg-rose-100 text-rose-800'
                         }`}
-                      />
-                      <span>{product.stock} pcs</span>
-                    </span>
+                      >
+                        <span
+                          className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                            product.stock > 5
+                              ? 'bg-emerald-600'
+                              : product.stock > 0
+                              ? 'bg-amber-600'
+                              : 'bg-rose-600'
+                          }`}
+                        />
+                        <span>{product.stock} pcs</span>
+                      </span>
+                    </div>
                   </div>
 
                   {/* Price & Cost Box */}
@@ -1677,7 +1779,11 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
       {/* Add / Edit Product Modal */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
-          <div className="bg-white rounded-2xl max-w-3xl w-full shadow-2xl overflow-hidden border border-slate-200 my-8">
+          <div
+            className={`bg-white dark:bg-slate-900 rounded-2xl ${
+              isPriceCalcOpen ? 'max-w-5xl' : 'max-w-3xl'
+            } w-full shadow-2xl overflow-hidden border border-slate-200 dark:border-slate-800 my-8 transition-all duration-200`}
+          >
             <div className="bg-slate-900 text-white px-6 py-4 flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Package className="w-5 h-5 text-sky-400" />
@@ -2023,12 +2129,47 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
 
                 {/* Pricing & Discount Engine */}
                 <div className="sm:col-span-2 p-3.5 rounded-xl bg-slate-50/80 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-3">
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
                     <h4 className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
                       <Percent className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400" />
                       <span>Pricing & Inventory</span>
                     </h4>
+                    <button
+                      type="button"
+                      onClick={() => setIsPriceCalcOpen((prev) => !prev)}
+                      className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-bold border transition-colors cursor-pointer ${
+                        isPriceCalcOpen
+                          ? 'bg-[#C25E28] text-[#FFFDF9] border-[#C25E28]'
+                          : 'bg-[#FFFDF9] dark:bg-[#231F1A] text-[#4A4137] dark:text-[#E2D9CE] border-[#DFD6C9] dark:border-[#3A3229] hover:bg-[#F5EFE6] dark:hover:bg-[#2D2720]'
+                      }`}
+                    >
+                      <Calculator className="w-3.5 h-3.5" />
+                      <span>{isPriceCalcOpen ? 'Hide Price Calculator' : 'Selling Price Calculator'}</span>
+                      {isPriceCalcOpen ? (
+                        <ChevronUp className="w-3.5 h-3.5" />
+                      ) : (
+                        <ChevronDown className="w-3.5 h-3.5" />
+                      )}
+                    </button>
                   </div>
+
+                  {calcAppliedNotice && (
+                    <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[#EFF7F3] dark:bg-[#162922] border border-[#C5E3D5] dark:border-[#245240] text-[#1A5E46] dark:text-[#9CE0C5] text-xs font-semibold">
+                      <CheckCircle className="w-4 h-4 text-[#1F7A5B] dark:text-[#5FD1A5] shrink-0" />
+                      <span>{calcAppliedNotice}</span>
+                    </div>
+                  )}
+
+                  {isPriceCalcOpen && (
+                    <div className="p-3.5 sm:p-4 rounded-2xl bg-[#F7F3EC] dark:bg-[#14110E] border border-[#E7DFD3] dark:border-[#322C24]">
+                      <SellingPriceCalculator
+                        mode="embedded"
+                        initialPurchasePrice={Number(formCostPrice) > 0 ? Number(formCostPrice) : undefined}
+                        initialSellingPrice={Number(formPrice) > 0 ? Number(formPrice) : undefined}
+                        onApplyPrice={handleApplyCalculatedPrice}
+                      />
+                    </div>
+                  )}
 
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
                     {/* Regular / Strike Price */}
@@ -2166,22 +2307,46 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
                       </div>
                     </div>
 
-                    <div>
-                      <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
-                        Product Stock Status *
-                      </label>
-                      <select
-                        value={formStockStatus}
-                        onChange={(e) => {
-                          const val = e.target.value as 'in_stock' | 'out_of_stock' | 'upcoming';
-                          setFormStockStatus(val || 'in_stock');
-                        }}
-                        className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-bold text-slate-900 dark:text-white bg-white dark:bg-slate-800 focus:ring-2 focus:ring-sky-500 cursor-pointer"
-                      >
-                        <option value="in_stock">In Stock</option>
-                        <option value="out_of_stock">Out of Stock</option>
-                        <option value="upcoming">Upcoming</option>
-                      </select>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
+                          Product Stock Status *
+                        </label>
+                        <select
+                          value={formStockStatus}
+                          onChange={(e) => {
+                            const val = e.target.value as 'in_stock' | 'out_of_stock' | 'upcoming';
+                            setFormStockStatus(val || 'in_stock');
+                            if (val === 'out_of_stock') setFormStock(0);
+                          }}
+                          className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-bold text-slate-900 dark:text-white bg-white dark:bg-slate-800 focus:ring-2 focus:ring-sky-500 cursor-pointer"
+                        >
+                          <option value="in_stock">In Stock</option>
+                          <option value="out_of_stock">Out of Stock</option>
+                          <option value="upcoming">Upcoming</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
+                          Real Stock Quantity
+                        </label>
+                        <input
+                          type="number"
+                          min="0"
+                          value={formStock}
+                          onChange={(e) => {
+                            const v = Math.max(0, Math.round(Number(e.target.value) || 0));
+                            setFormStock(v);
+                            if (v === 0 && formStockStatus === 'in_stock') {
+                              setFormStockStatus('out_of_stock');
+                            } else if (v > 0 && formStockStatus === 'out_of_stock') {
+                              setFormStockStatus('in_stock');
+                            }
+                          }}
+                          placeholder="e.g. 25"
+                          className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-bold text-slate-900 dark:text-white bg-white dark:bg-slate-800 focus:ring-2 focus:ring-sky-500"
+                        />
+                      </div>
                     </div>
                   </div>
 

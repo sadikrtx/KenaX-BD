@@ -1,4 +1,4 @@
-import { UserRole } from '../types/index.ts';
+import type { UserRole } from '../types/index.ts';
 
 export interface PermissionDefinition {
   id: string;
@@ -137,6 +137,10 @@ export const ALL_PERMISSIONS: PermissionDefinition[] = [
   { id: 'suppliers.view', name: 'View Suppliers & Wholesalers', description: 'View supplier address book, vendors & dropshipping sources', module: 'Suppliers' },
   { id: 'suppliers.manage', name: 'Manage Suppliers & Sourcing', description: 'Add, edit & delete wholesale suppliers, sourcing terms & contacts', module: 'Suppliers' },
 
+  // --- INTERNAL DEALERS & PURCHASE LEDGER ---
+  { id: 'dealers.view', name: 'View Dealers & Ledger', nameBn: 'ডিলার ও লেনদেন লেজার দেখা', description: 'View dealer directory, purchase transactions, statements & payment records', module: 'Dealers' },
+  { id: 'dealers.manage', name: 'Manage Dealers & Transactions', nameBn: 'ডিলার লেনদেন ও ইনভয়েস পরিচালনা', description: 'Add/edit dealers, record purchases, upload invoices & manage payments', module: 'Dealers' },
+
   // --- CUSTOMERS & REVIEWS ---
   { id: 'customers.view', name: 'View Customer Accounts', description: 'View customer accounts, contact numbers & lifetime order totals', module: 'Customers' },
   { id: 'customers.edit', name: 'Edit Customer Info', description: 'Update customer address, phone number & account info', module: 'Customers' },
@@ -182,14 +186,22 @@ export const ALL_PERMISSIONS: PermissionDefinition[] = [
   { id: 'settings.edit', name: 'Edit Store Settings', description: 'Update store info, delivery rates, banners, branding & policies', module: 'Settings' },
   { id: 'seo.manage', name: 'Manage SEO & Meta Tags', description: 'Configure Google Site Verification, meta titles, descriptions & cards', module: 'Settings' },
   { id: 'logs.view', name: 'View Activity Audit Logs', description: 'Inspect full audit trail of all staff and admin actions', module: 'Audit Logs' },
+
+  // --- UNIVERSAL PLUGIN MANAGER & EXTENSIONS ---
+  { id: 'plugins.view', name: 'View Plugins & Extension Hub', nameBn: 'প্লাগইন ও এক্সটেনশন হাব দেখুন', description: 'Browse installed plugins, Plugin Store catalog, and extension status', module: 'Plugins' },
+  { id: 'plugins.install', name: 'Install & Upload Plugins', nameBn: 'প্লাগইন ইনস্টল ও আপলোড করুন', description: 'Install plugins from Store, upload .knxplugin.zip packages, or connect API extensions', module: 'Plugins' },
+  { id: 'plugins.manage', name: 'Activate, Deactivate, Update & Rollback Plugins', nameBn: 'প্লাগইন অ্যাক্টিভ, ডিঅ্যাক্টিভ ও আপডেট নিয়ন্ত্রণ', description: 'Control plugin lifecycle states, version updates, rollbacks, and uninstallation', module: 'Plugins' },
+  { id: 'plugins.settings', name: 'Configure Plugin Settings & Permissions', nameBn: 'প্লাগইন সেটিংস ও পারমিশন কনফিগারেশন', description: 'Configure plugin API keys, webhook secrets, and role-based access rules', module: 'Plugins' },
 ];
 
 export const DEFAULT_ROLE_PERMISSIONS: Record<'super_admin' | 'admin' | 'manager' | 'moderator', string[]> = {
   super_admin: ALL_PERMISSIONS.map((p) => p.id),
   admin: ALL_PERMISSIONS.filter(
-    (p) => p.id !== 'staff.delete' && p.id !== 'roles.manage' && p.id !== 'my_dashboard.view'
+    (p) => p.id !== 'staff.delete' && p.id !== 'roles.manage'
   ).map((p) => p.id),
   manager: [
+    'my_dashboard.view',
+    'plugins.view',
     'whatsapp.inbox',
     'whatsapp.reply',
     'whatsapp.templates',
@@ -223,6 +235,8 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<'super_admin' | 'admin' | 'manager
     'inventory.manage',
     'suppliers.view',
     'suppliers.manage',
+    'dealers.view',
+    'dealers.manage',
     'customers.view',
     'customers.edit',
     'delivery.view',
@@ -240,10 +254,10 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<'super_admin' | 'admin' | 'manager
     'reviews.approve',
     'reports.view',
     'reports.export',
-    'performance.view',
     'logs.view',
   ],
   moderator: [
+    'my_dashboard.view',
     'whatsapp.inbox',
     'whatsapp.reply',
     'telegram.view',
@@ -275,9 +289,16 @@ export function hasPermission(
 ): boolean {
   if (role === 'customer') return false;
 
-  // My Dashboard is strictly restricted to Super Admin only (User explicit requirement)
+  // My Dashboard is accessible by every staff member (Personal Dashboard)
   if (requiredPermission === 'my_dashboard.view') {
-    return role === 'super_admin';
+    return true;
+  }
+
+  // Team Performance is strictly Super Admin only, unless explicitly granted via custom permissions
+  if (requiredPermission === 'performance.view') {
+    if (role === 'super_admin') return true;
+    if (customPermissions && customPermissions.includes('performance.view')) return true;
+    return false;
   }
 
   if (role === 'super_admin') return true;
@@ -368,6 +389,9 @@ export function hasPermission(
     }
     if (requiredPermission === 'suppliers.view' || requiredPermission === 'suppliers.manage') {
       if (permList.includes('products.view')) return true;
+    }
+    if (requiredPermission === 'dealers.view' || requiredPermission === 'dealers.manage') {
+      if (permList.includes('suppliers.view') || permList.includes('products.view') || permList.includes('costs.view')) return true;
     }
     if (requiredPermission === 'categories.manage') {
       if (permList.includes('products.view')) return true;

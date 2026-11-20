@@ -17,6 +17,7 @@ import {
 import { Category, Product, CustomerRecord, StaffUser } from '../types';
 import { useLanguage } from '../context/LanguageContext';
 import { getOptimizedImageUrl } from '../utils/imageOptimizer';
+import { SmartSearchBar } from './SmartSearchBar';
 
 const formatBDT = (amount: number) => `৳ ${amount.toLocaleString('en-BD')}`;
 
@@ -36,6 +37,7 @@ interface MobileBottomNavProps {
   products: Product[];
   onOpenProductDetail: (product: Product) => void;
   onAddToCart?: (product: Product, quantity: number) => void;
+  onBuyNow?: (product: Product, quantity: number) => void;
 }
 
 export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
@@ -54,6 +56,7 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
   products,
   onOpenProductDetail,
   onAddToCart,
+  onBuyNow,
 }) => {
   const { t } = useLanguage();
   const [isSearchOpen, setIsSearchOpen] = useState(false);
@@ -125,8 +128,20 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (localSearchInput.trim()) {
-      setSearchQuery(localSearchInput.trim());
+    const trimmed = localSearchInput.trim();
+    if (trimmed) {
+      const lower = trimmed.toLowerCase();
+      if (lower === '/admin' || lower === '/admin-dashboard' || lower === '/admin-portal') {
+        setLocalSearchInput('');
+        setSearchQuery('');
+        setIsSearchOpen(false);
+        try {
+          window.history.pushState({}, '', '/admin');
+        } catch {}
+        onNavigate('admin');
+        return;
+      }
+      setSearchQuery(trimmed);
       onNavigate('shop');
       setIsSearchOpen(false);
     }
@@ -256,15 +271,13 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
             <span className="text-[10px] tracking-tight leading-none">{t('কার্ট', 'Cart')}</span>
           </button>
 
-          {/* 5. Dashboard / Login Tab (Far Right Corner - Role-Based Routing) */}
+          {/* 5. Dashboard / Login Tab (Far Right Corner - Customer Account Routing) */}
           <button
             type="button"
             onClick={() => {
               setIsSearchOpen(false);
               setIsCategoriesOpen(false);
-              if (currentStaff) {
-                onNavigate('admin-dashboard');
-              } else if (currentCustomer) {
+              if (currentCustomer) {
                 onNavigate('customer-dashboard');
               } else {
                 onOpenCustomerAuth();
@@ -279,9 +292,7 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
             {isAccountActive && !isSearchOpen && !isCategoriesOpen && !isCartOpen && (
               <span className="absolute -top-1 w-7 h-0.5 bg-sky-400 rounded-full shadow-[0_0_8px_rgba(56,189,248,0.8)]" />
             )}
-            {currentStaff ? (
-              <ShieldCheck className="w-5 h-5 mb-0.5 transition-transform active:scale-90 text-amber-400" />
-            ) : currentCustomer ? (
+            {currentCustomer ? (
               <div className="w-5 h-5 rounded-full bg-sky-600/30 border border-sky-400/60 flex items-center justify-center mb-0.5 text-[10px] font-bold text-sky-300">
                 {currentCustomer.name ? currentCustomer.name.charAt(0).toUpperCase() : <User className="w-3.5 h-3.5" />}
               </div>
@@ -289,7 +300,7 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
               <LogIn className="w-5 h-5 mb-0.5 transition-transform active:scale-90" />
             )}
             <span className="text-[10px] tracking-tight leading-none truncate max-w-[60px]">
-              {currentStaff ? t('অ্যাডমিন', 'Admin') : currentCustomer ? t('প্রোফাইল', 'Dashboard') : t('লগইন', 'Login')}
+              {currentCustomer ? t('প্রোফাইল', 'Dashboard') : t('লগইন', 'Login')}
             </span>
           </button>
         </div>
@@ -309,215 +320,34 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
           />
 
           {/* Search Sheet Container from top */}
-          <div className="relative bg-white rounded-b-3xl max-h-[82vh] flex flex-col shadow-2xl z-10 animate-in slide-in-from-top duration-300 border-b border-slate-200 overflow-hidden">
-            {/* Search Header Bar */}
-            <div className="p-3 bg-white border-b border-slate-200 shadow-xs flex items-center gap-2 shrink-0">
-              <form onSubmit={handleSearchSubmit} className="flex-1 relative flex items-center">
-                <Search className="w-4 h-4 absolute left-3 text-slate-400 pointer-events-none" />
-                <input
-                  ref={searchInputRef}
-                  type="text"
-                  value={localSearchInput}
-                  onChange={(e) => setLocalSearchInput(e.target.value)}
-                  placeholder={t('পণ্য, ক্যাটাগরি বা মডেল দিয়ে খুঁজুন...', 'Search by name, category, or SKU/serial...')}
-                  className="w-full pl-9 pr-8 py-2.5 bg-slate-100 rounded-xl text-xs sm:text-sm text-slate-900 placeholder-slate-400 focus:outline-hidden focus:ring-2 focus:ring-sky-500 focus:bg-white transition-all"
-                />
-                {localSearchInput && (
-                  <button
-                    type="button"
-                    onClick={() => setLocalSearchInput('')}
-                    className="absolute right-2.5 text-slate-400 hover:text-slate-600 p-0.5 cursor-pointer"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
-                )}
-              </form>
-              <button
-                type="button"
-                onClick={() => setIsSearchOpen(false)}
-                className="px-3 py-2 text-xs font-bold text-slate-600 hover:text-slate-900 shrink-0 cursor-pointer"
-              >
-                {t('বাতিল', 'Cancel')}
-              </button>
-            </div>
-
-            {/* Quick Suggestions & Trending Keywords */}
-            <div className="flex-1 overflow-y-auto p-4 scrollbar-thin">
-              {!localSearchInput.trim() ? (
-                <div className="space-y-4">
-                  {/* Popular Searches */}
-                  <div>
-                    <div className="flex items-center gap-1.5 text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-2">
-                      <Sparkles className="w-3.5 h-3.5 text-sky-500" />
-                      <span>Popular Searches</span>
-                    </div>
-                    <div className="flex flex-wrap gap-1.5">
-                      {[
-                        'Smart Watch',
-                        'Wireless Earbuds',
-                        'Men Fashion',
-                        'Sneakers',
-                        'Panjabi',
-                        'Serum',
-                        'Fast Charger',
-                        'Backpack',
-                      ].map((kw) => (
-                        <button
-                          key={kw}
-                          type="button"
-                          onClick={() => handleQuickKeyword(kw)}
-                          className="px-2.5 py-1.5 bg-slate-100 hover:bg-sky-50 hover:text-sky-600 hover:border-sky-200 text-slate-700 rounded-lg text-xs font-medium transition-colors cursor-pointer border border-slate-200/60"
-                        >
-                          {kw}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Top Categories */}
-                  <div>
-                    <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-2">
-                      Top Categories
-                    </div>
-                    <div className="grid grid-cols-2 gap-2">
-                      {categories.slice(0, 6).map((c) => (
-                        <button
-                          key={c.id}
-                          type="button"
-                          onClick={() => {
-                            setLocalSearchInput('');
-                            onSelectCategory(c.name, 'All', 'All');
-                            setIsSearchOpen(false);
-                          }}
-                          className="flex items-center justify-between p-2.5 bg-slate-50 hover:bg-sky-50 rounded-xl border border-slate-200/80 text-left transition-colors cursor-pointer group"
-                        >
-                          <span className="text-xs font-semibold text-slate-800 group-hover:text-sky-600 truncate">
-                            {c.name}
-                          </span>
-                          <ChevronRight className="w-3.5 h-3.5 text-slate-400 group-hover:text-sky-600 shrink-0" />
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Suggested Categories / Popular Subcategories */}
-                  <div>
-                    <div className="flex items-center gap-1.5 text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-2">
-                      <Tag className="w-3 h-3 text-sky-500" />
-                      <span>Suggested Categories</span>
-                    </div>
-                    <div className="flex flex-wrap gap-1.5">
-                      {[
-                        'Panjabi & Pajama',
-                        'Smartphones',
-                        'TWS Earbuds',
-                        'Sneakers',
-                        'Smartwatches',
-                        'Baby & Kids',
-                        'Three Piece & Kurti',
-                      ].map((sub) => (
-                        <button
-                          key={sub}
-                          type="button"
-                          onClick={() => {
-                            setLocalSearchInput('');
-                            onSelectCategory('All', sub, 'All');
-                            setIsSearchOpen(false);
-                          }}
-                          className="px-2.5 py-1 bg-sky-50/70 hover:bg-sky-100 text-sky-700 rounded-lg text-[11px] font-medium transition-colors cursor-pointer border border-sky-100"
-                        >
-                          #{sub}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              ) : (
-                <div>
-                  <div className="flex items-center justify-between mb-3 text-xs font-bold text-slate-500">
-                    <span>Results ({liveSearchResults.length})</span>
-                    <button
-                      type="button"
-                      onClick={handleSearchSubmit}
-                      className="text-sky-600 hover:underline flex items-center gap-1 cursor-pointer"
-                    >
-                      <span>View all in Shop</span>
-                      <ArrowRight className="w-3 h-3" />
-                    </button>
-                  </div>
-
-                  {liveSearchResults.length === 0 ? (
-                    <div className="text-center py-10">
-                      <p className="text-sm font-semibold text-slate-600">No products found for "{localSearchInput}"</p>
-                      <p className="text-xs text-slate-400 mt-1">
-                        Try searching by product name, SKU / serial number, or category
-                      </p>
-                    </div>
-                  ) : (
-                    <div className="space-y-2">
-                      {liveSearchResults.map((prod) => (
-                        <div
-                          key={prod.id}
-                          onClick={() => {
-                            onOpenProductDetail(prod);
-                            setIsSearchOpen(false);
-                          }}
-                          className="flex items-center gap-3 p-2 rounded-xl border border-slate-100 hover:border-sky-200 hover:bg-sky-50/40 transition-colors cursor-pointer group"
-                        >
-                          <div className="w-14 h-14 rounded-lg bg-slate-50 border border-slate-100 overflow-hidden shrink-0 flex items-center justify-center p-1">
-                            <img
-                              src={getOptimizedImageUrl(prod.images?.[0], 200)}
-                              alt={prod.name}
-                              className="w-full h-full object-contain"
-                            />
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <h4 className="text-xs font-bold text-slate-800 line-clamp-1 group-hover:text-sky-600 transition-colors">
-                              {prod.name}
-                            </h4>
-                            <div className="flex items-center gap-1.5 mt-0.5">
-                              <span className="text-[11px] text-slate-400 truncate">{prod.category}</span>
-                              {prod.sku && (
-                                <span className="text-[9px] font-mono font-bold px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200 shrink-0">
-                                  SKU: {prod.sku}
-                                </span>
-                              )}
-                            </div>
-                            <div className="flex items-center gap-2 mt-1">
-                              <span className="text-xs font-extrabold text-sky-600">
-                                {formatBDT(prod.price)}
-                              </span>
-                              {prod.originalPrice && prod.originalPrice > prod.price && (
-                                <span className="text-[10px] text-slate-400 line-through">
-                                  {formatBDT(prod.originalPrice)}
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                          {onAddToCart && (
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                onAddToCart(prod, 1);
-                              }}
-                              className="p-2 bg-sky-50 text-sky-600 hover:bg-sky-600 hover:text-white rounded-lg transition-colors shrink-0 cursor-pointer"
-                              title="Add to cart"
-                            >
-                              <ShoppingCart className="w-4 h-4" />
-                            </button>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
+          <div className="relative bg-white dark:bg-slate-900 rounded-b-3xl max-h-[84vh] flex flex-col shadow-2xl z-10 animate-in slide-in-from-top duration-300 border-b border-slate-200 dark:border-slate-800 overflow-hidden">
+            <SmartSearchBar
+              searchQuery={searchQuery}
+              setSearchQuery={setSearchQuery}
+              products={products}
+              categories={categories}
+              onNavigate={onNavigate}
+              onSelectCategory={(cat, sub, subSub) => {
+                onSelectCategory(cat, sub, subSub);
+                setIsSearchOpen(false);
+              }}
+              onOpenProductDetail={(prod) => {
+                onOpenProductDetail(prod);
+                setIsSearchOpen(false);
+              }}
+              onAddToCart={onAddToCart}
+              onBuyNow={(prod, qty) => {
+                if (onBuyNow) onBuyNow(prod, qty);
+                setIsSearchOpen(false);
+              }}
+              variant="mobile-sheet"
+              onCloseMobileSheet={() => setIsSearchOpen(false)}
+              autoFocus={true}
+            />
 
             {/* Mobile Handle at bottom */}
-            <div className="py-1.5 flex justify-center shrink-0 border-t border-slate-100 bg-slate-50">
-              <div className="w-10 h-1 bg-slate-300 rounded-full" />
+            <div className="py-1.5 flex justify-center shrink-0 border-t border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-950">
+              <div className="w-10 h-1 bg-slate-300 dark:bg-slate-700 rounded-full" />
             </div>
           </div>
         </div>
@@ -525,108 +355,120 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
 
       {/* 
         ========================================================================
-        3. MOBILE CATEGORIES TOP DRAWER / SLIDE-IN FROM TOP
+        3. MOBILE CATEGORIES SIDE PANEL DRAWER (Slides in from the side)
         ========================================================================
       */}
       {isCategoriesOpen && (
-        <div className="fixed top-0 left-0 right-0 bottom-15 sm:bottom-16 z-40 md:hidden flex flex-col justify-start animate-in fade-in duration-200">
-          {/* Backdrop (leaving bottom navigation bar completely visible & interactive) */}
+        <div className="fixed inset-0 z-[100] md:hidden flex animate-in fade-in duration-200">
+          {/* Backdrop overlay */}
           <div
-            className="absolute inset-0 bg-slate-900/60 backdrop-blur-xs"
+            className="fixed inset-0 bg-slate-950/70 backdrop-blur-xs transition-opacity"
             onClick={() => setIsCategoriesOpen(false)}
           />
 
-          {/* Top Sheet Modal that slides in from the top */}
-          <div className="relative bg-white rounded-b-3xl max-h-[82vh] flex flex-col shadow-2xl z-10 animate-in slide-in-from-top duration-300 border-b border-slate-200 overflow-hidden">
-            {/* Sheet Header */}
-            <div className="px-5 py-3.5 border-b border-slate-100 flex items-center justify-between bg-white">
-              <div>
-                <h3 className="font-black text-base text-slate-900 flex items-center gap-2">
-                  <LayoutGrid className="w-4 h-4 text-sky-600" />
-                  <span>Browse Categories</span>
-                </h3>
-                <p className="text-xs text-slate-400">Select a category or subcategory to explore</p>
+          {/* Side Panel Drawer sliding from the left side */}
+          <div className="relative w-[85%] max-w-[320px] h-full bg-white dark:bg-slate-900 shadow-2xl z-10 flex flex-col animate-in slide-in-from-left duration-300 border-r border-slate-200 dark:border-slate-800">
+            {/* Drawer Header */}
+            <div className="p-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-slate-900 text-white shrink-0">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-sky-500/20 text-sky-400 flex items-center justify-center font-bold">
+                  <LayoutGrid className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="font-black text-sm text-white leading-tight">
+                    {t('ক্যাটাগরি ব্রাউজ করুন', 'Browse Categories')}
+                  </h3>
+                  <p className="text-[10px] text-slate-400">
+                    {filteredCategories.length} {t('টি ক্যাটাগরি রয়েছে', 'categories available')}
+                  </p>
+                </div>
               </div>
               <button
                 type="button"
                 onClick={() => setIsCategoriesOpen(false)}
-                className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-600 transition-colors cursor-pointer"
+                className="w-8 h-8 rounded-xl bg-slate-800 hover:bg-slate-700 flex items-center justify-center text-slate-300 hover:text-white transition-colors cursor-pointer"
                 title="Close Categories"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            {/* Quick Filter */}
-            <div className="px-5 pt-3 pb-2">
-              <input
-                type="text"
-                value={categoryFilter}
-                onChange={(e) => setCategoryFilter(e.target.value)}
-                placeholder="Search category or subcategory..."
-                className="w-full px-3 py-2 bg-slate-100 rounded-xl text-xs text-slate-800 placeholder-slate-400 focus:outline-hidden focus:ring-2 focus:ring-sky-500"
-              />
+            {/* Quick Filter Search */}
+            <div className="p-3 border-b border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-850 shrink-0">
+              <div className="relative">
+                <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input
+                  type="text"
+                  value={categoryFilter}
+                  onChange={(e) => setCategoryFilter(e.target.value)}
+                  placeholder={t('ক্যাটাগরি খুঁজুন...', 'Filter categories...')}
+                  className="w-full pl-8 pr-3 py-2 bg-white dark:bg-slate-900 rounded-xl text-xs text-slate-800 dark:text-slate-100 placeholder-slate-400 border border-slate-200 dark:border-slate-700 focus:outline-hidden focus:ring-2 focus:ring-sky-500"
+                />
+              </div>
             </div>
 
-            {/* Categories List with Expandable Subcategories */}
-            <div className="flex-1 overflow-y-auto px-4 py-2 divide-y divide-slate-100 space-y-1">
-              {/* All Categories Option */}
+            {/* Categories Scrollable List with Accordion */}
+            <div className="flex-1 overflow-y-auto p-3 space-y-1.5 scrollbar-thin">
+              {/* All Products Option */}
               <button
                 type="button"
                 onClick={() => {
                   onSelectCategory('All', 'All', 'All');
                   setIsCategoriesOpen(false);
                 }}
-                className="w-full flex items-center justify-between py-2.5 px-3 rounded-xl hover:bg-sky-50 text-left transition-colors cursor-pointer group"
+                className="w-full flex items-center justify-between p-2.5 rounded-xl hover:bg-sky-50 dark:hover:bg-slate-800 border border-slate-100 dark:border-slate-800 text-left transition-all cursor-pointer group"
               >
-                <div className="flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-xl bg-sky-100 text-sky-600 flex items-center justify-center font-bold text-xs">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="w-8 h-8 rounded-xl bg-sky-100 dark:bg-sky-900/60 text-sky-600 dark:text-sky-300 flex items-center justify-center font-black text-xs shrink-0">
                     ALL
                   </div>
-                  <div>
-                    <h4 className="text-xs font-bold text-slate-900 group-hover:text-sky-600">All Products</h4>
-                    <p className="text-[10px] text-slate-400">View complete product catalog</p>
+                  <div className="min-w-0">
+                    <h4 className="text-xs font-bold text-slate-900 dark:text-white group-hover:text-sky-600 truncate">
+                      {t('সকল পণ্য', 'All Products')}
+                    </h4>
+                    <p className="text-[10px] text-slate-400 truncate">
+                      {t('সব প্রোডাক্ট একসাথে দেখুন', 'Explore entire catalog')}
+                    </p>
                   </div>
                 </div>
-                <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-sky-600" />
+                <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-sky-600 shrink-0" />
               </button>
 
+              {/* Individual Categories */}
               {filteredCategories.map((cat) => {
                 const isExpanded = !!expandedCategories[cat.id];
                 const hasSubcategories = !!cat.subcategories && cat.subcategories.length > 0;
 
                 return (
-                  <div key={cat.id} className="pt-1">
-                    <div className="flex items-center justify-between py-1.5 px-1 rounded-xl hover:bg-slate-50 transition-colors">
-                      {/* Main Category Click -> Filter to this category */}
+                  <div key={cat.id} className="rounded-xl border border-slate-100 dark:border-slate-800/80 overflow-hidden bg-white dark:bg-slate-900/60">
+                    <div className="flex items-center justify-between p-2 hover:bg-slate-50 dark:hover:bg-slate-850 transition-colors">
                       <button
                         type="button"
                         onClick={() => {
                           onSelectCategory(cat.name, 'All', 'All');
                           setIsCategoriesOpen(false);
                         }}
-                        className="flex-1 flex items-center gap-3 text-left group cursor-pointer p-1.5"
+                        className="flex-1 flex items-center gap-2.5 text-left group cursor-pointer min-w-0"
                       >
-                        <div className="w-9 h-9 rounded-xl bg-slate-100 group-hover:bg-sky-100 flex items-center justify-center text-slate-700 group-hover:text-sky-600 transition-colors shrink-0">
+                        <div className="w-8 h-8 rounded-lg bg-slate-100 dark:bg-slate-800 group-hover:bg-sky-100 dark:group-hover:bg-sky-950 flex items-center justify-center text-slate-700 dark:text-slate-300 group-hover:text-sky-600 transition-colors shrink-0">
                           <LayoutGrid className="w-4 h-4" />
                         </div>
-                        <div className="min-w-0">
-                          <h4 className="text-xs font-bold text-slate-800 group-hover:text-sky-600 truncate">
+                        <div className="min-w-0 flex-1">
+                          <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200 group-hover:text-sky-600 truncate">
                             {cat.name}
                           </h4>
-                          <p className="text-[10px] text-slate-400">
+                          <p className="text-[10px] text-slate-400 truncate">
                             {cat.banglaName ? `${cat.banglaName} • ` : ''}
-                            {cat.itemCount ? `${cat.itemCount}+ items` : 'Explore'}
+                            {cat.itemCount ? `${cat.itemCount}+ ${t('টি পণ্য', 'items')}` : t('দেখুন', 'Explore')}
                           </p>
                         </div>
                       </button>
 
-                      {/* Arrow / Chevron Button to toggle subcategories */}
-                      {hasSubcategories ? (
+                      {hasSubcategories && (
                         <button
                           type="button"
                           onClick={(e) => toggleCategoryExpand(cat.id, e)}
-                          className="p-2 text-slate-400 hover:text-sky-600 hover:bg-sky-50 rounded-xl transition-all cursor-pointer shrink-0 ml-1"
+                          className="p-1.5 text-slate-400 hover:text-sky-600 hover:bg-sky-50 dark:hover:bg-slate-800 rounded-lg transition-all cursor-pointer shrink-0 ml-1"
                           title="Toggle Subcategories"
                         >
                           {isExpanded ? (
@@ -635,35 +477,24 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
                             <ChevronRight className="w-4 h-4 text-slate-400" />
                           )}
                         </button>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            onSelectCategory(cat.name, 'All', 'All');
-                            setIsCategoriesOpen(false);
-                          }}
-                          className="p-2 text-slate-300 hover:text-sky-600 transition-colors cursor-pointer shrink-0 ml-1"
-                        >
-                          <ChevronRight className="w-4 h-4" />
-                        </button>
                       )}
                     </div>
 
-                    {/* Expandable Subcategories Accordion */}
+                    {/* Subcategories */}
                     {hasSubcategories && isExpanded && (
-                      <div className="pl-6 pr-2 py-2 space-y-1 bg-slate-50/80 rounded-2xl mb-2 border-l-2 border-sky-400 ml-4 animate-in slide-in-from-top-2 duration-150">
+                      <div className="pl-4 pr-2 py-2 space-y-1 bg-slate-50/80 dark:bg-slate-850/80 border-t border-slate-100 dark:border-slate-800 animate-in slide-in-from-top-1 duration-150">
                         {cat.subcategories!.map((subItem, sIdx) => {
                           const subName = typeof subItem === 'string' ? subItem : subItem.name;
                           const subSubs = typeof subItem === 'object' && subItem.subSubcategories ? subItem.subSubcategories : [];
                           return (
-                            <div key={sIdx} className="py-1">
+                            <div key={sIdx} className="py-0.5">
                               <button
                                 type="button"
                                 onClick={() => {
                                   onSelectCategory(cat.name, subName, 'All');
                                   setIsCategoriesOpen(false);
                                 }}
-                                className="w-full text-left text-xs font-semibold text-slate-700 hover:text-sky-600 py-1 px-2 rounded-lg hover:bg-white transition-colors cursor-pointer flex items-center justify-between"
+                                className="w-full text-left text-xs font-semibold text-slate-700 dark:text-slate-300 hover:text-sky-600 py-1 px-2 rounded-lg hover:bg-white dark:hover:bg-slate-800 transition-colors cursor-pointer flex items-center justify-between"
                               >
                                 <span>{subName}</span>
                                 <ChevronRight className="w-3 h-3 text-slate-400" />
@@ -678,7 +509,7 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
                                         onSelectCategory(cat.name, subName, child);
                                         setIsCategoriesOpen(false);
                                       }}
-                                      className="text-[10px] text-slate-600 bg-white hover:bg-sky-50 hover:text-sky-600 px-2 py-0.5 rounded-md border border-slate-200/80 transition-colors cursor-pointer"
+                                      className="text-[10px] text-slate-600 dark:text-slate-300 bg-white dark:bg-slate-800 hover:bg-sky-50 dark:hover:bg-sky-950/60 hover:text-sky-600 px-2 py-0.5 rounded-md border border-slate-200/80 dark:border-slate-700 transition-colors cursor-pointer"
                                     >
                                       {child}
                                     </button>
@@ -696,16 +527,17 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
             </div>
 
             {/* Footer View All button */}
-            <div className="p-4 border-t border-slate-100 bg-slate-50">
+            <div className="p-3 border-t border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-850 shrink-0">
               <button
                 type="button"
                 onClick={() => {
                   onSelectCategory('All', 'All', 'All');
                   setIsCategoriesOpen(false);
                 }}
-                className="w-full py-2.5 bg-sky-600 hover:bg-sky-700 text-white rounded-xl text-xs font-bold transition-colors cursor-pointer shadow-xs"
+                className="w-full py-2.5 bg-sky-600 hover:bg-sky-700 active:scale-98 text-white rounded-xl text-xs font-bold transition-all cursor-pointer shadow-xs flex items-center justify-center gap-1.5"
               >
-                View All Products in Shop
+                <span>{t('সব পণ্য শপে দেখুন', 'View All Products in Shop')}</span>
+                <ArrowRight className="w-3.5 h-3.5" />
               </button>
             </div>
           </div>

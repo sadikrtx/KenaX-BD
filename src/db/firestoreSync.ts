@@ -16,20 +16,40 @@ import {
   getAllProductsFromSQL,
   getDeletedProductIdsFromStore,
 } from './products.ts';
-import { Product } from '../types/index.ts';
+import type { Product } from '../types/index.ts';
 
 let dbInstance: any = null;
 let quotaExceededLogged = false;
 
 function isQuotaError(err: any): boolean {
   if (!err) return false;
+  const code = String(err.code || err.name || '').toLowerCase();
   const msg = String(err.message || err.toString?.() || '');
   return (
+    code === 'permission-denied' ||
+    code === 'unauthenticated' ||
+    code === 'resource-exhausted' ||
+    code === '7' ||
+    code === '429' ||
+    msg.includes('PERMISSION_DENIED') ||
+    msg.includes('permission-denied') ||
+    msg.includes('Missing or insufficient permissions') ||
     msg.includes('Quota limit exceeded') ||
     msg.includes('resource-exhausted') ||
     msg.includes('429') ||
     msg.includes('Free daily read units')
   );
+}
+
+function handleFirestoreUnavailable(err: any): boolean {
+  if (isQuotaError(err)) {
+    if (!quotaExceededLogged) {
+      quotaExceededLogged = true;
+      console.info('[Firestore Sync] Operating in high-speed local server store mode.');
+    }
+    return true;
+  }
+  return false;
 }
 
 function getDb() {
@@ -38,7 +58,7 @@ function getDb() {
   try {
     const configPath = path.join(process.cwd(), 'firebase-applet-config.json');
     if (!fs.existsSync(configPath)) {
-      console.warn('[Firestore Sync] firebase-applet-config.json not found');
+      console.info('[Firestore Sync] firebase-applet-config.json not found');
       return null;
     }
     const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
@@ -46,7 +66,7 @@ function getDb() {
     dbInstance = config.firestoreDatabaseId ? getFirestore(app, config.firestoreDatabaseId) : getFirestore(app);
     return dbInstance;
   } catch (err) {
-    console.error('[Firestore Sync] Failed to initialize Firestore on server:', err);
+    console.info('[Firestore Sync] Operating with local server store.');
     return null;
   }
 }
@@ -67,14 +87,8 @@ export async function syncFirestoreWithServerStore(): Promise<void> {
         deleteCustomerFromStore(d.id);
       });
     } catch (err: any) {
-      if (isQuotaError(err)) {
-        if (!quotaExceededLogged) {
-          quotaExceededLogged = true;
-          console.warn('[Firestore Sync] Firestore quota limit exceeded. Operating in high-speed local storage fallback mode.');
-        }
-        return;
-      }
-      console.warn('[Firestore Sync] deletedCustomers read fallback:', err.message);
+      if (handleFirestoreUnavailable(err)) return;
+      console.info('[Firestore Sync] deletedCustomers read fallback:', err.message);
     }
 
     // Gather deleted staff tombstones first
@@ -86,23 +100,24 @@ export async function syncFirestoreWithServerStore(): Promise<void> {
         deleteStaffFromStore(d.id);
       });
     } catch (err: any) {
-      if (isQuotaError(err)) {
-        if (!quotaExceededLogged) {
-          quotaExceededLogged = true;
-          console.warn('[Firestore Sync] Firestore quota limit exceeded. Operating in high-speed local storage fallback mode.');
-        }
-        return;
-      }
-      console.warn('[Firestore Sync] deletedStaff read fallback:', err.message);
+      if (handleFirestoreUnavailable(err)) return;
+      console.info('[Firestore Sync] deletedStaff read fallback:', err.message);
     }
 
     // Gather deleted product tombstones
     const deletedProductIds = new Set<string>();
     try {
       const [delProdSnap1, delProdSnap2] = await Promise.all([
-        getDocs(collection(db, 'deletedProducts')).catch(() => ({ forEach: () => {} } as any)),
-        getDocs(collection(db, 'preview_deletedProducts')).catch(() => ({ forEach: () => {} } as any)),
+        getDocs(collection(db, 'deletedProducts')).catch((e) => {
+          handleFirestoreUnavailable(e);
+          return { forEach: () => {} } as any;
+        }),
+        getDocs(collection(db, 'preview_deletedProducts')).catch((e) => {
+          handleFirestoreUnavailable(e);
+          return { forEach: () => {} } as any;
+        }),
       ]);
+      if (quotaExceededLogged) return;
       delProdSnap1.forEach((d: any) => {
         deletedProductIds.add(d.id);
         recordDeletedProductIdInStore(d.id);
@@ -114,14 +129,8 @@ export async function syncFirestoreWithServerStore(): Promise<void> {
         deleteProductFromSQL(d.id).catch(() => {});
       });
     } catch (err: any) {
-      if (isQuotaError(err)) {
-        if (!quotaExceededLogged) {
-          quotaExceededLogged = true;
-          console.warn('[Firestore Sync] Firestore quota limit exceeded. Operating in high-speed local storage fallback mode.');
-        }
-        return;
-      }
-      console.warn('[Firestore Sync] deletedProducts read fallback:', err.message);
+      if (handleFirestoreUnavailable(err)) return;
+      console.info('[Firestore Sync] deletedProducts read fallback:', err.message);
     }
 
     // 1. Sync Products from Firestore to Server Store
@@ -143,14 +152,8 @@ export async function syncFirestoreWithServerStore(): Promise<void> {
         });
       }
     } catch (err: any) {
-      if (isQuotaError(err)) {
-        if (!quotaExceededLogged) {
-          quotaExceededLogged = true;
-          console.warn('[Firestore Sync] Firestore quota limit exceeded. Operating in high-speed local storage fallback mode.');
-        }
-        return;
-      }
-      console.warn('[Firestore Sync] Product sync error:', err.message);
+      if (handleFirestoreUnavailable(err)) return;
+      console.info('[Firestore Sync] Product sync notice:', err.message);
     }
 
     // 2. Sync Customers
@@ -170,14 +173,8 @@ export async function syncFirestoreWithServerStore(): Promise<void> {
       });
       console.log(`[Firestore Sync] Synced ${custSnap.size} customers from Firestore.`);
     } catch (err: any) {
-      if (isQuotaError(err)) {
-        if (!quotaExceededLogged) {
-          quotaExceededLogged = true;
-          console.warn('[Firestore Sync] Firestore quota limit exceeded. Operating in high-speed local storage fallback mode.');
-        }
-        return;
-      }
-      console.warn('[Firestore Sync] Customer sync error:', err.message);
+      if (handleFirestoreUnavailable(err)) return;
+      console.info('[Firestore Sync] Customer sync notice:', err.message);
     }
 
     // 2. Sync Orders
@@ -191,14 +188,8 @@ export async function syncFirestoreWithServerStore(): Promise<void> {
       });
       console.log(`[Firestore Sync] Synced ${orderSnap.size} orders from Firestore.`);
     } catch (err: any) {
-      if (isQuotaError(err)) {
-        if (!quotaExceededLogged) {
-          quotaExceededLogged = true;
-          console.warn('[Firestore Sync] Firestore quota limit exceeded. Operating in high-speed local storage fallback mode.');
-        }
-        return;
-      }
-      console.warn('[Firestore Sync] Order sync notice:', err.message);
+      if (handleFirestoreUnavailable(err)) return;
+      console.info('[Firestore Sync] Order sync notice:', err.message);
     }
 
     // 3. Sync Staff from both 'staff' and 'preview_staff' collections
@@ -226,56 +217,57 @@ export async function syncFirestoreWithServerStore(): Promise<void> {
       });
       console.log(`[Firestore Sync] Synced staff accounts from Firestore.`);
     } catch (err: any) {
-      if (isQuotaError(err)) {
-        if (!quotaExceededLogged) {
-          quotaExceededLogged = true;
-          console.warn('[Firestore Sync] Firestore quota limit exceeded. Operating in high-speed local storage fallback mode.');
-        }
-        return;
-      }
-      console.warn('[Firestore Sync] Staff sync notice:', err.message);
+      if (handleFirestoreUnavailable(err)) return;
+      console.info('[Firestore Sync] Staff sync notice:', err.message);
     }
+
+    if (quotaExceededLogged) return;
 
     // Push local valid items that might not be in Firestore yet
     const currentCust = getAllCustomersFromStore();
     for (const c of currentCust) {
+      if (quotaExceededLogged) break;
       if (c && c.id && !c.id.startsWith('staff-cust-') && !deletedCustomerIds.has(c.id)) {
-        writeCustomerToFirestore(c).catch(() => {});
+        await writeCustomerToFirestore(c).catch(() => {});
       }
     }
 
     const currentOrders = getAllOrdersFromStore();
     for (const o of currentOrders) {
+      if (quotaExceededLogged) break;
       if (o && o.id) {
-        writeOrderToFirestore(o).catch(() => {});
+        await writeOrderToFirestore(o).catch(() => {});
       }
     }
 
     const currentStaff = getAllStaffFromStore();
     for (const s of currentStaff) {
+      if (quotaExceededLogged) break;
       if (s && s.id && !deletedStaffIds.has(s.id)) {
-        writeStaffToFirestore(s).catch(() => {});
+        await writeStaffToFirestore(s).catch(() => {});
       }
     }
   } catch (err: any) {
-    console.error('[Firestore Sync] Global sync error:', err.message);
+    if (handleFirestoreUnavailable(err)) return;
+    console.info('[Firestore Sync] Global sync fallback:', err.message);
   }
 }
 
 export async function writeCustomerToFirestore(customer: any, isEnvPreview?: boolean): Promise<void> {
   const db = getDb();
-  if (!db || !customer || !customer.id || customer.id.startsWith('staff-cust-')) return;
+  if (!db || quotaExceededLogged || !customer || !customer.id || customer.id.startsWith('staff-cust-')) return;
   const colName = isEnvPreview ? 'preview_customers' : 'customers';
   try {
     await setDoc(doc(db, colName, customer.id), { ...customer, isV2Account: true }, { merge: true });
   } catch (err: any) {
-    console.warn('[Firestore Sync] writeCustomerToFirestore error:', err.message);
+    if (handleFirestoreUnavailable(err)) return;
+    console.info('[Firestore Sync] writeCustomerToFirestore fallback:', err.message);
   }
 }
 
 export async function deleteCustomerFromFirestore(customerId: string, isEnvPreview?: boolean): Promise<void> {
   const db = getDb();
-  if (!db || !customerId) return;
+  if (!db || quotaExceededLogged || !customerId) return;
   const colName = isEnvPreview ? 'preview_customers' : 'customers';
   const delColName = isEnvPreview ? 'preview_deletedCustomers' : 'deletedCustomers';
   try {
@@ -285,52 +277,62 @@ export async function deleteCustomerFromFirestore(customerId: string, isEnvPrevi
       deletedAt: new Date().toISOString(),
     });
   } catch (err: any) {
-    console.warn('[Firestore Sync] deleteCustomerFromFirestore error:', err.message);
+    if (handleFirestoreUnavailable(err)) return;
+    console.info('[Firestore Sync] deleteCustomerFromFirestore fallback:', err.message);
   }
 }
 
 export async function writeOrderToFirestore(order: any, isEnvPreview?: boolean): Promise<void> {
   const db = getDb();
-  if (!db || !order || !order.id) return;
+  if (!db || quotaExceededLogged || !order || !order.id) return;
   const colName = isEnvPreview ? 'preview_orders' : 'orders';
   try {
     await setDoc(doc(db, colName, order.id), order, { merge: true });
   } catch (err: any) {
-    console.warn('[Firestore Sync] writeOrderToFirestore error:', err.message);
+    if (handleFirestoreUnavailable(err)) return;
+    console.info('[Firestore Sync] writeOrderToFirestore fallback:', err.message);
   }
 }
 
 export async function writeStaffToFirestore(staff: any, _isEnvPreview?: boolean): Promise<void> {
   const db = getDb();
-  if (!db || !staff || !staff.id) return;
+  if (!db || quotaExceededLogged || !staff || !staff.id) return;
   try {
-    await Promise.allSettled([
+    const results = await Promise.allSettled([
       setDoc(doc(db, 'staff', staff.id), staff, { merge: true }),
       setDoc(doc(db, 'preview_staff', staff.id), staff, { merge: true }),
     ]);
+    for (const r of results) {
+      if (r.status === 'rejected' && handleFirestoreUnavailable(r.reason)) return;
+    }
   } catch (err: any) {
-    console.warn('[Firestore Sync] writeStaffToFirestore error:', err.message);
+    if (handleFirestoreUnavailable(err)) return;
+    console.info('[Firestore Sync] writeStaffToFirestore fallback:', err.message);
   }
 }
 
 export async function deleteStaffFromFirestore(staffId: string, _isEnvPreview?: boolean): Promise<void> {
   const db = getDb();
-  if (!db || !staffId) return;
+  if (!db || quotaExceededLogged || !staffId) return;
   try {
-    await Promise.allSettled([
+    const results = await Promise.allSettled([
       deleteDoc(doc(db, 'staff', staffId)),
       deleteDoc(doc(db, 'preview_staff', staffId)),
       setDoc(doc(db, 'deletedStaff', staffId), { id: staffId, deletedAt: new Date().toISOString() }),
       setDoc(doc(db, 'preview_deletedStaff', staffId), { id: staffId, deletedAt: new Date().toISOString() }),
     ]);
+    for (const r of results) {
+      if (r.status === 'rejected' && handleFirestoreUnavailable(r.reason)) return;
+    }
   } catch (err: any) {
-    console.warn('[Firestore Sync] deleteStaffFromFirestore error:', err.message);
+    if (handleFirestoreUnavailable(err)) return;
+    console.info('[Firestore Sync] deleteStaffFromFirestore fallback:', err.message);
   }
 }
 
 export async function writeProductToFirestore(product: any, isEnvPreview?: boolean): Promise<void> {
   const db = getDb();
-  if (!db || !product || !product.id) return;
+  if (!db || quotaExceededLogged || !product || !product.id) return;
   const colName = isEnvPreview ? 'preview_products' : 'products';
   const delColName = isEnvPreview ? 'preview_deletedProducts' : 'deletedProducts';
   try {
@@ -339,15 +341,16 @@ export async function writeProductToFirestore(product: any, isEnvPreview?: boole
     // If it was in deletedProducts, remove the tombstone
     await deleteDoc(doc(db, delColName, product.id)).catch(() => {});
   } catch (err: any) {
-    console.warn('[Firestore Sync] writeProductToFirestore error:', err.message);
+    if (handleFirestoreUnavailable(err)) return;
+    console.info('[Firestore Sync] writeProductToFirestore fallback:', err.message);
   }
 }
 
 export async function deleteProductFromFirestore(productId: string, _isEnvPreview?: boolean): Promise<void> {
   const db = getDb();
-  if (!db || !productId) return;
+  if (!db || quotaExceededLogged || !productId) return;
   try {
-    await Promise.allSettled([
+    const results = await Promise.allSettled([
       deleteDoc(doc(db, 'products', productId)),
       deleteDoc(doc(db, 'preview_products', productId)),
       setDoc(doc(db, 'deletedProducts', productId), {
@@ -359,8 +362,12 @@ export async function deleteProductFromFirestore(productId: string, _isEnvPrevie
         deletedAt: new Date().toISOString(),
       }),
     ]);
+    for (const r of results) {
+      if (r.status === 'rejected' && handleFirestoreUnavailable(r.reason)) return;
+    }
   } catch (err: any) {
-    console.warn('[Firestore Sync] deleteProductFromFirestore error:', err.message);
+    if (handleFirestoreUnavailable(err)) return;
+    console.info('[Firestore Sync] deleteProductFromFirestore fallback:', err.message);
   }
 }
 

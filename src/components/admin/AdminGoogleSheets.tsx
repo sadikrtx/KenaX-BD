@@ -1,4 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
+import {
+  SaasDonutChart,
+  SaasBarChart,
+  CollapsibleAnalyticsPanel,
+  SAAS_CHART_COLORS,
+} from './charts/AdminCharts';
 import {
   FileSpreadsheet,
   CheckCircle2,
@@ -30,8 +36,6 @@ import {
   FullSyncData,
 } from '../../lib/googleSheetsService';
 import { getOrdersFromDB, getCustomersFromDB, getProductsFromDB, saveSettingsToDB } from '../../lib/firebase';
-import { getResellers } from '../../lib/resellerStorage';
-import { getSellers } from '../../lib/sellerStorage';
 import { SiteSettings } from '../../types';
 
 interface AdminGoogleSheetsProps {
@@ -201,15 +205,12 @@ export const AdminGoogleSheets: React.FC<AdminGoogleSheetsProps> = ({ settings, 
         getProductsFromDB().catch(() => []),
       ]);
 
-      const resellers = getResellers();
-      const sellers = getSellers();
-
       const syncPayload: FullSyncData = {
         orders,
         customers,
         products,
-        resellers,
-        sellers,
+        resellers: [],
+        sellers: [],
       };
 
       const res = await syncAllDataToGoogleSheet(token, spreadsheetId, syncPayload);
@@ -243,10 +244,14 @@ export const AdminGoogleSheets: React.FC<AdminGoogleSheetsProps> = ({ settings, 
             getCustomersFromDB().catch(() => []),
             getProductsFromDB().catch(() => []),
           ]);
-          const resellers = getResellers();
-          const sellers = getSellers();
 
-          const syncRes = await syncAllDataToGoogleSheet(authRes.accessToken, spreadsheetId, { orders, customers, products, resellers, sellers });
+          const syncRes = await syncAllDataToGoogleSheet(authRes.accessToken, spreadsheetId, {
+            orders,
+            customers,
+            products,
+            resellers: [],
+            sellers: [],
+          });
           setSyncCounts(syncRes.syncedCounts);
 
           const timestamp = new Date().toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' });
@@ -309,6 +314,21 @@ export const AdminGoogleSheets: React.FC<AdminGoogleSheetsProps> = ({ settings, 
     setTimeout(() => setCopied(false), 3000);
   };
 
+  const syncAnalytics = useMemo(() => {
+    const entries = [
+      { id: 'orders', label: 'Orders', value: syncCounts.orders || 0, color: SAAS_CHART_COLORS[0] },
+      { id: 'delivered', label: 'Delivered', value: syncCounts.deliveredOrders || 0, color: SAAS_CHART_COLORS[1] },
+      { id: 'customers', label: 'Customers', value: syncCounts.customers || 0, color: SAAS_CHART_COLORS[2] },
+      { id: 'products', label: 'Products', value: syncCounts.products || 0, color: SAAS_CHART_COLORS[3] },
+      { id: 'payments', label: 'Payments', value: syncCounts.payments || 0, color: SAAS_CHART_COLORS[6] },
+    ];
+    const hasSynced = entries.some((e) => e.value > 0);
+    return {
+      slices: hasSynced ? entries.filter((e) => e.value > 0) : [],
+      bars: hasSynced ? entries : [],
+    };
+  }, [syncCounts]);
+
   return (
     <div className="space-y-6">
       {/* Header Banner */}
@@ -363,6 +383,26 @@ export const AdminGoogleSheets: React.FC<AdminGoogleSheetsProps> = ({ settings, 
           </div>
         </div>
       )}
+
+      {/* Google Sheets Sync Analytics */}
+      <CollapsibleAnalyticsPanel title="Synchronization Volume Analytics" defaultOpen={true}>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <SaasDonutChart
+            title="Synced Dataset Share"
+            subtitle="Record distribution from latest sync"
+            data={syncAnalytics.slices}
+            centerLabel="Synced Rows"
+            emptyText="Run 'Sync All Data Now' to visualize live dataset counts"
+          />
+          <SaasBarChart
+            title="Records per Master Tab"
+            subtitle="Row counts pushed across spreadsheet tabs"
+            data={syncAnalytics.bars}
+            primaryLabel="Synced Records"
+            emptyText="Run 'Sync All Data Now' to populate tab row counts"
+          />
+        </div>
+      </CollapsibleAnalyticsPanel>
 
       {/* Connection & Setup Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -627,33 +667,7 @@ export const AdminGoogleSheets: React.FC<AdminGoogleSheetsProps> = ({ settings, 
               </div>
             </div>
 
-            {/* Tab 5: Resellers */}
-            <div className="bg-slate-50 dark:bg-slate-900/40 p-3.5 rounded-xl border border-slate-200 dark:border-slate-700 flex items-center gap-3">
-              <div className="w-9 h-9 rounded-lg bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300 flex items-center justify-center shrink-0">
-                <Building2 className="w-4 h-4" />
-              </div>
-              <div className="min-w-0">
-                <p className="text-xs font-bold text-slate-900 dark:text-white truncate">{SHEET_TAB_NAMES.RESELLERS}</p>
-                <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                  {syncCounts.resellers !== undefined ? `${syncCounts.resellers} Records Synced` : 'Reseller accounts & earnings'}
-                </p>
-              </div>
-            </div>
-
-            {/* Tab 6: Sellers & Vendors */}
-            <div className="bg-slate-50 dark:bg-slate-900/40 p-3.5 rounded-xl border border-slate-200 dark:border-slate-700 flex items-center gap-3">
-              <div className="w-9 h-9 rounded-lg bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 flex items-center justify-center shrink-0">
-                <Store className="w-4 h-4" />
-              </div>
-              <div className="min-w-0">
-                <p className="text-xs font-bold text-slate-900 dark:text-white truncate">{SHEET_TAB_NAMES.SELLERS}</p>
-                <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                  {syncCounts.sellers !== undefined ? `${syncCounts.sellers} Records Synced` : 'Vendor shops & commissions'}
-                </p>
-              </div>
-            </div>
-
-            {/* Tab 7: Products */}
+            {/* Tab 5: Products */}
             <div className="bg-slate-50 dark:bg-slate-900/40 p-3.5 rounded-xl border border-slate-200 dark:border-slate-700 flex items-center gap-3">
               <div className="w-9 h-9 rounded-lg bg-sky-100 dark:bg-sky-900/40 text-sky-700 dark:text-sky-300 flex items-center justify-center shrink-0">
                 <Package className="w-4 h-4" />
