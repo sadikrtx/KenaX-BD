@@ -1771,19 +1771,24 @@ export default function App() {
     }
   }, [currentCustomer?.id]);
 
-  // Real-time synchronization for Authorized Staff Only (Completely isolated from regular public store customers)
+  // Real-time synchronization for Authorized Staff on Admin Dashboard Only
+  // Prioritizes essential Orders immediately; defers non-essential Cart Activities until after first paint
   useEffect(() => {
     const isStaffLoggedIn = Boolean(
       currentStaff && ['super_admin', 'admin', 'manager', 'moderator'].includes(currentStaff.role)
     );
-    if (!isStaffLoggedIn) {
+    const isAdminDashboardActive = currentView === 'admin-dashboard';
+    if (!isStaffLoggedIn || !isAdminDashboardActive) {
       return;
     }
 
     let isMounted = true;
     let ordersReceived = false;
     let cartActivitiesReceived = false;
+    let unsubCartActivities: (() => void) | null = null;
+    let cartFallbackTimer: number | null = null;
 
+    // 1. Essential: Orders listener attaches immediately for Dashboard KPIs & Orders tab
     const unsubOrders = subscribeToOrders((liveOrders) => {
       ordersReceived = true;
       if (isMounted && liveOrders) {
@@ -1791,45 +1796,47 @@ export default function App() {
       }
     });
 
-    const unsubCartActivities = subscribeToCartActivities((liveCartActivities) => {
-      cartActivitiesReceived = true;
-      if (isMounted && liveCartActivities) {
-        setCartActivities(liveCartActivities);
+    const ordersFallbackTimer = window.setTimeout(() => {
+      if (isMounted && !ordersReceived) {
+        getOrdersFromDB()
+          .then((dbOrders) => {
+            if (isMounted && dbOrders) setOrders(dbOrders);
+          })
+          .catch(() => {});
       }
-    });
+    }, 1500);
 
-    // Offline / quota fallback if a real-time snapshot didn't emit
-    const fallbackTimer = window.setTimeout(async () => {
+    // 2. Non-essential: Defer Cart Activities subscription until after initial Dashboard paint
+    const startCartActivitiesSync = () => {
       if (!isMounted) return;
-      const tasks: Promise<void>[] = [];
-      if (!ordersReceived) {
-        tasks.push(
-          getOrdersFromDB()
-            .then((dbOrders) => {
-              if (isMounted && dbOrders) setOrders(dbOrders);
-            })
-            .catch(() => {})
-        );
-      }
-      if (!cartActivitiesReceived) {
-        tasks.push(
+      unsubCartActivities = subscribeToCartActivities((liveCartActivities) => {
+        cartActivitiesReceived = true;
+        if (isMounted && liveCartActivities) {
+          setCartActivities(liveCartActivities);
+        }
+      });
+      cartFallbackTimer = window.setTimeout(() => {
+        if (isMounted && !cartActivitiesReceived) {
           getCartActivitiesFromDB()
             .then((dbCartActivities) => {
               if (isMounted && dbCartActivities) setCartActivities(dbCartActivities);
             })
-            .catch(() => {})
-        );
-      }
-      if (tasks.length > 0) await Promise.all(tasks);
-    }, 1500);
+            .catch(() => {});
+        }
+      }, 1500);
+    };
+
+    const deferCartTimer = window.setTimeout(startCartActivitiesSync, 650);
 
     return () => {
       isMounted = false;
-      window.clearTimeout(fallbackTimer);
+      window.clearTimeout(ordersFallbackTimer);
+      window.clearTimeout(deferCartTimer);
+      if (cartFallbackTimer !== null) window.clearTimeout(cartFallbackTimer);
       unsubOrders();
-      unsubCartActivities();
+      if (unsubCartActivities) unsubCartActivities();
     };
-  }, [currentStaff?.id, currentStaff?.role]);
+  }, [currentStaff?.id, currentStaff?.role, currentView === 'admin-dashboard']);
 
   // Real-time cart tracking synchronization for Staff (Admin, Manager, Moderator)
   const syncCartActivity = async (updatedItems: OrderItem[], actionProduct?: Product) => {

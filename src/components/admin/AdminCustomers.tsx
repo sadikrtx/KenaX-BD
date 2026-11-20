@@ -37,9 +37,19 @@ import {
   Zap,
   CheckCircle2,
   Loader2,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
 import { CustomerRecord, Order, UserRole, StaffUser, NewsletterSubscriber } from '../../types';
 import { subscribeToNewsletterSubscribers, deleteNewsletterSubscriber } from '../../lib/firebase';
+import {
+  fetchCustomersPage,
+  searchCustomersInFirestore,
+  getCollectionTotalCount,
+  type PaginatedResult,
+} from '../../lib/firestorePagination';
+import { adminDataCache } from '../../lib/adminCache';
+import { getEnvCollectionName } from '../../utils/envHelper';
 import { getOptimizedImageUrl, handleImageError } from '../../utils/imageOptimizer';
 import {
   cleanBDPhoneNumber,
@@ -61,6 +71,7 @@ interface AdminCustomersProps {
   currentStaff: StaffUser | null;
   initialSelectedCustomer?: CustomerRecord | null;
   onCloseCustomerModal?: () => void;
+  cacheScope?: string;
 }
 
 export type CustomerSegment = 'all' | 'registered' | 'panel_buyers' | 'active_buyers' | 'wishlist' | 'subscribers';
@@ -224,6 +235,7 @@ export const AdminCustomers: React.FC<AdminCustomersProps> = ({
   currentStaff,
   initialSelectedCustomer,
   onCloseCustomerModal,
+  cacheScope,
 }) => {
   const { language, t } = useLanguage();
   const isBn = language === 'bn';
@@ -707,6 +719,120 @@ ${offerBody.replace(/</g, '&lt;').replace(/>/g, '&gt;')}
     return matchesQuery && matchesSegment;
   });
 
+  // Phase 3: Firestore Cursor Pagination + Targeted Single-Field Search + True Total Count
+  const effectiveCacheScope =
+    cacheScope || adminDataCache.makeScope(currentStaff?.id || currentStaff?.email || 'staff', currentRole);
+  const [customerPage, setCustomerPage] = useState(1);
+  const [customerPageSize, setCustomerPageSize] = useState(25);
+  const [isLoadingCustomerPage, setIsLoadingCustomerPage] = useState(false);
+  const [customerPageResult, setCustomerPageResult] = useState<PaginatedResult<CustomerRecord> | null>(null);
+  const [firestoreTotalCustomers, setFirestoreTotalCustomers] = useState<number | null>(null);
+  const [remoteSearchMatches, setRemoteSearchMatches] = useState<CustomerRecord[]>([]);
+
+  // Fetch accurate server total count via getCountFromServer (cached 60s)
+  useEffect(() => {
+    let active = true;
+    getCollectionTotalCount(getEnvCollectionName('customers'), 'customers', effectiveCacheScope, 60_000)
+      .then((count) => {
+        if (active && count !== null) setFirestoreTotalCustomers(count);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [effectiveCacheScope, customers.length]);
+
+  // Reset pagination when search, segment, or page size changes
+  useEffect(() => {
+    setCustomerPage(1);
+  }, [searchQuery, activeSegment, customerPageSize]);
+
+  // Fetch cursor-paginated page when browsing 'all' without search query
+  useEffect(() => {
+    if (activeSegment !== 'all' || searchQuery.trim().length > 0) return;
+    let active = true;
+    setIsLoadingCustomerPage(true);
+    fetchCustomersPage(effectiveCacheScope, customerPage, customerPageSize, {
+      fallbackItems: realCustomers,
+    })
+      .then((res) => {
+        if (!active) return;
+        setCustomerPageResult(res);
+        if (res.totalCount !== null) setFirestoreTotalCustomers(res.totalCount);
+        if (res.page !== customerPage) setCustomerPage(res.page);
+      })
+      .finally(() => {
+        if (active) setIsLoadingCustomerPage(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [activeSegment, searchQuery, customerPage, customerPageSize, effectiveCacheScope]);
+
+  // Debounced targeted single-field Firestore search when searching by mobile / email / ID
+  useEffect(() => {
+    const q = searchQuery.trim();
+    if (!q || activeSegment === 'subscribers' || q.length < 4) {
+      setRemoteSearchMatches([]);
+      return;
+    }
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      searchCustomersInFirestore(effectiveCacheScope, q)
+        .then((matches) => {
+          if (!cancelled) setRemoteSearchMatches(matches.filter(isRealCustomer));
+        })
+        .catch(() => {});
+    }, 350);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [searchQuery, activeSegment, effectiveCacheScope]);
+
+  // Merge any targeted Firestore search results that weren't in the current local list
+  const mergedFilteredCustomers = useMemo(() => {
+    if (remoteSearchMatches.length === 0 || !searchQuery.trim()) return filteredCustomers;
+    const byId = new Map<string, CustomerRecord>();
+    filteredCustomers.forEach((c) => byId.set(c.id, c));
+    remoteSearchMatches.forEach((c) => {
+      if (!byId.has(c.id)) byId.set(c.id, c);
+    });
+    return Array.from(byId.values());
+  }, [filteredCustomers, remoteSearchMatches, searchQuery]);
+
+  const isCursorAllView = activeSegment === 'all' && searchQuery.trim().length === 0;
+  const totalCustomerCountForDisplay = isCursorAllView
+    ? Math.max(realCustomers.length, firestoreTotalCustomers ?? 0)
+    : mergedFilteredCustomers.length;
+  const totalCustomerPages = Math.max(1, Math.ceil(totalCustomerCountForDisplay / customerPageSize));
+  const safeCustomerPage = Math.min(customerPage, totalCustomerPages);
+
+  const paginatedCustomers = useMemo(() => {
+    if (isCursorAllView && customerPageResult?.source === 'firestore' && customerPageResult.items.length > 0) {
+      // On Page 1, keep live updates synced seamlessly while respecting pageSize
+      if (safeCustomerPage === 1 && realCustomers.length > 0) {
+        const byId = new Map<string, CustomerRecord>();
+        customerPageResult.items.forEach((c) => {
+          if (isRealCustomer(c)) byId.set(c.id, c);
+        });
+        // Apply any fresher live state fields from realCustomers for matching IDs
+        realCustomers.forEach((live) => {
+          if (byId.has(live.id)) byId.set(live.id, live);
+        });
+        return Array.from(byId.values()).slice(0, customerPageSize);
+      }
+      return customerPageResult.items.filter(isRealCustomer);
+    }
+    const startIdx = (safeCustomerPage - 1) * customerPageSize;
+    return mergedFilteredCustomers.slice(startIdx, startIdx + customerPageSize);
+  }, [isCursorAllView, customerPageResult, safeCustomerPage, customerPageSize, realCustomers, mergedFilteredCustomers]);
+
+  const canCustomerPrev = safeCustomerPage > 1;
+  const canCustomerNext = isCursorAllView
+    ? Boolean(customerPageResult?.hasNextPage) || safeCustomerPage < totalCustomerPages
+    : safeCustomerPage < totalCustomerPages;
+
   const handleBlockConfirm = () => {
     if (!blockingTarget) return;
     onToggleCustomerStatus(blockingTarget.id, blockReasonInput);
@@ -850,7 +976,7 @@ ${offerBody.replace(/</g, '&lt;').replace(/>/g, '&gt;')}
             </div>
           </div>
           <div className="flex items-baseline justify-between">
-            <span className="text-2xl font-black">{customers.length}</span>
+            <span className="text-2xl font-black">{Math.max(realCustomers.length, firestoreTotalCustomers ?? 0)}</span>
             <span className={`text-xs font-semibold ${activeSegment === 'all' ? 'text-slate-400' : 'text-slate-500'}`}>
               All Database Records
             </span>
@@ -1327,7 +1453,14 @@ ${offerBody.replace(/</g, '&lt;').replace(/>/g, '&gt;')}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {filteredCustomers.length === 0 ? (
+              {isLoadingCustomerPage && paginatedCustomers.length === 0 ? (
+                <tr>
+                  <td colSpan={10} className="py-12 text-center text-slate-400">
+                    <Loader2 className="w-6 h-6 mx-auto mb-2 animate-spin text-sky-500" />
+                    <p className="text-xs font-semibold text-slate-600">Loading customers page...</p>
+                  </td>
+                </tr>
+              ) : paginatedCustomers.length === 0 ? (
                 <tr>
                   <td colSpan={10} className="py-12 text-center text-slate-400">
                     <Users className="w-10 h-10 mx-auto mb-2 opacity-30" />
@@ -1336,7 +1469,7 @@ ${offerBody.replace(/</g, '&lt;').replace(/>/g, '&gt;')}
                   </td>
                 </tr>
               ) : (
-                filteredCustomers.map((c) => {
+                paginatedCustomers.map((c) => {
                   const customerOrders = getCustomerOrders(c.mobile);
                   const actualOrderCount = customerOrders.length || c.totalOrders;
                   const actualSpent = customerOrders.reduce((s, o) => s + (o.orderStatus !== 'Cancelled' ? o.totalAmount : 0), 0) || c.totalSpent;
@@ -1533,14 +1666,19 @@ ${offerBody.replace(/</g, '&lt;').replace(/>/g, '&gt;')}
 
         {/* Mobile View: Clean, Zero Horizontal Scroll Cards */}
         <div className="md:hidden divide-y divide-slate-100">
-          {filteredCustomers.length === 0 ? (
+          {isLoadingCustomerPage && paginatedCustomers.length === 0 ? (
+            <div className="py-12 text-center text-slate-400 text-xs">
+              <Loader2 className="w-6 h-6 mx-auto mb-2 animate-spin text-sky-500" />
+              <p className="font-semibold text-slate-600">Loading customers page...</p>
+            </div>
+          ) : paginatedCustomers.length === 0 ? (
             <div className="py-12 text-center text-slate-400 text-xs">
               <Users className="w-8 h-8 mx-auto mb-2 opacity-30" />
               <p className="font-bold text-slate-700">No customers found in this section</p>
               <p className="text-[11px] text-slate-400 mt-1">Try resetting search or switching segments.</p>
             </div>
           ) : (
-            filteredCustomers.map((c) => {
+            paginatedCustomers.map((c) => {
               const customerOrders = getCustomerOrders(c.mobile);
               const actualOrderCount = customerOrders.length || c.totalOrders;
               const actualSpent = customerOrders.reduce((s, o) => s + (o.orderStatus !== 'Cancelled' ? o.totalAmount : 0), 0) || c.totalSpent;
@@ -1710,6 +1848,53 @@ ${offerBody.replace(/</g, '&lt;').replace(/>/g, '&gt;')}
             })
           )}
         </div>
+
+            {/* Customers Cursor Pagination Footer */}
+            <div className="px-4 py-3 bg-slate-50/80 border-t border-slate-200 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-600">
+              <div className="flex items-center gap-3 flex-wrap">
+                <span className="tabular-nums font-medium">
+                  Showing <strong className="font-bold text-slate-900">{paginatedCustomers.length}</strong> of{' '}
+                  <strong className="font-bold text-slate-900">{totalCustomerCountForDisplay}</strong> customers
+                </span>
+                <div className="flex items-center gap-1.5 sm:pl-3 sm:border-l border-slate-200 text-slate-500">
+                  <span>Per page:</span>
+                  <select
+                    value={customerPageSize}
+                    onChange={(e) => setCustomerPageSize(Number(e.target.value) || 25)}
+                    aria-label="Customers per page"
+                    className="px-2 py-1 rounded-lg border border-slate-200 bg-white text-xs font-semibold text-slate-800 cursor-pointer"
+                  >
+                    <option value={25}>25</option>
+                    <option value={50}>50</option>
+                    <option value={100}>100</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  disabled={!canCustomerPrev || isLoadingCustomerPage}
+                  onClick={() => setCustomerPage((p) => Math.max(1, p - 1))}
+                  className="px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed font-medium text-xs flex items-center gap-1 transition-colors cursor-pointer"
+                >
+                  <ChevronLeft className="w-3.5 h-3.5" />
+                  <span>Prev</span>
+                </button>
+                <span className="px-2.5 py-1 font-bold text-slate-800 bg-slate-100 rounded-lg border border-slate-200 tabular-nums">
+                  Page {safeCustomerPage} of {totalCustomerPages}
+                </span>
+                <button
+                  type="button"
+                  disabled={!canCustomerNext || isLoadingCustomerPage}
+                  onClick={() => setCustomerPage((p) => p + 1)}
+                  className="px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed font-medium text-xs flex items-center gap-1 transition-colors cursor-pointer"
+                >
+                  <span>Next</span>
+                  <ChevronRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
           </>
         )}
       </div>

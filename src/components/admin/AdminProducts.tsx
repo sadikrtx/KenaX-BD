@@ -75,6 +75,8 @@ import {
   CollapsibleAnalyticsPanel,
   SAAS_CHART_COLORS,
 } from './charts/AdminCharts';
+import { searchProductsInFirestore } from '../../lib/firestorePagination';
+import { adminDataCache } from '../../lib/adminCache';
 
 interface AdminProductsProps {
   products: Product[];
@@ -90,6 +92,7 @@ interface AdminProductsProps {
   targetSupplierForNewProduct?: Supplier | null;
   onClearTargetProductForEdit?: () => void;
   onClearTargetSupplierForNewProduct?: () => void;
+  cacheScope?: string;
 }
 
 export const AdminProducts: React.FC<AdminProductsProps> = ({
@@ -106,7 +109,10 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
   targetSupplierForNewProduct,
   onClearTargetProductForEdit,
   onClearTargetSupplierForNewProduct,
+  cacheScope,
 }) => {
+  const effectiveCacheScope =
+    cacheScope || adminDataCache.makeScope(currentStaff?.id || currentStaff?.email || 'staff', currentRole);
   const staffPermissions = currentStaff?.permissions || [];
   const canCreate = hasPermission(currentRole, staffPermissions, 'products.create');
   const canEdit = hasPermission(currentRole, staffPermissions, 'products.edit');
@@ -299,10 +305,47 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState<number>(15);
 
+  // Targeted single-field Firestore SKU/ID product search without full-collection scans
+  const [remoteProductMatches, setRemoteProductMatches] = useState<Product[]>([]);
+
+  useEffect(() => {
+    const q = searchQuery.trim();
+    if (q.length < 3) {
+      setRemoteProductMatches([]);
+      return;
+    }
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      searchProductsInFirestore(effectiveCacheScope, q)
+        .then((matches) => {
+          if (!cancelled) setRemoteProductMatches(matches);
+        })
+        .catch(() => {});
+    }, 350);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [searchQuery, effectiveCacheScope]);
+
   const popularityStats = useMemo(() => getStoredPopularityStats(), [products, isModalOpen]);
 
   const filteredProducts = useMemo(() => {
-    let list = products.filter((p) => {
+    const sourceList =
+      remoteProductMatches.length > 0 && searchQuery.trim().length >= 3
+        ? (() => {
+            const byId = new Map<string, Product>();
+            products.forEach((p) => {
+              if (p?.id) byId.set(p.id, p);
+            });
+            remoteProductMatches.forEach((p) => {
+              if (p?.id && !byId.has(p.id)) byId.set(p.id, p);
+            });
+            return Array.from(byId.values());
+          })()
+        : products;
+
+    let list = sourceList.filter((p) => {
       const matchesSearch =
         p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
         p.sku.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -345,7 +388,7 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
     }
 
     return list;
-  }, [products, searchQuery, categoryFilter, stockFilter, baseTagFilter, sortByPopularity, popularityStats]);
+  }, [products, remoteProductMatches, searchQuery, categoryFilter, stockFilter, baseTagFilter, sortByPopularity, popularityStats]);
 
   // Reset page to 1 when filters change
   useEffect(() => {

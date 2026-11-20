@@ -73,7 +73,6 @@ import { UserRole, StaffUser } from '../../types';
 import { KenaXLogo } from '../KenaXLogo';
 import { hasPermission } from '../../lib/permissions';
 import { useLanguage } from '../../context/LanguageContext';
-import { subscribeToSMSLogs } from '../../lib/firebase';
 import { usePlugins } from '../../context/PluginContext';
 
 export type AdminTab =
@@ -210,33 +209,19 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({
   });
 
   useEffect(() => {
-    try {
-      const unsub = subscribeToSMSLogs((logs) => {
-        if (currentTab === 'sms-gateway') {
-          setUnreadSmsCount(0);
-          try {
-            localStorage.setItem('kenax_unread_sms_count', '0');
-            if (logs[0]?.id) localStorage.setItem('kenax_last_seen_sms_id', logs[0].id);
-          } catch {}
-          return;
-        }
-
-        const lastSeenId = localStorage.getItem('kenax_last_seen_sms_id');
-        if (!lastSeenId && logs.length > 0) {
-          localStorage.setItem('kenax_last_seen_sms_id', logs[0]?.id || '');
-          setUnreadSmsCount(0);
-        } else if (lastSeenId && logs.length > 0) {
-          const idx = logs.findIndex((l) => l.id === lastSeenId);
-          const newCount = idx > 0 ? idx : 0;
-          setUnreadSmsCount(newCount);
-          try {
-            localStorage.setItem('kenax_unread_sms_count', String(newCount));
-          } catch {}
-        }
-      });
-      return () => unsub?.();
-    } catch {}
-  }, [currentTab]);
+    const handleUnreadUpdate = () => {
+      try {
+        const saved = localStorage.getItem('kenax_unread_sms_count');
+        setUnreadSmsCount(saved ? Number(saved) || 0 : 0);
+      } catch {}
+    };
+    window.addEventListener('kenax_sms_unread_updated', handleUnreadUpdate);
+    window.addEventListener('storage', handleUnreadUpdate);
+    return () => {
+      window.removeEventListener('kenax_sms_unread_updated', handleUnreadUpdate);
+      window.removeEventListener('storage', handleUnreadUpdate);
+    };
+  }, []);
 
   useEffect(() => {
     if (currentTab === 'sms-gateway') {

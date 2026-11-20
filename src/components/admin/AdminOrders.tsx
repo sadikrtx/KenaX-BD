@@ -86,6 +86,8 @@ import {
   CollapsibleAnalyticsPanel,
   SAAS_CHART_COLORS,
 } from './charts/AdminCharts';
+import { searchOrdersInFirestore } from '../../lib/firestorePagination';
+import { adminDataCache } from '../../lib/adminCache';
 
 interface AdminOrdersProps {
   orders: Order[];
@@ -135,6 +137,7 @@ interface AdminOrdersProps {
       source?: string;
     }
   ) => void;
+  cacheScope?: string;
 }
 
 const COLUMNS_STORAGE_KEY = 'kenax_admin_order_columns_v2';
@@ -156,7 +159,10 @@ export const AdminOrders: React.FC<AdminOrdersProps> = ({
   initialSearchQuery = '',
   onNavigateToOrdersWithSearch,
   activityLogs = [],
+  cacheScope,
 }) => {
+  const effectiveCacheScope =
+    cacheScope || adminDataCache.makeScope(currentStaff?.id || currentStaff?.email || 'staff', currentRole);
   const { language } = useLanguage();
   const isBn = language === 'bn';
   const isConfirmedOrdersSection = isConfirmedOrdersTab || initialScope === 'confirmed';
@@ -247,9 +253,46 @@ export const AdminOrders: React.FC<AdminOrdersProps> = ({
     }
   }, [initialSearchQuery]);
 
-  // Scoped base orders (Reseller exclusion + Moderator isolation)
+  // Targeted single-field Firestore order lookup for searches (ID, tracking, mobile) without full-collection reads
+  const [remoteSearchedOrders, setRemoteSearchedOrders] = useState<Order[]>([]);
+
+  useEffect(() => {
+    const q = searchQuery.trim();
+    if (q.length < 4) {
+      setRemoteSearchedOrders([]);
+      return;
+    }
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      searchOrdersInFirestore(effectiveCacheScope, q)
+        .then((matches) => {
+          if (!cancelled) setRemoteSearchedOrders(matches);
+        })
+        .catch(() => {});
+    }, 350);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [searchQuery, effectiveCacheScope]);
+
+  // Scoped base orders (Reseller exclusion + Moderator isolation + targeted Firestore search merge)
   const scopedOrders = useMemo(() => {
-    return (orders || []).filter((order) => {
+    const mergedInput =
+      remoteSearchedOrders.length > 0 && searchQuery.trim().length >= 4
+        ? (() => {
+            const byId = new Map<string, Order>();
+            (orders || []).forEach((o) => {
+              if (o?.id) byId.set(o.id, o);
+            });
+            remoteSearchedOrders.forEach((o) => {
+              if (o?.id && !byId.has(o.id)) byId.set(o.id, o);
+            });
+            return Array.from(byId.values());
+          })()
+        : orders || [];
+
+    return mergedInput.filter((order) => {
       if (!order) return false;
       const isResellerOrder = Boolean(
         (order as any).resellerId ||
@@ -271,7 +314,7 @@ export const AdminOrders: React.FC<AdminOrdersProps> = ({
 
       return true;
     });
-  }, [orders, isModeratorRole, currentStaff]);
+  }, [orders, remoteSearchedOrders, searchQuery, isModeratorRole, currentStaff]);
 
   // Courier fraud checks map
   const [fraudReports, setFraudReports] = useState<Record<string, CourierFraudReport>>({});

@@ -1417,6 +1417,7 @@ export async function markConversationAsRead(phone: string, staffMember?: string
   initInMemoryFromCache();
   const nowISO = new Date().toISOString();
   let changed = false;
+  const targetMessageIds: string[] = [];
 
   // 1. Instantly update in-memory state and notify all UI subscribers with 0ms delay!
   inMemoryWhatsAppMessages.forEach((m, id) => {
@@ -1430,6 +1431,7 @@ export async function markConversationAsRead(phone: string, staffMember?: string
       m.readBy = staffMember || 'Admin';
       m.updatedAt = nowISO;
       inMemoryWhatsAppMessages.set(id, { ...m });
+      targetMessageIds.push(id);
       changed = true;
     }
   });
@@ -1445,32 +1447,21 @@ export async function markConversationAsRead(phone: string, staffMember?: string
     body: JSON.stringify({ phone, staffMember }),
   }).catch(() => {});
 
-  // 3. Update in Firestore directly for real-time sync across connected clients
-  if (db && !isQuotaExceededFlag) {
+  // 3. Update only the specific unread message docs in Firestore (0 full-collection reads!)
+  if (db && !isQuotaExceededFlag && targetMessageIds.length > 0) {
     try {
-      const snap = await getDocs(collection(db, 'whatsapp_messages'));
-      const updatePromises: Promise<any>[] = [];
-      snap.forEach((docSnap) => {
-        const data = docSnap.data();
-        if (
-          data.direction === 'incoming' &&
-          data.status !== 'read' &&
-          (isPhoneMatch(data.from, phone) || isPhoneMatch(data.to, phone))
-        ) {
-          updatePromises.push(
-            setDoc(
-              doc(db, 'whatsapp_messages', docSnap.id),
-              {
-                status: 'read',
-                readAt: nowISO,
-                readBy: staffMember || 'Admin',
-                updatedAt: nowISO,
-              },
-              { merge: true }
-            )
-          );
-        }
-      });
+      const updatePromises = targetMessageIds.map((docId) =>
+        setDoc(
+          doc(db, 'whatsapp_messages', docId),
+          {
+            status: 'read',
+            readAt: nowISO,
+            readBy: staffMember || 'Admin',
+            updatedAt: nowISO,
+          },
+          { merge: true }
+        )
+      );
       await Promise.allSettled(updatePromises);
     } catch {}
   }
@@ -1483,6 +1474,7 @@ export async function markAllConversationsAsRead(staffMember?: string): Promise<
   initInMemoryFromCache();
   const nowISO = new Date().toISOString();
   let changed = false;
+  const targetMessageIds: string[] = [];
 
   inMemoryWhatsAppMessages.forEach((m, id) => {
     if (m.direction === 'incoming' && m.status !== 'read') {
@@ -1491,6 +1483,7 @@ export async function markAllConversationsAsRead(staffMember?: string): Promise<
       m.readBy = staffMember || 'Admin';
       m.updatedAt = nowISO;
       inMemoryWhatsAppMessages.set(id, { ...m });
+      targetMessageIds.push(id);
       changed = true;
     }
   });
@@ -1505,27 +1498,21 @@ export async function markAllConversationsAsRead(staffMember?: string): Promise<
     body: JSON.stringify({ staffMember }),
   }).catch(() => {});
 
-  if (db && !isQuotaExceededFlag) {
+  // Update only the specific known unread docs directly (0 full-collection reads!)
+  if (db && !isQuotaExceededFlag && targetMessageIds.length > 0) {
     try {
-      const snap = await getDocs(collection(db, 'whatsapp_messages'));
-      const updatePromises: Promise<any>[] = [];
-      snap.forEach((docSnap) => {
-        const data = docSnap.data();
-        if (data.direction === 'incoming' && data.status !== 'read') {
-          updatePromises.push(
-            setDoc(
-              doc(db, 'whatsapp_messages', docSnap.id),
-              {
-                status: 'read',
-                readAt: nowISO,
-                readBy: staffMember || 'Admin',
-                updatedAt: nowISO,
-              },
-              { merge: true }
-            )
-          );
-        }
-      });
+      const updatePromises = targetMessageIds.map((docId) =>
+        setDoc(
+          doc(db, 'whatsapp_messages', docId),
+          {
+            status: 'read',
+            readAt: nowISO,
+            readBy: staffMember || 'Admin',
+            updatedAt: nowISO,
+          },
+          { merge: true }
+        )
+      );
       await Promise.allSettled(updatePromises);
     } catch {}
   }
@@ -1563,35 +1550,17 @@ export async function markConversationAsUnread(phone: string): Promise<void> {
     body: JSON.stringify({ phone }),
   }).catch(() => {});
 
-  // 3. Update Firestore
+  // 3. Direct single-document update in Firestore (0 full-collection reads!)
   if (db && !isQuotaExceededFlag && newestId) {
     try {
-      const snap = await getDocs(collection(db, 'whatsapp_messages'));
-      let newestDocId: string | null = null;
-      let newestTime = 0;
-      snap.forEach((d) => {
-        const data = d.data();
-        if (
-          data.direction === 'incoming' &&
-          (isPhoneMatch(data.from, phone) || isPhoneMatch(data.to, phone))
-        ) {
-          const t = new Date(data.timestamp || 0).getTime();
-          if (t > newestTime) {
-            newestTime = t;
-            newestDocId = d.id;
-          }
-        }
-      });
-      if (newestDocId) {
-        await setDoc(
-          doc(db, 'whatsapp_messages', newestDocId),
-          {
-            status: 'received',
-            updatedAt: nowISO,
-          },
-          { merge: true }
-        ).catch(() => {});
-      }
+      await setDoc(
+        doc(db, 'whatsapp_messages', newestId),
+        {
+          status: 'received',
+          updatedAt: nowISO,
+        },
+        { merge: true }
+      ).catch(() => {});
     } catch {}
   }
 }
@@ -1782,13 +1751,17 @@ export function subscribeToWhatsAppMessages(
 
   fetchMessagesHttp();
 
-  // Firestore Realtime Subscription (fetches all stored messages so history is never lost)
+  // Bounded Firestore Realtime Subscription (latest 200 messages ordered by timestamp desc)
   let firestoreUnsub: (() => void) | null = null;
   if (db && !isQuotaExceededFlag) {
     try {
-      const messagesRef = collection(db, 'whatsapp_messages');
+      const messagesQuery = query(
+        collection(db, 'whatsapp_messages'),
+        orderBy('timestamp', 'desc'),
+        limit(200)
+      );
       firestoreUnsub = onSnapshot(
-        messagesRef,
+        messagesQuery,
         (snapshot) => {
           if (!isSubscribed) return;
           const incomingDocs: WhatsAppMessageRecord[] = [];

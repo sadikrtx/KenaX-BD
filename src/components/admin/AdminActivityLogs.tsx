@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import {
   ClipboardList,
   Search,
@@ -12,9 +12,13 @@ import {
   Download,
   Database,
   UserCheck,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
 import { ActivityLog, UserRole, StaffUser } from '../../types';
-import { getActivityLogsFromDB, syncPendingActivityLogs } from '../../lib/firebase';
+import { syncPendingActivityLogs } from '../../lib/firebase';
+import { fetchActivityLogsPage, type PaginatedResult } from '../../lib/firestorePagination';
+import { adminDataCache } from '../../lib/adminCache';
 import {
   SaasDonutChart,
   SaasBarChart,
@@ -27,24 +31,70 @@ interface AdminActivityLogsProps {
   logs: ActivityLog[];
   currentRole: UserRole;
   currentStaff: StaffUser | null;
+  cacheScope?: string;
 }
 
 export const AdminActivityLogs: React.FC<AdminActivityLogsProps> = ({
   logs,
   currentRole,
   currentStaff,
+  cacheScope,
 }) => {
+  const effectiveScope =
+    cacheScope || adminDataCache.makeScope(currentStaff?.id || currentStaff?.email || 'staff', currentRole);
+
   const [searchQuery, setSearchQuery] = useState('');
   const [moduleFilter, setModuleFilter] = useState('all');
   const [roleFilter, setRoleFilter] = useState('all');
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncSuccessMsg, setSyncSuccessMsg] = useState<string | null>(null);
 
+  // Firestore cursor pagination state
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
+  const [isLoadingPage, setIsLoadingPage] = useState(false);
+  const [pageResult, setPageResult] = useState<PaginatedResult<ActivityLog> | null>(null);
+
+  const hasActiveFilters =
+    searchQuery.trim().length > 0 || moduleFilter !== 'all' || roleFilter !== 'all';
+
+  const loadPage = useCallback(
+    async (targetPage: number, targetSize: number, forceRefresh = false) => {
+      setIsLoadingPage(true);
+      try {
+        const res = await fetchActivityLogsPage(effectiveScope, targetPage, targetSize, {
+          forceRefresh,
+          fallbackItems: logs,
+        });
+        setPageResult(res);
+        if (res.page !== targetPage) {
+          setCurrentPage(res.page);
+        }
+      } finally {
+        setIsLoadingPage(false);
+      }
+    },
+    [effectiveScope, logs]
+  );
+
+  useEffect(() => {
+    if (!hasActiveFilters) {
+      loadPage(currentPage, pageSize, false);
+    }
+  }, [currentPage, pageSize, hasActiveFilters, effectiveScope]);
+
+  // Reset to page 1 when filters or page size change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, moduleFilter, roleFilter, pageSize]);
+
   const handleManualSync = async () => {
     setIsSyncing(true);
     try {
       await syncPendingActivityLogs();
-      await getActivityLogsFromDB();
+      adminDataCache.invalidateCollection(effectiveScope, 'activityLogs');
+      setCurrentPage(1);
+      await loadPage(1, pageSize, true);
       setSyncSuccessMsg('Cloud Firestore synced successfully!');
       setTimeout(() => setSyncSuccessMsg(null), 3000);
     } catch (e) {
@@ -78,22 +128,57 @@ export const AdminActivityLogs: React.FC<AdminActivityLogsProps> = ({
     document.body.removeChild(link);
   };
 
-  const filteredLogs = logs.filter((l) => {
-    const matchesSearch =
-      (l.staffName || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (l.action || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (l.details || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (l.targetId || '').toLowerCase().includes(searchQuery.toLowerCase());
+  const filteredLogs = useMemo(() => {
+    const sourceLogs = hasActiveFilters ? logs : (pageResult?.items && pageResult.items.length > 0 ? pageResult.items : logs);
+    if (!hasActiveFilters) {
+      // On Page 1, seamlessly prepend any brand-new real-time logs not yet in the cursor snapshot
+      if (currentPage === 1 && pageResult?.items) {
+        const byId = new Map<string, ActivityLog>();
+        logs.slice(0, pageSize).forEach((l) => {
+          if (l?.id) byId.set(l.id, l);
+        });
+        pageResult.items.forEach((l) => {
+          if (l?.id && !byId.has(l.id)) byId.set(l.id, l);
+        });
+        return Array.from(byId.values())
+          .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+          .slice(0, pageSize);
+      }
+      return sourceLogs.slice(0, pageSize);
+    }
 
-    const matchesModule =
-      moduleFilter === 'all' || (l.module || '').toLowerCase() === moduleFilter.toLowerCase();
+    return logs.filter((l) => {
+      const matchesSearch =
+        (l.staffName || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (l.action || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (l.details || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (l.targetId || '').toLowerCase().includes(searchQuery.toLowerCase());
 
-    const matchesRole =
-      roleFilter === 'all' ||
-      (l.staffRole || '').toLowerCase().replace('_', ' ') === roleFilter.toLowerCase().replace('_', ' ');
+      const matchesModule =
+        moduleFilter === 'all' || (l.module || '').toLowerCase() === moduleFilter.toLowerCase();
 
-    return matchesSearch && matchesModule && matchesRole;
-  });
+      const matchesRole =
+        roleFilter === 'all' ||
+        (l.staffRole || '').toLowerCase().replace('_', ' ') === roleFilter.toLowerCase().replace('_', ' ');
+
+      return matchesSearch && matchesModule && matchesRole;
+    });
+  }, [logs, pageResult, hasActiveFilters, currentPage, pageSize, searchQuery, moduleFilter, roleFilter]);
+
+  const displayedLogs = useMemo(() => {
+    if (!hasActiveFilters) return filteredLogs;
+    const start = (currentPage - 1) * pageSize;
+    return filteredLogs.slice(start, start + pageSize);
+  }, [filteredLogs, hasActiveFilters, currentPage, pageSize]);
+
+  const totalKnownLogs = hasActiveFilters
+    ? filteredLogs.length
+    : Math.max(pageResult?.totalCount ?? 0, logs.length);
+  const totalPages = Math.max(1, Math.ceil(totalKnownLogs / pageSize));
+  const canGoPrev = currentPage > 1;
+  const canGoNext = hasActiveFilters
+    ? currentPage < totalPages
+    : Boolean(pageResult?.hasNextPage) || currentPage < totalPages;
 
   const logAnalytics = useMemo(() => {
     const moduleMap = new Map<string, number>();
@@ -251,7 +336,7 @@ export const AdminActivityLogs: React.FC<AdminActivityLogsProps> = ({
             onChange={(e) => setModuleFilter(e.target.value)}
             className="px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-800 cursor-pointer"
           >
-            <option value="all">All Modules ({logs.length})</option>
+            <option value="all">All Modules ({totalKnownLogs})</option>
             <option value="orders">Orders</option>
             <option value="inventory">Inventory</option>
             <option value="payments">Payments</option>
@@ -314,7 +399,14 @@ export const AdminActivityLogs: React.FC<AdminActivityLogsProps> = ({
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-              {filteredLogs.length === 0 ? (
+              {isLoadingPage && displayedLogs.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="py-12 text-center text-slate-400">
+                    <RefreshCw className="w-6 h-6 mx-auto mb-2 animate-spin text-sky-500" />
+                    <p className="text-xs font-semibold text-slate-500 dark:text-slate-400">Loading audit logs page...</p>
+                  </td>
+                </tr>
+              ) : displayedLogs.length === 0 ? (
                 <tr>
                   <td colSpan={6} className="py-12 text-center text-slate-400">
                     <ClipboardList className="w-8 h-8 mx-auto mb-2 opacity-30" />
@@ -323,7 +415,7 @@ export const AdminActivityLogs: React.FC<AdminActivityLogsProps> = ({
                   </td>
                 </tr>
               ) : (
-                filteredLogs.map((log) => (
+                displayedLogs.map((log) => (
                   <tr key={log.id} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/60 transition-colors">
                     <td className="py-3.5 px-4 text-slate-500 dark:text-slate-400 text-[11px] whitespace-nowrap">
                       {new Date(log.timestamp).toLocaleString('en-GB')}
@@ -369,6 +461,53 @@ export const AdminActivityLogs: React.FC<AdminActivityLogsProps> = ({
               )}
             </tbody>
           </table>
+        </div>
+
+        {/* Cursor Pagination Footer */}
+        <div className="px-4 py-3 bg-slate-50/80 dark:bg-slate-800/80 border-t border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-600 dark:text-slate-300">
+          <div className="flex items-center gap-3 flex-wrap">
+            <span className="tabular-nums font-medium">
+              Showing <strong className="font-bold text-slate-900 dark:text-white">{displayedLogs.length}</strong> of{' '}
+              <strong className="font-bold text-slate-900 dark:text-white">{totalKnownLogs}</strong> audit events
+            </span>
+            <div className="flex items-center gap-1.5 sm:pl-3 sm:border-l border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400">
+              <span>Per page:</span>
+              <select
+                value={pageSize}
+                onChange={(e) => setPageSize(Number(e.target.value) || 25)}
+                aria-label="Activity logs per page"
+                className="px-2 py-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-semibold text-slate-800 dark:text-slate-200 cursor-pointer"
+              >
+                <option value={25}>25</option>
+                <option value={50}>50</option>
+                <option value={100}>100</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              disabled={!canGoPrev || isLoadingPage}
+              onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+              className="px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed font-medium text-xs flex items-center gap-1 transition-colors cursor-pointer"
+            >
+              <ChevronLeft className="w-3.5 h-3.5" />
+              <span>Prev</span>
+            </button>
+            <span className="px-2.5 py-1 font-bold text-slate-800 dark:text-slate-200 bg-slate-100 dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-700 tabular-nums">
+              Page {currentPage} of {totalPages}
+            </span>
+            <button
+              type="button"
+              disabled={!canGoNext || isLoadingPage}
+              onClick={() => setCurrentPage((p) => p + 1)}
+              className="px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed font-medium text-xs flex items-center gap-1 transition-colors cursor-pointer"
+            >
+              <span>Next</span>
+              <ChevronRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
         </div>
       </div>
     </div>

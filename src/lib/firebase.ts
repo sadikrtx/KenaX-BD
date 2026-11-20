@@ -13,6 +13,10 @@ import {
   deleteDoc,
   query,
   where,
+  orderBy,
+  limit,
+  startAfter,
+  getCountFromServer,
   onSnapshot,
   type Unsubscribe,
   disableNetwork,
@@ -112,12 +116,16 @@ if (typeof window !== 'undefined') {
   };
 }
 
-// Initialize Firestore with specific Database ID & robust long polling settings
+// Initialize Firestore with specific Database ID & valid Firebase v11 auto-detect long polling
+// NOTE: `experimentalForceLongPolling` and `experimentalAutoDetectLongPolling` are mutually exclusive in Firebase v11;
+// passing both throws a validation error and silently drops the settings. Using `experimentalAutoDetectLongPolling: true`
+// alone enables automatic fallback for restrictive proxies/iFrames without forcing unnecessary long-polling overhead.
+// NOTE: `persistentLocalCache` is intentionally not enabled because the app coordinates dual preview/prod caches,
+// an Express backend mirror, and a custom quota circuit breaker (`disableNetwork`), which avoids multi-tab IndexedDB lock contention.
 const dbId = (firebaseConfig as { firestoreDatabaseId?: string }).firestoreDatabaseId;
 function createFirestoreInstance() {
   try {
     const firestoreSettings = {
-      experimentalForceLongPolling: true,
       experimentalAutoDetectLongPolling: true,
       useFetchStreams: false,
     };
@@ -130,6 +138,61 @@ function createFirestoreInstance() {
   }
 }
 export const db = createFirestoreInstance();
+
+// Lightweight 60s TTL tombstone caches to prevent nested `getDocs(deleted*)` scans on every onSnapshot emit
+const TOMBSTONE_CACHE_TTL_MS = 60_000;
+let deletedProductsCache: { ids: string[]; fetchedAt: number } | null = null;
+let deletedCategoriesCache: { ids: string[]; fetchedAt: number } | null = null;
+let deletedCustomersCache: { ids: string[]; fetchedAt: number } | null = null;
+
+async function getCachedDeletedProductIds(): Promise<string[]> {
+  if (deletedProductsCache && Date.now() - deletedProductsCache.fetchedAt < TOMBSTONE_CACHE_TTL_MS) {
+    return deletedProductsCache.ids;
+  }
+  const ids: string[] = [];
+  if (!isQuotaExceededFlag) {
+    try {
+      const [deletedSnap1, deletedSnap2] = await Promise.all([
+        getDocs(collection(db, 'deletedProducts')).catch(() => ({ empty: true, forEach: () => {} } as any)),
+        getDocs(collection(db, 'preview_deletedProducts')).catch(() => ({ empty: true, forEach: () => {} } as any)),
+      ]);
+      if (!deletedSnap1.empty) deletedSnap1.forEach((d: any) => ids.push(d.id));
+      if (!deletedSnap2.empty) deletedSnap2.forEach((d: any) => ids.push(d.id));
+    } catch {}
+  }
+  deletedProductsCache = { ids: Array.from(new Set(ids)), fetchedAt: Date.now() };
+  return deletedProductsCache.ids;
+}
+
+async function getCachedDeletedCategoryIds(): Promise<string[]> {
+  if (deletedCategoriesCache && Date.now() - deletedCategoriesCache.fetchedAt < TOMBSTONE_CACHE_TTL_MS) {
+    return deletedCategoriesCache.ids;
+  }
+  const ids: string[] = [];
+  if (!isQuotaExceededFlag) {
+    try {
+      const deletedSnap = await getDocs(collection(db, 'deletedCategories'));
+      if (!deletedSnap.empty) deletedSnap.forEach((d) => ids.push(d.id));
+    } catch {}
+  }
+  deletedCategoriesCache = { ids: Array.from(new Set(ids)), fetchedAt: Date.now() };
+  return deletedCategoriesCache.ids;
+}
+
+async function getCachedDeletedCustomerIds(envCollectionName?: string): Promise<string[]> {
+  if (deletedCustomersCache && Date.now() - deletedCustomersCache.fetchedAt < TOMBSTONE_CACHE_TTL_MS) {
+    return deletedCustomersCache.ids;
+  }
+  const ids: string[] = [];
+  if (!isQuotaExceededFlag) {
+    try {
+      const deletedSnap = await getDocs(collection(db, envCollectionName || 'deletedCustomers'));
+      if (deletedSnap && !deletedSnap.empty) deletedSnap.forEach((d) => ids.push(d.id));
+    } catch {}
+  }
+  deletedCustomersCache = { ids: Array.from(new Set(ids)), fetchedAt: Date.now() };
+  return deletedCustomersCache.ids;
+}
 
 export const auth = getAuth(app);
 
@@ -1444,6 +1507,7 @@ export async function deleteProductFromDB(productId: string): Promise<void> {
 
   // 6. Delete doc from Firestore products & record in deletedProducts collection (both collections)
   try {
+    deletedProductsCache = null; // Invalidate tombstone cache immediately
     await Promise.allSettled([
       deleteDoc(doc(db, 'products', productId)),
       deleteDoc(doc(db, 'preview_products', productId)),
@@ -1468,15 +1532,7 @@ export function subscribeToProducts(onProductsChanged: (products: Product[]) => 
     return onSnapshot(
       colRef,
       async (snapshot) => {
-        let firestoreDeletedIds: string[] = [];
-        try {
-          const [deletedSnap1, deletedSnap2] = await Promise.all([
-            getDocs(collection(db, 'deletedProducts')).catch(() => ({ empty: true, forEach: () => {} } as any)),
-            getDocs(collection(db, 'preview_deletedProducts')).catch(() => ({ empty: true, forEach: () => {} } as any)),
-          ]);
-          if (!deletedSnap1.empty) deletedSnap1.forEach((d: any) => firestoreDeletedIds.push(d.id));
-          if (!deletedSnap2.empty) deletedSnap2.forEach((d: any) => firestoreDeletedIds.push(d.id));
-        } catch {}
+        const firestoreDeletedIds = await getCachedDeletedProductIds();
 
         let localDeletedIds: string[] = [];
         try {
@@ -1810,11 +1866,10 @@ export function subscribeToOrders(onOrdersChanged: (orders: Order[]) => void): U
   }
 }
 
-// Fetch specific Customer's Orders from Cloud Firestore (queries by customerId, email, mobile)
+// Fetch specific Customer's Orders using targeted single-field Firestore queries (eliminates full-collection scan)
 export async function fetchCustomerOrdersFromDB(
   customer: Partial<CustomerRecord> | { id?: string; email?: string; mobile?: string }
 ): Promise<Order[]> {
-  const allCurrent = await getOrdersFromDB();
   const cId = customer.id;
   const cEmail = customer.email ? customer.email.trim().toLowerCase() : '';
   const cPhone = normalizePhoneNumber(customer.mobile);
@@ -1826,19 +1881,15 @@ export async function fetchCustomerOrdersFromDB(
     localMyOrders = raw ? JSON.parse(raw) : [];
   } catch {}
 
-  const custOrderIds = (customer as any)?.orderIds || [];
+  const custOrderIds: string[] = Array.isArray((customer as any)?.orderIds) ? (customer as any).orderIds : [];
+  const candidateMap = new Map<string, Order>();
 
-  const matched = allCurrent.filter((o) => {
+  const matchesCustomer = (o: Order): boolean => {
     if (!o) return false;
-    // Match local device tracking
     if (localMyOrders.includes(o.id)) return true;
-    // Match orderIds array
     if (custOrderIds.includes(o.id)) return true;
-    // Match ID
     if (cId && cId !== 'cust-guest' && o.customerId === cId) return true;
-    // Match Email
     if (cEmail && o.customerEmail && o.customerEmail.trim().toLowerCase() === cEmail) return true;
-    // Match Customer Mobile
     if (cPhone) {
       const oPhone = normalizePhoneNumber(o.customerMobile || (o as any).customerPhone);
       const dPhone = normalizePhoneNumber(o.deliveryMobile);
@@ -1846,74 +1897,201 @@ export async function fetchCustomerOrdersFromDB(
       if (cPhone.length >= 10 && (oPhone.endsWith(cPhone.slice(-10)) || dPhone.endsWith(cPhone.slice(-10)))) return true;
     }
     return false;
-  });
+  };
 
-  return matched;
+  // 1. Seed from local cache immediately (0 Firestore reads)
+  try {
+    const cached =
+      localStorage.getItem(getEnvStorageKey('kenax_orders_cache')) ||
+      localStorage.getItem('kenax_orders_cache') ||
+      localStorage.getItem('preview_kenax_orders_cache');
+    if (cached) {
+      const parsed: Order[] = JSON.parse(cached);
+      if (Array.isArray(parsed)) {
+        parsed.forEach((o) => {
+          if (o?.id && matchesCustomer(o)) candidateMap.set(o.id, o);
+        });
+      }
+    }
+  } catch {}
+
+  // 2. Targeted single-field Firestore queries (all use automatic single-field indexes)
+  if (!isQuotaExceededFlag) {
+    const colName = getEnvCollectionName('orders');
+    const colRef = collection(db, colName);
+    const queryTasks: Promise<void>[] = [];
+
+    const addFromSnap = (snap: any) => {
+      if (!snap || snap.empty) return;
+      snap.forEach((docSnap: any) => {
+        const data = docSnap.data() as Order;
+        if (data && (data.isV2Order || data.id)) {
+          candidateMap.set(data.id || docSnap.id, data);
+        }
+      });
+    };
+
+    if (cId && cId !== 'cust-guest') {
+      queryTasks.push(
+        getDocs(query(colRef, where('customerId', '==', cId), limit(100)))
+          .then(addFromSnap)
+          .catch((err) => {
+            if (isQuotaExceededError(err)) markQuotaExceeded(err);
+          })
+      );
+    }
+
+    if (cEmail) {
+      queryTasks.push(
+        getDocs(query(colRef, where('customerEmail', '==', cEmail), limit(100)))
+          .then(addFromSnap)
+          .catch(() => {})
+      );
+      if (customer.email && customer.email.trim() !== cEmail) {
+        queryTasks.push(
+          getDocs(query(colRef, where('customerEmail', '==', customer.email.trim()), limit(100)))
+            .then(addFromSnap)
+            .catch(() => {})
+        );
+      }
+    }
+
+    if (cPhone) {
+      const local11 = cPhone.startsWith('880') && cPhone.length >= 13 ? '0' + cPhone.slice(3, 13) : cPhone;
+      const phoneVariants = Array.from(
+        new Set([customer.mobile?.trim() || '', cPhone, local11, `+88${local11}`].filter(Boolean))
+      );
+      for (const variant of phoneVariants) {
+        queryTasks.push(
+          getDocs(query(colRef, where('customerMobile', '==', variant), limit(100)))
+            .then(addFromSnap)
+            .catch(() => {})
+        );
+        queryTasks.push(
+          getDocs(query(colRef, where('deliveryMobile', '==', variant), limit(100)))
+            .then(addFromSnap)
+            .catch(() => {})
+        );
+      }
+    }
+
+    // Direct doc reads for device-tracked or account-linked order IDs (max 25)
+    const directIds = Array.from(new Set([...localMyOrders, ...custOrderIds])).slice(0, 25);
+    for (const orderId of directIds) {
+      if (!orderId || candidateMap.has(orderId)) continue;
+      queryTasks.push(
+        getDoc(doc(db, colName, orderId))
+          .then((snap) => {
+            if (snap.exists()) {
+              const data = snap.data() as Order;
+              if (data && (data.isV2Order || data.id)) candidateMap.set(data.id || snap.id, data);
+            }
+          })
+          .catch(() => {})
+      );
+    }
+
+    await Promise.allSettled(queryTasks);
+  }
+
+  return Array.from(candidateMap.values())
+    .filter(matchesCustomer)
+    .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
 }
 
-// Fetch single order from Cloud Firestore directly (for tracking / lookup)
+// Fetch single order from Cloud Firestore directly using direct doc lookup & targeted single-field queries
 export async function fetchSingleOrderFromDB(orderIdOrQuery: string): Promise<Order | null> {
-  const cleanQ = orderIdOrQuery.trim().toUpperCase();
-  const digitsQ = orderIdOrQuery.replace(/\D/g, '');
+  const rawQ = orderIdOrQuery.trim();
+  const cleanQ = rawQ.toUpperCase();
+  const digitsQ = rawQ.replace(/\D/g, '');
 
-  // 1. Check local cache first
-  const cached = localStorage.getItem('kenax_orders_cache');
+  const isOrderMatch = (o: Order): boolean => {
+    const oId = (o.id || '').toUpperCase();
+    const trk = (o.trackingNumber || '').toUpperCase();
+    const oPhone = normalizePhoneNumber(o.customerMobile || (o as any).customerPhone);
+    const dPhone = normalizePhoneNumber(o.deliveryMobile);
+    return (
+      oId === cleanQ ||
+      oId === `KB-${cleanQ}` ||
+      cleanQ === oId.replace(/^KB-/, '') ||
+      trk === cleanQ ||
+      (digitsQ.length >= 7 && (oPhone.includes(digitsQ) || dPhone.includes(digitsQ)))
+    );
+  };
+
+  // 1. Check local cache first (0 Firestore reads)
+  const cached = localStorage.getItem(getEnvStorageKey('kenax_orders_cache')) || localStorage.getItem('kenax_orders_cache');
   if (cached) {
     try {
       const orders: Order[] = JSON.parse(cached);
-      const found = orders.find((o) => {
-        const oId = (o.id || '').toUpperCase();
-        const trk = (o.trackingNumber || '').toUpperCase();
-        const oPhone = normalizePhoneNumber(o.customerMobile || (o as any).customerPhone);
-        const dPhone = normalizePhoneNumber(o.deliveryMobile);
-        return (
-          oId === cleanQ ||
-          oId === `KB-${cleanQ}` ||
-          cleanQ === oId.replace(/^KB-/, '') ||
-          trk === cleanQ ||
-          (digitsQ.length >= 7 && (oPhone.includes(digitsQ) || dPhone.includes(digitsQ)))
-        );
-      });
+      const found = orders.find(isOrderMatch);
       if (found) return found;
     } catch {}
   }
 
-  // 2. Direct Firestore Doc lookup
-  try {
-    const docRef = doc(db, 'orders', orderIdOrQuery.trim());
-    const snap = await getDoc(docRef);
-    if (snap.exists()) {
-      const order = snap.data() as Order;
-      return order;
-    }
-  } catch {}
+  if (isQuotaExceededFlag) return null;
 
-  // 3. Firestore query scan if by tracking number or custom ID format
+  const colName = getEnvCollectionName('orders');
+  const colRef = collection(db, colName);
+
+  // 2. Direct Firestore document lookups by exact ID & KB-prefixed ID (1-2 reads)
+  const idCandidates = Array.from(new Set([rawQ, cleanQ, cleanQ.startsWith('KB-') ? cleanQ : `KB-${cleanQ}`]));
+  for (const candidateId of idCandidates) {
+    try {
+      const snap = await getDoc(doc(db, colName, candidateId));
+      if (snap.exists()) {
+        return snap.data() as Order;
+      }
+      if (colName !== 'orders') {
+        const prodSnap = await getDoc(doc(db, 'orders', candidateId));
+        if (prodSnap.exists()) return prodSnap.data() as Order;
+      }
+    } catch {}
+  }
+
+  // 3. Targeted single-field Firestore queries (trackingNumber, customerMobile, deliveryMobile) with limit(10)
   try {
-    const colRef = collection(db, 'orders');
-    const snapshot = await getDocs(colRef);
-    if (!snapshot.empty) {
-      let foundOrder: Order | null = null;
-      snapshot.forEach((d) => {
-        const o = d.data() as Order;
-        const oId = (o.id || '').toUpperCase();
-        const trk = (o.trackingNumber || '').toUpperCase();
-        const oPhone = normalizePhoneNumber(o.customerMobile || (o as any).customerPhone);
-        const dPhone = normalizePhoneNumber(o.deliveryMobile);
-        if (
-          oId === cleanQ ||
-          oId === `KB-${cleanQ}` ||
-          cleanQ === oId.replace(/^KB-/, '') ||
-          trk === cleanQ ||
-          (digitsQ.length >= 7 && (oPhone.includes(digitsQ) || dPhone.includes(digitsQ)))
-        ) {
-          foundOrder = o;
-        }
-      });
-      if (foundOrder) return foundOrder;
+    const targetedQueries: Promise<any>[] = [
+      getDocs(query(colRef, where('trackingNumber', '==', rawQ), limit(10))).catch(() => null),
+    ];
+    if (cleanQ !== rawQ) {
+      targetedQueries.push(getDocs(query(colRef, where('trackingNumber', '==', cleanQ), limit(10))).catch(() => null));
+    }
+    if (digitsQ.length >= 10) {
+      const local11 = digitsQ.startsWith('880') && digitsQ.length >= 13
+        ? '0' + digitsQ.slice(3, 13)
+        : digitsQ.length === 10
+        ? '0' + digitsQ
+        : digitsQ.slice(-11);
+      const phoneVariants = Array.from(new Set([rawQ, local11, `+88${local11}`]));
+      for (const variant of phoneVariants) {
+        targetedQueries.push(getDocs(query(colRef, where('customerMobile', '==', variant), limit(10))).catch(() => null));
+        targetedQueries.push(getDocs(query(colRef, where('deliveryMobile', '==', variant), limit(10))).catch(() => null));
+      }
+    }
+
+    const snapshots = await Promise.all(targetedQueries);
+    for (const snap of snapshots) {
+      if (snap && !snap.empty) {
+        const foundDoc = snap.docs[0];
+        if (foundDoc) return foundDoc.data() as Order;
+      }
     }
   } catch (err) {
-    console.warn('[KenaX BD] fetchSingleOrderFromDB query error:', err);
+    if (isQuotaExceededError(err)) markQuotaExceeded(err);
+  }
+
+  // 4. Bounded recent orders fallback (max 100 recent docs instead of unbounded full-collection scan)
+  try {
+    const recentSnap = await getDocs(query(colRef, orderBy('createdAt', 'desc'), limit(100)));
+    if (!recentSnap.empty) {
+      for (const d of recentSnap.docs) {
+        const o = d.data() as Order;
+        if (isOrderMatch(o)) return o;
+      }
+    }
+  } catch (err) {
+    console.warn('[KenaX BD] fetchSingleOrderFromDB bounded fallback error:', err);
   }
 
   return null;
@@ -2398,9 +2576,9 @@ export async function getCustomersFromDB(): Promise<CustomerRecord[]> {
   } catch {}
 
   try {
-    const deletedSnap = await getDocs(collection(db, getEnvCollectionName('deletedCustomers')));
-    if (deletedSnap && !deletedSnap.empty) {
-      deletedSnap.forEach((d) => deletedCustomerIds.add(d.id));
+    const cachedDeletedIds = await getCachedDeletedCustomerIds(getEnvCollectionName('deletedCustomers'));
+    if (cachedDeletedIds.length > 0) {
+      cachedDeletedIds.forEach((id) => deletedCustomerIds.add(id));
       safeSetLocalStorage(getEnvStorageKey('kenax_deleted_customers_cache'), JSON.stringify(Array.from(deletedCustomerIds)));
     }
   } catch {}
@@ -2555,6 +2733,7 @@ export async function deleteCustomerFromDB(customerId: string): Promise<void> {
   }
 
   // 6. Add tombstone to Firestore deletedCustomers collection
+  deletedCustomersCache = null; // Invalidate tombstone cache immediately
   try {
     await setDoc(doc(db, getEnvCollectionName('deletedCustomers'), customerId), {
       id: customerId,
@@ -2742,13 +2921,17 @@ function mergeActivityLogLists(primary: ActivityLog[], secondary: ActivityLog[])
   );
 }
 
-export async function getActivityLogsFromDB(): Promise<ActivityLog[]> {
+export async function getActivityLogsFromDB(maxLimit: number = 100): Promise<ActivityLog[]> {
   // Always attempt to flush any pending offline logs first
   await syncPendingActivityLogs().catch(() => {});
 
   try {
     const colRef = collection(db, 'activityLogs');
-    const snapshot = await getDocs(colRef);
+    let snapshot = await getDocs(query(colRef, orderBy('timestamp', 'desc'), limit(maxLimit)));
+    // Fallback if legacy documents lack `timestamp`
+    if (snapshot.empty) {
+      snapshot = await getDocs(query(colRef, limit(maxLimit)));
+    }
     if (!snapshot.empty) {
       const items: ActivityLog[] = [];
       snapshot.forEach((docSnap) => {
@@ -2765,7 +2948,7 @@ export async function getActivityLogsFromDB(): Promise<ActivityLog[]> {
         }
       } catch {}
       const merged = mergeActivityLogLists(serverItems, items);
-      safeSetLocalStorage('kenax_activity_logs_cache', JSON.stringify(merged));
+      safeSetLocalStorage('kenax_activity_logs_cache', JSON.stringify(merged.slice(0, 200)));
       return merged;
     }
   } catch (err) {
@@ -2862,34 +3045,54 @@ export async function logActivityToDB(
   return newLog;
 }
 
-export function subscribeToActivityLogs(onLogsChanged: (logs: ActivityLog[]) => void): Unsubscribe {
+export function subscribeToActivityLogs(
+  onLogsChanged: (logs: ActivityLog[]) => void,
+  maxLimit: number = 100
+): Unsubscribe {
+  if (isQuotaExceededFlag) return () => {};
   try {
     const colRef = collection(db, 'activityLogs');
+    const boundedQuery = query(colRef, orderBy('timestamp', 'desc'), limit(maxLimit));
+    let cachedServerLogs: ActivityLog[] = [];
+    let lastServerFetchAt = 0;
+
     return onSnapshot(
-      colRef,
+      boundedQuery,
       (snapshot) => {
         const items: ActivityLog[] = [];
         snapshot.forEach((docSnap) => {
           const d = docSnap.data() as ActivityLog;
           if (!isLegacyFakeActivityLog(d)) items.push(d);
         });
-        fetch('/api/activity-logs')
-          .then((r) => {
-            const ct = (r.headers.get('content-type') || '').toLowerCase();
-            return r.ok && ct.includes('application/json') ? r.json() : [];
-          })
-          .then((serverItems) => {
-            const merged = mergeActivityLogLists(Array.isArray(serverItems) ? serverItems : [], items);
-            safeSetLocalStorage('kenax_activity_logs_cache', JSON.stringify(merged));
-            onLogsChanged(merged);
-          })
-          .catch(() => {
-            items.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-            safeSetLocalStorage('kenax_activity_logs_cache', JSON.stringify(items));
-            onLogsChanged(items);
-          });
+
+        const now = Date.now();
+        // Throttle `/api/activity-logs` merges to at most once every 30s instead of on every Firestore snapshot emit
+        if (now - lastServerFetchAt > 30_000) {
+          lastServerFetchAt = now;
+          fetch('/api/activity-logs')
+            .then((r) => {
+              const ct = (r.headers.get('content-type') || '').toLowerCase();
+              return r.ok && ct.includes('application/json') ? r.json() : [];
+            })
+            .then((serverItems) => {
+              cachedServerLogs = Array.isArray(serverItems) ? serverItems : [];
+              const merged = mergeActivityLogLists(cachedServerLogs, items);
+              safeSetLocalStorage('kenax_activity_logs_cache', JSON.stringify(merged.slice(0, 200)));
+              onLogsChanged(merged);
+            })
+            .catch(() => {
+              const merged = mergeActivityLogLists(cachedServerLogs, items);
+              safeSetLocalStorage('kenax_activity_logs_cache', JSON.stringify(merged.slice(0, 200)));
+              onLogsChanged(merged);
+            });
+        } else {
+          const merged = mergeActivityLogLists(cachedServerLogs, items);
+          safeSetLocalStorage('kenax_activity_logs_cache', JSON.stringify(merged.slice(0, 200)));
+          onLogsChanged(merged);
+        }
       },
       (error) => {
+        if (isQuotaExceededError(error)) markQuotaExceeded(error);
         console.warn('[KenaX BD] Activity logs real-time listener error:', error);
       }
     );
@@ -2902,15 +3105,18 @@ export function subscribeToActivityLogs(onLogsChanged: (logs: ActivityLog[]) => 
 // ----------------------------------------------------
 // INVENTORY LOGS (STOCK ADJUSTMENTS)
 // ----------------------------------------------------
-export async function getStockLogsFromDB(): Promise<StockLog[]> {
+export async function getStockLogsFromDB(maxLimit: number = 100): Promise<StockLog[]> {
   try {
     const colRef = collection(db, 'inventoryLogs');
-    const snapshot = await getDocs(colRef);
+    let snapshot = await getDocs(query(colRef, orderBy('timestamp', 'desc'), limit(maxLimit)));
+    if (snapshot.empty) {
+      snapshot = await getDocs(query(colRef, limit(maxLimit)));
+    }
     if (!snapshot.empty) {
       const items: StockLog[] = [];
       snapshot.forEach((doc) => items.push(doc.data() as StockLog));
       items.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-      safeSetLocalStorage('kenax_stock_logs_cache', JSON.stringify(items));
+      safeSetLocalStorage('kenax_stock_logs_cache', JSON.stringify(items.slice(0, 200)));
       return items;
     }
   } catch (err) {
@@ -2989,10 +3195,13 @@ export async function addNotificationToDB(
 // ----------------------------------------------------
 // CART ACTIVITIES (LIVE CART TRACKING)
 // ----------------------------------------------------
-export async function getCartActivitiesFromDB(): Promise<import('../types').CartActivity[]> {
+export async function getCartActivitiesFromDB(maxLimit: number = 100): Promise<import('../types').CartActivity[]> {
   try {
     const colRef = collection(db, 'cartActivities');
-    const snapshot = await getDocs(colRef);
+    let snapshot = await getDocs(query(colRef, orderBy('updatedAt', 'desc'), limit(maxLimit)));
+    if (snapshot.empty) {
+      snapshot = await getDocs(query(colRef, limit(maxLimit)));
+    }
     if (!snapshot.empty) {
       const items: import('../types').CartActivity[] = [];
       snapshot.forEach((docSnap) => {
@@ -3021,12 +3230,15 @@ export async function getCartActivitiesFromDB(): Promise<import('../types').Cart
 
 export function subscribeToCartActivities(
   onData: (items: import('../types').CartActivity[]) => void,
-  onError?: (err: any) => void
+  onError?: (err: any) => void,
+  maxLimit: number = 100
 ): () => void {
+  if (isQuotaExceededFlag) return () => {};
   try {
     const colRef = collection(db, 'cartActivities');
+    const boundedQuery = query(colRef, orderBy('updatedAt', 'desc'), limit(maxLimit));
     const unsub = onSnapshot(
-      colRef,
+      boundedQuery,
       (snapshot) => {
         const items: import('../types').CartActivity[] = [];
         snapshot.forEach((docSnap) => {
@@ -3044,6 +3256,7 @@ export function subscribeToCartActivities(
         onData(items);
       },
       (error) => {
+        if (isQuotaExceededError(error)) markQuotaExceeded(error);
         console.warn('[KenaX BD] subscribeToCartActivities onSnapshot error:', error);
         if (onError) onError(error);
       }
@@ -3489,6 +3702,7 @@ export async function getCategoriesFromDB(): Promise<Category[]> {
 
 export async function saveCategoryToDB(category: Category): Promise<void> {
   const cleaned = cleanFirestoreData(category);
+  deletedCategoriesCache = null; // Invalidate tombstone cache immediately
   try {
     await setDoc(doc(db, 'categories', category.id), cleaned, { merge: true });
     await deleteDoc(doc(db, 'deletedCategories', category.id));
@@ -3517,6 +3731,7 @@ export async function saveCategoryToDB(category: Category): Promise<void> {
 }
 
 export async function deleteCategoryFromDB(categoryId: string): Promise<void> {
+  deletedCategoriesCache = null; // Invalidate tombstone cache immediately
   try {
     await deleteDoc(doc(db, 'categories', categoryId));
     await setDoc(doc(db, 'deletedCategories', categoryId), { id: categoryId, deletedAt: new Date().toISOString() });
@@ -3552,13 +3767,7 @@ export function subscribeToCategories(onCategoriesChanged: (categories: Category
           firestoreItems.push(docSnap.data() as Category);
         });
 
-        let firestoreDeletedIds: string[] = [];
-        try {
-          const deletedSnap = await getDocs(collection(db, 'deletedCategories'));
-          if (!deletedSnap.empty) {
-            deletedSnap.forEach((d) => firestoreDeletedIds.push(d.id));
-          }
-        } catch {}
+        const firestoreDeletedIds = await getCachedDeletedCategoryIds();
 
         if (firestoreDeletedIds.length > 0) {
           try {
@@ -3612,9 +3821,9 @@ export function subscribeToCustomers(onCustomersChanged: (customers: CustomerRec
         } catch {}
 
         try {
-          const deletedSnap = await getDocs(collection(db, 'deletedCustomers'));
-          if (deletedSnap && !deletedSnap.empty) {
-            deletedSnap.forEach((d) => deletedCustomerIds.add(d.id));
+          const cachedRemoteDeleted = await getCachedDeletedCustomerIds('deletedCustomers');
+          if (cachedRemoteDeleted.length > 0) {
+            cachedRemoteDeleted.forEach((id) => deletedCustomerIds.add(id));
             safeSetLocalStorage('kenax_deleted_customers_cache', JSON.stringify(Array.from(deletedCustomerIds)));
           }
         } catch {}
@@ -3705,13 +3914,16 @@ if (typeof window !== 'undefined') {
   });
 }
 
-export async function getEmailLogsFromDB(): Promise<EmailLog[]> {
+export async function getEmailLogsFromDB(maxLimit: number = 150): Promise<EmailLog[]> {
   // Always flush any pending offline logs first
   await syncPendingEmailLogs().catch(() => {});
 
   try {
     const colRef = collection(db, 'emailLogs');
-    const snap = await getDocs(colRef);
+    let snap = await getDocs(query(colRef, orderBy('timestamp', 'desc'), limit(maxLimit)));
+    if (snap.empty) {
+      snap = await getDocs(query(colRef, limit(maxLimit)));
+    }
     const list: EmailLog[] = [];
     snap.forEach((d) => {
       const data = d.data() as EmailLog;
@@ -3759,11 +3971,13 @@ export async function saveEmailLogToDB(log: EmailLog): Promise<void> {
   }
 }
 
-export function subscribeToEmailLogs(callback: (logs: EmailLog[]) => void): Unsubscribe {
+export function subscribeToEmailLogs(callback: (logs: EmailLog[]) => void, maxLimit: number = 150): Unsubscribe {
+  if (isQuotaExceededFlag) return () => {};
   try {
     const colRef = collection(db, 'emailLogs');
+    const boundedQuery = query(colRef, orderBy('timestamp', 'desc'), limit(maxLimit));
     return onSnapshot(
-      colRef,
+      boundedQuery,
       (snap) => {
         const list: EmailLog[] = [];
         snap.forEach((d) => {
@@ -3777,6 +3991,7 @@ export function subscribeToEmailLogs(callback: (logs: EmailLog[]) => void): Unsu
         callback(list);
       },
       (err) => {
+        if (isQuotaExceededError(err)) markQuotaExceeded(err);
         console.warn('[KenaX BD] subscribeToEmailLogs error:', err);
       }
     );
@@ -4126,7 +4341,7 @@ export async function saveSMSSettingsToDB(settings: SMSSettings): Promise<boolea
   }
 }
 
-export async function getSMSLogsFromDB(): Promise<SMSLog[]> {
+export async function getSMSLogsFromDB(maxLimit: number = 100): Promise<SMSLog[]> {
   try {
     const cached = localStorage.getItem('kenax_sms_logs_cache');
     if (cached) {
@@ -4135,11 +4350,15 @@ export async function getSMSLogsFromDB(): Promise<SMSLog[]> {
   } catch (e) {}
 
   try {
-    const snap = await getDocs(collection(db, 'sms_logs'));
+    const colRef = collection(db, 'sms_logs');
+    let snap = await getDocs(query(colRef, orderBy('timestamp', 'desc'), limit(maxLimit)));
+    if (snap.empty) {
+      snap = await getDocs(query(colRef, limit(maxLimit)));
+    }
     const logs: SMSLog[] = [];
     snap.forEach((d) => logs.push(d.data() as SMSLog));
     logs.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-    safeSetLocalStorage('kenax_sms_logs_cache', JSON.stringify(logs));
+    safeSetLocalStorage('kenax_sms_logs_cache', JSON.stringify(logs.slice(0, 100)));
     return logs;
   } catch (err) {
     console.warn('[KenaX BD] getSMSLogsFromDB error:', err);
@@ -4162,21 +4381,24 @@ export async function saveSMSLogToDB(log: SMSLog): Promise<boolean> {
   }
 }
 
-export function subscribeToSMSLogs(onLogsChanged: (logs: SMSLog[]) => void): Unsubscribe {
+export function subscribeToSMSLogs(onLogsChanged: (logs: SMSLog[]) => void, maxLimit: number = 100): Unsubscribe {
+  if (isQuotaExceededFlag) return () => {};
   try {
     const colRef = collection(db, 'sms_logs');
+    const boundedQuery = query(colRef, orderBy('timestamp', 'desc'), limit(maxLimit));
     return onSnapshot(
-      colRef,
+      boundedQuery,
       (snapshot) => {
         const items: SMSLog[] = [];
         snapshot.forEach((docSnap) => {
           items.push(docSnap.data() as SMSLog);
         });
         items.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-        safeSetLocalStorage('kenax_sms_logs_cache', JSON.stringify(items));
+        safeSetLocalStorage('kenax_sms_logs_cache', JSON.stringify(items.slice(0, 100)));
         onLogsChanged(items);
       },
       (error) => {
+        if (isQuotaExceededError(error)) markQuotaExceeded(error);
         console.warn('[KenaX BD] subscribeToSMSLogs error:', error);
       }
     );

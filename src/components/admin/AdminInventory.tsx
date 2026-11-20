@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import {
   Boxes,
   AlertTriangle,
@@ -26,11 +26,15 @@ import {
   User,
   ShieldCheck,
   RefreshCw,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
 import { Product, StockLog, UserRole, StaffUser, Order } from '../../types';
 import { getOptimizedImageUrl, handleImageError } from '../../utils/imageOptimizer';
 import { PluginSlotRenderer } from './PluginSlotRenderer';
 import { SaasDonutChart, SaasBarChart } from './charts/AdminCharts';
+import { fetchStockLogsPage, type PaginatedResult } from '../../lib/firestorePagination';
+import { adminDataCache } from '../../lib/adminCache';
 
 interface AdminInventoryProps {
   products: Product[];
@@ -45,6 +49,7 @@ interface AdminInventoryProps {
   currentStaff: StaffUser | null;
   lowStockThreshold?: number;
   onNavigateToOrdersWithSearch?: (query: string) => void;
+  cacheScope?: string;
 }
 
 export const AdminInventory: React.FC<AdminInventoryProps> = ({
@@ -56,16 +61,24 @@ export const AdminInventory: React.FC<AdminInventoryProps> = ({
   currentStaff,
   lowStockThreshold = 5,
   onNavigateToOrdersWithSearch,
+  cacheScope,
 }) => {
+  const effectiveScope =
+    cacheScope || adminDataCache.makeScope(currentStaff?.id || currentStaff?.email || 'staff', currentRole);
+
   const [activeSubTab, setActiveSubTab] = useState<'inventory' | 'logs'>('inventory');
   const [searchQuery, setSearchQuery] = useState('');
   const [stockFilter, setStockFilter] = useState<string>('all');
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
   const [inlineStockDrafts, setInlineStockDrafts] = useState<Record<string, string>>({});
 
-  // Logs sub-tab filter states
+  // Logs sub-tab filter & cursor pagination states
   const [logSearchQuery, setLogSearchQuery] = useState('');
   const [logTypeFilter, setLogTypeFilter] = useState<'all' | 'delivery' | 'add' | 'remove' | 'restore'>('all');
+  const [logPage, setLogPage] = useState(1);
+  const [logPageSize, setLogPageSize] = useState(25);
+  const [isLoadingLogPage, setIsLoadingLogPage] = useState(false);
+  const [stockLogPageResult, setStockLogPageResult] = useState<PaginatedResult<StockLog> | null>(null);
 
   // Modal for adjustment
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
@@ -220,8 +233,74 @@ export const AdminInventory: React.FC<AdminInventoryProps> = ({
     });
   }, [products, searchQuery, stockFilter, categoryFilter, productStats, lowStockThreshold]);
 
-  // Filtered Stock Logs
+  const hasActiveLogFilters = logSearchQuery.trim().length > 0 || logTypeFilter !== 'all';
+
+  const loadStockLogsPage = useCallback(
+    async (targetPage: number, targetSize: number, forceRefresh = false) => {
+      setIsLoadingLogPage(true);
+      try {
+        const res = await fetchStockLogsPage(effectiveScope, targetPage, targetSize, {
+          forceRefresh,
+          fallbackItems: stockLogs,
+        });
+        setStockLogPageResult(res);
+        if (res.page !== targetPage) {
+          setLogPage(res.page);
+        }
+      } finally {
+        setIsLoadingLogPage(false);
+      }
+    },
+    [effectiveScope, stockLogs]
+  );
+
+  // Load cursor-paginated stock logs only when the Stock Logs sub-tab is open
+  useEffect(() => {
+    if (activeSubTab === 'logs' && !hasActiveLogFilters) {
+      loadStockLogsPage(logPage, logPageSize, false);
+    }
+  }, [activeSubTab, logPage, logPageSize, hasActiveLogFilters, effectiveScope]);
+
+  // Reset stock logs page when filters or page size change
+  useEffect(() => {
+    setLogPage(1);
+  }, [logSearchQuery, logTypeFilter, logPageSize]);
+
+  // Refresh page 1 automatically if a new stock adjustment arrives while viewing logs
+  useEffect(() => {
+    const onStockAdjusted = () => {
+      adminDataCache.invalidateCollection(effectiveScope, 'stockLogs');
+      if (activeSubTab === 'logs' && !hasActiveLogFilters) {
+        setLogPage(1);
+        loadStockLogsPage(1, logPageSize, true);
+      }
+    };
+    window.addEventListener('kenax_stock_logs_updated', onStockAdjusted);
+    return () => window.removeEventListener('kenax_stock_logs_updated', onStockAdjusted);
+  }, [activeSubTab, effectiveScope, hasActiveLogFilters, logPageSize, loadStockLogsPage]);
+
+  // Filtered Stock Logs (merges Page 1 live updates seamlessly when unfiltered)
   const filteredStockLogs = useMemo(() => {
+    if (!hasActiveLogFilters) {
+      if (logPage === 1 && stockLogPageResult?.items) {
+        const byId = new Map<string, StockLog>();
+        stockLogs.slice(0, logPageSize).forEach((l) => {
+          if (l?.id) byId.set(l.id, l);
+        });
+        stockLogPageResult.items.forEach((l) => {
+          if (l?.id && !byId.has(l.id)) byId.set(l.id, l);
+        });
+        return Array.from(byId.values())
+          .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+          .slice(0, logPageSize);
+      }
+      if (stockLogPageResult?.items && stockLogPageResult.items.length > 0) {
+        return stockLogPageResult.items;
+      }
+      const start = (logPage - 1) * logPageSize;
+      return stockLogs.slice(start, start + logPageSize);
+    }
+
     return stockLogs.filter((log) => {
       const query = logSearchQuery.toLowerCase().trim();
       const matchesQuery =
@@ -260,7 +339,22 @@ export const AdminInventory: React.FC<AdminInventoryProps> = ({
 
       return true;
     });
-  }, [stockLogs, logSearchQuery, logTypeFilter]);
+  }, [stockLogs, stockLogPageResult, hasActiveLogFilters, logPage, logPageSize, logSearchQuery, logTypeFilter]);
+
+  const displayedStockLogs = useMemo(() => {
+    if (!hasActiveLogFilters) return filteredStockLogs;
+    const start = (logPage - 1) * logPageSize;
+    return filteredStockLogs.slice(start, start + logPageSize);
+  }, [filteredStockLogs, hasActiveLogFilters, logPage, logPageSize]);
+
+  const totalKnownStockLogs = hasActiveLogFilters
+    ? filteredStockLogs.length
+    : Math.max(stockLogPageResult?.totalCount ?? 0, stockLogs.length);
+  const totalStockLogPages = Math.max(1, Math.ceil(totalKnownStockLogs / logPageSize));
+  const canLogPrev = logPage > 1;
+  const canLogNext = hasActiveLogFilters
+    ? logPage < totalStockLogPages
+    : Boolean(stockLogPageResult?.hasNextPage) || logPage < totalStockLogPages;
 
   const handleOpenAdjustModal = (product: Product, prefillMode: 'add' | 'remove' | 'exact' = 'add') => {
     setSelectedProduct(product);
@@ -916,14 +1010,21 @@ export const AdminInventory: React.FC<AdminInventoryProps> = ({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                  {filteredStockLogs.length === 0 ? (
+                  {isLoadingLogPage && displayedStockLogs.length === 0 ? (
+                    <tr>
+                      <td colSpan={8} className="py-12 text-center text-slate-400 dark:text-slate-500 font-medium">
+                        <RefreshCw className="w-5 h-5 mx-auto mb-2 animate-spin text-sky-500" />
+                        Loading stock logs page...
+                      </td>
+                    </tr>
+                  ) : displayedStockLogs.length === 0 ? (
                     <tr>
                       <td colSpan={8} className="py-12 text-center text-slate-400 dark:text-slate-500 font-medium">
                         No stock adjustment log entries match the filter.
                       </td>
                     </tr>
                   ) : (
-                    filteredStockLogs.map((log) => {
+                    displayedStockLogs.map((log) => {
                       const isOrderDelivery =
                         (log.reason && log.reason.toLowerCase().includes('ডেলিভারি')) ||
                         (log.reason && log.reason.toLowerCase().includes('delivered')) ||
@@ -1024,12 +1125,17 @@ export const AdminInventory: React.FC<AdminInventoryProps> = ({
 
             {/* Mobile Cards View */}
             <div className="lg:hidden divide-y divide-slate-100 dark:divide-slate-800">
-              {filteredStockLogs.length === 0 ? (
+              {isLoadingLogPage && displayedStockLogs.length === 0 ? (
+                <div className="p-8 text-center text-slate-400 dark:text-slate-500 text-xs font-medium">
+                  <RefreshCw className="w-5 h-5 mx-auto mb-2 animate-spin text-sky-500" />
+                  Loading stock logs page...
+                </div>
+              ) : displayedStockLogs.length === 0 ? (
                 <div className="p-8 text-center text-slate-400 dark:text-slate-500 text-xs font-medium">
                   No stock adjustment logs found.
                 </div>
               ) : (
-                filteredStockLogs.map((log) => {
+                displayedStockLogs.map((log) => {
                   const isOrderDelivery =
                     (log.reason && log.reason.toLowerCase().includes('ডেলিভারি')) ||
                     (log.reason && log.reason.toLowerCase().includes('delivered')) ||
@@ -1109,6 +1215,53 @@ export const AdminInventory: React.FC<AdminInventoryProps> = ({
                   );
                 })
               )}
+            </div>
+
+            {/* Stock Logs Cursor Pagination Footer */}
+            <div className="px-4 py-3 bg-slate-50/80 dark:bg-slate-800/80 border-t border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-600 dark:text-slate-300">
+              <div className="flex items-center gap-3 flex-wrap">
+                <span className="tabular-nums font-medium">
+                  Showing <strong className="font-bold text-slate-900 dark:text-white">{displayedStockLogs.length}</strong> of{' '}
+                  <strong className="font-bold text-slate-900 dark:text-white">{totalKnownStockLogs}</strong> stock log entries
+                </span>
+                <div className="flex items-center gap-1.5 sm:pl-3 sm:border-l border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400">
+                  <span>Per page:</span>
+                  <select
+                    value={logPageSize}
+                    onChange={(e) => setLogPageSize(Number(e.target.value) || 25)}
+                    aria-label="Stock logs per page"
+                    className="px-2 py-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-semibold text-slate-800 dark:text-slate-200 cursor-pointer"
+                  >
+                    <option value={25}>25</option>
+                    <option value={50}>50</option>
+                    <option value={100}>100</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  disabled={!canLogPrev || isLoadingLogPage}
+                  onClick={() => setLogPage((p) => Math.max(1, p - 1))}
+                  className="px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed font-medium text-xs flex items-center gap-1 transition-colors cursor-pointer"
+                >
+                  <ChevronLeft className="w-3.5 h-3.5" />
+                  <span>Prev</span>
+                </button>
+                <span className="px-2.5 py-1 font-bold text-slate-800 dark:text-slate-200 bg-slate-100 dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-700 tabular-nums">
+                  Page {logPage} of {totalStockLogPages}
+                </span>
+                <button
+                  type="button"
+                  disabled={!canLogNext || isLoadingLogPage}
+                  onClick={() => setLogPage((p) => p + 1)}
+                  className="px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed font-medium text-xs flex items-center gap-1 transition-colors cursor-pointer"
+                >
+                  <span>Next</span>
+                  <ChevronRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
             </div>
           </div>
         </div>

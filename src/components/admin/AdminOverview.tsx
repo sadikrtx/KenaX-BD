@@ -72,6 +72,7 @@ interface AdminOverviewProps {
   currentRole: UserRole;
   currentStaff?: StaffUser | null;
   lowStockThreshold?: number;
+  totalCustomersCount?: number | null;
 }
 
 export const AdminOverview: React.FC<AdminOverviewProps> = ({
@@ -88,6 +89,7 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
   currentRole,
   currentStaff,
   lowStockThreshold = 5,
+  totalCustomersCount = null,
 }) => {
   const { language } = useLanguage();
   const isBn = language === 'bn';
@@ -1997,7 +1999,9 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
               </div>
             </div>
             <div className="mt-2">
-              <h4 className="text-lg sm:text-xl font-black text-slate-900 dark:text-white">{customers.length}</h4>
+              <h4 className="text-lg sm:text-xl font-black text-slate-900 dark:text-white">
+                {Math.max(customers.length, totalCustomersCount ?? 0)}
+              </h4>
               <p className="text-[10px] sm:text-xs text-emerald-600 dark:text-emerald-400 font-semibold mt-0.5 truncate">
                 {isBn ? 'নিবন্ধিত ডেটাবেস অ্যাকাউন্ট' : 'Registered database accounts'}
               </p>

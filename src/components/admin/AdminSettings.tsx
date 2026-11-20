@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, Suspense } from 'react';
 import {
   Settings,
   Save,
@@ -40,16 +40,39 @@ import {
 } from 'lucide-react';
 import { extractYouTubeId } from '../HeroBanner';
 import { saveHeroVideoToFirestore, deleteHeroVideoFromFirestore, saveSettingsToDB, saveHeroBannersToDB } from '../../lib/firebase';
-import { AdminHeroSlidesManager } from './AdminHeroSlidesManager';
-import { AdminTagBannersManager } from './AdminTagBannersManager';
-import { AdminNavItemsManager } from './AdminNavItemsManager';
-import { AdminPromoGridManager } from './AdminPromoGridManager';
-import { AdminMaintenanceSettings } from './AdminMaintenanceSettings';
-import { AdminPoliciesSettings } from './AdminPoliciesSettings';
-import { AdminGoogleSheets } from './AdminGoogleSheets';
-import { AdminCourierLogisticsSettings } from './AdminCourierLogisticsSettings';
-import { AdminStorageSettings } from './AdminStorageSettings';
-import { AdminIntegrationSettings } from './AdminIntegrationSettings';
+import { AdminSectionSkeleton } from './AdminSectionSkeleton';
+
+// Lazy-loaded Settings Sub-Sections (prevents downloading all 16 sub-tabs up front)
+const AdminHeroSlidesManager = React.lazy(() =>
+  import('./AdminHeroSlidesManager').then((m) => ({ default: m.AdminHeroSlidesManager }))
+);
+const AdminTagBannersManager = React.lazy(() =>
+  import('./AdminTagBannersManager').then((m) => ({ default: m.AdminTagBannersManager }))
+);
+const AdminNavItemsManager = React.lazy(() =>
+  import('./AdminNavItemsManager').then((m) => ({ default: m.AdminNavItemsManager }))
+);
+const AdminPromoGridManager = React.lazy(() =>
+  import('./AdminPromoGridManager').then((m) => ({ default: m.AdminPromoGridManager }))
+);
+const AdminMaintenanceSettings = React.lazy(() =>
+  import('./AdminMaintenanceSettings').then((m) => ({ default: m.AdminMaintenanceSettings }))
+);
+const AdminPoliciesSettings = React.lazy(() =>
+  import('./AdminPoliciesSettings').then((m) => ({ default: m.AdminPoliciesSettings }))
+);
+const AdminGoogleSheets = React.lazy(() =>
+  import('./AdminGoogleSheets').then((m) => ({ default: m.AdminGoogleSheets }))
+);
+const AdminCourierLogisticsSettings = React.lazy(() =>
+  import('./AdminCourierLogisticsSettings').then((m) => ({ default: m.AdminCourierLogisticsSettings }))
+);
+const AdminStorageSettings = React.lazy(() =>
+  import('./AdminStorageSettings').then((m) => ({ default: m.AdminStorageSettings }))
+);
+const AdminIntegrationSettings = React.lazy(() =>
+  import('./AdminIntegrationSettings').then((m) => ({ default: m.AdminIntegrationSettings }))
+);
 import {
   SiteSettings,
   UserRole,
@@ -773,6 +796,7 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
       </div>
 
       {/* Main Settings Body */}
+      <Suspense fallback={<AdminSectionSkeleton variant="settings" />}>
       {activeTab === 'integration' && isStrictSuperAdmin ? (
         <AdminIntegrationSettings
           settings={settings}
@@ -1612,6 +1636,7 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
         )}
       </form>
       )}
+      </Suspense>
     </div>
   );
 };

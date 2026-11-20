@@ -108,7 +108,16 @@ export const AdminSMSGateway: React.FC<AdminSMSGatewayProps> = ({
 
     const unsubscribe = subscribeToSMSLogs((updatedLogs) => {
       logsReceived = true;
-      if (isMounted) setLogs(updatedLogs);
+      if (isMounted) {
+        setLogs(updatedLogs);
+        try {
+          localStorage.setItem('kenax_unread_sms_count', '0');
+          if (updatedLogs[0]?.id) {
+            localStorage.setItem('kenax_last_seen_sms_id', updatedLogs[0].id);
+          }
+          window.dispatchEvent(new Event('kenax_sms_unread_updated'));
+        } catch {}
+      }
     });
 
     const fallbackTimer = window.setTimeout(() => {

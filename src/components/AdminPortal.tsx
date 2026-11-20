@@ -4,12 +4,16 @@ import {
   AdminTab,
 } from './admin/AdminSidebar';
 import { AdminHeader } from './admin/AdminHeader';
-
-import AdminOrderSettings from './admin/AdminOrderSettings';
-import AdminPlugins, { PluginManagerSubTab } from './admin/AdminPlugins';
+import { AdminSectionSkeleton } from './admin/AdminSectionSkeleton';
+import type { PluginManagerSubTab } from './admin/AdminPlugins';
 import { PluginProvider } from '../context/PluginContext';
+import { adminDataCache } from '../lib/adminCache';
+import { getCollectionTotalCount } from '../lib/firestorePagination';
+import { getEnvCollectionName } from '../utils/envHelper';
 
 // Lazy-loaded Admin Sub-Modules (Zero overhead until opened)
+const AdminOrderSettings = React.lazy(() => import('./admin/AdminOrderSettings'));
+const AdminPlugins = React.lazy(() => import('./admin/AdminPlugins'));
 const AdminOverview = React.lazy(() => import('./admin/AdminOverview').then(m => ({ default: m.AdminOverview })));
 const AdminOrders = React.lazy(() => import('./admin/AdminOrders').then(m => ({ default: m.AdminOrders })));
 const AdminProducts = React.lazy(() => import('./admin/AdminProducts').then(m => ({ default: m.AdminProducts })));
@@ -584,6 +588,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     } catch {}
     return mergeCustomersLists(INITIAL_CUSTOMERS, localCache);
   });
+  const [totalCustomersCount, setTotalCustomersCount] = useState<number | null>(null);
 
   const [activityLogs, setActivityLogs] = useState<ActivityLog[]>([]);
 
@@ -745,32 +750,444 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   // Invoice modal state
   const [selectedInvoiceOrder, setSelectedInvoiceOrder] = useState<Order | null>(null);
 
-  // Sync with Firestore on mount: parallel one-shot reads for non-subscribed collections + real-time listeners (with fallback guards)
+  // Account- & Role-Scoped In-Memory Cache Scope (isolates cached data across account/role switches)
+  const cacheScope = adminDataCache.makeScope(
+    currentStaff?.id || currentStaff?.email || authenticatedStaff?.id || 'staff',
+    activeRole
+  );
+
+  useEffect(() => {
+    adminDataCache.enforceScope(cacheScope);
+  }, [cacheScope]);
+
+  // Tab requirement flags for demand-driven data loading & scoped Firestore listeners
+  const needsLiveCustomers =
+    currentTab === 'customers' ||
+    currentTab === 'wishlist-activities' ||
+    currentTab === 'gmail-alerts';
+  const needsOverviewSummaryCache = currentTab === 'overview';
+  const needsLiveExpenses = currentTab === 'costs' || currentTab === 'reports';
+  const needsLiveOtherProfits = currentTab === 'costs';
+  const needsLiveSuppliers = currentTab === 'products' || currentTab === 'dropshipping';
+  const needsLiveSourcing = currentTab === 'dropshipping';
+  const needsLiveReviews = currentTab === 'reviews' || currentTab === 'performance';
+  const needsLiveActivityLogs =
+    currentTab === 'logs' ||
+    currentTab === 'performance' ||
+    currentTab === 'my-dashboard' ||
+    currentTab === 'costs' ||
+    currentTab === 'orders' ||
+    currentTab === 'confirmed-orders';
+  const needsStockLogs = currentTab === 'inventory';
+  const needsStaffFallback =
+    (currentTab === 'staff' || currentTab === 'roles') &&
+    (!passedStaffList || passedStaffList.length === 0);
+
+  // 1. Deferred non-blocking header notifications (never blocks initial Dashboard render)
   useEffect(() => {
     let isMounted = true;
-    const received = {
-      logs: false,
-      customers: false,
-      expenses: false,
-      otherProfits: false,
-      suppliers: false,
-      sourcing: false,
-      reviews: false,
+    const timer = window.setTimeout(() => {
+      adminDataCache
+        .getOrFetch(cacheScope, 'notifications', () => getNotificationsFromDB(), 90_000)
+        .then((dbNotifs) => {
+          if (isMounted && dbNotifs && dbNotifs.length > 0) {
+            setNotifications(dbNotifs);
+          }
+        })
+        .catch(() => {});
+    }, 400);
+    return () => {
+      isMounted = false;
+      window.clearTimeout(timer);
     };
+  }, [cacheScope]);
 
-    // Non-subscribed collections fetched in parallel (staff, notifications, stock logs)
-    Promise.all([
-      getStaffFromDB().catch(() => null),
-      getNotificationsFromDB().catch(() => null),
-      getStockLogsFromDB().catch(() => null),
-    ]).then(([dbStaff, dbNotifs, dbStockLogs]) => {
-      if (!isMounted) return;
-      if (dbStaff && dbStaff.length > 0) setStaffList(dbStaff);
-      if (dbNotifs && dbNotifs.length > 0) setNotifications(dbNotifs);
-      if (dbStockLogs && dbStockLogs.length > 0) setStockLogs(dbStockLogs);
+  // 2. Staff fallback (only if parent App.tsx did not already supply live staffList)
+  useEffect(() => {
+    if (!needsStaffFallback) return;
+    let isMounted = true;
+    adminDataCache
+      .getOrFetch(cacheScope, 'staff', () => getStaffFromDB(), 120_000)
+      .then((dbStaff) => {
+        if (isMounted && dbStaff && dbStaff.length > 0) {
+          setStaffList(dbStaff);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      isMounted = false;
+    };
+  }, [cacheScope, needsStaffFallback]);
+
+  // 3. Overview non-blocking cached KPI hydration (server customer count via getCountFromServer, expenses, otherProfits)
+  // Avoids downloading the entire customers collection or opening 7+ heavy real-time listeners on initial Dashboard login
+  useEffect(() => {
+    if (!needsOverviewSummaryCache) return;
+    let isMounted = true;
+
+    const cachedCust = adminDataCache.get<CustomerRecord[]>(cacheScope, 'customers');
+    if (cachedCust?.data) setCustomers(cachedCust.data);
+    const cachedExp = adminDataCache.get<ExpenseRecord[]>(cacheScope, 'expenses');
+    if (cachedExp?.data) setExpenses(cachedExp.data);
+    const cachedProfits = adminDataCache.get<OtherProfitRecord[]>(cacheScope, 'otherProfits');
+    if (cachedProfits?.data) setOtherProfits(cachedProfits.data);
+
+    const timer = window.setTimeout(() => {
+      Promise.all([
+        getCollectionTotalCount(getEnvCollectionName('customers'), 'customers', cacheScope, 120_000)
+          .then((count) => {
+            if (isMounted && count !== null) setTotalCustomersCount(count);
+          })
+          .catch(() => {}),
+        adminDataCache
+          .getOrFetch(
+            cacheScope,
+            'expenses',
+            async () => (await getExpensesFromDB()).filter((e) => !isDemoExpense(e)),
+            90_000
+          )
+          .then((validExpenses) => {
+            if (isMounted && validExpenses) {
+              setExpenses(validExpenses);
+              safeSetLocalStorage('kenax_expenses_cache', JSON.stringify(validExpenses));
+            }
+          })
+          .catch(() => {}),
+        adminDataCache
+          .getOrFetch(
+            cacheScope,
+            'otherProfits',
+            async () => (await getOtherProfitsFromDB()).filter((p) => !isDemoOtherProfit(p)),
+            90_000
+          )
+          .then((validProfits) => {
+            if (isMounted && validProfits) {
+              setOtherProfits(validProfits);
+              safeSetLocalStorage('kenax_other_profits_cache', JSON.stringify(validProfits));
+            }
+          })
+          .catch(() => {}),
+      ]);
+    }, 250);
+
+    return () => {
+      isMounted = false;
+      window.clearTimeout(timer);
+    };
+  }, [cacheScope, needsOverviewSummaryCache]);
+
+  // 4. Tab-Demand Live Customers Listener (customers, wishlist-activities, gmail-alerts)
+  useEffect(() => {
+    if (!needsLiveCustomers) return;
+    let isMounted = true;
+    let snapshotReceived = false;
+
+    const cached = adminDataCache.get<CustomerRecord[]>(cacheScope, 'customers');
+    if (cached?.data && cached.data.length > 0) {
+      setCustomers(cached.data);
+    }
+
+    const unsubscribe = subscribeToCustomers((freshCusts) => {
+      snapshotReceived = true;
+      if (isMounted && freshCusts && freshCusts.length > 0) {
+        setCustomers(freshCusts);
+        adminDataCache.set(cacheScope, 'customers', freshCusts, 120_000);
+      }
     });
 
+    const fallbackTimer = window.setTimeout(() => {
+      if (isMounted && !snapshotReceived) {
+        adminDataCache
+          .getOrFetch(cacheScope, 'customers', () => getCustomersFromDB(), 120_000)
+          .then((dbCust) => {
+            if (isMounted && dbCust && dbCust.length > 0) setCustomers(dbCust);
+          })
+          .catch(() => {});
+      }
+    }, 1500);
+
+    return () => {
+      isMounted = false;
+      window.clearTimeout(fallbackTimer);
+      unsubscribe();
+    };
+  }, [cacheScope, needsLiveCustomers]);
+
+  // 5. Tab-Demand Live Expenses Listener (costs, reports)
+  useEffect(() => {
+    if (!needsLiveExpenses) return;
+    let isMounted = true;
+    let snapshotReceived = false;
+
+    const cached = adminDataCache.get<ExpenseRecord[]>(cacheScope, 'expenses');
+    if (cached?.data) setExpenses(cached.data);
+
+    const unsubscribe = subscribeToExpenses((freshExpenses) => {
+      snapshotReceived = true;
+      if (isMounted && freshExpenses) {
+        const validExpenses = freshExpenses.filter((e) => !isDemoExpense(e));
+        setExpenses(validExpenses);
+        adminDataCache.set(cacheScope, 'expenses', validExpenses, 90_000);
+        safeSetLocalStorage('kenax_expenses_cache', JSON.stringify(validExpenses));
+      }
+    });
+
+    const fallbackTimer = window.setTimeout(() => {
+      if (isMounted && !snapshotReceived) {
+        adminDataCache
+          .getOrFetch(
+            cacheScope,
+            'expenses',
+            async () => (await getExpensesFromDB()).filter((e) => !isDemoExpense(e)),
+            90_000
+          )
+          .then((valid) => {
+            if (isMounted && valid) {
+              setExpenses(valid);
+              safeSetLocalStorage('kenax_expenses_cache', JSON.stringify(valid));
+            }
+          })
+          .catch(() => {});
+      }
+    }, 1500);
+
+    return () => {
+      isMounted = false;
+      window.clearTimeout(fallbackTimer);
+      unsubscribe();
+    };
+  }, [cacheScope, needsLiveExpenses]);
+
+  // 6. Tab-Demand Live Other Profits Listener (costs)
+  useEffect(() => {
+    if (!needsLiveOtherProfits) return;
+    let isMounted = true;
+    let snapshotReceived = false;
+
+    const cached = adminDataCache.get<OtherProfitRecord[]>(cacheScope, 'otherProfits');
+    if (cached?.data) setOtherProfits(cached.data);
+
+    const unsubscribe = subscribeToOtherProfits((freshProfits) => {
+      snapshotReceived = true;
+      if (isMounted && freshProfits) {
+        const cleanProfits = freshProfits.filter((p) => !isDemoOtherProfit(p));
+        setOtherProfits(cleanProfits);
+        adminDataCache.set(cacheScope, 'otherProfits', cleanProfits, 90_000);
+        safeSetLocalStorage('kenax_other_profits_cache', JSON.stringify(cleanProfits));
+      }
+    });
+
+    const fallbackTimer = window.setTimeout(() => {
+      if (isMounted && !snapshotReceived) {
+        adminDataCache
+          .getOrFetch(
+            cacheScope,
+            'otherProfits',
+            async () => (await getOtherProfitsFromDB()).filter((p) => !isDemoOtherProfit(p)),
+            90_000
+          )
+          .then((valid) => {
+            if (isMounted && valid) {
+              setOtherProfits(valid);
+              safeSetLocalStorage('kenax_other_profits_cache', JSON.stringify(valid));
+            }
+          })
+          .catch(() => {});
+      }
+    }, 1500);
+
+    return () => {
+      isMounted = false;
+      window.clearTimeout(fallbackTimer);
+      unsubscribe();
+    };
+  }, [cacheScope, needsLiveOtherProfits]);
+
+  // 7. Tab-Demand Live Suppliers Listener (products, dropshipping)
+  useEffect(() => {
+    if (!needsLiveSuppliers) return;
+    let isMounted = true;
+    let snapshotReceived = false;
+
+    const cached = adminDataCache.get<Supplier[]>(cacheScope, 'suppliers');
+    if (cached?.data && cached.data.length > 0) setSuppliers(cached.data);
+
+    const unsubscribe = subscribeToSuppliers((freshSuppliers) => {
+      snapshotReceived = true;
+      if (isMounted && freshSuppliers) {
+        setSuppliers(freshSuppliers);
+        adminDataCache.set(cacheScope, 'suppliers', freshSuppliers, 120_000);
+        safeSetLocalStorage('kenax_suppliers_cache', JSON.stringify(freshSuppliers));
+      }
+    });
+
+    const fallbackTimer = window.setTimeout(() => {
+      if (isMounted && !snapshotReceived) {
+        adminDataCache
+          .getOrFetch(cacheScope, 'suppliers', () => getSuppliersFromDB(), 120_000)
+          .then((dbSuppliers) => {
+            if (isMounted && dbSuppliers && dbSuppliers.length > 0) {
+              setSuppliers(dbSuppliers);
+              safeSetLocalStorage('kenax_suppliers_cache', JSON.stringify(dbSuppliers));
+            }
+          })
+          .catch(() => {});
+      }
+    }, 1500);
+
+    return () => {
+      isMounted = false;
+      window.clearTimeout(fallbackTimer);
+      unsubscribe();
+    };
+  }, [cacheScope, needsLiveSuppliers]);
+
+  // 8. Tab-Demand Live Sourcing Locations Listener (dropshipping only)
+  useEffect(() => {
+    if (!needsLiveSourcing) return;
+    let isMounted = true;
+    let snapshotReceived = false;
+
+    const cached = adminDataCache.get<SourcingLocation[]>(cacheScope, 'sourcingLocations');
+    if (cached?.data && cached.data.length > 0) setSourcingLocations(cached.data);
+
+    const unsubscribe = subscribeToSourcingLocations((freshLocs) => {
+      snapshotReceived = true;
+      if (isMounted && freshLocs) {
+        setSourcingLocations(freshLocs);
+        adminDataCache.set(cacheScope, 'sourcingLocations', freshLocs, 120_000);
+        safeSetLocalStorage('kenax_sourcing_locations_cache', JSON.stringify(freshLocs));
+      }
+    });
+
+    const fallbackTimer = window.setTimeout(() => {
+      if (isMounted && !snapshotReceived) {
+        adminDataCache
+          .getOrFetch(cacheScope, 'sourcingLocations', () => getSourcingLocationsFromDB(), 120_000)
+          .then((dbSourcing) => {
+            if (isMounted && dbSourcing && dbSourcing.length > 0) {
+              setSourcingLocations(dbSourcing);
+              safeSetLocalStorage('kenax_sourcing_locations_cache', JSON.stringify(dbSourcing));
+            }
+          })
+          .catch(() => {});
+      }
+    }, 1500);
+
+    return () => {
+      isMounted = false;
+      window.clearTimeout(fallbackTimer);
+      unsubscribe();
+    };
+  }, [cacheScope, needsLiveSourcing]);
+
+  // 9. Tab-Demand Live Reviews Listener (reviews, performance)
+  useEffect(() => {
+    if (!needsLiveReviews) return;
+    let isMounted = true;
+    let snapshotReceived = false;
+
+    const cached = adminDataCache.get<Review[]>(cacheScope, 'reviews');
+    if (cached?.data && cached.data.length > 0) setReviews(cached.data);
+
+    const unsubscribe = subscribeToReviews((freshReviews) => {
+      snapshotReceived = true;
+      if (isMounted && freshReviews && freshReviews.length > 0) {
+        setReviews(freshReviews);
+        adminDataCache.set(cacheScope, 'reviews', freshReviews, 120_000);
+        safeSetLocalStorage('kenax_reviews_cache', JSON.stringify(freshReviews));
+      }
+    });
+
+    const fallbackTimer = window.setTimeout(() => {
+      if (isMounted && !snapshotReceived) {
+        adminDataCache
+          .getOrFetch(cacheScope, 'reviews', () => getReviewsFromDB(), 120_000)
+          .then((dbReviews) => {
+            if (isMounted && dbReviews && dbReviews.length > 0) {
+              setReviews(dbReviews);
+              safeSetLocalStorage('kenax_reviews_cache', JSON.stringify(dbReviews));
+            }
+          })
+          .catch(() => {});
+      }
+    }, 1500);
+
+    return () => {
+      isMounted = false;
+      window.clearTimeout(fallbackTimer);
+      unsubscribe();
+    };
+  }, [cacheScope, needsLiveReviews]);
+
+  // 10. Tab-Demand Live Activity Logs Listener (logs, performance, my-dashboard, costs, orders)
+  useEffect(() => {
+    if (!needsLiveActivityLogs) return;
+    let isMounted = true;
+    let snapshotReceived = false;
+
+    const cached = adminDataCache.get<ActivityLog[]>(cacheScope, 'activityLogs');
+    if (cached?.data && cached.data.length > 0) setActivityLogs(cached.data);
+
+    // Fetch persistent server activity logs only when an activity-log tab is opened (deduplicated via cache)
+    adminDataCache
+      .getOrFetch(
+        cacheScope,
+        'serverActivityLogs',
+        async () => {
+          const res = await fetch('/api/activity-logs');
+          const ct = (res.headers.get('content-type') || '').toLowerCase();
+          return res.ok && ct.includes('application/json') ? ((await res.json()) as ActivityLog[]) : [];
+        },
+        60_000
+      )
+      .then((serverLogs) => {
+        if (isMounted && Array.isArray(serverLogs) && serverLogs.length > 0) {
+          setActivityLogs((prev) => {
+            const byId = new Map<string, ActivityLog>();
+            [...serverLogs, ...prev].forEach((item) => {
+              if (item && item.id) byId.set(item.id, item);
+            });
+            const merged = Array.from(byId.values()).sort(
+              (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+            );
+            adminDataCache.set(cacheScope, 'activityLogs', merged, 60_000);
+            return merged;
+          });
+        }
+      })
+      .catch(() => {});
+
+    const unsubscribe = subscribeToActivityLogs((freshLogs) => {
+      snapshotReceived = true;
+      if (isMounted && Array.isArray(freshLogs)) {
+        setActivityLogs(freshLogs);
+        adminDataCache.set(cacheScope, 'activityLogs', freshLogs, 60_000);
+      }
+    });
+
+    const fallbackTimer = window.setTimeout(() => {
+      if (isMounted && !snapshotReceived) {
+        adminDataCache
+          .getOrFetch(cacheScope, 'activityLogs', () => getActivityLogsFromDB(), 60_000)
+          .then((dbLogs) => {
+            if (isMounted && dbLogs && dbLogs.length > 0) setActivityLogs(dbLogs);
+          })
+          .catch(() => {});
+      }
+    }, 1500);
+
+    return () => {
+      isMounted = false;
+      window.clearTimeout(fallbackTimer);
+      unsubscribe();
+    };
+  }, [cacheScope, needsLiveActivityLogs]);
+
+  // 11. Tab-Demand Stock Logs Loader (inventory tab only + local cache sync on adjustment)
+  useEffect(() => {
     const handleStockLogsUpdated = () => {
+      adminDataCache.invalidateCollection(cacheScope, 'stockLogs');
       const cached = localStorage.getItem('kenax_stock_logs_cache');
       if (cached) {
         try {
@@ -784,183 +1201,24 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     window.addEventListener('kenax_stock_logs_updated', handleStockLogsUpdated);
     window.addEventListener('storage', handleStockLogsUpdated);
 
-    // Fetch real persistent activity logs from server immediately
-    fetch('/api/activity-logs')
-      .then((res) => {
-        const ct = (res.headers.get('content-type') || '').toLowerCase();
-        return res.ok && ct.includes('application/json') ? res.json() : [];
-      })
-      .then((serverLogs) => {
-        if (isMounted && Array.isArray(serverLogs)) {
-          setActivityLogs((prev) => {
-            const byId = new Map<string, ActivityLog>();
-            [...serverLogs, ...prev].forEach((item) => {
-              if (item && item.id) byId.set(item.id, item);
-            });
-            return Array.from(byId.values()).sort(
-              (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
-            );
-          });
-        }
-      })
-      .catch(() => {});
-
-    // Permanent Real-time Firestore sync for admin collections (eliminates duplicate initial getDocs reads)
-    const unsubscribeLogs = subscribeToActivityLogs((freshLogs) => {
-      received.logs = true;
-      if (isMounted && Array.isArray(freshLogs)) {
-        setActivityLogs(freshLogs);
-      }
-    });
-
-    const unsubscribeCustomers = subscribeToCustomers((freshCusts) => {
-      received.customers = true;
-      if (isMounted && freshCusts && freshCusts.length > 0) {
-        setCustomers(freshCusts);
-      }
-    });
-
-    const unsubscribeExpenses = subscribeToExpenses((freshExpenses) => {
-      received.expenses = true;
-      if (isMounted && freshExpenses) {
-        const validExpenses = freshExpenses.filter((e) => !isDemoExpense(e));
-        setExpenses(validExpenses);
-        safeSetLocalStorage('kenax_expenses_cache', JSON.stringify(validExpenses));
-      }
-    });
-
-    const unsubscribeOtherProfits = subscribeToOtherProfits((freshProfits) => {
-      received.otherProfits = true;
-      if (isMounted && freshProfits) {
-        const cleanProfits = freshProfits.filter((p) => !isDemoOtherProfit(p));
-        setOtherProfits(cleanProfits);
-        safeSetLocalStorage('kenax_other_profits_cache', JSON.stringify(cleanProfits));
-      }
-    });
-
-    const unsubscribeSuppliers = subscribeToSuppliers((freshSuppliers) => {
-      received.suppliers = true;
-      if (isMounted && freshSuppliers) {
-        setSuppliers(freshSuppliers);
-        safeSetLocalStorage('kenax_suppliers_cache', JSON.stringify(freshSuppliers));
-      }
-    });
-
-    const unsubscribeSourcing = subscribeToSourcingLocations((freshLocs) => {
-      received.sourcing = true;
-      if (isMounted && freshLocs) {
-        setSourcingLocations(freshLocs);
-        safeSetLocalStorage('kenax_sourcing_locations_cache', JSON.stringify(freshLocs));
-      }
-    });
-
-    const unsubscribeReviews = subscribeToReviews((freshReviews) => {
-      received.reviews = true;
-      if (isMounted && freshReviews && freshReviews.length > 0) {
-        setReviews(freshReviews);
-        safeSetLocalStorage('kenax_reviews_cache', JSON.stringify(freshReviews));
-      }
-    });
-
-    // Offline / quota safety fallback: fetch in parallel ONLY for collections whose snapshot didn't emit
-    const fallbackTimer = window.setTimeout(async () => {
-      if (!isMounted) return;
-      const tasks: Promise<void>[] = [];
-      if (!received.customers) {
-        tasks.push(
-          getCustomersFromDB()
-            .then((dbCust) => {
-              if (isMounted && dbCust && dbCust.length > 0) setCustomers(dbCust);
-            })
-            .catch(() => {})
-        );
-      }
-      if (!received.logs) {
-        tasks.push(
-          getActivityLogsFromDB()
-            .then((dbLogs) => {
-              if (isMounted && dbLogs && dbLogs.length > 0) setActivityLogs(dbLogs);
-            })
-            .catch(() => {})
-        );
-      }
-      if (!received.expenses) {
-        tasks.push(
-          getExpensesFromDB()
-            .then((dbExpenses) => {
-              if (!isMounted) return;
-              const valid = (dbExpenses || []).filter((e) => !isDemoExpense(e));
-              setExpenses(valid);
-              safeSetLocalStorage('kenax_expenses_cache', JSON.stringify(valid));
-            })
-            .catch(() => {})
-        );
-      }
-      if (!received.otherProfits) {
-        tasks.push(
-          getOtherProfitsFromDB()
-            .then((dbOtherProfits) => {
-              if (!isMounted) return;
-              const valid = (dbOtherProfits || []).filter((p) => !isDemoOtherProfit(p));
-              setOtherProfits(valid);
-              safeSetLocalStorage('kenax_other_profits_cache', JSON.stringify(valid));
-            })
-            .catch(() => {})
-        );
-      }
-      if (!received.suppliers) {
-        tasks.push(
-          getSuppliersFromDB()
-            .then((dbSuppliers) => {
-              if (isMounted && dbSuppliers && dbSuppliers.length > 0) {
-                setSuppliers(dbSuppliers);
-                safeSetLocalStorage('kenax_suppliers_cache', JSON.stringify(dbSuppliers));
-              }
-            })
-            .catch(() => {})
-        );
-      }
-      if (!received.sourcing) {
-        tasks.push(
-          getSourcingLocationsFromDB()
-            .then((dbSourcing) => {
-              if (isMounted && dbSourcing && dbSourcing.length > 0) {
-                setSourcingLocations(dbSourcing);
-                safeSetLocalStorage('kenax_sourcing_locations_cache', JSON.stringify(dbSourcing));
-              }
-            })
-            .catch(() => {})
-        );
-      }
-      if (!received.reviews) {
-        tasks.push(
-          getReviewsFromDB()
-            .then((dbReviews) => {
-              if (isMounted && dbReviews && dbReviews.length > 0) {
-                setReviews(dbReviews);
-                safeSetLocalStorage('kenax_reviews_cache', JSON.stringify(dbReviews));
-              }
-            })
-            .catch(() => {})
-        );
-      }
-      if (tasks.length > 0) await Promise.all(tasks);
-    }, 1500);
+    let isMounted = true;
+    if (needsStockLogs) {
+      adminDataCache
+        .getOrFetch(cacheScope, 'stockLogs', () => getStockLogsFromDB(), 60_000)
+        .then((dbStockLogs) => {
+          if (isMounted && dbStockLogs && dbStockLogs.length > 0) {
+            setStockLogs(dbStockLogs);
+          }
+        })
+        .catch(() => {});
+    }
 
     return () => {
       isMounted = false;
-      window.clearTimeout(fallbackTimer);
-      unsubscribeLogs();
-      unsubscribeCustomers();
-      unsubscribeExpenses();
-      unsubscribeOtherProfits();
-      unsubscribeSuppliers();
-      unsubscribeSourcing();
-      unsubscribeReviews();
       window.removeEventListener('kenax_stock_logs_updated', handleStockLogsUpdated);
       window.removeEventListener('storage', handleStockLogsUpdated);
     };
-  }, []);
+  }, [cacheScope, needsStockLogs]);
 
   // Centralized Audit Logger
   const recordAuditLog = (
@@ -998,6 +1256,8 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     };
 
     setActivityLogs((prev) => [newLog, ...prev]);
+    adminDataCache.invalidateCollection(cacheScope, 'activityLogs');
+    adminDataCache.invalidate(cacheScope, 'serverActivityLogs');
     logActivityToDB(newLog);
   };
 
@@ -1005,6 +1265,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   const handleAddExpense = (expense: ExpenseRecord) => {
     const next = [expense, ...expenses];
     setExpenses(next);
+    adminDataCache.set(cacheScope, 'expenses', next, 90_000);
     safeSetLocalStorage('kenax_expenses_cache', JSON.stringify(next));
     saveExpenseToDB(expense);
 
@@ -1019,6 +1280,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   const handleUpdateExpense = (updated: ExpenseRecord) => {
     const next = expenses.map((e) => (e.id === updated.id ? updated : e));
     setExpenses(next);
+    adminDataCache.set(cacheScope, 'expenses', next, 90_000);
     safeSetLocalStorage('kenax_expenses_cache', JSON.stringify(next));
     saveExpenseToDB(updated);
 
@@ -1034,6 +1296,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     const target = expenses.find((e) => e.id === expenseId);
     const next = expenses.filter((e) => e.id !== expenseId);
     setExpenses(next);
+    adminDataCache.set(cacheScope, 'expenses', next, 90_000);
     safeSetLocalStorage('kenax_expenses_cache', JSON.stringify(next));
     deleteExpenseFromDB(expenseId);
 
@@ -1051,6 +1314,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   const handleAddOtherProfit = (profit: OtherProfitRecord) => {
     const next = [profit, ...otherProfits];
     setOtherProfits(next);
+    adminDataCache.set(cacheScope, 'otherProfits', next, 90_000);
     safeSetLocalStorage('kenax_other_profits_cache', JSON.stringify(next));
     saveOtherProfitToDB(profit);
 
@@ -1065,6 +1329,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   const handleUpdateOtherProfit = (updated: OtherProfitRecord) => {
     const next = otherProfits.map((p) => (p.id === updated.id ? updated : p));
     setOtherProfits(next);
+    adminDataCache.set(cacheScope, 'otherProfits', next, 90_000);
     safeSetLocalStorage('kenax_other_profits_cache', JSON.stringify(next));
     saveOtherProfitToDB(updated);
 
@@ -1080,6 +1345,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     const target = otherProfits.find((p) => p.id === profitId);
     const next = otherProfits.filter((p) => p.id !== profitId);
     setOtherProfits(next);
+    adminDataCache.set(cacheScope, 'otherProfits', next, 90_000);
     safeSetLocalStorage('kenax_other_profits_cache', JSON.stringify(next));
     deleteOtherProfitFromDB(profitId);
 
@@ -1313,7 +1579,13 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
       reason,
     });
 
-    setStockLogs((prev) => [stockEntry, ...prev.filter((l) => l.id !== stockEntry.id)]);
+    setStockLogs((prev) => {
+      const next = [stockEntry, ...prev.filter((l) => l.id !== stockEntry.id)];
+      adminDataCache.invalidateCollection(cacheScope, 'stockLogs');
+      adminDataCache.set(cacheScope, 'stockLogs', next, 60_000);
+      return next;
+    });
+    adminDataCache.invalidateCollection(cacheScope, 'products');
 
     recordAuditLog(
       'Stock Adjusted',
@@ -1337,6 +1609,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     };
 
     setCustomers((prev) => prev.map((c) => (c.id === customerId ? updated : c)));
+    adminDataCache.invalidateCollection(cacheScope, 'customers');
     saveCustomerToDB(updated);
 
     recordAuditLog(
@@ -1358,6 +1631,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     };
 
     setCustomers((prev) => prev.map((c) => (c.id === customerId ? updated : c)));
+    adminDataCache.invalidateCollection(cacheScope, 'customers');
     await updateCustomerInDB(customerId, { password: newPassword });
 
     // Update active logged in customer cache if this customer is currently active
@@ -1391,6 +1665,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     };
 
     setCustomers((prev) => prev.map((c) => (c.id === customerId ? mergedCustomer : c)));
+    adminDataCache.invalidateCollection(cacheScope, 'customers');
     await updateCustomerInDB(customerId, updatedData);
 
     recordAuditLog(
@@ -1413,6 +1688,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
 
     // Delete customer record from state and database
     setCustomers((prev) => prev.filter((c) => c.id !== customerId));
+    adminDataCache.invalidateCollection(cacheScope, 'customers');
     await deleteCustomerFromDB(customerId);
 
     // CRITICAL: All orders remain intact in state and in Firestore!
@@ -1429,6 +1705,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     setNotifications((prev) =>
       prev.map((n) => (n.id === notifId ? { ...n, isRead: true } : n))
     );
+    adminDataCache.invalidate(cacheScope, 'notifications');
     markNotificationReadInDB(notifId);
   };
 
@@ -1573,6 +1850,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   const handleAddSupplier = async (supplier: Supplier) => {
     setSuppliers((prev) => {
       const next = [supplier, ...prev.filter((s) => s.id !== supplier.id)];
+      adminDataCache.set(cacheScope, 'suppliers', next, 120_000);
       safeSetLocalStorage('kenax_suppliers_cache', JSON.stringify(next));
       return next;
     });
@@ -1588,6 +1866,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   const handleUpdateSupplier = async (supplier: Supplier) => {
     setSuppliers((prev) => {
       const next = prev.map((s) => (s.id === supplier.id ? supplier : s));
+      adminDataCache.set(cacheScope, 'suppliers', next, 120_000);
       safeSetLocalStorage('kenax_suppliers_cache', JSON.stringify(next));
       return next;
     });
@@ -1604,6 +1883,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     const supp = suppliers.find((s) => s.id === supplierId);
     setSuppliers((prev) => {
       const next = prev.filter((s) => s.id !== supplierId);
+      adminDataCache.set(cacheScope, 'suppliers', next, 120_000);
       safeSetLocalStorage('kenax_suppliers_cache', JSON.stringify(next));
       return next;
     });
@@ -1622,6 +1902,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   const handleAddSourcingLocation = async (location: SourcingLocation) => {
     setSourcingLocations((prev) => {
       const next = [location, ...prev.filter((l) => l.id !== location.id)];
+      adminDataCache.set(cacheScope, 'sourcingLocations', next, 120_000);
       safeSetLocalStorage('kenax_sourcing_locations_cache', JSON.stringify(next));
       return next;
     });
@@ -1640,6 +1921,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
       const next = exists
         ? prev.map((l) => (l.id === location.id ? location : l))
         : [location, ...prev];
+      adminDataCache.set(cacheScope, 'sourcingLocations', next, 120_000);
       safeSetLocalStorage('kenax_sourcing_locations_cache', JSON.stringify(next));
       return next;
     });
@@ -1656,6 +1938,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     const loc = sourcingLocations.find((l) => l.id === locationId);
     setSourcingLocations((prev) => {
       const next = prev.filter((l) => l.id !== locationId);
+      adminDataCache.set(cacheScope, 'sourcingLocations', next, 120_000);
       safeSetLocalStorage('kenax_sourcing_locations_cache', JSON.stringify(next));
       return next;
     });
@@ -1785,8 +2068,9 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
 
   const lowStockCount = products.filter((p) => p.stock <= 10).length;
 
-  // Direct Logout Handler - Clears session completely and takes user back to store home without opening staff portal modal
+  // Direct Logout Handler - Clears session and in-memory admin cache completely
   const handleDirectLogout = () => {
+    adminDataCache.clearAll();
     setCurrentStaff(null);
     setAuthenticatedStaff(null);
     localStorage.removeItem('kenax_current_staff');
@@ -1800,6 +2084,24 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
       onNavigateToStore();
     }
   };
+
+  const activeSkeletonVariant: 'dashboard' | 'table' | 'settings' | 'cards' =
+    currentTab === 'overview' || currentTab === 'performance' || currentTab === 'my-dashboard'
+      ? 'dashboard'
+      : currentTab === 'settings' ||
+          currentTab === 'storage-settings' ||
+          currentTab === 'integration-settings' ||
+          currentTab === 'order-settings' ||
+          currentTab === 'seo-settings' ||
+          currentTab === 'policies'
+        ? 'settings'
+        : currentTab.startsWith('plugins') ||
+            currentTab === 'get-offers' ||
+            currentTab === 'coupons' ||
+            currentTab === 'categories' ||
+            currentTab === 'payment-gateways'
+          ? 'cards'
+          : 'table';
 
   return (
     <PluginProvider
@@ -1860,14 +2162,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
 
         {/* Tab Body */}
         <main className="flex-1 min-w-0 p-2 sm:p-4 lg:p-5 w-full max-w-[99%] 2xl:max-w-[1720px] mx-auto">
-          <Suspense
-            fallback={
-              <div className="flex flex-col items-center justify-center py-24 text-slate-400 text-xs">
-                <div className="w-8 h-8 border-3 border-purple-600 border-t-transparent rounded-full animate-spin mb-3" />
-                <span className="font-bold">মডিউল লোড হচ্ছে...</span>
-              </div>
-            }
-          >
+          <Suspense fallback={<AdminSectionSkeleton variant={activeSkeletonVariant} />}>
             {currentTab === 'overview' && (
             <AdminOverview
               orders={orders}
@@ -1885,6 +2180,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
               currentRole={activeRole}
               currentStaff={currentStaff}
               lowStockThreshold={settings.lowStockThreshold ?? 5}
+              totalCustomersCount={totalCustomersCount}
             />
           )}
 
@@ -1943,12 +2239,20 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                 setCurrentTab('orders');
               }}
               onUpdateOrderStatus={(orderId, status, courier, tracking, staff, adminNotes, trackingUrl) => {
+                adminDataCache.invalidateCollection(cacheScope, 'orders');
                 handleUpdateOrderStatus(orderId, status, courier, tracking, staff, adminNotes, trackingUrl);
               }}
-              onUpdateOrder={onUpdateOrder}
-              onVerifyPayment={handleVerifyPayment}
+              onUpdateOrder={(orderId, updates) => {
+                adminDataCache.invalidateCollection(cacheScope, 'orders');
+                if (onUpdateOrder) onUpdateOrder(orderId, updates);
+              }}
+              onVerifyPayment={(orderId) => {
+                adminDataCache.invalidateCollection(cacheScope, 'orders');
+                handleVerifyPayment(orderId);
+              }}
               onPrintInvoice={(order) => setSelectedInvoiceOrder(order)}
               onAddOrder={(newOrd) => {
+                adminDataCache.invalidateCollection(cacheScope, 'orders');
                 if (onAddOrder) onAddOrder(newOrd);
                 recordAuditLog('Manual Order Created', 'orders', newOrd.id, `Created manual order ${newOrd.id} for ${newOrd.customerName} (৳${newOrd.totalAmount})`);
               }}
@@ -1957,6 +2261,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
               settings={settings}
               activityLogs={activityLogs}
               onRecordAudit={recordAuditLog}
+              cacheScope={cacheScope}
             />
           )}
 
@@ -1995,6 +2300,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
               products={products}
               categories={categories}
               onAddProduct={(p) => {
+                adminDataCache.invalidateCollection(cacheScope, 'products');
                 onAddProduct(p);
                 recordAuditLog(
                   'Product Created',
@@ -2010,6 +2316,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                 }).catch((err) => console.error('[Telegram New Product Error]:', err));
               }}
               onUpdateProduct={(p) => {
+                adminDataCache.invalidateCollection(cacheScope, 'products');
                 const prevProd = products.find((old) => old.id === p.id || old.sku === p.sku);
                 const prevPrice = prevProd?.price ?? p.price;
                 const prevStock = prevProd?.stock ?? p.stock;
@@ -2039,6 +2346,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                 }
               }}
               onDeleteProduct={(id) => {
+                adminDataCache.invalidateCollection(cacheScope, 'products');
                 const prod = products.find((p) => p.id === id);
                 onDeleteProduct(id);
                 if (prod) {
@@ -2059,6 +2367,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
               targetSupplierForNewProduct={targetSupplierForNewProduct}
               onClearTargetProductForEdit={() => setTargetProductForEdit(null)}
               onClearTargetSupplierForNewProduct={() => setTargetSupplierForNewProduct(null)}
+              cacheScope={cacheScope}
             />
           )}
 
@@ -2195,6 +2504,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                 setOrdersInitialSearch(orderIdOrQuery);
                 setCurrentTab('orders');
               }}
+              cacheScope={cacheScope}
             />
           )}
 
@@ -2210,6 +2520,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
               currentStaff={currentStaff}
               initialSelectedCustomer={selectedCustomerForAdmin}
               onCloseCustomerModal={() => setSelectedCustomerForAdmin(null)}
+              cacheScope={cacheScope}
             />
           )}
 
@@ -2332,6 +2643,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                 if (target) {
                   const updated = { ...target, status: 'approved' as const };
                   setReviews((prev) => prev.map((r) => (r.id === id ? updated : r)));
+                  adminDataCache.invalidate(cacheScope, 'reviews');
                   await saveReviewToDB(updated);
                 }
                 recordAuditLog('Review Approved', 'reviews', id, `Approved public display for review #${id}`);
@@ -2341,17 +2653,20 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                 if (target) {
                   const updated = { ...target, status: 'hidden' as const };
                   setReviews((prev) => prev.map((r) => (r.id === id ? updated : r)));
+                  adminDataCache.invalidate(cacheScope, 'reviews');
                   await saveReviewToDB(updated);
                 }
                 recordAuditLog('Review Hidden', 'reviews', id, `Hidden review #${id}`);
               }}
               onDeleteReview={async (id) => {
                 setReviews((prev) => prev.filter((r) => r.id !== id));
+                adminDataCache.invalidate(cacheScope, 'reviews');
                 await deleteReviewFromDB(id);
                 recordAuditLog('Review Deleted', 'reviews', id, `Permanently removed review #${id}`);
               }}
               onUpdateReview={async (updated) => {
                 setReviews((prev) => prev.map((r) => (r.id === updated.id ? updated : r)));
+                adminDataCache.invalidate(cacheScope, 'reviews');
                 try {
                   const raw = localStorage.getItem('kenax_custom_reviews_map');
                   const map = raw ? JSON.parse(raw) : {};
@@ -2375,6 +2690,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
               }}
               onAddDemoReview={async (newDemo) => {
                 setReviews((prev) => [newDemo, ...prev]);
+                adminDataCache.invalidate(cacheScope, 'reviews');
                 await saveReviewToDB(newDemo);
                 recordAuditLog('Demo Review Created', 'reviews', newDemo.id, `Added demo review for ${newDemo.productName}`);
               }}
@@ -2423,6 +2739,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
               logs={activityLogs}
               currentRole={activeRole}
               currentStaff={currentStaff}
+              cacheScope={cacheScope}
             />
           )}
 
@@ -2590,34 +2907,43 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
         </main>
       </div>
 
-      {/* Printable Invoice Modal */}
-      <InvoiceModal
-        order={selectedInvoiceOrder}
-        products={products}
-        settings={settings}
-        onClose={() => setSelectedInvoiceOrder(null)}
-      />
+      {/* Printable Invoice Modal (Mounted lazily only when an invoice is opened) */}
+      {selectedInvoiceOrder && (
+        <Suspense fallback={null}>
+          <InvoiceModal
+            order={selectedInvoiceOrder}
+            products={products}
+            settings={settings}
+            onClose={() => setSelectedInvoiceOrder(null)}
+          />
+        </Suspense>
+      )}
 
-      {/* Staff Login / Role Switcher Modal */}
-      <AdminLoginModal
-        isOpen={isLoginModalOpen}
-        onClose={() => setIsLoginModalOpen(false)}
-        onLoginSuccess={(staff) => {
-          setAuthenticatedStaff(staff);
-          setCurrentStaff(staff);
-          localStorage.setItem('kenax_authenticated_staff', JSON.stringify(staff));
-          localStorage.setItem('kenax_authenticated_role', staff.role);
-          if (onRoleChange) onRoleChange(staff.role);
-          recordAuditLog(
-            'Staff Logged In',
-            'staff',
-            staff.email,
-            `${staff.name} logged into Admin Portal as ${staff.role}`
-          );
-          setIsLoginModalOpen(false);
-        }}
-        staffList={staffList}
-      />
+      {/* Staff Login / Role Switcher Modal (Mounted lazily only when opened) */}
+      {isLoginModalOpen && (
+        <Suspense fallback={null}>
+          <AdminLoginModal
+            isOpen={isLoginModalOpen}
+            onClose={() => setIsLoginModalOpen(false)}
+            onLoginSuccess={(staff) => {
+              adminDataCache.clearAll();
+              setAuthenticatedStaff(staff);
+              setCurrentStaff(staff);
+              localStorage.setItem('kenax_authenticated_staff', JSON.stringify(staff));
+              localStorage.setItem('kenax_authenticated_role', staff.role);
+              if (onRoleChange) onRoleChange(staff.role);
+              recordAuditLog(
+                'Staff Logged In',
+                'staff',
+                staff.email,
+                `${staff.name} logged into Admin Portal as ${staff.role}`
+              );
+              setIsLoginModalOpen(false);
+            }}
+            staffList={staffList}
+          />
+        </Suspense>
+      )}
 
       {/* Change Password Modal */}
       {isChangePasswordOpen && (
