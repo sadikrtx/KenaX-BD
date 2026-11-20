@@ -90,6 +90,12 @@ import {
 } from '../types';
 import { hasPermission, DEFAULT_ROLE_PERMISSIONS } from '../lib/permissions';
 import { safeSetLocalStorage } from '../lib/storage';
+import {
+  loadStaffSession,
+  saveStaffSession,
+  clearStaffSession,
+  stripStaffSecrets,
+} from '../lib/passwordHash';
 
 import {
   INITIAL_STAFF,
@@ -123,6 +129,7 @@ import {
   logStockAdjustmentToDB,
   saveOrderToDB,
   updateOrderInDB,
+  generateNextOrderId,
   getCartActivitiesFromDB,
   subscribeToCartActivities,
   updateCartActivityStatusInDB,
@@ -301,16 +308,8 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     } catch {}
   }, [currentTab]);
 
-  // Cart Activities state
-  const [internalCartActivities, setInternalCartActivities] = useState<CartActivity[]>(() => {
-    try {
-      const cached = localStorage.getItem('kenax_cart_activities_cache');
-      const list = cached ? JSON.parse(cached) : [];
-      return Array.isArray(list) ? list.filter((c: any) => c && c.isV2Activity) : [];
-    } catch {
-      return [];
-    }
-  });
+  // Cart Activities state (hydrated live from Cloud Firestore)
+  const [internalCartActivities, setInternalCartActivities] = useState<CartActivity[]>([]);
 
   const hasParentCartSync = Boolean(onRefreshCartActivities);
 
@@ -387,8 +386,8 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     setInternalCartActivities((prev) => prev.filter((c) => c.id !== cartId));
   };
 
-  const handleConvertCartToManualOrder = (cart: CartActivity) => {
-    const newOrderId = `ORD-${Date.now().toString().slice(-6)}`;
+  const handleConvertCartToManualOrder = async (cart: CartActivity) => {
+    const newOrderId = await generateNextOrderId('KB');
     const deliveryFee = settings.insideDhakaDeliveryFee || 70;
     const cartItemsList = Array.isArray(cart?.items) ? cart.items : [];
     const itemsTotal = cartItemsList.reduce((sum, it) => sum + (it.price || 0) * (it.quantity || 1), 0);
@@ -443,7 +442,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     if (onAddOrder) {
       onAddOrder(newOrder);
     }
-    saveOrderToDB(newOrder);
+    await saveOrderToDB(newOrder);
     handleUpdateCartStatus(cart.id, 'converted', {
       notes: `Converted to Order #${newOrderId} by ${currentStaff?.name || 'Admin'}`,
       lastFollowUpBy: currentStaff?.name || 'Admin',
@@ -457,90 +456,40 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     );
   };
 
-  // Active Authenticated Staff
+  // Active Authenticated Staff (hydrated exclusively from Cloud Firestore & passwordless session)
   const [staffList, setStaffList] = useState<StaffUser[]>(() => {
-    if (passedStaffList && passedStaffList.length > 0) return passedStaffList;
-    try {
-      const cached = localStorage.getItem('kenax_staff_cache') || localStorage.getItem('preview_kenax_staff_cache');
-      if (cached) {
-        const parsed = JSON.parse(cached);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-      }
-    } catch {}
-    return INITIAL_STAFF.map((s) => ({
-      id: s.id,
-      name: s.name,
-      email: s.email,
-      phone: s.phone,
-      password: (s as any).password || '123456',
-      role: s.role as UserRole,
-      permissions: s.permissions,
-      isActive: s.status === 'active',
-      createdAt: s.createdAt,
-      lastLogin: s.lastLogin,
-    }));
+    if (passedStaffList && passedStaffList.length > 0) return passedStaffList.map(stripStaffSecrets);
+    return [];
   });
 
   useEffect(() => {
     if (passedStaffList && passedStaffList.length > 0) {
-      setStaffList(passedStaffList);
+      setStaffList(passedStaffList.map(stripStaffSecrets));
     }
   }, [passedStaffList]);
 
   const [authenticatedStaff, setAuthenticatedStaff] = useState<StaffUser | null>(() => {
-    if (externalStaff) return externalStaff;
-    const savedAuth = localStorage.getItem('kenax_authenticated_staff') || localStorage.getItem('kenax_current_staff');
-    if (savedAuth) {
-      try {
-        return JSON.parse(savedAuth);
-      } catch (e) {}
-    }
-    const superAdmin = INITIAL_STAFF.find((s) => s.role === 'super_admin');
-    if (superAdmin) {
-      return {
-        id: superAdmin.id,
-        name: superAdmin.name,
-        email: superAdmin.email,
-        phone: superAdmin.phone,
-        password: (superAdmin as any).password || 'sadik@1234',
-        role: superAdmin.role as UserRole,
-        permissions: superAdmin.permissions,
-        isActive: superAdmin.status === 'active',
-        createdAt: superAdmin.createdAt,
-        lastLogin: superAdmin.lastLogin,
-      };
-    }
-    return {
-      id: 'staff-super-2',
-      name: 'Super Admin',
-      email: 'super@kenaxbd.com',
-      phone: '+880 1700-123456',
-      password: 'sadik@1234',
-      role: 'super_admin',
-      permissions: ['*'],
-      isActive: true,
-      createdAt: new Date().toISOString(),
-    };
+    if (externalStaff) return stripStaffSecrets(externalStaff);
+    return loadStaffSession();
   });
 
   const [currentStaff, setCurrentStaff] = useState<StaffUser | null>(() => {
-    return externalStaff || authenticatedStaff;
+    return externalStaff ? stripStaffSecrets(externalStaff) : authenticatedStaff;
   });
 
   useEffect(() => {
     if (externalStaff) {
-      setCurrentStaff(externalStaff);
-      setAuthenticatedStaff(externalStaff);
+      const clean = stripStaffSecrets(externalStaff);
+      setCurrentStaff(clean);
+      setAuthenticatedStaff(clean);
     }
   }, [externalStaff]);
 
   // Strict check: Only real Super Admin account gets access to the Quick Role Tester
-  // Persists across role simulations (Super Admin -> Manager -> Moderator -> etc.)
   const isSuperAdminAccount =
     authenticatedStaff?.role === 'super_admin' ||
     authenticatedStaff?.email === 'super@kenaxbd.com' ||
-    Boolean(authenticatedStaff?.permissions && authenticatedStaff.permissions.includes('*')) ||
-    localStorage.getItem('kenax_authenticated_role') === 'super_admin';
+    Boolean(authenticatedStaff?.permissions && authenticatedStaff.permissions.includes('*'));
 
   // Change Password Modal State
   const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
@@ -548,7 +497,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   const [confirmStaffPassword, setConfirmStaffPassword] = useState('');
   const [passwordChangeMsg, setPasswordChangeMsg] = useState<string | null>(null);
 
-  const handleChangePasswordSubmit = (e: React.FormEvent) => {
+  const handleChangePasswordSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentStaff) return;
     if (newStaffPassword.length < 4) {
@@ -559,73 +508,36 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
       setPasswordChangeMsg('New passwords do not match.');
       return;
     }
-    const updated = { ...currentStaff, password: newStaffPassword };
-    setCurrentStaff(updated);
     try {
-      localStorage.setItem('kenax_authenticated_staff', JSON.stringify(updated));
-      localStorage.setItem('kenax_current_staff', JSON.stringify(updated));
-      localStorage.setItem('kenax_admin_session', JSON.stringify(updated));
-    } catch {}
-    handleUpdateStaff(updated);
-    setPasswordChangeMsg('Password updated successfully! All account data preserved.');
-    setTimeout(() => {
-      setIsChangePasswordOpen(false);
-      setPasswordChangeMsg(null);
-      setNewStaffPassword('');
-      setConfirmStaffPassword('');
-    }, 1500);
+      const updatedWithPassword = { ...currentStaff, password: newStaffPassword };
+      await handleUpdateStaff(updatedWithPassword);
+      const safeSession = stripStaffSecrets(currentStaff);
+      setCurrentStaff(safeSession);
+      saveStaffSession(safeSession);
+      setPasswordChangeMsg('Password updated securely in Cloud Database! All account data preserved.');
+      setTimeout(() => {
+        setIsChangePasswordOpen(false);
+        setPasswordChangeMsg(null);
+        setNewStaffPassword('');
+        setConfirmStaffPassword('');
+      }, 1500);
+    } catch (err: any) {
+      setPasswordChangeMsg(err?.message || 'Failed to update password in Cloud Database.');
+    }
   };
 
   // Effective Role (prioritizes currentStaff role if logged in)
   const activeRole: UserRole = currentStaff?.role || currentRole || 'super_admin';
 
-  // Sub-entity states
-  const [customers, setCustomers] = useState<CustomerRecord[]>(() => {
-    let localCache: CustomerRecord[] = [];
-    try {
-      const cached = localStorage.getItem('kenax_customers_cache');
-      if (cached) localCache = JSON.parse(cached);
-    } catch {}
-    return mergeCustomersLists(INITIAL_CUSTOMERS, localCache);
-  });
+  // Sub-entity states (hydrated from Cloud Firestore, never stale browser localStorage caches)
+  const [customers, setCustomers] = useState<CustomerRecord[]>([]);
   const [totalCustomersCount, setTotalCustomersCount] = useState<number | null>(null);
 
   const [activityLogs, setActivityLogs] = useState<ActivityLog[]>([]);
 
-  const [stockLogs, setStockLogs] = useState<StockLog[]>(() => {
-    try {
-      const cached = localStorage.getItem('kenax_stock_logs_cache');
-      if (cached) {
-        const parsed = JSON.parse(cached);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-      }
-    } catch {}
-    return INITIAL_STOCK_LOGS.map((sl: any) => ({
-      id: sl.id,
-      productId: sl.productId,
-      productName: sl.productName,
-      sku: sl.sku,
-      staffId: sl.staffId || 'staff-root',
-      staffName: sl.staffName,
-      staffRole: sl.staffRole as UserRole,
-      previousStock: sl.previousStock,
-      newStock: sl.newStock,
-      quantityChanged: sl.quantityChanged,
-      reason: sl.reason,
-      timestamp: sl.timestamp,
-    }));
-  });
+  const [stockLogs, setStockLogs] = useState<StockLog[]>([]);
 
-  const [notifications, setNotifications] = useState<AdminNotification[]>(() => {
-    return INITIAL_NOTIFICATIONS.map((n) => ({
-      id: n.id,
-      type: n.type,
-      title: n.title,
-      message: n.message,
-      isRead: n.isRead,
-      createdAt: n.createdAt,
-    }));
-  });
+  const [notifications, setNotifications] = useState<AdminNotification[]>([]);
 
   const [coupons, setCoupons] = useState<Coupon[]>(() => {
     return INITIAL_COUPONS.map((c) => ({
@@ -641,40 +553,15 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     }));
   });
 
-  const [internalCategories, setInternalCategories] = useState<Category[]>(() => {
-    const saved = localStorage.getItem('kenax_categories');
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-      } catch (e) {
-        console.error('Failed to parse categories', e);
-      }
-    }
-    return INITIAL_CATEGORIES;
-  });
+  const [internalCategories, setInternalCategories] = useState<Category[]>(INITIAL_CATEGORIES);
 
   const categories = passedCategories && passedCategories.length > 0 ? passedCategories : internalCategories;
 
   const handlePersistCategories = (updatedCats: Category[]) => {
     setInternalCategories(updatedCats);
-    safeSetLocalStorage('kenax_categories', JSON.stringify(updatedCats));
-    safeSetLocalStorage('kenax_categories_cache', JSON.stringify(updatedCats));
   };
 
-  const [reviews, setReviews] = useState<Review[]>(() => {
-    try {
-      const cached = localStorage.getItem('kenax_reviews_cache');
-      let list = cached ? JSON.parse(cached) : INITIAL_REVIEWS;
-      const customRaw = localStorage.getItem('kenax_custom_reviews_map');
-      if (customRaw) {
-        const customMap = JSON.parse(customRaw);
-        list = list.map((r: Review) => customMap[r.id] ? { ...r, ...customMap[r.id] } : r);
-      }
-      if (Array.isArray(list) && list.length > 0) return list;
-    } catch {}
-    return INITIAL_REVIEWS;
-  });
+  const [reviews, setReviews] = useState<Review[]>([]);
 
   // Helper to filter out legacy demo/placeholder records
   const isDemoExpense = (e: any) =>
@@ -683,67 +570,17 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     e?.id === 'EXP-1003' ||
     (typeof e?.title === 'string' && (e.title.includes('Batch #12') || e.title.includes('Security Poly Bags')));
 
-  // Expenses State (Cache + Firestore DB Sync)
-  const [expenses, setExpenses] = useState<ExpenseRecord[]>(() => {
-    try {
-      const cached = localStorage.getItem('kenax_expenses_cache');
-      if (cached) {
-        const parsed = JSON.parse(cached);
-        if (Array.isArray(parsed)) {
-          const valid = parsed.filter((item) => !isDemoExpense(item));
-          if (valid.length !== parsed.length) {
-            safeSetLocalStorage('kenax_expenses_cache', JSON.stringify(valid));
-          }
-          return valid;
-        }
-      }
-    } catch (e) {
-      console.error('Failed to parse expenses cache', e);
-    }
-    return [];
-  });
+  // Expenses State (Cloud Firestore Single Source of Truth)
+  const [expenses, setExpenses] = useState<ExpenseRecord[]>([]);
 
-  // Other Profits State (Cache + Firestore DB Sync)
-  const [otherProfits, setOtherProfits] = useState<OtherProfitRecord[]>(() => {
-    try {
-      const cached = localStorage.getItem('kenax_other_profits_cache');
-      if (cached) {
-        const parsed = JSON.parse(cached);
-        if (Array.isArray(parsed)) {
-          const valid = parsed.filter((item) => !isDemoOtherProfit(item));
-          safeSetLocalStorage('kenax_other_profits_cache', JSON.stringify(valid));
-          return valid;
-        }
-      }
-    } catch (e) {
-      console.error('Failed to parse other profits cache', e);
-    }
-    return [];
-  });
+  // Other Profits State (Cloud Firestore Single Source of Truth)
+  const [otherProfits, setOtherProfits] = useState<OtherProfitRecord[]>([]);
 
-  // Dropshipping Suppliers state & cross-tab targeting
-  const [suppliers, setSuppliers] = useState<Supplier[]>(() => {
-    try {
-      const cached = localStorage.getItem('kenax_suppliers_cache');
-      if (cached) {
-        const parsed = JSON.parse(cached);
-        if (Array.isArray(parsed)) return parsed;
-      }
-    } catch {}
-    return [];
-  });
+  // Dropshipping Suppliers state (Cloud Firestore Single Source of Truth)
+  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
 
-  // Wholesalers & Sourcing Locations (Own Stock) State
-  const [sourcingLocations, setSourcingLocations] = useState<SourcingLocation[]>(() => {
-    try {
-      const cached = localStorage.getItem('kenax_sourcing_locations_cache');
-      if (cached) {
-        const parsed = JSON.parse(cached);
-        if (Array.isArray(parsed)) return parsed;
-      }
-    } catch {}
-    return [];
-  });
+  // Wholesalers & Sourcing Locations (Cloud Firestore Single Source of Truth)
+  const [sourcingLocations, setSourcingLocations] = useState<SourcingLocation[]>([]);
   const [targetProductForEdit, setTargetProductForEdit] = useState<Product | null>(null);
   const [targetSupplierForNewProduct, setTargetSupplierForNewProduct] = useState<Supplier | null>(null);
 
@@ -1184,24 +1021,21 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     };
   }, [cacheScope, needsLiveActivityLogs]);
 
-  // 11. Tab-Demand Stock Logs Loader (inventory tab only + local cache sync on adjustment)
+  // 11. Tab-Demand Stock Logs Loader (inventory tab only + live Firestore refresh on adjustment)
   useEffect(() => {
+    let isMounted = true;
     const handleStockLogsUpdated = () => {
       adminDataCache.invalidateCollection(cacheScope, 'stockLogs');
-      const cached = localStorage.getItem('kenax_stock_logs_cache');
-      if (cached) {
-        try {
-          const parsed = JSON.parse(cached);
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            setStockLogs(parsed);
+      getStockLogsFromDB()
+        .then((dbStockLogs) => {
+          if (isMounted && Array.isArray(dbStockLogs)) {
+            setStockLogs(dbStockLogs);
           }
-        } catch {}
-      }
+        })
+        .catch(() => {});
     };
     window.addEventListener('kenax_stock_logs_updated', handleStockLogsUpdated);
-    window.addEventListener('storage', handleStockLogsUpdated);
 
-    let isMounted = true;
     if (needsStockLogs) {
       adminDataCache
         .getOrFetch(cacheScope, 'stockLogs', () => getStockLogsFromDB(), 60_000)
@@ -1216,7 +1050,6 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     return () => {
       isMounted = false;
       window.removeEventListener('kenax_stock_logs_updated', handleStockLogsUpdated);
-      window.removeEventListener('storage', handleStockLogsUpdated);
     };
   }, [cacheScope, needsStockLogs]);
 
@@ -1709,14 +1542,15 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     markNotificationReadInDB(notifId);
   };
 
-  // Staff Management
-  const handleAddStaff = (newStaff: StaffUser) => {
+  // Staff Management (Cloud Firestore Single Source of Truth + SHA-256 hashed passwords)
+  const handleAddStaff = async (newStaff: StaffUser) => {
+    const safeForUi = stripStaffSecrets(newStaff);
     setStaffList((prev) => {
-      const next = [newStaff, ...prev];
+      const next = [safeForUi, ...prev.filter((s) => s.id !== safeForUi.id)];
       if (onUpdateStaffList) onUpdateStaffList(next);
       return next;
     });
-    saveStaffToDB(newStaff);
+    await saveStaffToDB(newStaff);
     recordAuditLog(
       'New Staff Account Created',
       'staff',
@@ -1725,66 +1559,56 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     );
   };
 
-  const handleUpdateStaff = (updatedStaff: StaffUser) => {
+  const handleUpdateStaff = async (updatedStaff: StaffUser) => {
+    const safeForUi = stripStaffSecrets(updatedStaff);
     setStaffList((prev) => {
-      const next = prev.map((s) => (s.id === updatedStaff.id ? updatedStaff : s));
-      safeSetLocalStorage('kenax_staff_cache', JSON.stringify(next));
-      safeSetLocalStorage('preview_kenax_staff_cache', JSON.stringify(next));
+      const next = prev.map((s) => (s.id === safeForUi.id ? safeForUi : s));
       if (onUpdateStaffList) onUpdateStaffList(next);
       return next;
     });
 
-    // If the updated staff is currently active or super admin, sync active session states & local caches
+    // If the updated staff is currently active or super admin, sync passwordless session metadata only
     const isCurrentActive =
-      currentStaff?.id === updatedStaff.id ||
-      (currentStaff?.email && updatedStaff.email && currentStaff.email.toLowerCase() === updatedStaff.email.toLowerCase()) ||
-      authenticatedStaff?.id === updatedStaff.id ||
-      (authenticatedStaff?.email && updatedStaff.email && authenticatedStaff.email.toLowerCase() === updatedStaff.email.toLowerCase()) ||
-      (updatedStaff.role === 'super_admin' && (currentStaff?.role === 'super_admin' || authenticatedStaff?.role === 'super_admin'));
+      currentStaff?.id === safeForUi.id ||
+      (currentStaff?.email && safeForUi.email && currentStaff.email.toLowerCase() === safeForUi.email.toLowerCase()) ||
+      authenticatedStaff?.id === safeForUi.id ||
+      (authenticatedStaff?.email && safeForUi.email && authenticatedStaff.email.toLowerCase() === safeForUi.email.toLowerCase());
 
     if (isCurrentActive) {
-      setCurrentStaff(updatedStaff);
-      setAuthenticatedStaff(updatedStaff);
+      setCurrentStaff(safeForUi);
+      setAuthenticatedStaff(safeForUi);
+      saveStaffSession(safeForUi);
       if (onUpdateCurrentStaff) {
-        onUpdateCurrentStaff(updatedStaff);
+        onUpdateCurrentStaff(safeForUi);
       }
-      try {
-        const serialized = JSON.stringify(updatedStaff);
-        safeSetLocalStorage('kenax_current_staff', serialized);
-        safeSetLocalStorage('kenax_authenticated_staff', serialized);
-        safeSetLocalStorage('preview_kenax_current_staff', serialized);
-        safeSetLocalStorage('preview_kenax_authenticated_staff', serialized);
-        safeSetLocalStorage('kenax_admin_session', serialized);
-        safeSetLocalStorage('preview_kenax_admin_session', serialized);
-      } catch {}
     }
 
-    const prevStaff = staffList.find((s) => s.id === updatedStaff.id);
+    const prevStaff = staffList.find((s) => s.id === safeForUi.id);
     const changes: string[] = [];
-    if (prevStaff && prevStaff.role !== updatedStaff.role) {
-      changes.push(`Role: ${prevStaff.role} → ${updatedStaff.role}`);
+    if (prevStaff && prevStaff.role !== safeForUi.role) {
+      changes.push(`Role: ${prevStaff.role} → ${safeForUi.role}`);
     }
-    if (prevStaff && prevStaff.isActive !== updatedStaff.isActive) {
-      changes.push(`Status: ${updatedStaff.isActive ? 'Active' : 'Suspended'}`);
+    if (prevStaff && prevStaff.isActive !== safeForUi.isActive) {
+      changes.push(`Status: ${safeForUi.isActive ? 'Active' : 'Suspended'}`);
     }
-    if (prevStaff && prevStaff.status !== updatedStaff.status && updatedStaff.status) {
-      changes.push(`Account Status: ${prevStaff.status || 'active'} → ${updatedStaff.status}`);
+    if (prevStaff && prevStaff.status !== safeForUi.status && safeForUi.status) {
+      changes.push(`Account Status: ${prevStaff.status || 'active'} → ${safeForUi.status}`);
     }
 
-    saveStaffToDB(updatedStaff);
+    await saveStaffToDB(updatedStaff);
     recordAuditLog(
-      prevStaff && prevStaff.role !== updatedStaff.role
+      prevStaff && prevStaff.role !== safeForUi.role
         ? 'Staff Role Changed'
-        : prevStaff && (prevStaff.isActive !== updatedStaff.isActive || prevStaff.status !== updatedStaff.status)
-        ? updatedStaff.isActive === false || updatedStaff.status === 'suspended'
+        : prevStaff && (prevStaff.isActive !== safeForUi.isActive || prevStaff.status !== safeForUi.status)
+        ? safeForUi.isActive === false || safeForUi.status === 'suspended'
           ? 'Staff Suspended'
           : 'Staff Activated'
         : 'Staff Account Updated',
       'Staff',
-      updatedStaff.email,
+      safeForUi.email,
       changes.length > 0
-        ? `Updated ${updatedStaff.name} (${updatedStaff.email}): ${changes.join(', ')}`
-        : `Updated profile/phone/permissions for ${updatedStaff.name} (${updatedStaff.email})`
+        ? `Updated ${safeForUi.name} (${safeForUi.email}): ${changes.join(', ')}`
+        : `Updated profile/phone/permissions for ${safeForUi.name} (${safeForUi.email})`
     );
   };
 
@@ -1792,10 +1616,9 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     const target = staffList.find((s) => s.id === staffId);
     if (!target) return;
 
-    // Hard permanent delete: purge account immediately and tombstone it in Firestore/local storage
+    // Hard permanent delete in Cloud Firestore
     setStaffList((prev) => {
       const next = prev.filter((s) => s.id !== staffId);
-      safeSetLocalStorage('kenax_staff_cache', JSON.stringify(next));
       if (onUpdateStaffList) onUpdateStaffList(next);
       return next;
     });
@@ -1815,7 +1638,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     if (!target) return;
 
     const restoredStaff: StaffUser = {
-      ...target,
+      ...stripStaffSecrets(target),
       isRemoved: false,
       status: 'active',
       isActive: true,
@@ -1825,7 +1648,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
 
     setStaffList((prev) => {
       const next = prev.map((s) => (s.id === staffId ? restoredStaff : s));
-      safeSetLocalStorage('kenax_staff_cache', JSON.stringify(next));
+      if (onUpdateStaffList) onUpdateStaffList(next);
       return next;
     });
 
@@ -1842,7 +1665,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   const handleToggleStaffStatus = (staffId: string) => {
     const target = staffList.find((s) => s.id === staffId);
     if (!target) return;
-    const updated = { ...target, isActive: !target.isActive };
+    const updated = { ...stripStaffSecrets(target), isActive: !target.isActive };
     handleUpdateStaff(updated);
   };
 
@@ -2068,14 +1891,12 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
 
   const lowStockCount = products.filter((p) => p.stock <= 10).length;
 
-  // Direct Logout Handler - Clears session and in-memory admin cache completely
+  // Direct Logout Handler - Clears passwordless session and in-memory admin cache completely
   const handleDirectLogout = () => {
     adminDataCache.clearAll();
     setCurrentStaff(null);
     setAuthenticatedStaff(null);
-    localStorage.removeItem('kenax_current_staff');
-    localStorage.removeItem('kenax_authenticated_staff');
-    localStorage.removeItem('kenax_authenticated_role');
+    clearStaffSession();
     setIsLoginModalOpen(false);
 
     if (onLogout) {
@@ -2667,25 +2488,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
               onUpdateReview={async (updated) => {
                 setReviews((prev) => prev.map((r) => (r.id === updated.id ? updated : r)));
                 adminDataCache.invalidate(cacheScope, 'reviews');
-                try {
-                  const raw = localStorage.getItem('kenax_custom_reviews_map');
-                  const map = raw ? JSON.parse(raw) : {};
-                  map[updated.id] = updated;
-                  safeSetLocalStorage('kenax_custom_reviews_map', JSON.stringify(map));
-                } catch {}
-                try {
-                  const cached = localStorage.getItem('kenax_reviews_cache');
-                  let list: Review[] = cached ? JSON.parse(cached) : [];
-                  const idx = list.findIndex((r) => r.id === updated.id);
-                  if (idx >= 0) {
-                    list[idx] = updated;
-                  } else {
-                    list.unshift(updated);
-                  }
-                  safeSetLocalStorage('kenax_reviews_cache', JSON.stringify(list));
-                } catch {}
-                // Trigger cloud & API sync in background without blocking UI
-                saveReviewToDB(updated).catch((e) => console.warn('[Review DB Sync]', e));
+                await saveReviewToDB(updated).catch((e) => console.warn('[Review DB Sync]', e));
                 recordAuditLog('Review Edited', 'reviews', updated.id, `Edited review content/rating/photos for #${updated.id}`);
               }}
               onAddDemoReview={async (newDemo) => {
@@ -2926,17 +2729,17 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
             isOpen={isLoginModalOpen}
             onClose={() => setIsLoginModalOpen(false)}
             onLoginSuccess={(staff) => {
+              const safeStaff = stripStaffSecrets(staff);
               adminDataCache.clearAll();
-              setAuthenticatedStaff(staff);
-              setCurrentStaff(staff);
-              localStorage.setItem('kenax_authenticated_staff', JSON.stringify(staff));
-              localStorage.setItem('kenax_authenticated_role', staff.role);
-              if (onRoleChange) onRoleChange(staff.role);
+              setAuthenticatedStaff(safeStaff);
+              setCurrentStaff(safeStaff);
+              saveStaffSession(safeStaff);
+              if (onRoleChange) onRoleChange(safeStaff.role);
               recordAuditLog(
                 'Staff Logged In',
                 'staff',
-                staff.email,
-                `${staff.name} logged into Admin Portal as ${staff.role}`
+                safeStaff.email,
+                `${safeStaff.name} logged into Admin Portal as ${safeStaff.role}`
               );
               setIsLoginModalOpen(false);
             }}

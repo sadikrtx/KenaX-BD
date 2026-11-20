@@ -219,6 +219,35 @@
         "updatedBy": { "type": "string" }
       },
       "required": ["id", "sellerAllowedTabs", "resellerAllowedTabs", "updatedAt"]
+    },
+    "StaffUser": {
+      "title": "StaffUser",
+      "description": "Shared RBAC staff account stored in Cloud Firestore with SHA-256 hashed password (never plaintext)",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "phone": { "type": "string" },
+        "passwordHash": { "type": "string" },
+        "role": { "type": "string" },
+        "permissions": { "type": "array" },
+        "isActive": { "type": "boolean" },
+        "status": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "lastLogin": { "type": "string" }
+      },
+      "required": ["id", "name", "email", "passwordHash", "role"]
+    },
+    "OrderCounter": {
+      "title": "OrderCounter",
+      "description": "Atomic cross-device sequential order number counter (KB-######)",
+      "type": "object",
+      "properties": {
+        "current": { "type": "number" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["current"]
     }
   },
   "firestore": {
@@ -273,6 +302,14 @@
     "/whatsapp_webhooks/{webhookId}": {
       "schema": "WhatsAppWebhookLog",
       "description": "Meta WhatsApp Cloud API webhook logs"
+    },
+    "/staff/{staffId}": {
+      "schema": "StaffUser",
+      "description": "Shared RBAC staff accounts across all devices with SHA-256 hashed passwords"
+    },
+    "/system/{docId}": {
+      "schema": "OrderCounter",
+      "description": "Atomic order number counter (orderCounter), seed status, and one-time migration state"
     }
   }
 }

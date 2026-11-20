@@ -29,9 +29,9 @@ import {
   type DocumentSnapshot,
   type QueryConstraint,
 } from 'firebase/firestore';
-import { db, isQuotaExceededFlag, isQuotaExceededError, markQuotaExceeded } from './firebase';
+import { db, isQuotaExceededFlag, isQuotaExceededError, markQuotaExceeded, normalizeOrderRecord } from './firebase';
 import { adminDataCache } from './adminCache';
-import { getEnvCollectionName, getEnvStorageKey } from '../utils/envHelper';
+import { getEnvCollectionName } from '../utils/envHelper';
 import type { ActivityLog, StockLog, CustomerRecord, Order, Product } from '../types';
 
 export interface PaginatedResult<T> {
@@ -366,27 +366,12 @@ export async function fetchStockLogsPage(
 // ---------------------------------------------------------------------------
 // 3. CUSTOMERS PAGINATION & TARGETED SINGLE-FIELD SEARCH
 // ---------------------------------------------------------------------------
-function getLocalDeletedCustomerIds(): Set<string> {
-  const deleted = new Set<string>();
-  try {
-    const raw =
-      localStorage.getItem(getEnvStorageKey('kenax_deleted_customers_cache')) ||
-      localStorage.getItem('kenax_deleted_customers_cache');
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) parsed.forEach((id) => deleted.add(String(id)));
-    }
-  } catch {}
-  return deleted;
-}
-
 export async function fetchCustomersPage(
   scopeKey: string,
   page: number,
   pageSize: number = 25,
   options?: { forceRefresh?: boolean; fallbackItems?: CustomerRecord[] }
 ): Promise<PaginatedResult<CustomerRecord>> {
-  const deletedIds = getLocalDeletedCustomerIds();
   const colName = getEnvCollectionName('customers');
   return fetchFirestoreCursorPage<CustomerRecord>({
     scopeKey,
@@ -401,7 +386,7 @@ export async function fetchCustomersPage(
     fallbackItems: options?.fallbackItems,
     mapDoc: (d) => {
       const data = d.data() as CustomerRecord;
-      if (!data || !data.id || deletedIds.has(d.id) || deletedIds.has(data.id)) return null;
+      if (!data || !data.id) return null;
       return data;
     },
   });
@@ -424,7 +409,6 @@ export async function searchCustomersInFirestore(
 
   const colName = getEnvCollectionName('customers');
   const colRef = collection(db, colName);
-  const deletedIds = getLocalDeletedCustomerIds();
   const foundMap = new Map<string, CustomerRecord>();
 
   const queries: Promise<void>[] = [];
@@ -435,7 +419,7 @@ export async function searchCustomersInFirestore(
       .then((snap) => {
         if (snap.exists()) {
           const data = snap.data() as CustomerRecord;
-          if (data?.id && !deletedIds.has(data.id)) foundMap.set(data.id, data);
+          if (data?.id) foundMap.set(data.id, data);
         }
       })
       .catch(() => {})
@@ -448,7 +432,7 @@ export async function searchCustomersInFirestore(
         .then((snap) => {
           snap.forEach((d) => {
             const data = d.data() as CustomerRecord;
-            if (data?.id && !deletedIds.has(data.id)) foundMap.set(data.id, data);
+            if (data?.id) foundMap.set(data.id, data);
           });
         })
         .catch(() => {})
@@ -470,7 +454,7 @@ export async function searchCustomersInFirestore(
           .then((snap) => {
             snap.forEach((d) => {
               const data = d.data() as CustomerRecord;
-              if (data?.id && !deletedIds.has(data.id)) foundMap.set(data.id, data);
+              if (data?.id) foundMap.set(data.id, data);
             });
           })
           .catch(() => {})
@@ -506,8 +490,8 @@ export async function fetchOrdersPage(
     forceRefresh: options?.forceRefresh,
     fallbackItems: options?.fallbackItems,
     mapDoc: (d) => {
-      const data = d.data() as Order;
-      return data && (data.isV2Order || data.id) ? data : null;
+      const data = d.data();
+      return data ? normalizeOrderRecord(data, d.id) : null;
     },
   });
 }
@@ -541,8 +525,8 @@ export async function searchOrdersInFirestore(
       getDoc(doc(db, colName, idCandidate))
         .then((snap) => {
           if (snap.exists()) {
-            const data = snap.data() as Order;
-            if (data?.id) foundMap.set(data.id, data);
+            const normalized = normalizeOrderRecord(snap.data(), snap.id);
+            if (normalized.id) foundMap.set(normalized.id, normalized);
           }
         })
         .catch(() => {})
@@ -554,8 +538,8 @@ export async function searchOrdersInFirestore(
     getDocs(query(colRef, where('trackingNumber', '==', trimmed), limit(15)))
       .then((snap) => {
         snap.forEach((d) => {
-          const data = d.data() as Order;
-          if (data?.id) foundMap.set(data.id, data);
+          const normalized = normalizeOrderRecord(d.data(), d.id);
+          if (normalized.id) foundMap.set(normalized.id, normalized);
         });
       })
       .catch(() => {})
@@ -575,8 +559,8 @@ export async function searchOrdersInFirestore(
         getDocs(query(colRef, where('customerMobile', '==', variant), limit(25)))
           .then((snap) => {
             snap.forEach((d) => {
-              const data = d.data() as Order;
-              if (data?.id) foundMap.set(data.id, data);
+              const normalized = normalizeOrderRecord(d.data(), d.id);
+              if (normalized.id) foundMap.set(normalized.id, normalized);
             });
           })
           .catch(() => {})
@@ -585,8 +569,8 @@ export async function searchOrdersInFirestore(
         getDocs(query(colRef, where('deliveryMobile', '==', variant), limit(25)))
           .then((snap) => {
             snap.forEach((d) => {
-              const data = d.data() as Order;
-              if (data?.id) foundMap.set(data.id, data);
+              const normalized = normalizeOrderRecord(d.data(), d.id);
+              if (normalized.id) foundMap.set(normalized.id, normalized);
             });
           })
           .catch(() => {})
@@ -605,20 +589,6 @@ export async function searchOrdersInFirestore(
 // ---------------------------------------------------------------------------
 // 5. PRODUCTS PAGINATION & TARGETED SINGLE-FIELD SEARCH
 // ---------------------------------------------------------------------------
-function getLocalDeletedProductIds(): Set<string> {
-  const deleted = new Set<string>();
-  try {
-    ['kenax_deleted_product_ids', getEnvStorageKey('kenax_deleted_product_ids')].forEach((k) => {
-      const raw = localStorage.getItem(k);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed)) parsed.forEach((id) => deleted.add(String(id)));
-      }
-    });
-  } catch {}
-  return deleted;
-}
-
 export async function fetchProductsPage(
   scopeKey: string,
   page: number,
@@ -626,7 +596,6 @@ export async function fetchProductsPage(
   options?: { forceRefresh?: boolean; fallbackItems?: Product[] }
 ): Promise<PaginatedResult<Product>> {
   const colName = getEnvCollectionName('products');
-  const deletedIds = getLocalDeletedProductIds();
   return fetchFirestoreCursorPage<Product>({
     scopeKey,
     firestoreCollection: colName,
@@ -640,7 +609,7 @@ export async function fetchProductsPage(
     fallbackItems: options?.fallbackItems,
     mapDoc: (d) => {
       const data = d.data() as Product;
-      if (!data || !data.id || deletedIds.has(data.id)) return null;
+      if (!data || !data.id) return null;
       return data;
     },
   });
@@ -662,7 +631,6 @@ export async function searchProductsInFirestore(
 
   const colName = getEnvCollectionName('products');
   const colRef = collection(db, colName);
-  const deletedIds = getLocalDeletedProductIds();
   const foundMap = new Map<string, Product>();
 
   const tasks: Promise<void>[] = [
@@ -670,7 +638,7 @@ export async function searchProductsInFirestore(
       .then((snap) => {
         if (snap.exists()) {
           const data = snap.data() as Product;
-          if (data?.id && !deletedIds.has(data.id)) foundMap.set(data.id, data);
+          if (data?.id) foundMap.set(data.id, data);
         }
       })
       .catch(() => {}),
@@ -678,7 +646,7 @@ export async function searchProductsInFirestore(
       .then((snap) => {
         snap.forEach((d) => {
           const data = d.data() as Product;
-          if (data?.id && !deletedIds.has(data.id)) foundMap.set(data.id, data);
+          if (data?.id) foundMap.set(data.id, data);
         });
       })
       .catch(() => {}),
@@ -686,7 +654,7 @@ export async function searchProductsInFirestore(
       .then((snap) => {
         snap.forEach((d) => {
           const data = d.data() as Product;
-          if (data?.id && !deletedIds.has(data.id)) foundMap.set(data.id, data);
+          if (data?.id) foundMap.set(data.id, data);
         });
       })
       .catch(() => {}),

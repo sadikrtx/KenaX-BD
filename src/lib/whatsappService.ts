@@ -590,16 +590,6 @@ export function subscribeToWhatsAppSettings(callback: (settings: WhatsAppSetting
 // Helper to look up product data for cost prices, suppliers and product links
 export function findProductDetails(productId?: string): Partial<Product> | undefined {
   if (!productId) return undefined;
-  try {
-    const cached = typeof localStorage !== 'undefined' ? localStorage.getItem('kenax_products_cache') : null;
-    if (cached) {
-      const list = JSON.parse(cached);
-      if (Array.isArray(list)) {
-        const found = list.find((p: any) => p.id === productId);
-        if (found) return found;
-      }
-    }
-  } catch {}
   return INITIAL_PRODUCTS.find((p) => p.id === productId);
 }
 

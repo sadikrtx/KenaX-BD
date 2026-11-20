@@ -98,7 +98,7 @@ export const AdminStaff: React.FC<AdminStaffProps> = ({
     setName(staff.name);
     setEmail(staff.email);
     setPhone(staff.phone || '+880 17');
-    setPassword(staff.password || '123456');
+    setPassword('');
     setRole(staff.role);
     setSelectedPermissions(staff.permissions || DEFAULT_ROLE_PERMISSIONS[staff.role]);
     setPermSearch('');
@@ -134,12 +134,17 @@ export const AdminStaff: React.FC<AdminStaffProps> = ({
     e.preventDefault();
     if (!name.trim() || !email.trim()) return;
 
+    const trimmedPassword = password.trim();
     const payload: StaffUser = {
       id: editingStaff ? editingStaff.id : 'staff-' + Date.now(),
       name: name.trim(),
       email: email.trim().toLowerCase(),
       phone: phone.trim(),
-      password: password.trim() || editingStaff?.password || '123456',
+      ...(trimmedPassword
+        ? { password: trimmedPassword }
+        : editingStaff
+        ? {}
+        : { password: '123456' }),
       role,
       permissions: selectedPermissions,
       isActive: editingStaff ? editingStaff.isActive : true,
@@ -681,13 +686,15 @@ export const AdminStaff: React.FC<AdminStaffProps> = ({
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Password *</label>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    {editingStaff ? 'New Password (optional)' : 'Password *'}
+                  </label>
                   <input
                     type="text"
-                    required
+                    required={!editingStaff}
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    placeholder="Enter login password"
+                    placeholder={editingStaff ? 'Leave blank to keep current password' : 'Enter login password'}
                     className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs text-slate-900 dark:text-white font-mono"
                   />
                 </div>

@@ -21,13 +21,11 @@ export function isPreviewEnvironment(): boolean {
 }
 
 /**
- * Get dynamic collection name based on current environment.
- * E.g. 'products' -> 'preview_products' in dev preview, 'products' in live production site.
+ * Return the canonical shared Cloud Firestore collection name.
+ * All browsers, devices, and deployments read/write the same central Firestore collections
+ * in project `gen-lang-client-0077501500` so orders, products, staff, and reports stay 100% synced.
  */
 export function getEnvCollectionName(baseName: string): string {
-  if (isPreviewEnvironment()) {
-    return `preview_${baseName}`;
-  }
   return baseName;
 }
 

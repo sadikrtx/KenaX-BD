@@ -46,8 +46,7 @@ import {
   ColorVariation,
 } from '../types';
 import { BANGLADESH_LOCATIONS } from '../data/bangladeshData';
-import { saveCustomerToDB, getCustomersFromDB, mergeCustomersLists } from '../lib/firebase';
-import { INITIAL_CUSTOMERS } from '../data/initialSettings';
+import { saveCustomerToDB, getCustomersFromDB, generateNextOrderId } from '../lib/firebase';
 import {
   cleanBDPhoneNumber,
   isValidBDMobileNumber,
@@ -73,7 +72,7 @@ interface CheckoutModalProps {
   fullCart?: OrderItem[];
   discountAmount: number;
   couponCode?: string;
-  onOrderPlaced: (order: Order) => void;
+  onOrderPlaced: (order: Order) => Promise<void> | void;
   savedAddresses?: DeliveryAddress[];
   defaultInsideCityFee?: number;
   defaultOutsideCityFee?: number;
@@ -889,7 +888,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
       // If customer entered at least partial info or attempted order with items in cart
       if (itemsList.length > 0 && (rawMobile || rawName || rawAddress)) {
         try {
-          const incompleteOrderId = 'INC-' + Math.floor(100000 + Math.random() * 900000);
+          const incompleteOrderId = await generateNextOrderId('INC');
           const nowISO = new Date().toISOString();
           const missingFieldsList: string[] = [];
           if (!rawName) missingFieldsList.push('Customer Name');
@@ -969,7 +968,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
       }
     } catch (e) {}
 
-    const generatedOrderId = 'KB-' + Math.floor(100000 + Math.random() * 900000);
+    const generatedOrderId = await generateNextOrderId('KB');
     const nowISO = new Date().toISOString();
 
     // Map payment method name
@@ -978,19 +977,19 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
       methodTitle = currentGateway ? currentGateway.name : selectedGatewayId;
     }
 
-    // If guest, search existing customer records by Email or Mobile to prevent duplicates
+    // If guest, search existing customer records directly in Cloud Firestore by Email or Mobile to prevent duplicates
     let finalCustomerId = currentCustomer?.id;
     if (!currentCustomer) {
       const guestEmail = customerEmail.trim().toLowerCase();
       const guestMobileDigits = (customerMobile.trim() || deliveryMobile.trim()).replace(/[^0-9]/g, '');
 
-      let cachedCusts: CustomerRecord[] = [];
+      let allCusts: CustomerRecord[] = [];
       try {
-        const c = localStorage.getItem('kenax_customers_cache');
-        if (c) cachedCusts = JSON.parse(c);
-      } catch {}
+        allCusts = await getCustomersFromDB();
+      } catch {
+        allCusts = [];
+      }
 
-      const allCusts = mergeCustomersLists(INITIAL_CUSTOMERS, cachedCusts);
       const existingMatched = allCusts.find((c) => {
         if (guestEmail && c.email && c.email.trim().toLowerCase() === guestEmail) return true;
         if (guestMobileDigits) {
@@ -1167,10 +1166,11 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
       } catch {}
     }
 
-    setTimeout(() => {
+    try {
+      await Promise.resolve(onOrderPlaced(orderData));
+    } finally {
       setIsSubmitting(false);
-      onOrderPlaced(orderData);
-    }, 150);
+    }
   };
 
   const availableDistricts = Object.keys(BANGLADESH_LOCATIONS[division]?.districts || {});

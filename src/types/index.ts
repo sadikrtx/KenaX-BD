@@ -418,6 +418,8 @@ export interface Order {
   dueAmount?: number;
   paymentVerifiedAt?: string;
   advancePaidVerified?: boolean;
+  createdAtServer?: any;
+  updatedAtServer?: any;
   
   // Shipping & Courier
   orderStatus: OrderStatus;
@@ -1703,6 +1705,7 @@ export interface StaffUser {
   name: string;
   email: string;
   password?: string;
+  passwordHash?: string;
   role: UserRole;
   status?: 'active' | 'suspended';
   isActive?: boolean;
@@ -1714,7 +1717,10 @@ export interface StaffUser {
   avatar?: string;
   lastLogin?: string;
   createdAt: string;
+  updatedAt?: string;
   createdBy?: string;
+  loginAt?: string;
+  expiresAt?: string;
 }
 
 export interface ActivityLog {

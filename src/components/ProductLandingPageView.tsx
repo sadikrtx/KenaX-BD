@@ -54,6 +54,7 @@ import { useLanguage } from '../context/LanguageContext';
 import { getAttributionForOrder } from '../utils/attribution';
 import { trackPixelViewContent, trackPixelInitiateCheckout } from '../utils/pixelTracker';
 import { OrderRestrictionModal, RestrictionReason } from './OrderRestrictionModal';
+import { generateNextOrderId } from '../lib/firebase';
 
 interface ProductLandingPageViewProps {
   product: Product;
@@ -603,8 +604,10 @@ export const ProductLandingPageView: React.FC<ProductLandingPageViewProps> = ({
       variant: [selectedColor?.name, selectedVariant].filter(Boolean).join(' - ') || selectedVariant || selectedColor?.name || undefined,
     };
 
+    const generatedOrderId = await generateNextOrderId('KB');
+
     const newOrder: Order = {
-      id: 'ORD-' + Date.now().toString().slice(-6),
+      id: generatedOrderId,
       customerId: 'guest-' + Date.now(),
       customerName: cleanName,
       customerEmail: '',

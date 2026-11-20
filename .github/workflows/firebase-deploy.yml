@@ -33,8 +33,8 @@ jobs:
         with:
           credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_GEN_LANG_CLIENT_0077501500 }}
 
-      - name: Deploy Firebase Functions, Hosting, and Firestore Rules
+      - name: Deploy Firebase Functions, Hosting, and Firestore Rules & Indexes
         env:
           FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
         run: |
-          npx --yes firebase-tools deploy --only functions,hosting,firestore:rules --project gen-lang-client-0077501500 --non-interactive --force
+          npx --yes firebase-tools deploy --only functions,hosting,firestore:rules,firestore:indexes --project gen-lang-client-0077501500 --non-interactive --force

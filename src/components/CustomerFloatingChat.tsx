@@ -45,6 +45,7 @@ import { KenaXLogo } from './KenaXLogo';
 import { evaluateChatBotRules, searchCatalogHierarchicalMatrix } from '../lib/chatBotRuleMatcher';
 import { getEnvApiHeaders } from '../utils/envHelper';
 import { enrichProductsWithPopularity, getSortedPopularProducts } from '../utils/productPopularity';
+import { generateNextOrderId } from '../lib/firebase';
 
 interface CustomerFloatingChatProps {
   currentCustomer: CustomerRecord | null;
@@ -1602,7 +1603,7 @@ export const CustomerFloatingChat: React.FC<CustomerFloatingChatProps> = ({
           const uPrice = matchedProd?.price || det.unitPrice || 1200;
           const dFee = det.division === 'Outside Dhaka' ? outsideDhakaFee : insideDhakaFee;
           const totalAmt = uPrice * (det.quantity || 1) + dFee;
-          const ordId = `KB-ORD-${Date.now().toString(36).toUpperCase()}`;
+          const ordId = await generateNextOrderId('KB');
 
           finalOrderData = {
             orderId: ordId,
@@ -1831,7 +1832,7 @@ export const CustomerFloatingChat: React.FC<CustomerFloatingChatProps> = ({
       const deliveryCharge = subtotal >= 5000 ? 0 : (orderDeliveryZone === 'dhaka' ? insideDhakaFee : outsideDhakaFee);
       const totalAmount = subtotal + deliveryCharge;
 
-      const orderId = `KB-ORD-${Date.now().toString(36).toUpperCase()}`;
+      const orderId = await generateNextOrderId('KB');
 
       const divisionNameBn = BANGLADESH_DIVISION_NAMES_BN[orderDivision] || orderDivision;
       const districtNameBn = BANGLADESH_DISTRICT_NAMES_BN[orderDistrict] || orderDistrict;

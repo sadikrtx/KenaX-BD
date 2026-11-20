@@ -1,158 +1,328 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Products, Categories, Delivery Zones, Coupons, Settings, Reviews: Public Read and Write
-    match /products/{productId} {
-      allow read, write: if true;
+    // ===============================================================
+    // KenaX BD — Shared Cloud Firestore Security Rules
+    // Project: gen-lang-client-0077501500
+    // ===============================================================
+    // Security Guarantees:
+    // 1. Default-deny catch-all (no wildcard allow across unknown collections).
+    // 2. Server-only `integration_secrets` strictly denied to all clients.
+    // 3. `staff` collection strictly forbids plaintext `password` fields and
+    //    requires SHA-256 `passwordHash` ("sha256:<64-hex>").
+    // 4. Schema, ID, and numeric bounds validation enforced on core collections.
+    // ===============================================================
+
+    // Default deny for any unlisted collection/path
+    match /{document=**} {
+      allow read, write: if false;
     }
-    match /categories/{categoryId} {
-      allow read, write: if true;
+
+    // Helper functions
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 160;
     }
-    match /deletedProducts/{productId} {
-      allow read, write: if true;
+
+    function incoming() {
+      return request.resource.data;
     }
-    match /deletedCategories/{categoryId} {
-      allow read, write: if true;
+
+    function hasValidStaffDoc(data) {
+      return !('password' in data)
+        && data.passwordHash is string
+        && data.passwordHash.matches('^sha256:[a-f0-9]{64}$')
+        && data.email is string
+        && data.email.size() > 2
+        && data.email.size() <= 200
+        && data.name is string
+        && data.name.size() > 0
+        && data.name.size() <= 160
+        && data.role in ['super_admin', 'admin', 'manager', 'moderator', 'staff', 'user'];
     }
-    match /suppliers/{supplierId} {
-      allow read, write: if true;
+
+    function hasValidOrderDoc(data) {
+      return data.id is string
+        && data.id.size() > 0
+        && data.id.size() <= 120
+        && data.customerName is string
+        && data.customerName.size() <= 200
+        && data.totalAmount is number
+        && data.totalAmount >= 0
+        && data.totalAmount <= 100000000;
     }
-    match /deletedSuppliers/{supplierId} {
-      allow read, write: if true;
+
+    function hasValidProductDoc(data) {
+      return data.id is string
+        && data.id.size() > 0
+        && data.id.size() <= 120
+        && data.name is string
+        && data.name.size() > 0
+        && data.name.size() <= 300
+        && data.price is number
+        && data.price >= 0
+        && data.price <= 100000000;
     }
-    match /sourcingLocations/{locId} {
-      allow read, write: if true;
-    }
-    match /deletedSourcingLocations/{locId} {
-      allow read, write: if true;
-    }
-    match /deliveryZones/{zoneId} {
-      allow read, write: if true;
-    }
-    match /coupons/{couponId} {
-      allow read, write: if true;
-    }
-    match /websiteSettings/{settingId} {
-      allow read, write: if true;
-    }
-    match /system_settings/{settingId} {
-      allow read, write: if true;
-    }
-    match /settings/{settingId} {
-      allow read, write: if true;
-    }
-    match /system/{docId} {
-      allow read, write: if true;
-    }
-    match /heroBannerVideos/{videoId} {
-      allow read, write: if true;
-      match /chunks/{chunkId} {
-        allow read, write: if true;
-      }
-    }
-    match /productImageMedia/{mediaId} {
-      allow read, write: if true;
-      match /chunks/{chunkId} {
-        allow read, write: if true;
-      }
-    }
-    match /reviews/{reviewId} {
-      allow read, write: if true;
-    }
-    match /preview_reviews/{reviewId} {
-      allow read, write: if true;
-    }
-    match /deletedReviews/{reviewId} {
-      allow read, write: if true;
-    }
-    match /preview_deletedReviews/{reviewId} {
-      allow read, write: if true;
-    }
-    // Orders: Anyone can create an order, read by id or query, admin can manage/delete
-    match /orders/{orderId} {
-      allow read, write: if true;
-    }
-    // Staff, Roles, Permissions, Activity Logs, Notifications, Inventory
-    match /staff/{staffId} {
-      allow read, write: if true;
-    }
-    match /roles/{roleId} {
-      allow read, write: if true;
-    }
-    match /permissions/{permissionId} {
-      allow read, write: if true;
-    }
-    match /activityLogs/{logId} {
-      allow read, write: if true;
-    }
-    match /inventory/{inventoryId} {
-      allow read, write: if true;
-    }
-    match /inventoryLogs/{logId} {
-      allow read, write: if true;
-    }
-    match /notifications/{notificationId} {
-      allow read, write: if true;
-    }
-    match /customers/{customerId} {
-      allow read, write: if true;
-    }
-    match /deletedCustomers/{customerId} {
-      allow read, write: if true;
-    }
-    match /deletedStaff/{staffId} {
-      allow read, write: if true;
-    }
-    // Cart Activities & Wishlist & Live tracking & Newsletter Subscribers
-    match /cartActivities/{activityId} {
-      allow read, write: if true;
-    }
-    match /wishlistActivities/{activityId} {
-      allow read, write: if true;
-    }
-    match /newsletter_subscribers/{subscriberId} {
-      allow read, write: if true;
-    }
-    // Users & Profiles
-    match /users/{userId} {
-      allow read, write: if true;
-    }
-    // Email logs, SMS logs, Activity logs, Google sheets sync, Expenses, Other profits
-    match /emailLogs/{logId} {
-      allow read, write: if true;
-    }
-    match /sms_logs/{logId} {
-      allow read, write: if true;
-    }
-    match /auditLogs/{logId} {
-      allow read, write: if true;
-    }
-    match /expenses/{expenseId} {
-      allow read, write: if true;
-    }
-    match /other_profits/{profitId} {
-      allow read, write: if true;
-    }
-    match /googleSheetsSync/{syncId} {
-      allow read, write: if true;
-    }
-    match /whatsapp_messages/{messageId} {
-      allow read, write: if true;
-    }
-    match /whatsapp_webhooks/{webhookId} {
-      allow read, write: if true;
-    }
-    match /test/{docId} {
-      allow read, write: if true;
-    }
-    // Server-only Integration API Key hashes — NEVER readable or writable by any client role (including Manager/Admin)
+
+    // ---------------------------------------------------------------
+    // Server-only secrets — NEVER readable or writable by any client
+    // ---------------------------------------------------------------
     match /integration_secrets/{docId} {
       allow read, write: if false;
     }
-    // Universal catch-all rule (strictly excludes server-only integration_secrets)
-    match /{collection}/{document=**} {
-      allow read, write: if collection != 'integration_secrets';
+
+    // ---------------------------------------------------------------
+    // Core Storefront & Admin Shared Collections
+    // ---------------------------------------------------------------
+    match /products/{productId} {
+      allow read: if true;
+      allow create: if isValidId(productId) && hasValidProductDoc(incoming());
+      allow update: if isValidId(productId) && incoming().keys().size() <= 120;
+      allow delete: if isValidId(productId);
+    }
+
+    match /deletedProducts/{productId} {
+      allow read: if true;
+      allow write: if isValidId(productId);
+    }
+
+    match /categories/{categoryId} {
+      allow read: if true;
+      allow write: if isValidId(categoryId);
+    }
+
+    match /deletedCategories/{categoryId} {
+      allow read: if true;
+      allow write: if isValidId(categoryId);
+    }
+
+    match /orders/{orderId} {
+      allow read: if true;
+      allow create: if isValidId(orderId) && hasValidOrderDoc(incoming());
+      allow update: if isValidId(orderId) && incoming().keys().size() <= 120;
+      allow delete: if isValidId(orderId);
+    }
+
+    // Staff collection: strictly enforces SHA-256 passwordHash and blocks plaintext password
+    match /staff/{staffId} {
+      allow read: if true;
+      allow create, update: if isValidId(staffId) && hasValidStaffDoc(incoming());
+      allow delete: if isValidId(staffId);
+    }
+
+    match /deletedStaff/{staffId} {
+      allow read: if true;
+      allow write: if isValidId(staffId);
+    }
+
+    match /customers/{customerId} {
+      allow read: if true;
+      allow write: if isValidId(customerId);
+    }
+
+    match /deletedCustomers/{customerId} {
+      allow read: if true;
+      allow write: if isValidId(customerId);
+    }
+
+    // System metadata: atomic orderCounter, seedInfo, one-time migration marker
+    match /system/{docId} {
+      allow read: if true;
+      allow write: if isValidId(docId);
+    }
+
+    // Website & Integration Settings
+    match /websiteSettings/{settingId} {
+      allow read: if true;
+      allow write: if isValidId(settingId);
+    }
+
+    match /system_settings/{settingId} {
+      allow read: if true;
+      allow write: if isValidId(settingId);
+    }
+
+    match /settings/{settingId} {
+      allow read: if true;
+      allow write: if isValidId(settingId);
+    }
+
+    // Media chunk storage (product images & hero videos)
+    match /heroBannerVideos/{videoId} {
+      allow read: if true;
+      allow write: if isValidId(videoId);
+      match /chunks/{chunkId} {
+        allow read: if true;
+        allow write: if isValidId(chunkId);
+      }
+    }
+
+    match /productImageMedia/{mediaId} {
+      allow read: if true;
+      allow write: if isValidId(mediaId);
+      match /chunks/{chunkId} {
+        allow read: if true;
+        allow write: if isValidId(chunkId);
+      }
+    }
+
+    // Catalog & Sourcing supporting collections
+    match /suppliers/{supplierId} {
+      allow read: if true;
+      allow write: if isValidId(supplierId);
+    }
+
+    match /deletedSuppliers/{supplierId} {
+      allow read: if true;
+      allow write: if isValidId(supplierId);
+    }
+
+    match /sourcingLocations/{locId} {
+      allow read: if true;
+      allow write: if isValidId(locId);
+    }
+
+    match /deletedSourcingLocations/{locId} {
+      allow read: if true;
+      allow write: if isValidId(locId);
+    }
+
+    match /deliveryZones/{zoneId} {
+      allow read: if true;
+      allow write: if isValidId(zoneId);
+    }
+
+    match /coupons/{couponId} {
+      allow read: if true;
+      allow write: if isValidId(couponId);
+    }
+
+    match /reviews/{reviewId} {
+      allow read: if true;
+      allow write: if isValidId(reviewId);
+    }
+
+    match /preview_reviews/{reviewId} {
+      allow read: if true;
+      allow write: if isValidId(reviewId);
+    }
+
+    match /deletedReviews/{reviewId} {
+      allow read: if true;
+      allow write: if isValidId(reviewId);
+    }
+
+    match /preview_deletedReviews/{reviewId} {
+      allow read: if true;
+      allow write: if isValidId(reviewId);
+    }
+
+    // Operations, Finance, Logs & Analytics
+    match /activityLogs/{logId} {
+      allow read: if true;
+      allow write: if isValidId(logId);
+    }
+
+    match /auditLogs/{logId} {
+      allow read: if true;
+      allow write: if isValidId(logId);
+    }
+
+    match /inventory/{inventoryId} {
+      allow read: if true;
+      allow write: if isValidId(inventoryId);
+    }
+
+    match /inventoryLogs/{logId} {
+      allow read: if true;
+      allow write: if isValidId(logId);
+    }
+
+    match /notifications/{notificationId} {
+      allow read: if true;
+      allow write: if isValidId(notificationId);
+    }
+
+    match /expenses/{expenseId} {
+      allow read: if true;
+      allow write: if isValidId(expenseId);
+    }
+
+    match /other_profits/{profitId} {
+      allow read: if true;
+      allow write: if isValidId(profitId);
+    }
+
+    match /roles/{roleId} {
+      allow read: if true;
+      allow write: if isValidId(roleId);
+    }
+
+    match /permissions/{permissionId} {
+      allow read: if true;
+      allow write: if isValidId(permissionId);
+    }
+
+    // Live Storefront Engagement & Marketing
+    match /cartActivities/{activityId} {
+      allow read: if true;
+      allow write: if isValidId(activityId);
+    }
+
+    match /wishlistActivities/{activityId} {
+      allow read: if true;
+      allow write: if isValidId(activityId);
+    }
+
+    match /newsletter_subscribers/{subscriberId} {
+      allow read: if true;
+      allow write: if isValidId(subscriberId);
+    }
+
+    match /users/{userId} {
+      allow read: if true;
+      allow write: if isValidId(userId);
+    }
+
+    // Communications & Sync Logs
+    match /emailLogs/{logId} {
+      allow read: if true;
+      allow write: if isValidId(logId);
+    }
+
+    match /sms_logs/{logId} {
+      allow read: if true;
+      allow write: if isValidId(logId);
+    }
+
+    match /googleSheetsSync/{syncId} {
+      allow read: if true;
+      allow write: if isValidId(syncId);
+    }
+
+    match /whatsapp_messages/{messageId} {
+      allow read: if true;
+      allow write: if isValidId(messageId);
+    }
+
+    match /whatsapp_webhooks/{webhookId} {
+      allow read: if true;
+      allow write: if isValidId(webhookId);
+    }
+
+    match /whatsapp_metadata/{docId} {
+      allow read: if true;
+      allow write: if isValidId(docId);
+    }
+
+    match /telegram_logs/{logId} {
+      allow read: if true;
+      allow write: if isValidId(logId);
+    }
+
+    // Health check document for testConnection()
+    match /test/{docId} {
+      allow read: if true;
+      allow write: if false;
     }
   }
 }
-

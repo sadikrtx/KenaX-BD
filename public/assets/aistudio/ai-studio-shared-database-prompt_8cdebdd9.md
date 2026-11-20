@@ -1,0 +1,40 @@
+# KenaX BD — Shared Cloud Database Fix (data must sync across all browsers/devices): AI Studio Prompt
+Prepared for Sadik, 2026-11-20. Problem reported by Sadik the same day: an order created in one browser only appears in that same browser's admin dashboard; opening the admin in another browser or on a phone does not show it. A staff account created in the admin dashboard cannot log in from any other browser/device. Diagnosis: orders, products and staff accounts are being stored in browser-local storage (localStorage) instead of a shared server database, so every browser has its own separate copy of the shop's data.
+
+## How to use
+Paste the prompt below into Google AI Studio in the KenaX BD project, let it build, then push to GitHub and deploy (hosting + Firestore rules) as usual. Then run the cross-browser tests at the end of the prompt.
+
+---
+
+```
+You are working on my existing e-commerce app "KenaX BD", deployed on Firebase Hosting (project gen-lang-client-0077501500) via GitHub. Do NOT redesign anything. Keep the existing UI, branding, colours, Bengali + English labels, pages, checkout flow, Staff Login Portal, RBAC roles and all existing features exactly as they are. Only fix WHERE the app's data is stored, as described below.
+
+PROBLEM
+Right now the app's data is saved in the browser's local storage (localStorage) of whichever browser created it. This means every browser and every device has its own separate copy of the shop's data:
+- If I place an order while using one browser, that order appears only in that same browser. When I log in to the admin dashboard from a different browser or from a mobile phone, the order is NOT there.
+- If I create a staff account (for example a Moderator with a Gmail address and password) in the admin dashboard, that staff member CANNOT log in from any other browser or device — the login fails, because the staff account exists only in the first browser's local storage.
+- The same risk applies to products, inventory/stock, customers, payments and activity logs.
+For a real shop this is broken: customers order from their own phones and browsers, so their orders must reach ONE central place that the admin dashboard reads.
+
+FIX — MOVE ALL SHARED DATA TO CLOUD FIRESTORE (ONE CENTRAL DATABASE)
+Use Cloud Firestore in the SAME Firebase project that already hosts this site (gen-lang-client-0077501500). Firestore becomes the single source of truth for ALL shared shop data. From now on:
+
+1) ORDERS: When any customer checks out from ANY browser or device, the order is written to a Firestore collection `orders` (not localStorage). The storefront Track Order page and the admin Orders / Confirmed Orders pages must read orders from Firestore, so an order placed anywhere appears in the admin dashboard everywhere.
+2) STAFF ACCOUNTS & LOGIN: Staff accounts live in a Firestore collection `staff`. Creating, editing, activating/deactivating or deleting a staff account in Staff Management writes to Firestore. The Staff Login Portal must validate the entered email/mobile + password against the Firestore `staff` collection (server data), NOT against localStorage — so a staff account created on one device can log in from any browser or phone. Keep the existing roles and the exact same permission rules (Super Admin, Manager, Moderator and their RBAC menus).
+3) PRODUCTS & INVENTORY: Products, categories, prices, discounts and stock quantities live in Firestore collections (`products`, and inventory fields with the product or a separate `inventory` collection). Adding/editing a product or changing stock in the admin must be visible on the storefront for every visitor, on every device.
+4) EVERYTHING ELSE SHARED: Customers, payments/COD records, delivery/courier info, activity logs, report & analytics figures, and site settings must also be computed from / stored in Firestore — no report or list may be built from localStorage data. Dashboard totals (Total Orders, Gross Sales, Pending COD etc.) must be calculated from the Firestore orders so every browser shows the same numbers.
+5) REALTIME: Subscribe to Firestore with onSnapshot listeners for the admin lists (orders, products, staff, activity logs) so a new order placed by a customer appears LIVE in an already-open admin dashboard without a manual refresh.
+6) ORDER NUMBERS: Order IDs (for example KB-404401) must be unique across ALL devices. Do not generate them from a per-browser counter in localStorage. Use the Firestore document ID and/or a single shared counter document updated inside a Firestore transaction, keeping the visible "KB-######" format customers already see.
+7) TIMESTAMPS: Use Firestore serverTimestamp() for order creation and status-change times so dates/times agree across devices and timezones.
+8) WHAT MAY STAY LOCAL: Only per-visitor, non-shared things may remain in localStorage — the shopping cart of a guest before checkout, and the staff login session (staffId, role, loginAt, expiresAt — never the password). Everything that more than one person or device needs must be in Firestore.
+9) MIGRATION: On first run after this change, if Firestore collections are empty and the current browser has existing localStorage data (orders, products, staff), offer/run a one-time import that uploads that existing data into Firestore, so I do not lose the products, staff accounts and orders I already created. Do not duplicate data if the import runs twice.
+10) SECURITY: Add Firestore security rules in the project (firestore.rules, deployed with the site) that fit this app: anyone may create an order at checkout and read the data the public storefront needs (products), but only logged-in staff may read the full order list, customer details and staff collection, and only Super Admin may manage staff accounts. Never store staff passwords as plain readable text anywhere a browser can download for other users — store a hashed password (for example SHA-256 hash) in the staff document and compare hashes at login.
+11) DEPLOY: Make sure the GitHub → Firebase deploy includes the Firestore rules (and any composite indexes the queries need) together with the hosting build, and that the web app's Firebase config points to the same project gen-lang-client-0077501500.
+
+TEST BEFORE YOU FINISH (do these and report the results in your summary):
+- Browser A: place a test order on the storefront. Browser B (different browser or phone), logged in to /admin: the same order must appear in Orders with the same order number, items and total — without Browser B ever having been used for the order.
+- In Browser A admin, create a new Moderator staff account. In Browser B (or a phone), log in to the Staff Portal with that new account's email and password: login must succeed with Moderator menus and permissions.
+- In Browser B as that Moderator, change the test order from Pending to Confirmed. In Browser A admin, the order must show Confirmed (live, or after one refresh at most).
+- Add a new product in one browser's admin: it must appear on the storefront in the other browser.
+- Confirm no order, product, staff or report data is read from localStorage anymore (clearing a browser's site data must not delete any shop orders, products or staff accounts).
+```

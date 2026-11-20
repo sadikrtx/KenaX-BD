@@ -153,7 +153,15 @@ import {
   mergeCategoriesLists,
   mergeOrdersLists,
   resolveOriginalImageMedia,
+  testConnection,
 } from './lib/firebase';
+import { runOneTimeLocalStorageMigration } from './lib/firestoreMigration';
+import {
+  loadStaffSession,
+  saveStaffSession,
+  clearStaffSession,
+  stripStaffSecrets,
+} from './lib/passwordHash';
 import { addAddressWithoutDuplicates, isSameAddress } from './utils/addressUtils';
 import { preloadProductThumbnailBatch } from './utils/imageOptimizer';
 import { Sparkles, Flame, Star, CheckCircle, ArrowRight, ShieldCheck, Lock, LogIn } from 'lucide-react';
@@ -319,19 +327,8 @@ export default function App() {
   });
   const [selectedTrackOrder, setSelectedTrackOrder] = useState<Order | null>(null);
   const [currentRole, setCurrentRole] = useState<UserRole>(() => {
-    try {
-      const savedStaff =
-        localStorage.getItem('kenax_current_staff') ||
-        localStorage.getItem('kenax_authenticated_staff') ||
-        localStorage.getItem('preview_kenax_current_staff');
-      if (savedStaff) {
-        const parsed = JSON.parse(savedStaff);
-        if (parsed && parsed.role) return parsed.role;
-      }
-      const savedRole = localStorage.getItem('kenax_authenticated_role');
-      if (savedRole) return savedRole as UserRole;
-    } catch {}
-    return 'customer';
+    const session = loadStaffSession();
+    return session?.role || 'customer';
   });
   const [adminInitialTab, setAdminInitialTab] = useState<any>(() => {
     try {
@@ -402,99 +399,13 @@ export default function App() {
     }
   };
 
-  // Staff Authentication state (Permanent Multi-Device & Cross-Environment Persistence)
-  const [staffList, setStaffList] = useState<StaffUser[]>(() => {
-    const staffById = new Map<string, StaffUser>();
-    const staffByEmail = new Map<string, StaffUser>();
+  // Staff Authentication state (Cloud Firestore Single Source of Truth; localStorage stores ONLY non-secret session metadata)
+  const [staffList, setStaffList] = useState<StaffUser[]>([]);
 
-    const mergeEntry = (s: StaffUser) => {
-      if (!s || (!s.id && !s.email)) return;
-      const lowerEmail = s.email ? s.email.trim().toLowerCase() : '';
-      const idKey = s.id ? s.id.trim() : '';
-
-      const existing = (idKey ? staffById.get(idKey) : null) || (lowerEmail ? staffByEmail.get(lowerEmail) : null);
-      const resolvedPhone = (s.phone && s.phone.trim() !== '') ? s.phone.trim() : (existing?.phone || s.phone);
-      const resolvedName = (s.name && s.name.trim() !== '') ? s.name.trim() : (existing?.name || s.name);
-      const merged: StaffUser = existing
-        ? {
-            ...existing,
-            ...s,
-            phone: resolvedPhone,
-            name: resolvedName,
-          }
-        : { ...s };
-
-      if (idKey) staffById.set(idKey, merged);
-      if (lowerEmail) staffByEmail.set(lowerEmail, merged);
-    };
-
-    // 1. INITIAL_STAFF baseline
-    for (const s of INITIAL_STAFF as StaffUser[]) {
-      mergeEntry(s);
-    }
-
-    const readLocal = (key: string) => {
-      try {
-        const cached = localStorage.getItem(key);
-        if (cached) {
-          const parsed = JSON.parse(cached);
-          if (Array.isArray(parsed)) {
-            parsed.forEach((s) => mergeEntry(s));
-          } else if (parsed && typeof parsed === 'object' && (parsed.id || parsed.email)) {
-            mergeEntry(parsed);
-          }
-        }
-      } catch {}
-    };
-    readLocal('kenax_staff_cache');
-    readLocal('preview_kenax_staff_cache');
-    readLocal('kenax_current_staff');
-    readLocal('kenax_authenticated_staff');
-
-    const seen = new Set<string>();
-    const res: StaffUser[] = [];
-    for (const s of staffById.values()) {
-      const key = s.id || (s.email ? s.email.toLowerCase() : '');
-      if (key && !seen.has(key)) {
-        seen.add(key);
-        res.push(s);
-      }
-    }
-    return res;
-  });
-
-  const [currentStaff, setCurrentStaff] = useState<StaffUser | null>(() => {
-    const saved = localStorage.getItem('kenax_current_staff') || localStorage.getItem('kenax_authenticated_staff') || localStorage.getItem('preview_kenax_current_staff');
-    if (saved) {
-      try {
-        const parsed: StaffUser = JSON.parse(saved);
-        if (parsed && (parsed.id || parsed.email)) {
-          return parsed;
-        }
-      } catch (e) {}
-    }
-    return null;
-  });
-
-  // Reconcile active session staff into staffList so it's always listed in Staff Members & RBAC
-  useEffect(() => {
-    if (currentStaff && (currentStaff.id || currentStaff.email)) {
-      setStaffList((prev) => {
-        const exists = prev.some(
-          (s) => s.id === currentStaff.id || (s.email && currentStaff.email && s.email.toLowerCase() === currentStaff.email.toLowerCase())
-        );
-        if (!exists) {
-          const updated = [currentStaff, ...prev];
-          saveStaffToDB(currentStaff);
-          return updated;
-        }
-        return prev;
-      });
-    }
-  }, [currentStaff]);
+  const [currentStaff, setCurrentStaff] = useState<StaffUser | null>(() => loadStaffSession());
 
   const [isAdminLoginOpen, setIsAdminLoginOpen] = useState(false);
-  const [isAdminPortalAuthenticated, setIsAdminPortalAuthenticated] = useState(false);
+  const [isAdminPortalAuthenticated, setIsAdminPortalAuthenticated] = useState<boolean>(() => Boolean(loadStaffSession()));
 
   // Defer non-critical storefront floating widgets (Chat & Offer Popup) until after first paint
   const [deferredStorefrontWidgetsReady, setDeferredStorefrontWidgetsReady] = useState(false);
@@ -518,7 +429,7 @@ export default function App() {
     };
   }, []);
 
-  // Sync staff list via real-time subscription ONLY when staff/admin context is active (avoids unnecessary reads for public visitors)
+  // Sync staff list via real-time subscription from Cloud Firestore when staff/admin context is active
   useEffect(() => {
     const shouldSyncStaff = Boolean(currentStaff) || currentView === 'admin-dashboard' || isAdminLoginOpen;
     if (!shouldSyncStaff) return;
@@ -527,18 +438,31 @@ export default function App() {
     let staffSnapshotReceived = false;
 
     const applyStaffList = (latestStaff: StaffUser[]) => {
-      if (!isMounted || !latestStaff || latestStaff.length === 0) return;
-      setStaffList(latestStaff);
+      if (!isMounted || !latestStaff) return;
+      const sanitizedList = latestStaff.map(stripStaffSecrets);
+      setStaffList(sanitizedList);
       setCurrentStaff((prev) => {
         if (!prev) return prev;
-        const matched = latestStaff.find(
+        const matched = sanitizedList.find(
           (s) => s.id === prev.id || (s.email && prev.email && s.email.toLowerCase() === prev.email.toLowerCase())
         );
         if (matched) {
-          const ser = JSON.stringify(matched);
-          localStorage.setItem('kenax_current_staff', ser);
-          localStorage.setItem('kenax_authenticated_staff', ser);
+          if (matched.isRemoved || matched.isActive === false || matched.status === 'suspended') {
+            clearStaffSession();
+            setIsAdminPortalAuthenticated(false);
+            setCurrentRole('customer');
+            return null;
+          }
+          saveStaffSession(matched);
+          setCurrentRole(matched.role);
           return matched;
+        }
+        // Account no longer exists in Firestore (permanently deleted by Super Admin)
+        if (sanitizedList.length > 0) {
+          clearStaffSession();
+          setIsAdminPortalAuthenticated(false);
+          setCurrentRole('customer');
+          return null;
         }
         return prev;
       });
@@ -549,7 +473,6 @@ export default function App() {
       applyStaffList(latestStaff);
     });
 
-    // Fallback one-shot read ONLY if real-time snapshot didn't emit (e.g. offline/quota mode)
     const fallbackTimer = window.setTimeout(() => {
       if (isMounted && !staffSnapshotReceived) {
         getStaffFromDB().then((dbStaff) => {
@@ -565,16 +488,8 @@ export default function App() {
     };
   }, [Boolean(currentStaff), currentView === 'admin-dashboard', isAdminLoginOpen]);
 
-  // Cart Activities for Admin / Manager / Moderator Tracking
-  const [cartActivities, setCartActivities] = useState<CartActivity[]>(() => {
-    try {
-      const cached = localStorage.getItem('kenax_cart_activities_cache');
-      const list = cached ? JSON.parse(cached) : [];
-      return Array.isArray(list) ? list.filter((c: any) => c && c.isV2Activity) : [];
-    } catch {
-      return [];
-    }
-  });
+  // Cart Activities for Admin / Manager / Moderator Tracking (hydrated live from Firestore)
+  const [cartActivities, setCartActivities] = useState<CartActivity[]>([]);
 
   // Persistent Guest Visitor Session ID
   const [visitorSessionId] = useState<string>(() => {
@@ -593,71 +508,13 @@ export default function App() {
   const [successOrder, setSuccessOrder] = useState<Order | null>(null);
   const [isSuccessModalOpen, setIsSuccessModalOpen] = useState(false);
 
-  // Database Data States
-  const [products, setProducts] = useState<Product[]>(() => {
-    try {
-      const rawDeleted = localStorage.getItem(getEnvStorageKey('kenax_deleted_product_ids'));
-      const deletedSet = new Set<string>(rawDeleted ? JSON.parse(rawDeleted) : []);
-      const cached = localStorage.getItem(getEnvStorageKey('kenax_products_cache'));
-      let cachedList: Product[] = [];
-      if (cached) {
-        const parsed = JSON.parse(cached);
-        if (Array.isArray(parsed)) cachedList = parsed;
-      }
-      const baseline = INITIAL_PRODUCTS;
-      const merged = mergeProductsLists(baseline, cachedList, deletedSet);
-      return merged.filter((p: Product) => p && p.id && !deletedSet.has(p.id));
-    } catch {
-      return INITIAL_PRODUCTS;
-    }
-  });
-  const [orders, setOrders] = useState<Order[]>(() => {
-    try {
-      const cached = localStorage.getItem(getEnvStorageKey('kenax_orders_cache'));
-      if (cached) {
-        const parsed = JSON.parse(cached);
-        if (Array.isArray(parsed) && parsed.length > 0) return mergeOrdersLists([], parsed);
-      }
-    } catch {}
-    return [];
-  });
-  const [categories, setCategories] = useState<Category[]>(() => {
-    try {
-      const cached = localStorage.getItem('kenax_categories_cache') || localStorage.getItem('kenax_categories');
-      if (cached) {
-        const parsed = JSON.parse(cached);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          return mergeCategoriesLists(INITIAL_CATEGORIES, parsed);
-        }
-      }
-    } catch {}
-    return INITIAL_CATEGORIES;
-  });
-  const [siteSettings, setSiteSettings] = useState<SiteSettings>(() => {
-    const saved = (() => {
-      try {
-        return localStorage.getItem('kenax_site_settings') || localStorage.getItem('kenax_settings_cache');
-      } catch {
-        return null;
-      }
-    })();
-    const storedLogo = (() => {
-      try {
-        return localStorage.getItem('kenax_custom_logo') || undefined;
-      } catch {
-        return undefined;
-      }
-    })();
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        return sanitizeSiteSettings(parsed, storedLogo);
-      } catch (e) {
-        console.error('Failed to parse saved siteSettings', e);
-      }
-    }
-    return sanitizeSiteSettings(INITIAL_WEBSITE_SETTINGS, storedLogo);
-  });
+  // Database Data States (Cloud Firestore Single Source of Truth — no browser-local shared caches)
+  const [products, setProducts] = useState<Product[]>([]);
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [categories, setCategories] = useState<Category[]>(INITIAL_CATEGORIES);
+  const [siteSettings, setSiteSettings] = useState<SiteSettings>(() =>
+    sanitizeSiteSettings(INITIAL_WEBSITE_SETTINGS)
+  );
 
   // Dynamically sync SEO Meta Tags and Advertising Pixels (Meta Pixel, CAPI, TikTok, GA4) to DOM
   useEffect(() => {
@@ -687,15 +544,6 @@ export default function App() {
     let fullMerged: SiteSettings = sanitizeSiteSettings(newSettings, siteSettings.customLogo);
     setSiteSettings((prev) => {
       fullMerged = sanitizeSiteSettings({ ...prev, ...newSettings });
-      try {
-        safeSetLocalStorage('kenax_site_settings', JSON.stringify(fullMerged));
-        safeSetLocalStorage('kenax_settings_cache', JSON.stringify(fullMerged));
-        if (fullMerged.customLogo) {
-          safeSetLocalStorage('kenax_custom_logo', fullMerged.customLogo);
-        }
-      } catch (e) {
-        console.error('Failed to persist siteSettings', e);
-      }
       return fullMerged;
     });
     await saveSettingsToDB(fullMerged);
@@ -1585,35 +1433,29 @@ export default function App() {
     }
   };
 
-  // Real-time database listeners (Products, Settings, Categories) + network reconnect sync
+  // Real-time database listeners (Products, Settings, Categories) + one-time migration & network reconnect sync
   useEffect(() => {
     let isMounted = true;
     let productsReceived = false;
     let settingsReceived = false;
     let categoriesReceived = false;
 
-    // Background seed without blocking initial storefront paint
-    const seeded = localStorage.getItem('kenax_seeded_flag');
+    // Verify Firestore connectivity & run safe idempotent one-time legacy localStorage -> Firestore migration
+    testConnection().catch(() => {});
+    runOneTimeLocalStorageMigration()
+      .then(() => seedAllDataToFirestore().catch(() => {}))
+      .catch(() => {});
+
     let seedTimer: number | null = null;
-    if (!seeded) {
-      seedTimer = window.setTimeout(() => {
-        seedAllDataToFirestore().catch(() => {});
-      }, 1200);
-    }
 
     const applySettings = (incomingSettings: Partial<SiteSettings>) => {
-      setSiteSettings((prev) => {
-        const merged = sanitizeSiteSettings({ ...prev, ...incomingSettings });
-        safeSetLocalStorage('kenax_site_settings', JSON.stringify(merged));
-        safeSetLocalStorage('kenax_settings_cache', JSON.stringify(merged));
-        return merged;
-      });
+      setSiteSettings((prev) => sanitizeSiteSettings({ ...prev, ...incomingSettings }));
     };
 
-    // Attach real-time Firestore listeners immediately (eliminates duplicate initial getDocs + onSnapshot reads)
+    // Attach real-time Firestore listeners immediately (Single Source of Truth)
     const unsubscribeProducts = subscribeToProducts((liveProducts) => {
       productsReceived = true;
-      if (isMounted && liveProducts && liveProducts.length > 0) {
+      if (isMounted && liveProducts) {
         setProducts(liveProducts);
       }
     });
@@ -2334,7 +2176,7 @@ export default function App() {
     setCurrentStaff(null);
     setCurrentRole('customer');
     localStorage.removeItem('kenax_current_customer');
-    localStorage.removeItem('kenax_current_staff');
+    clearStaffSession();
     localStorage.removeItem('kenax_cart');
     localStorage.removeItem('kenax_wishlist');
     localStorage.removeItem('kenax_saved_addresses');
@@ -2348,10 +2190,7 @@ export default function App() {
     setIsAdminPortalAuthenticated(false);
     setCurrentStaff(null);
     setCurrentRole('customer');
-    localStorage.removeItem('kenax_current_staff');
-    localStorage.removeItem('kenax_authenticated_staff');
-    localStorage.removeItem('preview_kenax_current_staff');
-    localStorage.removeItem('kenax_authenticated_role');
+    clearStaffSession();
     localStorage.removeItem('kenax_current_view');
     localStorage.removeItem('kenax_admin_active_tab');
     try {
@@ -2393,67 +2232,44 @@ export default function App() {
     await deleteProductFromDB(productId);
   };
 
-  // Category handlers for Admin
+  // Category handlers for Admin (Cloud Firestore Single Source of Truth)
   const handleAddCategory = async (newCat: Category) => {
     setCategories((prev) => {
       const exists = prev.some((c) => c.id === newCat.id);
-      const next = exists ? prev.map((c) => (c.id === newCat.id ? newCat : c)) : [...prev, newCat];
-      try {
-        localStorage.setItem('kenax_categories', JSON.stringify(next));
-        localStorage.setItem('kenax_categories_cache', JSON.stringify(next));
-      } catch {}
-      return next;
+      return exists ? prev.map((c) => (c.id === newCat.id ? newCat : c)) : [...prev, newCat];
     });
     await saveCategoryToDB(newCat);
   };
 
   const handleUpdateCategory = async (updatedCat: Category) => {
     const oldCat = categories.find((c) => c.id === updatedCat.id);
-    setCategories((prev) => {
-      const next = prev.map((c) => (c.id === updatedCat.id ? updatedCat : c));
-      try {
-        localStorage.setItem('kenax_categories', JSON.stringify(next));
-        localStorage.setItem('kenax_categories_cache', JSON.stringify(next));
-      } catch {}
-      return next;
-    });
+    setCategories((prev) => prev.map((c) => (c.id === updatedCat.id ? updatedCat : c)));
     await saveCategoryToDB(updatedCat);
 
     // Cascade category name change to products if name changed
     if (oldCat && oldCat.name !== updatedCat.name) {
-      setProducts((prev) => {
-        const nextProducts = prev.map((p) =>
+      setProducts((prev) =>
+        prev.map((p) =>
           p.category === oldCat.name ? { ...p, category: updatedCat.name, categorySlug: updatedCat.slug || p.categorySlug } : p
-        );
-        try {
-          localStorage.setItem('kenax_products_cache', JSON.stringify(nextProducts));
-        } catch {}
-        return nextProducts;
-      });
-      products.filter((p) => p.category === oldCat.name).forEach((p) => {
-        saveProductToDB({ ...p, category: updatedCat.name, categorySlug: updatedCat.slug || p.categorySlug }).catch(() => {});
-      });
+        )
+      );
+      await Promise.allSettled(
+        products
+          .filter((p) => p.category === oldCat.name)
+          .map((p) =>
+            saveProductToDB({ ...p, category: updatedCat.name, categorySlug: updatedCat.slug || p.categorySlug })
+          )
+      );
     }
   };
 
   const handleDeleteCategory = async (catId: string) => {
-    setCategories((prev) => {
-      const next = prev.filter((c) => c.id !== catId);
-      try {
-        localStorage.setItem('kenax_categories', JSON.stringify(next));
-        localStorage.setItem('kenax_categories_cache', JSON.stringify(next));
-      } catch {}
-      return next;
-    });
+    setCategories((prev) => prev.filter((c) => c.id !== catId));
     await deleteCategoryFromDB(catId);
   };
 
   const handleReorderCategories = async (newCats: Category[]) => {
     setCategories(newCats);
-    try {
-      localStorage.setItem('kenax_categories', JSON.stringify(newCats));
-      localStorage.setItem('kenax_categories_cache', JSON.stringify(newCats));
-    } catch {}
     for (const c of newCats) {
       await saveCategoryToDB(c);
     }
@@ -3000,12 +2816,11 @@ export default function App() {
               isOpen={true}
               onClose={handleNavigateToStoreFromAdmin}
               onLoginSuccess={(staff) => {
-                setCurrentStaff(staff);
-                setCurrentRole(staff.role);
+                const safeStaff = stripStaffSecrets(staff);
+                setCurrentStaff(safeStaff);
+                setCurrentRole(safeStaff.role);
                 setIsAdminPortalAuthenticated(true);
-                localStorage.setItem('kenax_current_staff', JSON.stringify(staff));
-                localStorage.setItem('kenax_authenticated_staff', JSON.stringify(staff));
-                localStorage.setItem('kenax_authenticated_role', staff.role);
+                saveStaffSession(safeStaff);
                 setIsAdminLoginOpen(false);
                 setCurrentView('admin-dashboard');
               }}
@@ -3072,35 +2887,29 @@ export default function App() {
           initialSettingsSubTab={adminInitialSettingsSubTab}
           staffList={staffList}
           onUpdateStaffList={(newList) => {
-            setStaffList(newList);
+            const sanitized = newList.map(stripStaffSecrets);
+            setStaffList(sanitized);
             if (currentStaff) {
-              const matched = newList.find(
+              const matched = sanitized.find(
                 (s) => s.id === currentStaff.id || (s.email && currentStaff.email && s.email.toLowerCase() === currentStaff.email.toLowerCase())
               );
               if (matched) {
                 setCurrentStaff(matched);
-                const ser = JSON.stringify(matched);
-                localStorage.setItem('kenax_current_staff', ser);
-                localStorage.setItem('kenax_authenticated_staff', ser);
-                localStorage.setItem('preview_kenax_current_staff', ser);
+                saveStaffSession(matched);
               }
             }
           }}
           onUpdateCurrentStaff={(updated) => {
-            setCurrentStaff(updated);
-            const ser = JSON.stringify(updated);
-            localStorage.setItem('kenax_current_staff', ser);
-            localStorage.setItem('kenax_authenticated_staff', ser);
-            localStorage.setItem('preview_kenax_current_staff', ser);
+            const safeUpdated = stripStaffSecrets(updated);
+            setCurrentStaff(safeUpdated);
+            saveStaffSession(safeUpdated);
           }}
           onRoleChange={(role) => {
             setCurrentRole(role);
             if (currentStaff) {
-              const updated = { ...currentStaff, role };
+              const updated = stripStaffSecrets({ ...currentStaff, role });
               setCurrentStaff(updated);
-              localStorage.setItem('kenax_current_staff', JSON.stringify(updated));
-              localStorage.setItem('kenax_authenticated_staff', JSON.stringify(updated));
-              localStorage.setItem('kenax_authenticated_role', role);
+              saveStaffSession(updated);
             }
           }}
         />
@@ -4247,12 +4056,11 @@ export default function App() {
             isOpen={isAdminLoginOpen}
             onClose={() => setIsAdminLoginOpen(false)}
             onLoginSuccess={(staff) => {
-              setCurrentStaff(staff);
-              setCurrentRole(staff.role);
+              const safeStaff = stripStaffSecrets(staff);
+              setCurrentStaff(safeStaff);
+              setCurrentRole(safeStaff.role);
               setIsAdminPortalAuthenticated(true);
-              localStorage.setItem('kenax_current_staff', JSON.stringify(staff));
-              localStorage.setItem('kenax_authenticated_staff', JSON.stringify(staff));
-              localStorage.setItem('kenax_authenticated_role', staff.role);
+              saveStaffSession(safeStaff);
               setIsAdminLoginOpen(false);
               setCurrentView('admin-dashboard');
             }}

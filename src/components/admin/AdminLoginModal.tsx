@@ -15,6 +15,8 @@ import {
   UserCheck,
 } from 'lucide-react';
 import { StaffUser } from '../../types';
+import { authenticateStaffFromDB } from '../../lib/firebase';
+import { saveStaffSession } from '../../lib/passwordHash';
 
 interface AdminLoginModalProps {
   isOpen: boolean;
@@ -27,7 +29,6 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
   isOpen,
   onClose,
   onLoginSuccess,
-  staffList,
 }) => {
   // Staff Login Form state
   const [staffInputVal, setStaffInputVal] = useState('');
@@ -37,80 +38,29 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
 
   if (!isOpen) return null;
 
-  const handleStaffSubmit = (e: React.FormEvent) => {
+  const handleStaffSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setStaffErrorMsg(null);
     setIsSubmitting(true);
 
-    const cleanInput = staffInputVal.trim().toLowerCase();
-    const cleanDigits = cleanInput.replace(/[\s\-\+\(\)]/g, '');
+    try {
+      const result = await authenticateStaffFromDB(staffInputVal, staffPassword);
+      if (!result.success || !result.staff) {
+        setStaffErrorMsg(result.error || 'Invalid credentials. Access denied.');
+        setIsSubmitting(false);
+        return;
+      }
 
-    // Find staff account from staffList (by email, phone, or super_admin role)
-    let foundStaff = staffList.find(
-      (s) =>
-        (s.email && s.email.trim().toLowerCase() === cleanInput) ||
-        (s.phone && s.phone.replace(/[\s\-\+\(\)]/g, '').toLowerCase() === cleanDigits)
-    );
-
-    const isSuperAdminIdentifier =
-      cleanInput === 'super@kenaxbd.com' ||
-      cleanInput === 'super@gmail.com' ||
-      cleanInput === 'sadikrtx3060@gmail.com' ||
-      cleanInput === 'admin' ||
-      cleanInput === 'superadmin' ||
-      cleanInput === 'super_admin' ||
-      cleanDigits === '01700123456';
-
-    if (!foundStaff && isSuperAdminIdentifier) {
-      foundStaff = staffList.find((s) => s.role === 'super_admin') || {
-        id: 'staff-super-2',
-        name: 'Super Admin',
-        email: cleanInput.includes('@') ? cleanInput : 'super@kenaxbd.com',
-        phone: '+880 1700-123456',
-        password: 'sadik@1234',
-        role: 'super_admin' as const,
-        permissions: ['*'],
-        isActive: true,
-        createdAt: new Date().toISOString(),
-      };
-    }
-
-    if (!foundStaff) {
-      setStaffErrorMsg('No authorized staff account found for this Email or Mobile Number.');
+      // Persist ONLY non-secret session metadata (never password or passwordHash)
+      saveStaffSession(result.staff);
       setIsSubmitting(false);
-      return;
-    }
-
-    if (foundStaff.isRemoved) {
+      onLoginSuccess(result.staff);
+    } catch (err: any) {
       setStaffErrorMsg(
-        'এই অ্যাকাউন্টটি সরিয়ে দেওয়া হয়েছে (This account has been removed)। এই ইমেল বা ফোন দিয়ে কোনো সক্রিয় ডেটা পাওয়া যায় নি। অনুগ্রহ করে সুপার অ্যাডমিনের সাথে যোগাযোগ করুন অথবা নতুন অ্যাকাউন্ট খুলুন।'
+        err?.message || 'Unable to verify credentials against Cloud Firestore. Please check your internet connection and try again.'
       );
       setIsSubmitting(false);
-      return;
     }
-
-    const isAccountSuspended =
-      foundStaff.isActive === false ||
-      foundStaff.status === 'suspended';
-
-    if (isAccountSuspended) {
-      setStaffErrorMsg('Your staff account has been suspended by the Super Admin.');
-      setIsSubmitting(false);
-      return;
-    }
-
-    const expectedPassword =
-      foundStaff.password ||
-      (foundStaff.role === 'super_admin' ? 'sadik@1234' : '123456');
-
-    if (staffPassword !== expectedPassword) {
-      setStaffErrorMsg('Incorrect password. Access denied.');
-      setIsSubmitting(false);
-      return;
-    }
-
-    setIsSubmitting(false);
-    onLoginSuccess(foundStaff);
   };
 
   return (

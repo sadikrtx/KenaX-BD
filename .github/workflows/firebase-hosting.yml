@@ -1,5 +1,4 @@
-
-name: Deploy KenaX BD to Firebase Hosting
+name: Deploy KenaX BD to Firebase Hosting & Firestore
 
 on:
   push:
@@ -18,13 +17,21 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 24
-          
 
       - name: Install Dependencies
         run: npm install
 
       - name: Build Website
         run: npm run build
+
+      - name: Deploy Firestore Rules and Indexes
+        env:
+          FIREBASE_SA_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_GEN_LANG_CLIENT_0077501500 }}
+        run: |
+          trap 'rm -f /tmp/firebase-sa.json' EXIT
+          printf '%s' "$FIREBASE_SA_JSON" > /tmp/firebase-sa.json
+          export GOOGLE_APPLICATION_CREDENTIALS=/tmp/firebase-sa.json
+          npx --yes firebase-tools deploy --only firestore:rules,firestore:indexes --project gen-lang-client-0077501500 --non-interactive
 
       - name: Deploy to Firebase Hosting
         uses: FirebaseExtended/action-hosting-deploy@v0
@@ -33,4 +40,3 @@ jobs:
           firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_GEN_LANG_CLIENT_0077501500 }}
           projectId: gen-lang-client-0077501500
           channelId: live
-          
