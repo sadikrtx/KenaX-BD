@@ -30,7 +30,7 @@ jobs:
         uses: FirebaseExtended/action-hosting-deploy@v0
         with:
           repoToken: ${{ secrets.GITHUB_TOKEN }}
-          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_GALVANIC_PURSUIT_VDS98 }}
-          projectId: galvanic-pursuit-vds98
+          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_GEN_LANG_CLIENT_0077501500 }}
+          projectId: gen-lang-client-0077501500
           channelId: live
           
