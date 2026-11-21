@@ -17,7 +17,7 @@ const DEFAULT_STAFF: StaffUser[] = [
   {
     id: 'staff-super-2',
     name: 'Super Admin',
-    email: 'super@kenaxbd.com',
+    email: 'sadikrtx3060@gmail.com',
     phone: '01719143897',
     role: 'super_admin',
     permissions: ['*'],
@@ -28,8 +28,17 @@ const DEFAULT_STAFF: StaffUser[] = [
   },
 ];
 
+function normalizeLegacySuperEmail(email?: string): string {
+  const lower = String(email || '').trim().toLowerCase();
+  if (lower === 'super@kenaxbd.com' || lower === 'superadmin@kenaxbd.com') {
+    return 'sadikrtx3060@gmail.com';
+  }
+  return lower;
+}
+
 function migrateAnyInlineSecretToCredentialStore(staff: StaffUser): StaffUser {
   const anyStaff = staff as any;
+  const normalizedEmail = normalizeLegacySuperEmail(staff.email);
   const rawSecret =
     (typeof anyStaff.password === 'string' && anyStaff.password.trim()) ||
     (typeof anyStaff.passwordHash === 'string' && anyStaff.passwordHash.trim()) ||
@@ -37,21 +46,24 @@ function migrateAnyInlineSecretToCredentialStore(staff: StaffUser): StaffUser {
 
   if (staff.id && rawSecret && !getStaffCredential(staff.id)) {
     try {
-      setStaffCredential(staff.id, staff.email || '', rawSecret, false);
+      setStaffCredential(staff.id, normalizedEmail, rawSecret, false);
     } catch (err) {
       console.warn('[Server Staff] Failed migrating inline secret to credential store:', err);
     }
   }
-  return sanitizeStaffForResponse(staff) as StaffUser;
+  return sanitizeStaffForResponse({ ...staff, email: normalizedEmail || staff.email }) as StaffUser;
 }
 
 function ensureBootstrapSuperAdminCredential(): void {
   const superId = DEFAULT_STAFF[0].id;
-  if (!getStaffCredential(superId)) {
+  const existingCred = getStaffCredential(superId);
+  if (!existingCred) {
     const envBootstrapPassword = String(process.env.INITIAL_SUPER_ADMIN_PASSWORD || '').trim();
     if (envBootstrapPassword) {
       setStaffCredential(superId, DEFAULT_STAFF[0].email, envBootstrapPassword, false);
     }
+  } else if (existingCred.email !== DEFAULT_STAFF[0].email) {
+    setStaffCredential(superId, DEFAULT_STAFF[0].email, existingCred.passwordHash, false);
   }
 }
 
@@ -103,7 +115,10 @@ export function getAllStaffFromStore(_isEnvPreview?: boolean): StaffUser[] {
 
     const mergeEntry = (s: StaffUser) => {
       if (!s || (!s.id && !s.email)) return;
-      const clean = sanitizeStaffForResponse(s) as StaffUser;
+      const clean = sanitizeStaffForResponse({
+        ...s,
+        email: normalizeLegacySuperEmail(s.email) || s.email,
+      }) as StaffUser;
       const lowerEmail = clean.email ? clean.email.trim().toLowerCase() : '';
       const idKey = clean.id ? clean.id.trim() : '';
 

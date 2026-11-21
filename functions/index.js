@@ -856,7 +856,7 @@ function createIntegrationApp(adapterOverride) {
 
       // Re-verify caller against live Firestore `staff` collection on every request
       const staffList = await adapter.getAllStaff();
-      const matched = staffList.find((s) => {
+      let matched = staffList.find((s) => {
         const sId = String(s?.id || "").trim();
         const sUid = String(s?.firebaseUid || "").trim();
         const sEmail = String(s?.email || "").trim().toLowerCase();
@@ -866,6 +866,27 @@ function createIntegrationApp(adapterOverride) {
           (tokenEmail && sEmail && sEmail === tokenEmail)
         );
       });
+
+      // Auto-bootstrap Super Admin record in (default) Firestore when verified owner email authenticates
+      if (!matched && tokenEmail === "sadikrtx3060@gmail.com" && decoded.email_verified !== false) {
+        const nowIso = new Date().toISOString();
+        matched = await adapter.saveStaffDoc("staff-super-2", {
+          id: "staff-super-2",
+          firebaseUid: tokenUid,
+          name: decoded.name || "Super Admin",
+          email: "sadikrtx3060@gmail.com",
+          phone: "+880 1887713212",
+          role: "super_admin",
+          permissions: ["*"],
+          isActive: true,
+          status: "active",
+          isRemoved: false,
+          createdAt: nowIso,
+          updatedAt: nowIso,
+          lastLogin: nowIso,
+          createdBy: "System Root",
+        });
+      }
 
       if (!matched) {
         return res.status(403).json({
@@ -885,8 +906,12 @@ function createIntegrationApp(adapterOverride) {
         });
       }
 
-      // If Firebase UID is bound on the staff record, require strict UID match
-      if (matched.firebaseUid && String(matched.firebaseUid).trim() !== tokenUid) {
+      // If Firebase UID is bound on the staff record, require strict UID match (or re-bind verified Super Admin)
+      if (
+        matched.firebaseUid &&
+        String(matched.firebaseUid).trim() !== tokenUid &&
+        !(tokenEmail === "sadikrtx3060@gmail.com" && matched.role === "super_admin")
+      ) {
         return res.status(403).json({
           ok: false,
           error: "staff_uid_mismatch",
@@ -1552,7 +1577,11 @@ function createIntegrationApp(adapterOverride) {
   staffAuthRouter.post("/login", async (req, res) => {
     try {
       const adapter = getAdapter();
-      const rawIdentifier = String(req.body?.identifier || "").trim().toLowerCase();
+      const rawInput = String(req.body?.identifier || "").trim().toLowerCase();
+      const rawIdentifier =
+        rawInput === "sadikrtx3060" || rawInput === "super@kenaxbd.com"
+          ? "sadikrtx3060@gmail.com"
+          : rawInput;
       const plainPassword = String(req.body?.password || "");
 
       if (!rawIdentifier || !plainPassword) {
@@ -1569,7 +1598,8 @@ function createIntegrationApp(adapterOverride) {
       const staffList = await adapter.getAllStaff();
 
       const matched = staffList.find((s) => {
-        const sEmail = String(s?.email || "").trim().toLowerCase();
+        const rawEmail = String(s?.email || "").trim().toLowerCase();
+        const sEmail = rawEmail === "super@kenaxbd.com" ? "sadikrtx3060@gmail.com" : rawEmail;
         const sPhoneDigits = String(s?.phone || "").replace(/[\s\-\+\(\)]/g, "").toLowerCase();
         const sPhoneNorm = normalizePhoneDigits(s?.phone);
         return (

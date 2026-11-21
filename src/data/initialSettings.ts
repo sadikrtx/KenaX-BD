@@ -598,7 +598,7 @@ export const INITIAL_STAFF = [
   {
     id: 'staff-super-2',
     name: 'Super Admin',
-    email: 'super@kenaxbd.com',
+    email: 'sadikrtx3060@gmail.com',
     role: 'super_admin' as const,
     status: 'active' as const,
     isActive: true,

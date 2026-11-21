@@ -283,7 +283,11 @@ async function startServer() {
   app.post("/api/staff-auth/login", (req, res) => {
     try {
       const isEnvPreview = checkIsEnvPreview(req);
-      const rawIdentifier = String(req.body?.identifier || '').trim().toLowerCase();
+      const rawInput = String(req.body?.identifier || '').trim().toLowerCase();
+      const rawIdentifier =
+        rawInput === 'sadikrtx3060' || rawInput === 'super@kenaxbd.com'
+          ? 'sadikrtx3060@gmail.com'
+          : rawInput;
       const plainPassword = String(req.body?.password || '');
 
       if (!rawIdentifier || !plainPassword) {

@@ -403,7 +403,7 @@ export const AdminStaff: React.FC<AdminStaffProps> = ({
                       >
                         {s.isActive ? <ShieldAlert className="w-4 h-4" /> : <ShieldCheck className="w-4 h-4" />}
                       </button>
-                      {s.email.toLowerCase() !== 'super@kenaxbd.com' && (
+                      {s.email.toLowerCase() !== 'sadikrtx3060@gmail.com' && (
                         <button
                           onClick={() => {
                             if (window.confirm(`Are you sure you want to permanently delete staff member ${s.name} (${s.email})? This staff account will be removed permanently from the database and login access will be revoked.`)) {
@@ -489,7 +489,7 @@ export const AdminStaff: React.FC<AdminStaffProps> = ({
                     >
                       {s.isActive ? <ShieldAlert className="w-3.5 h-3.5" /> : <ShieldCheck className="w-3.5 h-3.5" />}
                     </button>
-                    {s.email.toLowerCase() !== 'super@kenaxbd.com' && (
+                    {s.email.toLowerCase() !== 'sadikrtx3060@gmail.com' && (
                       <button
                         onClick={() => {
                           if (window.confirm(`Permanently delete staff member ${s.name}?`)) {

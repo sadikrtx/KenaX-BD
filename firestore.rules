@@ -188,6 +188,22 @@ service cloud.firestore {
         && !(prevStatus in ['Delivered', 'Completed'] && nextStatus in ['Cancelled', 'Spam', 'Fake Order']);
     }
 
+    function isValidStaffDoc(data, staffId) {
+      return isValidId(staffId)
+        && data.keys().size() <= 25
+        && !('password' in data)
+        && !('passwordHash' in data)
+        && data.id is string
+        && data.id == staffId
+        && data.name is string
+        && data.name.size() > 0
+        && data.name.size() <= 160
+        && data.email is string
+        && data.email.size() > 3
+        && data.email.size() <= 200
+        && data.role in ['super_admin', 'admin', 'manager', 'moderator'];
+    }
+
     // -------------------------------------------------------------------------
     // Server-Only Secrets & Credentials — NEVER accessible to ANY client SDK
     // -------------------------------------------------------------------------
@@ -203,15 +219,17 @@ service cloud.firestore {
     // Staff, Roles & Permissions (Strict Super Admin Governance)
     // -------------------------------------------------------------------------
     match /staff/{staffId} {
-      allow get: if isSuperAdmin() || (isActiveStaff() && request.auth.token.staffId == staffId);
+      allow get: if isSuperAdmin()
+        || (isActiveStaff() && request.auth.token.staffId == staffId)
+        || (isSignedIn() && resource != null && 'email' in resource.data && 'email' in request.auth.token && resource.data.email == request.auth.token.email);
       allow list: if isSuperAdmin();
-      // All staff create/update/delete operations MUST go through server-verified /api/staff-auth/*
-      allow create, update, delete: if false;
+      allow create, update: if isSuperAdmin() && isValidStaffDoc(incoming(), staffId);
+      allow delete: if isSuperAdmin() && isValidId(staffId);
     }
 
     match /deletedStaff/{staffId} {
       allow read: if isSuperAdmin();
-      allow write: if false;
+      allow write: if isSuperAdmin() && isValidId(staffId);
     }
 
     match /roles/{roleId} {
