@@ -44,8 +44,7 @@ function isTelegramFirestoreError(err: any): boolean {
 if (firebaseConfig) {
   try {
     const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
-    const dbId = (firebaseConfig as { firestoreDatabaseId?: string }).firestoreDatabaseId;
-    db = dbId ? getFirestore(app, dbId) : getFirestore(app);
+    db = getFirestore(app);
   } catch {
     telegramFirestoreUnavailable = true;
   }

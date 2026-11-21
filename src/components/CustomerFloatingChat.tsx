@@ -45,12 +45,11 @@ import { KenaXLogo } from './KenaXLogo';
 import { evaluateChatBotRules, searchCatalogHierarchicalMatrix } from '../lib/chatBotRuleMatcher';
 import { getEnvApiHeaders } from '../utils/envHelper';
 import { enrichProductsWithPopularity, getSortedPopularProducts } from '../utils/productPopularity';
-import { generateNextOrderId } from '../lib/firebase';
 
 interface CustomerFloatingChatProps {
   currentCustomer: CustomerRecord | null;
   siteSettings: SiteSettings;
-  onAddOrder?: (newOrder: Order) => Promise<void> | void;
+  onAddOrder?: (newOrder: Order) => Promise<Order | void> | void;
   products?: Product[];
   onOpenProductDetail?: (product: Product) => void;
   orders?: Order[];
@@ -1603,10 +1602,9 @@ export const CustomerFloatingChat: React.FC<CustomerFloatingChatProps> = ({
           const uPrice = matchedProd?.price || det.unitPrice || 1200;
           const dFee = det.division === 'Outside Dhaka' ? outsideDhakaFee : insideDhakaFee;
           const totalAmt = uPrice * (det.quantity || 1) + dFee;
-          const ordId = await generateNextOrderId('KB');
 
           finalOrderData = {
-            orderId: ordId,
+            orderId: 'KB-PENDING',
             productName: matchedProd?.name || det.productName || orderProductName,
             productId: matchedProd?.id || det.productId,
             productImage: matchedProd?.featuredImage || matchedProd?.images?.[0] || '',
@@ -1623,9 +1621,9 @@ export const CustomerFloatingChat: React.FC<CustomerFloatingChatProps> = ({
             status: 'pending',
           };
 
-          // Save order to store
+          // Save order atomically to Cloud Firestore (default)
           const newOrder: Order = {
-            id: ordId,
+            id: 'KB-PENDING',
             customerId: currentCustomer?.id || `guest-${Date.now()}`,
             customerName: finalOrderData.customerName,
             customerEmail: currentCustomer?.email || 'guest@kenaxbd.com',
@@ -1667,7 +1665,11 @@ export const CustomerFloatingChat: React.FC<CustomerFloatingChatProps> = ({
           } as any;
 
           if (onAddOrder) {
-            await onAddOrder(newOrder);
+            const savedBotOrder = await onAddOrder(newOrder);
+            if (savedBotOrder && savedBotOrder.id) {
+              finalOrderData.orderId = savedBotOrder.id;
+              newOrder.id = savedBotOrder.id;
+            }
           }
           try {
             await fetch('/api/orders', {
@@ -1832,7 +1834,7 @@ export const CustomerFloatingChat: React.FC<CustomerFloatingChatProps> = ({
       const deliveryCharge = subtotal >= 5000 ? 0 : (orderDeliveryZone === 'dhaka' ? insideDhakaFee : outsideDhakaFee);
       const totalAmount = subtotal + deliveryCharge;
 
-      const orderId = await generateNextOrderId('KB');
+      let orderId = 'KB-PENDING';
 
       const divisionNameBn = BANGLADESH_DIVISION_NAMES_BN[orderDivision] || orderDivision;
       const districtNameBn = BANGLADESH_DISTRICT_NAMES_BN[orderDistrict] || orderDistrict;
@@ -1871,7 +1873,7 @@ export const CustomerFloatingChat: React.FC<CustomerFloatingChatProps> = ({
       const firstProd = activeCart[0]?.product;
 
       const newOrder: Order = {
-        id: orderId,
+        id: 'KB-PENDING',
         customerId: currentCustomer?.id || `guest-${Date.now()}`,
         customerName: orderCustomerName.trim(),
         customerEmail: orderCustomerEmail.trim() || currentCustomer?.email || 'guest@kenaxbd.com',
@@ -1891,7 +1893,7 @@ export const CustomerFloatingChat: React.FC<CustomerFloatingChatProps> = ({
         total: totalAmount,
         totalAmount,
         paymentMethod: orderPaymentMethod,
-        paymentStatus: orderPaymentMethod === 'cod' ? 'unpaid' : 'paid',
+        paymentStatus: orderPaymentMethod === 'cod' ? 'unpaid' : 'Pending Verification',
         transactionId: orderTrxId.trim() || undefined,
         senderNumber: orderSenderMobile.trim() || undefined,
         orderStatus: 'Pending',
@@ -1907,7 +1909,11 @@ export const CustomerFloatingChat: React.FC<CustomerFloatingChatProps> = ({
       } as any;
 
       if (onAddOrder) {
-        await onAddOrder(newOrder);
+        const savedChatOrder = await onAddOrder(newOrder);
+        if (savedChatOrder && savedChatOrder.id) {
+          orderId = savedChatOrder.id;
+          newOrder.id = savedChatOrder.id;
+        }
       }
 
       try {
@@ -1994,9 +2000,16 @@ export const CustomerFloatingChat: React.FC<CustomerFloatingChatProps> = ({
       setOrderTrxId('');
       setOrderCreateAccount(false);
       setOrderPassword('');
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to submit AI order', err);
-      setOrderFormError('অর্ডার সাবমিট করতে সমস্যা হয়েছে, অনুগ্রহ করে আবার চেষ্টা করুন।');
+      let realErrMsg = err?.message || String(err || 'Order failed to save.');
+      try {
+        const parsed = JSON.parse(realErrMsg);
+        if (parsed && typeof parsed.error === 'string') {
+          realErrMsg = `${parsed.error}${parsed.path ? ` (${parsed.path})` : ''}`;
+        }
+      } catch {}
+      setOrderFormError(realErrMsg);
     } finally {
       setOrderSubmitting(false);
     }

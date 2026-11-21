@@ -120,25 +120,21 @@ if (typeof window !== 'undefined') {
   };
 }
 
-// Initialize Firestore with specific Database ID & valid Firebase v11 auto-detect long polling
+// Initialize the (default) Cloud Firestore database with valid Firebase v11 auto-detect long polling
 // NOTE: `experimentalForceLongPolling` and `experimentalAutoDetectLongPolling` are mutually exclusive in Firebase v11;
 // passing both throws a validation error and silently drops the settings. Using `experimentalAutoDetectLongPolling: true`
 // alone enables automatic fallback for restrictive proxies/iFrames without forcing unnecessary long-polling overhead.
-// NOTE: `persistentLocalCache` is intentionally not enabled because the app coordinates dual preview/prod caches,
-// an Express backend mirror, and a custom quota circuit breaker (`disableNetwork`), which avoids multi-tab IndexedDB lock contention.
-const dbId = (firebaseConfig as { firestoreDatabaseId?: string }).firestoreDatabaseId;
+// NOTE: `persistentLocalCache` is intentionally not enabled because the app coordinates caches,
+// an Express backend mirror, and a custom quota circuit breaker, avoiding multi-tab IndexedDB lock contention.
 function createFirestoreInstance() {
   try {
     const firestoreSettings = {
       experimentalAutoDetectLongPolling: true,
       useFetchStreams: false,
     };
-    if (dbId) {
-      return initializeFirestore(app, firestoreSettings, dbId);
-    }
     return initializeFirestore(app, firestoreSettings);
   } catch {
-    return dbId ? getFirestore(app, dbId) : getFirestore(app);
+    return getFirestore(app);
   }
 }
 export const db = createFirestoreInstance();
@@ -332,29 +328,14 @@ export async function generateNextOrderId(prefix: 'KB' | 'INC' = 'KB'): Promise<
       const snap = await tx.get(counterRef);
       const current = snap.exists() ? Number(snap.data()?.current || baseStart) : baseStart;
       const safeCurrent = Number.isFinite(current) && current >= baseStart ? Math.floor(current) : baseStart;
-      let next = safeCurrent + 1;
-
-      // Guard against collision with any pre-existing migrated order ID (max 5 probes inside tx)
-      if (prefix === 'KB') {
-        for (let attempt = 0; attempt < 5; attempt++) {
-          const candidateId = `${prefix}-${String(next).padStart(6, '0')}`;
-          try {
-            const existingOrder = await tx.get(doc(db, 'orders', candidateId));
-            if (!existingOrder.exists()) break;
-            next += 1;
-          } catch {
-            // Guests cannot read `orders/{id}` under hardened rules; monotonic counter is already safe
-            break;
-          }
-        }
-      }
+      const next = safeCurrent + 1;
 
       tx.set(
         counterRef,
         {
           current: next,
           prefix,
-          updatedAt: new Date().toISOString(),
+          updatedAt: serverTimestamp(),
           updatedAtServer: serverTimestamp(),
         },
         { merge: true }
@@ -363,18 +344,8 @@ export async function generateNextOrderId(prefix: 'KB' | 'INC' = 'KB'): Promise<
     });
     return `${prefix}-${String(nextNum).padStart(6, '0')}`;
   } catch (err) {
-    console.warn('[KenaX BD] Firestore order counter transaction fallback:', err);
-    // High-entropy 9-digit timestamp+crypto fallback outside sequential 6-digit range (zero collision)
-    let randomPart = Math.floor(1000 + Math.random() * 9000);
-    try {
-      if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
-        const arr = new Uint32Array(1);
-        crypto.getRandomValues(arr);
-        randomPart = 1000 + (arr[0] % 9000);
-      }
-    } catch {}
-    const timeTail = String(Date.now()).slice(-5);
-    return `${prefix}-${timeTail}${randomPart}`;
+    console.warn('[KenaX BD] Firestore order counter transaction error:', err);
+    throw err;
   }
 }
 
@@ -1301,32 +1272,156 @@ export async function fetchServerOrders(): Promise<Order[]> {
   return [];
 }
 
-// Create new Order directly in Cloud Firestore (Single Source of Truth) with server timestamps
-export async function saveOrderToDB(order: Order): Promise<void> {
-  order.isV2Order = true;
-  const nowIso = order.createdAt || new Date().toISOString();
-  const cleaned = cleanFirestoreData({
+function buildCanonicalOrderDoc(order: Order, assignedOrderNumber: string, nowIso: string): Record<string, any> {
+  const fullAddressParts = [
+    order.fullAddress || order.deliveryAddress || order.shippingAddress || (order as any).address || '',
+    order.upazila || '',
+    order.district || '',
+    order.division || '',
+  ]
+    .map((p) => String(p || '').trim())
+    .filter(Boolean);
+
+  // Avoid duplicating district/division if already present in fullAddress
+  const baseAddress = String(
+    order.deliveryAddress || order.fullAddress || order.shippingAddress || (order as any).address || ''
+  ).trim();
+  const extraGeo = [order.upazila, order.district, order.division]
+    .map((p) => String(p || '').trim())
+    .filter((p) => p && !baseAddress.toLowerCase().includes(p.toLowerCase()));
+  const composedDeliveryAddress = baseAddress
+    ? [baseAddress, ...extraGeo].join(', ')
+    : fullAddressParts.join(', ');
+
+  const normalizedItems = (Array.isArray(order.items) ? order.items : []).map((it: any) => ({
+    ...it,
+    productId: it?.productId || it?.id || '',
+    name: it?.name || it?.productName || 'Product',
+    productName: it?.productName || it?.name || 'Product',
+    sku: it?.sku || it?.productSku || it?.productId || '',
+    variant: it?.variant || it?.selectedColor || it?.selectedVariation || null,
+    color: it?.selectedColor || it?.color || null,
+    size: it?.selectedSize || it?.size || null,
+    price: Number(it?.price ?? 0),
+    quantity: Number(it?.quantity ?? 1),
+  }));
+
+  const subtotalVal = Number(order.subtotal ?? 0);
+  const deliveryChargeVal = Number(order.deliveryCharge ?? 0);
+  const totalVal = Number(order.totalAmount ?? (order as any).total ?? subtotalVal + deliveryChargeVal);
+
+  const rawPaymentStatus = String(order.paymentStatus || '').trim();
+  const canonicalPaymentStatus =
+    rawPaymentStatus && rawPaymentStatus !== 'Paid on Delivery'
+      ? rawPaymentStatus
+      : 'unpaid';
+
+  const rawStatus = String(order.orderStatus || (order as any).status || 'Pending').trim();
+  const canonicalOrderStatus = rawStatus || 'Pending';
+  const canonicalStatusLower = canonicalOrderStatus.toLowerCase();
+
+  const cleanedBase = cleanFirestoreData({
     ...order,
-    createdAt: nowIso,
-    updatedAt: order.updatedAt || nowIso,
+    id: assignedOrderNumber,
+    orderNumber: assignedOrderNumber,
+    items: normalizedItems,
+    subtotal: subtotalVal,
+    deliveryCharge: deliveryChargeVal,
+    total: totalVal,
+    totalAmount: totalVal,
+    customerName: String(order.customerName || order.deliveryName || 'Customer').trim(),
+    customerPhone: String(order.customerPhone || order.customerMobile || order.deliveryMobile || '').trim(),
+    customerMobile: String(order.customerMobile || order.customerPhone || order.deliveryMobile || '').trim(),
+    customerEmail: String(order.customerEmail || '').trim(),
+    deliveryAddress: composedDeliveryAddress,
+    fullAddress: baseAddress || composedDeliveryAddress,
+    note: String((order as any).note ?? order.customerNotes ?? order.deliveryInstructions ?? order.notes ?? '').trim(),
+    paymentMethod: String(order.paymentMethod || 'COD').trim(),
+    paymentStatus: canonicalPaymentStatus,
+    orderStatus: canonicalOrderStatus,
+    status: canonicalStatusLower === 'pending' ? 'pending' : canonicalOrderStatus,
+    fulfillmentStatus: String((order as any).fulfillmentStatus || 'unfulfilled'),
+    sourceChannel: String(order.sourceChannel || order.source || 'website'),
+    orderDate: order.orderDate || nowIso,
     isV2Order: true,
   });
 
-  // 1. Write authoritatively to Cloud Firestore `orders` collection with serverTimestamp()
+  return {
+    ...cleanedBase,
+    assignedTo: (order as any).assignedTo ?? null,
+    courier: (order as any).courier ?? order.courierName ?? null,
+    trackingNumber: order.trackingNumber ?? null,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+    createdAtServer: serverTimestamp(),
+    updatedAtServer: serverTimestamp(),
+  };
+}
+
+/**
+ * Atomically increment `system/orderCounter` (or `incompleteOrderCounter`) AND write `orders/{KB-######}`
+ * inside ONE single Cloud Firestore transaction in the `(default)` database.
+ * Guarantees unique, strictly increasing order numbers and throws the real Firestore error on failure.
+ */
+export async function createOrderTransactionallyInDB(
+  orderInput: Order,
+  prefix: 'KB' | 'INC' = 'KB'
+): Promise<Order> {
+  const counterDocId = prefix === 'INC' ? 'incompleteOrderCounter' : 'orderCounter';
+  const counterRef = doc(db, 'system', counterDocId);
+  const baseStart = prefix === 'INC' ? 100000 : 404400;
+  const nowIso = orderInput.createdAt || new Date().toISOString();
+
+  let assignedOrderNumber = '';
   try {
-    await setDoc(
-      doc(db, 'orders', order.id),
-      {
-        ...cleaned,
-        createdAtServer: serverTimestamp(),
-        updatedAtServer: serverTimestamp(),
-      },
-      { merge: true }
-    );
+    assignedOrderNumber = await runTransaction(db, async (tx) => {
+      const counterSnap = await tx.get(counterRef);
+      const currentRaw = counterSnap.exists() ? Number(counterSnap.data()?.current || baseStart) : baseStart;
+      const safeCurrent = Number.isFinite(currentRaw) && currentRaw >= baseStart ? Math.floor(currentRaw) : baseStart;
+      const next = safeCurrent + 1;
+      const orderNumber = `${prefix}-${String(next).padStart(6, '0')}`;
+
+      const orderDocPayload = buildCanonicalOrderDoc(orderInput, orderNumber, nowIso);
+
+      tx.set(
+        counterRef,
+        {
+          prefix,
+          current: next,
+          updatedAt: serverTimestamp(),
+          updatedAtServer: serverTimestamp(),
+        },
+        { merge: true }
+      );
+
+      tx.set(doc(db, 'orders', orderNumber), orderDocPayload);
+      return orderNumber;
+    });
   } catch (err) {
-    handleFirestoreError(err, OperationType.CREATE, `orders/${order.id}`);
+    handleFirestoreError(err, OperationType.CREATE, `orders/${assignedOrderNumber || prefix}`);
   }
 
+  const confirmedOrder: Order = {
+    ...orderInput,
+    id: assignedOrderNumber,
+    orderNumber: assignedOrderNumber,
+    total: Number(orderInput.totalAmount ?? (orderInput as any).total ?? 0),
+    totalAmount: Number(orderInput.totalAmount ?? (orderInput as any).total ?? 0),
+    assignedTo: (orderInput as any).assignedTo ?? null,
+    courier: (orderInput as any).courier ?? orderInput.courierName ?? null,
+    trackingNumber: orderInput.trackingNumber ?? null,
+    createdAt: nowIso,
+    updatedAt: nowIso,
+    isV2Order: true,
+  } as Order;
+
+  // Non-blocking post-write side effects (never fail an already-saved order)
+  runPostOrderSaveEffects(confirmedOrder, nowIso).catch(() => {});
+
+  return confirmedOrder;
+}
+
+async function runPostOrderSaveEffects(order: Order, nowIso: string): Promise<void> {
   // 2. Non-blocking mirror to Express backend if running
   try {
     fetch('/api/orders', {
@@ -1394,12 +1489,25 @@ export async function saveOrderToDB(order: Order): Promise<void> {
     fetch('/api/sheets/sync', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...getEnvApiHeaders() },
-      body: JSON.stringify({
-        type: 'Orders',
-        records: [order],
-      }),
+      body: JSON.stringify(order),
     }).catch(() => {});
   } catch {}
+}
+
+// Create or save an Order directly in Cloud Firestore `(default)` database with canonical fields & server timestamps
+export async function saveOrderToDB(order: Order): Promise<void> {
+  order.isV2Order = true;
+  const nowIso = order.createdAt || new Date().toISOString();
+  const payload = buildCanonicalOrderDoc(order, order.id, nowIso);
+
+  // 1. Write authoritatively to Cloud Firestore `orders` collection with serverTimestamp()
+  try {
+    await setDoc(doc(db, 'orders', order.id), payload);
+  } catch (err) {
+    handleFirestoreError(err, OperationType.CREATE, `orders/${order.id}`);
+  }
+
+  await runPostOrderSaveEffects(order, nowIso);
 }
 
 // Fetch all Orders directly from Cloud Firestore (Single Source of Truth — never localStorage)

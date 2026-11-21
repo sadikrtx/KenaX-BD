@@ -63,20 +63,30 @@ service cloud.firestore {
       return staffData().role;
     }
 
+    function isBootstrapSuperAdmin() {
+      return isSignedIn()
+        && request.auth.token.email == 'sadikrtx3060@gmail.com'
+        && request.auth.token.email_verified == true;
+    }
+
     function isSuperAdmin() {
-      return isActiveStaff() && liveStaffRole() == 'super_admin';
+      return isBootstrapSuperAdmin()
+        || (isActiveStaff() && liveStaffRole() == 'super_admin');
     }
 
     function isAdminOrAbove() {
-      return isActiveStaff() && liveStaffRole() in ['super_admin', 'admin'];
+      return isBootstrapSuperAdmin()
+        || (isActiveStaff() && liveStaffRole() in ['super_admin', 'admin']);
     }
 
     function isManagerOrAbove() {
-      return isActiveStaff() && liveStaffRole() in ['super_admin', 'admin', 'manager'];
+      return isBootstrapSuperAdmin()
+        || (isActiveStaff() && liveStaffRole() in ['super_admin', 'admin', 'manager']);
     }
 
     function isModeratorOrAbove() {
-      return isActiveStaff() && liveStaffRole() in ['super_admin', 'admin', 'manager', 'moderator', 'staff'];
+      return isBootstrapSuperAdmin()
+        || (isActiveStaff() && liveStaffRole() in ['super_admin', 'admin', 'manager', 'moderator', 'staff']);
     }
 
     function hasValidProductDoc(data) {
@@ -92,24 +102,29 @@ service cloud.firestore {
     }
 
     function hasValidOrderDoc(data) {
-      return data.id is string
-        && data.id.size() > 0
-        && data.id.size() <= 120
+      return (
+          (data.id is string && data.id.size() > 0 && data.id.size() <= 120)
+          || (data.orderNumber is string && data.orderNumber.size() > 0 && data.orderNumber.size() <= 120)
+        )
         && data.customerName is string
         && data.customerName.size() > 0
         && data.customerName.size() <= 200
-        && data.totalAmount is number
-        && data.totalAmount >= 0
-        && data.totalAmount <= 100000000;
+        && (
+          (data.totalAmount is number && data.totalAmount >= 0 && data.totalAmount <= 100000000)
+          || (data.total is number && data.total >= 0 && data.total <= 100000000)
+        );
     }
 
     // Public checkout can ONLY submit new unverified orders in initial pending states
     function isValidPublicOrderCreate(data) {
       return hasValidOrderDoc(data)
-        && data.keys().size() <= 100
-        && (!('orderStatus' in data) || data.orderStatus in ['Pending', 'Payment Verification', 'Unconfirmed'])
-        && (!('status' in data) || data.status in ['Pending', 'Payment Verification', 'Unconfirmed'])
-        && (!('paymentStatus' in data) || data.paymentStatus in ['Unpaid', 'Pending', 'Partial', 'Awaiting Verification'])
+        && data.keys().size() <= 120
+        && (!('orderStatus' in data) || data.orderStatus in ['Pending', 'pending', 'Payment Verification', 'Unconfirmed', 'Incomplete'])
+        && (!('status' in data) || data.status in ['Pending', 'pending', 'Payment Verification', 'Unconfirmed', 'Incomplete'])
+        && (!('paymentStatus' in data) || data.paymentStatus in [
+          'Unpaid', 'unpaid', 'Pending', 'pending', 'Partial', 'Awaiting Verification',
+          'Paid on Delivery', 'Pending Verification'
+        ])
         && (!('advancePaidVerified' in data) || data.advancePaidVerified == false);
     }
 
@@ -124,6 +139,39 @@ service cloud.firestore {
         && data.name.size() <= 200
         && !('role' in data)
         && (!('isBlocked' in data) || data.isBlocked == false);
+    }
+
+    // Validated Super-Admin-only Muse Permissions toggle document (settings/musePermissions)
+    // Supports all 15 built-in boolean keys plus Super-Admin-created custom permission keys
+    function isValidMusePermissions(data) {
+      return data.keys().size() <= 100
+        && (!('viewOrders' in data) || data.viewOrders is bool)
+        && (!('changeOrderStatus' in data) || data.changeOrderStatus is bool)
+        && (!('assignOrders' in data) || data.assignOrders is bool)
+        && (!('addOrders' in data) || data.addOrders is bool)
+        && (!('courierCheck' in data) || data.courierCheck is bool)
+        && (!('viewProducts' in data) || data.viewProducts is bool)
+        && (!('manageProducts' in data) || data.manageProducts is bool)
+        && (!('viewProductPerformance' in data) || data.viewProductPerformance is bool)
+        && (!('viewInventory' in data) || data.viewInventory is bool)
+        && (!('updateStock' in data) || data.updateStock is bool)
+        && (!('viewActivity' in data) || data.viewActivity is bool)
+        && (!('viewSalesReports' in data) || data.viewSalesReports is bool)
+        && (!('viewDashboardOverview' in data) || data.viewDashboardOverview is bool)
+        && (!('buildReports' in data) || data.buildReports is bool)
+        && (!('sendWhatsAppAlerts' in data) || data.sendWhatsAppAlerts is bool)
+        && (!('updatedBy' in data) || (data.updatedBy is string && data.updatedBy.size() <= 200))
+        && (!('updatedAt' in data) || data.updatedAt is timestamp);
+    }
+
+    // Validated Super-Admin-only Muse Permissions metadata document (settings/musePermissionsMeta)
+    function isValidMusePermissionsMeta(data) {
+      return data.keys().size() <= 10
+        && data.keys().hasOnly(['permissions', 'groups', 'updatedAt', 'updatedBy'])
+        && (!('permissions' in data) || (data.permissions is list && data.permissions.size() <= 80 && (data.permissions.size() == 0 || data.permissions[0] is map)))
+        && (!('groups' in data) || (data.groups is list && data.groups.size() <= 20 && (data.groups.size() == 0 || data.groups[0] is map)))
+        && (!('updatedBy' in data) || (data.updatedBy is string && data.updatedBy.size() <= 200))
+        && (!('updatedAt' in data) || data.updatedAt is timestamp);
     }
 
     // Moderators can update operational status/tracking/notes, NOT pricing/items, and cannot cancel Delivered orders
@@ -218,9 +266,22 @@ service cloud.firestore {
       allow write: if isAdminOrAbove() && isValidId(settingId);
     }
 
+    // Muse Permissions — strictly Super Admin ONLY (no public read, no Manager/Moderator/Admin access)
+    match /settings/musePermissions {
+      allow read: if isSuperAdmin();
+      allow create, update: if isSuperAdmin() && isValidMusePermissions(incoming());
+      allow delete: if false;
+    }
+
+    match /settings/musePermissionsMeta {
+      allow read: if isSuperAdmin();
+      allow create, update: if isSuperAdmin() && isValidMusePermissionsMeta(incoming());
+      allow delete: if false;
+    }
+
     match /settings/{settingId} {
-      allow read: if true;
-      allow write: if isAdminOrAbove() && isValidId(settingId);
+      allow read: if settingId != 'musePermissions' && settingId != 'musePermissionsMeta';
+      allow write: if settingId != 'musePermissions' && settingId != 'musePermissionsMeta' && isAdminOrAbove() && isValidId(settingId);
     }
 
     match /heroBannerVideos/{videoId} {

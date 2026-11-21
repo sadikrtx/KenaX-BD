@@ -130,6 +130,7 @@ export const AdminHeader: React.FC<AdminHeaderProps> = ({
       case 'logs': return isBn ? 'অডিট ও অ্যাক্টিভিটি লগ' : 'Audit & Activity Logs';
       case 'settings': return isBn ? 'ওয়েবসাইট ও স্টোর সেটিংস' : 'Website & Store Settings';
       case 'integration-settings': return isBn ? 'Muse AI ইন্টিগ্রেশন ও API Key' : 'Muse AI Integration';
+      case 'muse-permissions': return 'Muse Permissions';
       case 'storage-settings': return isBn ? 'স্টোরেজ ও ক্লাউড' : 'Storage & Cloud';
       case 'gmail-alerts': return isBn ? 'ইমেইল অ্যালার্ট ম্যানেজার' : 'Gmail Alerts & Template Manager';
       default: return isBn ? 'অ্যাডমিন পোর্টাল' : 'Admin Portal';

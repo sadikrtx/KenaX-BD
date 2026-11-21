@@ -1,0 +1,105 @@
+# KenaX BD — AI Studio Prompt v2: "Muse Permissions" screen (EXPANDED rules)
+
+Paste this whole prompt into Google AI Studio, in the KenaX BD project.
+Written 2026-11-21. This REPLACES the earlier permissions prompts: Sadik
+dictated the full rule list himself (orders A–Z, products add/edit/performance,
+stock update, dashboard overview + reports, WhatsApp alerts, and the ability
+to add NEW rules himself in the future). It also fixes the two faults of the
+first build: no toggles were shown, and saving failed ("সেভ হয় নাই, retry").
+
+```
+You already added a "Muse Permissions" screen to my KenaX BD admin dashboard,
+but it is BROKEN and INCOMPLETE. Rebuild ONLY this screen as specified below.
+Do NOT change any other page, feature, flow, role or styling, and do NOT
+touch any file under .github/workflows.
+
+WHAT IS WRONG NOW
+1) The screen shows no checkboxes / toggle switches at all.
+2) Saving fails ("permission not saved, please retry") — nothing is stored.
+
+THE PERMISSIONS — one toggle switch for EACH key below, grouped exactly
+like this, with clear labels. Use these EXACT key names; my Cloudflare
+Worker reads the same keys from the same Firestore document.
+
+ORDERS
+- viewOrders — View ALL orders A to Z: every order ID; every status list
+  (Pending, Follow-up, Confirmed, Processing, Ready to Ship, In Transit,
+  Delivered, Hold, Cancelled, Return, Delivery Failed); and every order
+  field: order date, customer name, customer phone, delivery address,
+  product, total amount, payment method, payment status, order status,
+  fulfillment status, assigned staff, courier name, tracking number,
+  source channel. Includes searching and filtering (including payment
+  filters and column filters).
+- changeOrderStatus — Change an order's status (e.g. Pending to Confirmed,
+  Confirmed to Processing, and every other status transition).
+- assignOrders — Assign an order to a staff member / moderator.
+- addOrders — Create / add an order manually.
+- courierCheck — View courier info and run the Courier Fraud Checker.
+
+PRODUCTS
+- viewProducts — View the product list.
+- manageProducts — Add new products and edit existing products.
+- viewProductPerformance — View product performance (sales per product).
+
+INVENTORY
+- viewInventory — View stock levels, including low-stock items.
+- updateStock — Update / change stock quantities.
+
+STAFF & ACTIVITY
+- viewActivity — View moderator / staff activity logs (who changed which
+  order, from which status to which status, and when).
+
+REPORTS
+- viewSalesReports — View sales reports and best-selling products.
+- viewDashboardOverview — View the admin dashboard Overview (totals,
+  summaries, all overview widgets).
+- buildReports — Build analytics / summary reports for the owner from the
+  shop data (daily / weekly / monthly summaries, best sellers, low stock).
+
+ALERTS
+- sendWhatsAppAlerts — Send WhatsApp alerts to the owner: new order alerts,
+  moderator-activity alerts, an alert whenever Muse changes an order
+  status, and low-stock alerts.
+
+FUTURE RULES — VERY IMPORTANT
+- I must be able to create NEW permission rules myself in the future,
+  from this same screen, WITHOUT asking a developer or changing code.
+- So build the permission list DATA-DRIVEN: the screen reads its list of
+  permissions (key, label, group) from Firestore, and add an
+  "Add Permission" form on this screen (Super Admin only) where I can type
+  a label and a key for a new permission; it appears immediately as a new
+  toggle in the list and is saved like the others. Deleting a custom
+  permission I added must also be possible. The built-in permissions above
+  cannot be deleted, only switched on/off.
+
+STORAGE & SYNC (single source of truth)
+- Firestore, collection "settings", document "musePermissions": one boolean
+  field per permission key (built-in and custom). The permission list
+  metadata (labels/groups/custom entries) lives in Firestore too
+  (e.g. settings/musePermissionsMeta).
+- My admin screen writes this document; my external Cloudflare Worker reads
+  the SAME document on every request. ON here must mean ON for the Worker,
+  OFF here must mean OFF for the Worker — no second copy anywhere.
+- On opening the screen, read the current values and show the toggles in
+  their real saved state. If the document does not exist yet, create it
+  with every built-in key = true.
+- When a toggle is flipped, save immediately (merge update) and show a
+  small "Saved" confirmation only after the write succeeds. If the write
+  fails, revert the toggle and show the REAL Firestore error message
+  (not a generic "retry" message).
+- Subscribe with onSnapshot so changes appear live without a reload.
+
+FIX THE SAVE FAILURE
+- The likely cause is the Firestore security rules denying writes to the
+  "settings" collection. Update the rules so a signed-in Super Admin can
+  read and write settings/musePermissions and settings/musePermissionsMeta,
+  and nobody else can. Make sure the screen writes through the Firestore
+  SDK (the same shared database as orders/products) — NOT localStorage.
+
+DESIGN RULES (keep exactly)
+- Clean UI, warm vibe, responsive on mobile and desktop, smooth performance.
+- NO subtitle text anywhere on this screen.
+- Only Super Admin can see or open this screen (menu hidden for Manager and
+  Moderator; direct URL must not open it for them).
+- Do not break any existing code or screen.
+```

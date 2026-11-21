@@ -119,6 +119,7 @@ export type AdminTab =
   | 'google-sheets'
   | 'settings'
   | 'integration-settings'
+  | 'muse-permissions'
   | 'storage-settings'
   | 'plugins'
   | 'plugins-installed'
@@ -603,6 +604,15 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({
           icon: Plug,
           badge: 'Muse AI',
           badgeColor: 'bg-emerald-600 text-white',
+          requiredPermission: 'settings.view',
+          superAdminOnly: true,
+        },
+        {
+          id: 'muse-permissions',
+          label: 'Muse Permissions',
+          icon: ShieldCheck,
+          badge: 'Muse',
+          badgeColor: 'bg-amber-600 text-white',
           requiredPermission: 'settings.view',
           superAdminOnly: true,
         },

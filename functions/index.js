@@ -31,11 +31,8 @@ function getAdminApp() {
   return getApps().length ? getApp() : initializeApp();
 }
 
-const FIRESTORE_DATABASE_ID =
-  process.env.FIRESTORE_DATABASE_ID || "ai-studio-kenaxbd-db227bcd-db17-47e7-9023-bbf12ea50418";
-
 function getDb() {
-  return getFirestore(getAdminApp(), FIRESTORE_DATABASE_ID);
+  return getFirestore(getAdminApp());
 }
 
 function hashApiKey(rawKey) {

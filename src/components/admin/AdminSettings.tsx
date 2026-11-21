@@ -73,6 +73,9 @@ const AdminStorageSettings = React.lazy(() =>
 const AdminIntegrationSettings = React.lazy(() =>
   import('./AdminIntegrationSettings').then((m) => ({ default: m.AdminIntegrationSettings }))
 );
+const AdminMusePermissions = React.lazy(() =>
+  import('./AdminMusePermissions').then((m) => ({ default: m.AdminMusePermissions }))
+);
 import {
   SiteSettings,
   UserRole,
@@ -93,7 +96,14 @@ interface AdminSettingsProps {
   currentUserRole?: UserRole;
   currentRole?: UserRole;
   currentStaff?: StaffUser | null;
-  initialSubTab?: 'hero' | 'nav_items' | 'tag_banners' | 'promo_grid' | 'promo' | 'profile' | 'delivery' | 'footer' | 'seo' | 'system' | 'order_steps' | 'policies' | 'google_sheets' | 'storage' | 'integration';
+  onRecordAuditLog?: (
+    action: string,
+    module: string,
+    targetId: string,
+    details: string,
+    meta?: { fromStatus?: string; toStatus?: string; staffEmail?: string }
+  ) => void;
+  initialSubTab?: 'hero' | 'nav_items' | 'tag_banners' | 'promo_grid' | 'promo' | 'profile' | 'delivery' | 'footer' | 'seo' | 'system' | 'order_steps' | 'policies' | 'google_sheets' | 'storage' | 'integration' | 'muse_permissions';
 }
 
 const DEFAULT_HERO_FEATURES = [
@@ -109,6 +119,7 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
   currentUserRole,
   currentRole = 'admin',
   currentStaff,
+  onRecordAuditLog,
   initialSubTab,
 }) => {
   const effectiveRole = currentUserRole || currentRole || 'admin';
@@ -117,16 +128,24 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
     effectiveRole === 'super_admin' ||
     currentStaff?.role === 'super_admin';
 
-  const [activeTab, setActiveTab] = useState<'hero' | 'nav_items' | 'tag_banners' | 'promo_grid' | 'promo' | 'profile' | 'delivery' | 'order_settings' | 'footer' | 'seo' | 'system' | 'order_steps' | 'policies' | 'google_sheets' | 'storage' | 'integration'>(initialSubTab || 'hero');
+  const [activeTab, setActiveTab] = useState<'hero' | 'nav_items' | 'tag_banners' | 'promo_grid' | 'promo' | 'profile' | 'delivery' | 'order_settings' | 'footer' | 'seo' | 'system' | 'order_steps' | 'policies' | 'google_sheets' | 'storage' | 'integration' | 'muse_permissions'>(() => {
+    if ((initialSubTab === 'integration' || initialSubTab === 'muse_permissions') && !isStrictSuperAdmin) {
+      return 'hero';
+    }
+    return initialSubTab || 'hero';
+  });
 
   useEffect(() => {
-    if (initialSubTab && (initialSubTab !== 'integration' || isStrictSuperAdmin)) {
+    if (
+      initialSubTab &&
+      ((initialSubTab !== 'integration' && initialSubTab !== 'muse_permissions') || isStrictSuperAdmin)
+    ) {
       setActiveTab(initialSubTab);
     }
   }, [initialSubTab, isStrictSuperAdmin]);
 
   useEffect(() => {
-    if (activeTab === 'integration' && !isStrictSuperAdmin) {
+    if ((activeTab === 'integration' || activeTab === 'muse_permissions') && !isStrictSuperAdmin) {
       setActiveTab('hero');
     }
   }, [activeTab, isStrictSuperAdmin]);
@@ -775,6 +794,25 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
           </button>
         )}
 
+        {isStrictSuperAdmin && (
+          <button
+            type="button"
+            id="tab-muse-permissions"
+            onClick={() => setActiveTab('muse_permissions')}
+            className={`px-3.5 py-2 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-2 ${
+              activeTab === 'muse_permissions'
+                ? 'bg-amber-600 text-white shadow-xs ring-2 ring-amber-400'
+                : 'text-amber-900 dark:text-amber-300 bg-amber-50/80 dark:bg-amber-950/40 hover:bg-amber-100 border border-amber-200/80 dark:border-amber-800/80'
+            }`}
+          >
+            <ShieldCheck className="w-4 h-4" />
+            <span>Muse Permissions</span>
+            <span className="text-[9px] px-1.5 py-0.2 rounded font-black bg-amber-200 dark:bg-amber-900 text-amber-950 dark:text-amber-200 uppercase">
+              Super Admin
+            </span>
+          </button>
+        )}
+
         {isSuperAdmin && (
           <button
             type="button"
@@ -803,6 +841,12 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
           onUpdateSettings={onUpdateSettings}
           currentUserRole={effectiveRole}
           currentStaff={currentStaff}
+        />
+      ) : activeTab === 'muse_permissions' && isStrictSuperAdmin ? (
+        <AdminMusePermissions
+          currentUserRole={effectiveRole}
+          currentStaff={currentStaff}
+          onRecordAuditLog={onRecordAuditLog}
         />
       ) : activeTab === 'storage' ? (
         <AdminStorageSettings

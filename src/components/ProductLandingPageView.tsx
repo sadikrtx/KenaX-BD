@@ -54,7 +54,6 @@ import { useLanguage } from '../context/LanguageContext';
 import { getAttributionForOrder } from '../utils/attribution';
 import { trackPixelViewContent, trackPixelInitiateCheckout } from '../utils/pixelTracker';
 import { OrderRestrictionModal, RestrictionReason } from './OrderRestrictionModal';
-import { generateNextOrderId } from '../lib/firebase';
 
 interface ProductLandingPageViewProps {
   product: Product;
@@ -72,7 +71,7 @@ interface ProductLandingPageViewProps {
     variant?: string,
     customImage?: string
   ) => void;
-  onOrderPlaced?: (order: Order) => void;
+  onOrderPlaced?: (order: Order) => Promise<Order | void> | void;
   siteSettings?: SiteSettings;
   isPreviewMode?: boolean;
   onBackToStore?: () => void;
@@ -604,10 +603,8 @@ export const ProductLandingPageView: React.FC<ProductLandingPageViewProps> = ({
       variant: [selectedColor?.name, selectedVariant].filter(Boolean).join(' - ') || selectedVariant || selectedColor?.name || undefined,
     };
 
-    const generatedOrderId = await generateNextOrderId('KB');
-
     const newOrder: Order = {
-      id: generatedOrderId,
+      id: 'KB-PENDING',
       customerId: 'guest-' + Date.now(),
       customerName: cleanName,
       customerEmail: '',
@@ -628,8 +625,8 @@ export const ProductLandingPageView: React.FC<ProductLandingPageViewProps> = ({
       discount: 0,
       paymentMethod: resolvedPaymentMethod as any,
       paymentOptionType: paymentOptionType,
-      paymentStatus: paymentOptionType === 'cod' ? 'Pending' : 'Pending',
-      status: 'Pending',
+      paymentStatus: paymentOptionType === 'cod' ? 'unpaid' : 'Pending Verification',
+      status: 'pending' as any,
       orderStatus: 'Pending',
       senderMobileNumber: paymentOptionType !== 'cod' ? senderMobile.trim() : undefined,
       transactionId: paymentOptionType !== 'cod' ? transactionId.trim() : undefined,
@@ -642,7 +639,7 @@ export const ProductLandingPageView: React.FC<ProductLandingPageViewProps> = ({
       customerNotes: customerNote || undefined,
       source: 'Landing Page',
       orderSource: 'landing_page',
-      sourceChannel: 'Landing Page Direct',
+      sourceChannel: 'landing_page',
       isAiBotOrder: false,
       landingPageSlug: lp.slug || product.slug || product.id,
       attribution: getAttributionForOrder(),
@@ -656,17 +653,26 @@ export const ProductLandingPageView: React.FC<ProductLandingPageViewProps> = ({
     };
 
     if (onOrderPlaced) {
-      onOrderPlaced(newOrder);
-      setIsSubmittingOrder(false);
-      setOrderSuccess(true);
+      try {
+        await Promise.resolve(onOrderPlaced(newOrder));
+        setOrderSuccess(true);
+      } catch (err: any) {
+        let realErrMsg = err?.message || String(err || 'Order failed to save.');
+        try {
+          const parsed = JSON.parse(realErrMsg);
+          if (parsed && typeof parsed.error === 'string') {
+            realErrMsg = `${parsed.error}${parsed.path ? ` (${parsed.path})` : ''}`;
+          }
+        } catch {}
+        setFormError(realErrMsg);
+      } finally {
+        setIsSubmittingOrder(false);
+      }
     } else if (onBuyNow) {
       onBuyNow(product, quantity, selectedVariant || selectedColor?.name, activeImage);
       setIsSubmittingOrder(false);
     } else {
-      setTimeout(() => {
-        setIsSubmittingOrder(false);
-        setOrderSuccess(true);
-      }, 600);
+      setIsSubmittingOrder(false);
     }
   };
 

@@ -124,6 +124,7 @@ import {
   getProductsFromDB,
   getOrdersFromDB,
   saveOrderToDB,
+  createOrderTransactionallyInDB,
   saveProductToDB,
   deleteProductFromDB,
   logStockAdjustmentToDB,
@@ -2044,9 +2045,25 @@ export default function App() {
     }
   };
 
-  // Order Placement Handler
-  const handleOrderPlaced = async (newOrder: Order) => {
-    // Reset checkout items ref immediately to prevent restoring ordered items to cart
+  // Order Placement Handler — atomically allocates KB-###### & saves to (default) Firestore BEFORE showing success
+  const handleOrderPlaced = async (incomingOrder: Order): Promise<Order> => {
+    const preparedOrder: Order = {
+      ...incomingOrder,
+      attribution: incomingOrder.attribution || getAttributionForOrder(),
+    };
+
+    // Incomplete lead capture (never closes checkout or shows success modal)
+    if (preparedOrder.isIncompleteOrder) {
+      const savedIncomplete = await createOrderTransactionallyInDB(preparedOrder, 'INC');
+      setOrders((prev) => [savedIncomplete, ...prev.filter((o) => o.id !== savedIncomplete.id)]);
+      return savedIncomplete;
+    }
+
+    // 1. CRITICAL: Atomically increment system/orderCounter & write orders/{KB-######} FIRST.
+    //    If this fails, re-throw the real Firestore error — NEVER show order success or clear cart!
+    const newOrder = await createOrderTransactionallyInDB(preparedOrder, 'KB');
+
+    // 2. Order is now durably saved in (default) Firestore — close checkout & launch confirmation UI
     checkoutItemsRef.current = [];
     setCheckoutItems([]);
     setIsCheckoutOpen(false);
@@ -2054,17 +2071,11 @@ export default function App() {
       setCurrentView('home');
     }
 
-    // Immediately launch the delivery van animation for instant visual feedback on both Desktop/PC and Mobile
     processingOrderRef.current = newOrder;
-    // Attach Multi-Touch Marketing Attribution (UTM parameters, fbclid, session)
-    if (!newOrder.attribution) {
-      newOrder.attribution = getAttributionForOrder();
-    }
-
     setProcessingOrder(newOrder);
     setIsProcessingAnimationOpen(true);
 
-    setOrders((prev) => [newOrder, ...prev]);
+    setOrders((prev) => [newOrder, ...prev.filter((o) => o.id !== newOrder.id)]);
 
     // Clean up ordered items from cart (whether direct Buy Now or combined with cart items)
     const orderedKeys = new Set(
@@ -2154,32 +2165,32 @@ export default function App() {
       saveCustomerToDB(updatedCust).catch((err) => console.warn('Sync customer order record:', err));
     }
 
-    // Persist to Cloud Firestore and local storage in background (non-blocking)
-    try {
-      await saveOrderToDB(newOrder);
-      
-      // Dispatch Order Placed (Pending) Email to Customer and New Order Alerts to Staff & Super Admin
-      triggerOrderPlacedWorkflow(newOrder).catch((emailErr) => {
-        console.warn('[Order Placed Email Workflow Warning]:', emailErr);
-      });
+    // 3. Fire non-blocking post-order notifications AFTER confirmed Firestore write
+    triggerOrderPlacedWorkflow(newOrder).catch((emailErr) => {
+      console.warn('[Order Placed Email Workflow Warning]:', emailErr);
+    });
+    triggerOrderPlacedSMS(newOrder).catch((smsErr) => {
+      console.warn('[Order Placed SMS Warning]:', smsErr);
+    });
+    triggerTelegramNewOrder(newOrder).catch((tgErr) => {
+      console.warn('[Telegram New Order Alert Warning]:', tgErr);
+    });
+    triggerWhatsAppEvent({
+      event: 'order_placed',
+      order: newOrder,
+      customerPhone: newOrder.customerMobile || newOrder.deliveryMobile,
+      user: {
+        name: newOrder.customerName,
+        email: newOrder.customerEmail,
+        phone: newOrder.customerMobile || newOrder.deliveryMobile,
+        id: newOrder.customerId,
+      },
+    }).catch((waErr) => {
+      console.warn('[Order Placed WhatsApp Event Warning]:', waErr);
+    });
+    trackPixelPurchase(newOrder, siteSettings);
 
-      // Dispatch Order Placed SMS to Customer & Admin
-      triggerOrderPlacedSMS(newOrder).catch((smsErr) => {
-        console.warn('[Order Placed SMS Warning]:', smsErr);
-      });
-
-      // Dispatch Telegram Bot Alert to Admin, Staff & Customer (Pending status)
-      triggerTelegramNewOrder(newOrder).catch((tgErr) => {
-        console.warn('[Telegram New Order Alert Warning]:', tgErr);
-      });
-
-      // Dispatch Multi-Channel Purchase Event (Meta Pixel + Server-Side CAPI, TikTok, Google Ads)
-      trackPixelPurchase(newOrder, siteSettings);
-    } catch (err) {
-      console.warn('[KenaX BD] Error persisting order to Firestore:', err);
-    }
-
-    // Convert active cart activity to converted!
+    // 4. Convert active cart activity to converted AFTER order write succeeds
     try {
       const cartActivityId = currentCustomer ? `cart-user-${currentCustomer.id}` : `cart-${visitorSessionId}`;
       await updateCartActivityStatusInDB(cartActivityId, 'converted');
@@ -2191,6 +2202,8 @@ export default function App() {
     } catch (err) {
       console.warn('[KenaX BD] Error updating cart activity status:', err);
     }
+
+    return newOrder;
   };
 
   const handleProcessingAnimationComplete = (completedOrder?: Order | null) => {
@@ -2624,7 +2637,7 @@ export default function App() {
   };
 
   // Manual order creation by Staff (Admin, Moderator, Manager) or Customer Bot
-  const handleAddOrder = async (newOrder: Order) => {
+  const handleAddOrder = async (newOrder: Order): Promise<Order> => {
     const rawStatus = (newOrder.orderStatus || (newOrder as any).status || 'Pending').toString().trim();
     const lower = rawStatus.toLowerCase();
     const normalizedStatus: OrderStatus =
@@ -2652,24 +2665,37 @@ export default function App() {
         ? undefined
         : newOrder.createdByStaffName,
     };
-    setOrders((prev) => [sanitizedOrder, ...prev.filter((o) => o.id !== sanitizedOrder.id)]);
-    await saveOrderToDB(sanitizedOrder);
-    triggerTelegramNewOrder(newOrder).catch((tgErr) => {
+
+    const needsAtomicId =
+      !sanitizedOrder.id ||
+      sanitizedOrder.id === 'KB-PENDING' ||
+      sanitizedOrder.id === 'INC-PENDING';
+
+    const savedOrder = needsAtomicId
+      ? await createOrderTransactionallyInDB(
+          sanitizedOrder,
+          sanitizedOrder.id === 'INC-PENDING' ? 'INC' : 'KB'
+        )
+      : (await saveOrderToDB(sanitizedOrder), sanitizedOrder);
+
+    setOrders((prev) => [savedOrder, ...prev.filter((o) => o.id !== savedOrder.id)]);
+    triggerTelegramNewOrder(savedOrder).catch((tgErr) => {
       console.warn('[Telegram Manual Order Alert Warning]:', tgErr);
     });
     triggerWhatsAppEvent({
       event: 'order_placed',
-      order: newOrder,
-      customerPhone: newOrder.customerMobile || newOrder.deliveryMobile,
+      order: savedOrder,
+      customerPhone: savedOrder.customerMobile || savedOrder.deliveryMobile,
       user: {
-        name: newOrder.customerName || newOrder.deliveryName,
-        email: newOrder.customerEmail || '',
-        phone: newOrder.customerMobile || newOrder.deliveryMobile,
-        id: newOrder.customerId,
+        name: savedOrder.customerName || savedOrder.deliveryName,
+        email: savedOrder.customerEmail || '',
+        phone: savedOrder.customerMobile || savedOrder.deliveryMobile,
+        id: savedOrder.customerId,
       },
     }).catch((waErr) => {
       console.warn('[WhatsApp Manual Order Alert Error]:', waErr);
     });
+    return savedOrder;
   };
 
   // Filter products for Home Sections

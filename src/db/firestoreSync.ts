@@ -63,7 +63,7 @@ function getDb() {
     }
     const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
     const app = !getApps().length ? initializeApp(config) : getApp();
-    dbInstance = config.firestoreDatabaseId ? getFirestore(app, config.firestoreDatabaseId) : getFirestore(app);
+    dbInstance = getFirestore(app);
     return dbInstance;
   } catch (err) {
     console.info('[Firestore Sync] Operating with local server store.');

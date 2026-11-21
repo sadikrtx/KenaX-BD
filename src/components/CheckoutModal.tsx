@@ -53,9 +53,6 @@ import {
   getBDPhoneValidationError,
 } from '../utils/phoneUtils';
 import { isValidEmailFormat, getEmailValidationError } from '../utils/emailValidator';
-import { triggerOrderPlacedSMS } from '../lib/smsService';
-import { triggerOrderPlacedWorkflow } from '../lib/emailService';
-import { triggerWhatsAppEvent } from '../lib/whatsappService';
 import { isTelegramWebApp, getTelegramUser, triggerHaptic } from '../lib/telegramWebApp';
 import { trackPixelInitiateCheckout } from '../utils/pixelTracker';
 import { getAttributionForOrder } from '../utils/attribution';
@@ -72,7 +69,7 @@ interface CheckoutModalProps {
   fullCart?: OrderItem[];
   discountAmount: number;
   couponCode?: string;
-  onOrderPlaced: (order: Order) => Promise<void> | void;
+  onOrderPlaced: (order: Order) => Promise<Order | void> | void;
   savedAddresses?: DeliveryAddress[];
   defaultInsideCityFee?: number;
   defaultOutsideCityFee?: number;
@@ -968,7 +965,6 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
       }
     } catch (e) {}
 
-    const generatedOrderId = await generateNextOrderId('KB');
     const nowISO = new Date().toISOString();
 
     // Map payment method name
@@ -1054,7 +1050,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
     }
 
     const orderData: Order = {
-      id: generatedOrderId,
+      id: 'KB-PENDING',
       customerId: finalCustomerId || 'cust-guest',
       customerName: customerName.trim() || deliveryName.trim(),
       customerEmail: customerEmail.trim() || 'customer@kenaxbd.com',
@@ -1091,7 +1087,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
       paymentOptionType,
       paymentStatus:
         paymentOptionType === 'cod'
-          ? 'Paid on Delivery'
+          ? 'unpaid'
           : 'Pending Verification',
       senderMobileNumber: paymentOptionType !== 'cod' ? senderMobile.trim() : undefined,
       transactionId: paymentOptionType !== 'cod' ? transactionId.trim() : undefined,
@@ -1099,8 +1095,12 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
       dueAmount: dueOnDelivery,
 
       orderStatus: 'Pending',
+      status: 'pending' as any,
+      fulfillmentStatus: 'unfulfilled' as any,
+      assignedTo: null as any,
+      courier: null as any,
       courierName: undefined,
-      trackingNumber: undefined,
+      trackingNumber: null as any,
       trackingUrl: undefined,
       estimatedDelivery:
         selectedDeliveryMethod === 'inside'
@@ -1131,7 +1131,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
       ],
       source: orderSource === 'chatbot' ? 'Ordered by KenaX Bot' : orderSource === 'landing_page' ? 'Landing Page' : 'Website Store',
       orderSource: orderSource === 'chatbot' ? 'chatbot' : orderSource === 'landing_page' ? 'landing_page' : 'website_store',
-      sourceChannel: orderSource === 'chatbot' ? 'Ordered by KenaX Bot' : orderSource === 'landing_page' ? 'Landing Page Direct' : 'Website Store',
+      sourceChannel: orderSource === 'chatbot' ? 'chatbot' : orderSource === 'landing_page' ? 'landing_page' : 'website',
       isAiBotOrder: orderSource === 'chatbot',
       createdByStaffName: orderSource === 'chatbot' ? 'Ordered by KenaX Bot' : undefined,
       attribution: getAttributionForOrder(),
@@ -1139,38 +1139,37 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
       updatedAt: nowISO,
     };
 
-    // Trigger Android SIM SMS / Gateway & Email Invoice notifications & WhatsApp Automation
-    triggerOrderPlacedSMS(orderData).catch(() => {});
-    triggerOrderPlacedWorkflow(orderData).catch((emailErr) => {
-      console.warn('[Checkout Order Placed Email Workflow]:', emailErr);
-    });
-    triggerWhatsAppEvent({
-      event: 'order_placed',
-      order: orderData,
-      customerPhone: orderData.customerMobile || orderData.deliveryMobile,
-      user: {
-        name: orderData.customerName,
-        email: orderData.customerEmail,
-        phone: orderData.customerMobile || orderData.deliveryMobile,
-        id: orderData.customerId,
-      },
-    }).catch((waErr) => {
-      console.warn('[Checkout WhatsApp Event Error]:', waErr);
-    });
-
-    if (isTelegramWebApp()) {
-      triggerHaptic('success');
-    }
-
-    const cleanPhoneForRecord = cleanBDPhoneNumber(orderData.customerMobile || orderData.deliveryMobile);
-    if (cleanPhoneForRecord) {
-      try {
-        localStorage.setItem(`kenax_last_order_time_${cleanPhoneForRecord}`, Date.now().toString());
-      } catch {}
-    }
-
     try {
+      setErrors((prev) => {
+        const next = { ...prev };
+        delete next.general;
+        return next;
+      });
       await Promise.resolve(onOrderPlaced(orderData));
+
+      if (isTelegramWebApp()) {
+        triggerHaptic('success');
+      }
+
+      const cleanPhoneForRecord = cleanBDPhoneNumber(orderData.customerMobile || orderData.deliveryMobile);
+      if (cleanPhoneForRecord) {
+        try {
+          localStorage.setItem(`kenax_last_order_time_${cleanPhoneForRecord}`, Date.now().toString());
+        } catch {}
+      }
+    } catch (err: any) {
+      let realErrMsg = err?.message || String(err || 'Failed to save order to database.');
+      try {
+        const parsed = JSON.parse(realErrMsg);
+        if (parsed && typeof parsed.error === 'string') {
+          realErrMsg = `${parsed.error}${parsed.path ? ` (${parsed.path})` : ''}`;
+        }
+      } catch {}
+      console.error('[CheckoutModal] Order save failed:', err);
+      setErrors((prev) => ({
+        ...prev,
+        general: realErrMsg,
+      }));
     } finally {
       setIsSubmitting(false);
     }
@@ -2306,6 +2305,15 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 
             {/* Place Order CTA with Premium Dark Styling & Smooth Animation */}
             <div className="mt-4 pt-3 border-t border-slate-200 dark:border-slate-800">
+              {errors.general && (
+                <div
+                  role="alert"
+                  className="mb-3 p-3 rounded-xl bg-rose-50 dark:bg-rose-950/60 border border-rose-200 dark:border-rose-800 text-rose-700 dark:text-rose-300 text-xs font-medium flex items-start gap-2"
+                >
+                  <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                  <span className="break-words">{errors.general}</span>
+                </div>
+              )}
               <button
                 type="button"
                 disabled={isSubmitting || cartItems.length === 0}

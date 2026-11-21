@@ -1,0 +1,82 @@
+# KenaX BD — AI Studio Prompt: Use the (default) Firestore database + actually write orders
+
+Paste this whole prompt into Google AI Studio for the KenaX BD project.
+
+---
+
+You are working on my existing e-commerce app "KenaX BD", deployed on Firebase Hosting (Firebase project `gen-lang-client-0077501500`) via GitHub. Do NOT redesign anything. Keep the existing UI, branding, colours, layout and all existing features exactly as they are. Do not break any existing code. Keep performance smooth on mobile and desktop.
+
+## The problem (verified in Firebase Console)
+
+This Firebase project has TWO Firestore databases:
+
+1. The **(default)** database — completely empty right now.
+2. A named database with ID `ai-studio-kenaxbd-db227bcd-db17-47e7-9023-bbf12ea50418` — this is the one the app currently uses. It only contains `cartActivities`, `customers` and `system/orderCounter` documents.
+
+Two things are broken:
+
+- The app uses the named database, but everything else (Firestore rules deployed via GitHub, and an external Cloudflare Worker integration that reads orders/products with a service account) uses the **(default)** database — so nothing matches.
+- At checkout, NO order document is ever written anywhere. The flow takes a number from the counter, creates a customer and marks the cart converted, but the order itself is never saved. Verified: a test order on 2026-11-21 got number KB-404401 (the same number as a test order the day before) and no order document exists in either database.
+
+## What to do
+
+### 1. Use ONLY the (default) Firestore database
+
+- Initialise Firestore with NO custom database ID — plain `getFirestore(app)` (web SDK) or the equivalent default initialisation in this codebase.
+- Find and remove/replace EVERY reference to the named database ID `ai-studio-kenaxbd-db227bcd-db17-47e7-9023-bbf12ea50418` anywhere in the code (for example `getFirestore(app, "ai-studio-kenaxbd-...")`, a `databaseId` in config, or a provider prop). After your change, the app must read and write ONLY in the (default) database.
+- Do NOT create any new database or any new Firebase project.
+- Do NOT try to delete the old named database — code cannot do that and you must not attempt it. Just stop using it. (The owner will remove it manually in the Firebase Console later, after the new setup is verified.)
+
+### 2. Actually save every order (the critical fix)
+
+On successful checkout, in the (default) database:
+
+- In ONE transaction: increment the shared order counter (keep it at `system/orderCounter`, fields `prefix: "KB"`, `current: <number>`) and build the order number `KB-<current>`. Every order must get a NEW, unique, increasing number — never reuse a number.
+- Write a document to the **`orders`** collection (document ID = the order number, e.g. `KB-404402`) with at least these fields:
+  - `orderNumber`, `items` (array: productId, name, sku, variant/colour, size if any, price, quantity), `subtotal`, `deliveryCharge`, `total`
+  - `customerName`, `customerPhone`, `customerEmail` (if collected), `deliveryAddress` (full address incl. division/district/thana), `note`
+  - `paymentMethod` (e.g. "COD"), `paymentStatus` (e.g. "unpaid"), `status` ("pending"), `fulfillmentStatus`, `sourceChannel` (e.g. "website")
+  - `assignedTo` (null at first), `courier` (null at first), `trackingNumber` (null at first)
+  - `createdAt` and `updatedAt` using server timestamps
+- Only show the "order successful" confirmation AFTER the order document write succeeds. If the write fails, show the real error — never show success for an order that was not saved.
+- The admin Orders screens must read orders live from this `orders` collection (realtime listener), so an order placed in any browser/phone appears in every admin immediately.
+
+### 3. Move the whole data layer to (default)
+
+ALL data of this app — A to Z, everything it stores today or adds later — must live in the (default) database and nowhere else. That includes at least these collections (keep the same collection names the app already uses, just in (default)):
+
+- `orders` — every order (see section 2).
+- `products` — all products with name, sku, price, sale price, stock, category, images, status. Seed/migrate the products currently shown in the store from the app's existing local data into this collection once, and make the storefront and admin both read from it.
+- `customers`, `cartActivities` — same collections as now, but in (default).
+- Wishlist data — the wishlist collection/activity the app uses (e.g. `wishlists` or `wishlistActivities`), in (default).
+- `activityLogs` — staff/order activity entries.
+- `staff` — staff accounts (never store plain-text passwords).
+- `settings` — including the `settings/musePermissions` document used by the Muse Permissions screen, so that screen can read/save once the Super Admin is signed in with Firebase Authentication (Google).
+- `system/orderCounter` — the shared order counter, in (default).
+
+General rule with no exceptions: if the app stores it, it goes to the (default) Firestore database. Nothing may be written to the named database any more, and no shared data may live only in localStorage.
+
+Keep the one-time localStorage migration: on first run of the new build in a browser that has old local data, copy any not-yet-migrated local orders/products/staff into the matching (default)-database collections, then rely on Firestore only.
+
+### 4. Firestore rules (for the (default) database)
+
+Ship `firestore.rules` in the repo (it deploys through the existing GitHub workflow — do NOT touch anything under `.github/workflows/`):
+
+- `products`: public read; write only for signed-in staff/admin.
+- `orders`: anyone (guest checkout) can CREATE an order; read/update only for signed-in staff/admin.
+- `customers`, `cartActivities`: create allowed for checkout/cart flow; read only for staff/admin.
+- `activityLogs`, `staff`: staff/admin only.
+- `settings/musePermissions`: read/write only for the Super Admin account; no public access.
+- Deny everything else by default.
+
+### 5. Do not touch
+
+- Do NOT change, add or delete any file under `.github/workflows/`.
+- Do NOT change the design, layout, text content or branding anywhere.
+- Do NOT remove any existing feature, page or admin section.
+
+## How to verify your own work before finishing
+
+1. Search the whole codebase: the string `ai-studio-kenaxbd` must appear NOWHERE.
+2. Place a test order in the preview: afterwards a document must exist in the (default) database `orders` collection with the correct total, and the order number must be one higher than the previous order's number.
+3. Open the admin in a second browser/incognito: the same order must be visible there without any manual refresh tricks.

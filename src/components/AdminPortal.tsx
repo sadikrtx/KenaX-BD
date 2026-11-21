@@ -36,6 +36,7 @@ const AdminCosts = React.lazy(() => import('./admin/AdminCosts').then(m => ({ de
 const AdminPerformanceOverview = React.lazy(() => import('./admin/AdminPerformanceOverview').then(m => ({ default: m.AdminPerformanceOverview })));
 const AdminMyDashboard = React.lazy(() => import('./admin/AdminMyDashboard').then(m => ({ default: m.AdminMyDashboard })));
 const AdminSettings = React.lazy(() => import('./admin/AdminSettings').then(m => ({ default: m.AdminSettings })));
+const AdminMusePermissions = React.lazy(() => import('./admin/AdminMusePermissions').then(m => ({ default: m.AdminMusePermissions })));
 const AdminPaymentGateways = React.lazy(() => import('./admin/AdminPaymentGateways').then(m => ({ default: m.AdminPaymentGateways })));
 const AdminCartActivities = React.lazy(() => import('./admin/AdminCartActivities').then(m => ({ default: m.AdminCartActivities })));
 const AdminWishlistActivities = React.lazy(() => import('./admin/AdminWishlistActivities').then(m => ({ default: m.AdminWishlistActivities })));
@@ -1841,7 +1842,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
       'plugins-logs': 'plugins.view',
     };
 
-    if (currentTab === 'integration-settings') {
+    if (currentTab === 'integration-settings' || currentTab === 'muse-permissions') {
       setCurrentTab('overview');
       return;
     }
@@ -1897,6 +1898,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
       : currentTab === 'settings' ||
           currentTab === 'storage-settings' ||
           currentTab === 'integration-settings' ||
+          currentTab === 'muse-permissions' ||
           currentTab === 'order-settings' ||
           currentTab === 'seo-settings' ||
           currentTab === 'policies'
@@ -2636,6 +2638,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
               }}
               currentRole={activeRole}
               currentStaff={currentStaff}
+              onRecordAuditLog={recordAuditLog}
               initialSubTab={initialSettingsSubTab}
             />
           )}
@@ -2647,6 +2650,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
               onUpdateSettings={onUpdateSettings}
               currentRole={activeRole}
               currentStaff={currentStaff}
+              onRecordAuditLog={recordAuditLog}
               initialSubTab="storage"
             />
           )}
@@ -2658,7 +2662,16 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
               onUpdateSettings={onUpdateSettings}
               currentRole={activeRole}
               currentStaff={currentStaff}
+              onRecordAuditLog={recordAuditLog}
               initialSubTab="integration"
+            />
+          )}
+
+          {currentTab === 'muse-permissions' && activeRole === 'super_admin' && (
+            <AdminMusePermissions
+              currentUserRole={activeRole}
+              currentStaff={currentStaff}
+              onRecordAuditLog={recordAuditLog}
             />
           )}
 

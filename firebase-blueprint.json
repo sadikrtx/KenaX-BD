@@ -327,6 +327,14 @@
     "/system/{docId}": {
       "schema": "OrderCounter",
       "description": "Atomic monotonic order counter (orderCounter), seed status, and transactional migration lock"
+    },
+    "/settings/musePermissions": {
+      "schema": "EntityDefinition",
+      "description": "Super-Admin-only Muse AI boolean permission toggles (15 built-in + custom keys) read by the Cloudflare Worker"
+    },
+    "/settings/musePermissionsMeta": {
+      "schema": "EntityDefinition",
+      "description": "Super-Admin-only metadata (labels, groups, custom rule definitions) for the data-driven Muse Permissions screen"
     }
   }
 }

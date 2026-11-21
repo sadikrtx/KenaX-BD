@@ -936,6 +936,146 @@ async function main() {
     assert.ok(fbSource.includes('export function subscribeToNotifications'), 'firebase.ts must export subscribeToNotifications');
   });
 
+  // =========================================================================
+  // SUITE 8: MUSE PERMISSIONS SCREEN (v2 EXPANDED) & FIRESTORE SECURITY RULES
+  // =========================================================================
+  await test('Muse Permissions', 'firestore.rules strictly restricts settings/musePermissions & musePermissionsMeta to isSuperAdmin() (verified email or live staff claim) and excludes both from public wildcard', () => {
+    const rules = fs.readFileSync(path.resolve(process.cwd(), 'firestore.rules'), 'utf8');
+    assert.ok(
+      rules.includes("request.auth.token.email == 'sadikrtx3060@gmail.com'") &&
+        rules.includes('request.auth.token.email_verified == true'),
+      'isBootstrapSuperAdmin() must enforce email_verified == true'
+    );
+    assert.ok(
+      rules.includes('match /settings/musePermissions'),
+      'firestore.rules must explicitly define match /settings/musePermissions'
+    );
+    assert.ok(
+      rules.includes('match /settings/musePermissionsMeta'),
+      'firestore.rules must explicitly define match /settings/musePermissionsMeta'
+    );
+    assert.ok(
+      rules.includes("settingId != 'musePermissions' && settingId != 'musePermissionsMeta'"),
+      'Public settings/{settingId} wildcard must explicitly exclude both musePermissions and musePermissionsMeta'
+    );
+    const museBlockMatch = rules.match(/match \/settings\/musePermissions\s*\{[\s\S]*?\n    \}/m);
+    assert.ok(museBlockMatch, 'Could not locate settings/musePermissions rule block');
+    const museBlock = museBlockMatch[0];
+    assert.ok(museBlock.includes('allow read: if isSuperAdmin();'), 'settings/musePermissions read must require isSuperAdmin()');
+    assert.ok(museBlock.includes('isSuperAdmin() && isValidMusePermissions(incoming())'), 'settings/musePermissions write must require isSuperAdmin() + schema validation');
+    assert.ok(museBlock.includes('allow delete: if false;'), 'settings/musePermissions delete must be denied');
+
+    const metaBlockMatch = rules.match(/match \/settings\/musePermissionsMeta\s*\{[\s\S]*?\n    \}/m);
+    assert.ok(metaBlockMatch, 'Could not locate settings/musePermissionsMeta rule block');
+    const metaBlock = metaBlockMatch[0];
+    assert.ok(metaBlock.includes('allow read: if isSuperAdmin();'), 'settings/musePermissionsMeta read must require isSuperAdmin()');
+    assert.ok(metaBlock.includes('isSuperAdmin() && isValidMusePermissionsMeta(incoming())'), 'settings/musePermissionsMeta write must require isSuperAdmin() + schema validation');
+    assert.ok(metaBlock.includes('allow delete: if false;'), 'settings/musePermissionsMeta delete must be denied');
+  });
+
+  await test('Muse Permissions', 'AdminMusePermissions v2 uses Firestore onSnapshot (settings/musePermissions + musePermissionsMeta), all 15 built-in keys, custom add/delete, real error messages, zero localStorage, zero API keys', () => {
+    const comp = fs.readFileSync(path.resolve(process.cwd(), 'src/components/admin/AdminMusePermissions.tsx'), 'utf8');
+    assert.ok(comp.includes("doc(db, 'settings', 'musePermissions')"), 'Must target Firestore settings/musePermissions');
+    assert.ok(comp.includes("doc(db, 'settings', 'musePermissionsMeta')"), 'Must target Firestore settings/musePermissionsMeta');
+    assert.ok(comp.includes('onSnapshot('), 'Must subscribe with live onSnapshot');
+    assert.ok(comp.includes('writeBatch(db)') && comp.includes('deleteField()'), 'Must support atomic custom add & delete');
+    assert.ok(comp.includes('serverTimestamp()'), 'Must write serverTimestamp() on updatedAt');
+    assert.equal(comp.includes('localStorage'), false, 'Must NEVER use localStorage for Muse Permissions');
+    assert.equal(comp.includes('sessionStorage'), false, 'Must NEVER use sessionStorage for Muse Permissions');
+    assert.equal(/apiKey|x-api-key|integration_secrets/i.test(comp), false, 'Must NEVER display or reference Integration API keys');
+    assert.equal(comp.includes('Save hoyni, abar chesta korun'), false, 'Must show real Firestore error message instead of generic retry text');
+    for (const key of [
+      'viewOrders',
+      'changeOrderStatus',
+      'assignOrders',
+      'addOrders',
+      'courierCheck',
+      'viewProducts',
+      'manageProducts',
+      'viewProductPerformance',
+      'viewInventory',
+      'updateStock',
+      'viewActivity',
+      'viewSalesReports',
+      'viewDashboardOverview',
+      'buildReports',
+      'sendWhatsAppAlerts',
+    ]) {
+      assert.ok(comp.includes(key), `Missing built-in permission key: ${key}`);
+    }
+    assert.ok(comp.includes('logActivityToDB') && comp.includes('onRecordAuditLog'), 'Must record activityLogs entry on changes');
+  });
+
+  await test('Muse Permissions', 'Strict Super-Admin-only gating across AdminSidebar, AdminSettings, and AdminPortal', () => {
+    const sidebar = fs.readFileSync(path.resolve(process.cwd(), 'src/components/admin/AdminSidebar.tsx'), 'utf8');
+    const settings = fs.readFileSync(path.resolve(process.cwd(), 'src/components/admin/AdminSettings.tsx'), 'utf8');
+    const portal = fs.readFileSync(path.resolve(process.cwd(), 'src/components/AdminPortal.tsx'), 'utf8');
+
+    assert.ok(sidebar.includes("id: 'muse-permissions'"), 'AdminSidebar must include muse-permissions entry');
+    const sidebarEntry = sidebar.slice(sidebar.indexOf("id: 'muse-permissions'"), sidebar.indexOf("id: 'muse-permissions'") + 260);
+    assert.ok(sidebarEntry.includes('superAdminOnly: true'), 'AdminSidebar muse-permissions entry must set superAdminOnly: true');
+
+    assert.ok(settings.includes("id=\"tab-muse-permissions\""), 'AdminSettings must expose tab-muse-permissions');
+    assert.ok(settings.includes("activeTab === 'muse_permissions' && isStrictSuperAdmin"), 'AdminSettings must gate AdminMusePermissions on isStrictSuperAdmin');
+
+    assert.ok(
+      portal.includes("currentTab === 'integration-settings' || currentTab === 'muse-permissions'"),
+      'AdminPortal RBAC effect must redirect non-Super-Admin away from muse-permissions'
+    );
+    assert.ok(
+      portal.includes("currentTab === 'muse-permissions' && activeRole === 'super_admin'"),
+      'AdminPortal render gate must require activeRole === super_admin for AdminMusePermissions'
+    );
+  });
+
+  await test('Default Database', 'Zero references to legacy named database in app code & config', () => {
+    const legacyDbPrefix = ['ai', 'studio', 'kenaxbd'].join('-');
+    const filesToCheck = [
+      'firebase.json',
+      'firebase-applet-config.json',
+      'functions/index.js',
+      'src/lib/firebase.ts',
+      'src/db/telegram.ts',
+      'src/db/whatsapp.ts',
+      'src/db/firestoreSync.ts',
+    ];
+    for (const relPath of filesToCheck) {
+      const content = fs.readFileSync(path.resolve(process.cwd(), relPath), 'utf8');
+      assert.equal(
+        content.includes(legacyDbPrefix),
+        false,
+        `${relPath} must NOT reference legacy named database`
+      );
+    }
+    const firebaseJson = JSON.parse(fs.readFileSync(path.resolve(process.cwd(), 'firebase.json'), 'utf8'));
+    assert.equal(firebaseJson.firestore?.database, undefined, 'firebase.json must target (default) database without custom database field');
+    const appletCfg = JSON.parse(fs.readFileSync(path.resolve(process.cwd(), 'firebase-applet-config.json'), 'utf8'));
+    assert.equal(appletCfg.firestoreDatabaseId, '(default)', 'firebase-applet-config.json must specify (default)');
+  });
+
+  await test('Default Database', 'Checkout writes order + increments system/orderCounter atomically before showing success', () => {
+    const firebaseTs = fs.readFileSync(path.resolve(process.cwd(), 'src/lib/firebase.ts'), 'utf8');
+    const appTsx = fs.readFileSync(path.resolve(process.cwd(), 'src/App.tsx'), 'utf8');
+    const checkoutTsx = fs.readFileSync(path.resolve(process.cwd(), 'src/components/CheckoutModal.tsx'), 'utf8');
+
+    assert.ok(firebaseTs.includes('export async function createOrderTransactionallyInDB'), 'firebase.ts must export createOrderTransactionallyInDB');
+    assert.ok(
+      firebaseTs.includes("'orderCounter'") &&
+        firebaseTs.includes("doc(db, 'system', counterDocId)") &&
+        firebaseTs.includes("doc(db, 'orders', orderNumber)"),
+      'createOrderTransactionallyInDB must atomically write system/orderCounter and orders/{orderNumber} in one transaction'
+    );
+    assert.ok(firebaseTs.includes('createdAt: serverTimestamp()') && firebaseTs.includes('updatedAt: serverTimestamp()'), 'Order document must include serverTimestamp() for createdAt and updatedAt');
+    assert.ok(
+      appTsx.includes("const newOrder = await createOrderTransactionallyInDB(preparedOrder, 'KB')"),
+      'App.tsx handleOrderPlaced must await createOrderTransactionallyInDB before showing confirmation'
+    );
+    assert.ok(
+      checkoutTsx.includes('await Promise.resolve(onOrderPlaced(orderData))'),
+      'CheckoutModal must await onOrderPlaced and surface real Firestore errors on failure'
+    );
+  });
+
   const passedCount = results.filter((r) => r.passed).length;
   const failedCount = results.filter((r) => !r.passed).length;
   console.log(`\n================ SUMMARY: ${passedCount}/${results.length} PASSED, ${failedCount} FAILED ================\n`);

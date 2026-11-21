@@ -1,0 +1,94 @@
+You are working on my existing e-commerce app "KenaX BD", deployed on Firebase
+Hosting (project gen-lang-client-0077501500) via GitHub. Only ADD one new
+settings screen, as described below. Do NOT change any existing page, feature,
+flow, role, or styling anywhere else in the app.
+
+CONTEXT
+Muse (my AI assistant) connects to this shop through a Cloudflare Worker
+Integration API using an API key. I want one screen where I, as Super Admin,
+can switch each Muse ability ON or OFF with a checkbox — and the switch must
+actually work end to end, not just change how the screen looks.
+
+THE SCREEN
+1) Add a new screen called "Muse Permissions" inside the admin dashboard,
+   under Settings / Integration. ONLY Super Admin can see or open it. Manager
+   and Moderator must NOT see it in their menu at all, and it must not open
+   for them even by typing its URL.
+2) One checkbox (toggle switch) per ability, grouped like this:
+   - View: Orders / Products / Inventory & Low Stock / Staff Activity /
+     Sales Reports & Best Sellers
+   - Actions: Confirm / Change Order Status
+   - Alerts: WhatsApp Alerts to Owner
+3) When the screen opens it must show the CURRENT saved state of every switch
+   (read from Firestore, see below). Show a small loading state until the real
+   values arrive — never flash all ON or all OFF first.
+
+DESIGN RULES (follow exactly)
+4) CLEAN, minimal design. NO SUBTITLE anywhere: no description text under the
+   page title, no description text under group headings, and NO explanatory
+   sub-text under any permission name. Each row shows ONLY the permission name
+   (short Bengali + English label) and its switch. Nothing else.
+5) WARM vibe: soft warm background tones (warm off-white / light cream), warm
+   amber/orange accent for the ON state of switches, white cards with large
+   rounded corners and very soft shadows. Friendly and calm. Keep the app's
+   existing font.
+6) RESPONSIVE: on mobile, one single clean column, full-width cards, switch
+   rows at least 44px tall for easy touch, nothing cut off or overlapping.
+   On desktop, the groups sit in a neat grid aligned with the other Settings
+   screens' width. Must look right at every width from 360px to 1920px.
+7) SMOOTH PERFORMANCE: this screen loads ONE small Firestore document only.
+   No polling, no extra collections, no heavy animation — only a simple CSS
+   transition on the switch. Add NO new npm dependencies. Lazy-load this
+   screen like the other Settings sub-screens so the rest of the admin stays
+   fast, with no lag anywhere.
+
+WHERE THE SWITCHES ARE SAVED — FIRESTORE (THIS MAKES THEM FUNCTIONAL)
+8) Save the switches in Cloud Firestore, in the SAME project
+   (gen-lang-client-0077501500), as ONE document: collection "settings",
+   document id "musePermissions". This document is the single source of
+   truth — the Cloudflare Worker reads this same document on every API
+   request and allows or blocks Muse accordingly, so ticking a checkbox here
+   automatically changes what the Worker allows. Do NOT save these switches
+   in localStorage.
+9) Document fields (all boolean):
+   viewOrders, changeOrderStatus, viewProducts, viewInventory, viewActivity,
+   viewSalesReports, sendWhatsAppAlerts
+   plus updatedAt (Firestore serverTimestamp) and updatedBy (logged-in staff
+   email/name).
+10) If the document does not exist yet, treat every switch as ON (this matches
+    how Muse works today) and create the document with all ON on the first
+    toggle.
+11) AUTO-SAVE: toggling a switch immediately saves that one change to
+    Firestore (merge update, no Save button). Show a tiny "Saving…" state on
+    that row, then a small success tick/toast ("Saved"). If the save FAILS,
+    revert the switch to its previous state and show a clear Bengali error
+    ("Save hoyni, abar chesta korun") — never show ON on screen while
+    Firestore still has OFF.
+12) Also write one entry to the existing activityLogs collection for every
+    permission change (who, which permission, old value → new value, time).
+    Reuse the existing activity-log helper if there is one.
+
+SECURITY
+13) Firestore rules: ONLY Super Admin can read or write
+    settings/musePermissions. No other staff role and no public visitor may
+    read or change it. Never show the Integration API key on this screen, and
+    never store any API key or secret in Firestore or in app code.
+
+DO NOT BREAK ANYTHING
+14) This is an additive change only: new screen component + menu entry +
+    route + the Firestore document + its rule. Do NOT modify the logic,
+    state, or styling of Orders, Products, Inventory, Staff Management, the
+    existing Integration screen, login/session handling, or checkout. Reuse
+    the app's existing Firebase initialisation — do not initialise Firebase a
+    second time. After your change, login, staff sessions, the order flow and
+    every existing screen must work exactly as before.
+
+TEST BEFORE YOU FINISH (do these and report results in your summary):
+- Super Admin: the screen opens and all 7 switches show their saved values.
+- Moderator login: the screen is not in the menu and cannot be opened by URL.
+- Turn OFF "Orders", wait a few seconds, reload: it is still OFF (really
+  saved in Firestore). Turn it back ON, reload: ON again.
+- Clear the browser's site data: the switches do NOT reset (proves they are
+  not in localStorage).
+- Open the screen on a narrow mobile width and on desktop: layout is clean
+  and responsive in both, with no subtitle text anywhere.

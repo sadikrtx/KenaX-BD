@@ -471,7 +471,7 @@ function getFirestoreInstance() {
     if (!fs.existsSync(configPath)) return null;
     const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
     const app = !getApps().length ? initializeApp(config) : getApp();
-    firestoreDb = config.firestoreDatabaseId ? getFirestore(app, config.firestoreDatabaseId) : getFirestore(app);
+    firestoreDb = getFirestore(app);
     return firestoreDb;
   } catch {
     return null;
