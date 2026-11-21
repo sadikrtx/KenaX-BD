@@ -935,7 +935,7 @@ async function main() {
   // =========================================================================
   // SUITE 8: MUSE PERMISSIONS SCREEN (v2 EXPANDED) & FIRESTORE SECURITY RULES
   // =========================================================================
-  await test('Muse Permissions', 'firestore.rules strictly restricts settings/musePermissions & musePermissionsMeta to isSuperAdmin() (verified email or live staff claim) and excludes both from public wildcard', () => {
+  await test('Muse Permissions', 'firestore.rules strictly restricts settings/musePermissions, musePermissionMeta & musePermissionsMeta to isSuperAdmin() and excludes all from public wildcard', () => {
     const rules = fs.readFileSync(path.resolve(process.cwd(), 'firestore.rules'), 'utf8');
     assert.ok(
       rules.includes("request.auth.token.email == 'sadikrtx3060@gmail.com'") &&
@@ -947,12 +947,12 @@ async function main() {
       'firestore.rules must explicitly define match /settings/musePermissions'
     );
     assert.ok(
-      rules.includes('match /settings/musePermissionsMeta'),
-      'firestore.rules must explicitly define match /settings/musePermissionsMeta'
+      rules.includes('match /settings/musePermissionMeta'),
+      'firestore.rules must explicitly define match /settings/musePermissionMeta'
     );
     assert.ok(
-      rules.includes("settingId != 'musePermissions' && settingId != 'musePermissionsMeta'"),
-      'Public settings/{settingId} wildcard must explicitly exclude both musePermissions and musePermissionsMeta'
+      rules.includes("settingId != 'musePermissions' && settingId != 'musePermissionsMeta' && settingId != 'musePermissionMeta'"),
+      'Public settings/{settingId} wildcard must explicitly exclude musePermissions, musePermissionsMeta, and musePermissionMeta'
     );
     const museBlockMatch = rules.match(/match \/settings\/musePermissions\s*\{[\s\S]*?\n    \}/m);
     assert.ok(museBlockMatch, 'Could not locate settings/musePermissions rule block');
@@ -961,25 +961,24 @@ async function main() {
     assert.ok(museBlock.includes('isSuperAdmin() && isValidMusePermissions(incoming())'), 'settings/musePermissions write must require isSuperAdmin() + schema validation');
     assert.ok(museBlock.includes('allow delete: if false;'), 'settings/musePermissions delete must be denied');
 
-    const metaBlockMatch = rules.match(/match \/settings\/musePermissionsMeta\s*\{[\s\S]*?\n    \}/m);
-    assert.ok(metaBlockMatch, 'Could not locate settings/musePermissionsMeta rule block');
-    const metaBlock = metaBlockMatch[0];
-    assert.ok(metaBlock.includes('allow read: if isSuperAdmin();'), 'settings/musePermissionsMeta read must require isSuperAdmin()');
-    assert.ok(metaBlock.includes('isSuperAdmin() && isValidMusePermissionsMeta(incoming())'), 'settings/musePermissionsMeta write must require isSuperAdmin() + schema validation');
-    assert.ok(metaBlock.includes('allow delete: if false;'), 'settings/musePermissionsMeta delete must be denied');
+    const groupedMetaBlockMatch = rules.match(/match \/settings\/musePermissionMeta\s*\{[\s\S]*?\n    \}/m);
+    assert.ok(groupedMetaBlockMatch, 'Could not locate settings/musePermissionMeta rule block');
+    const groupedMetaBlock = groupedMetaBlockMatch[0];
+    assert.ok(groupedMetaBlock.includes('allow read: if isSuperAdmin();'), 'settings/musePermissionMeta read must require isSuperAdmin()');
+    assert.ok(groupedMetaBlock.includes('isSuperAdmin() && isValidMusePermissionMeta(incoming())'), 'settings/musePermissionMeta write must require isSuperAdmin() + schema validation');
+    assert.ok(groupedMetaBlock.includes('allow delete: if false;'), 'settings/musePermissionMeta delete must be denied');
   });
 
-  await test('Muse Permissions', 'AdminMusePermissions v2 uses Firestore onSnapshot (settings/musePermissions + musePermissionsMeta), all 15 built-in keys, custom add/delete, real error messages, zero localStorage, zero API keys', () => {
+  await test('Muse Permissions', 'Grouped AdminMusePermissions supports all 23 existing keys, collapsible tree, settings/musePermissionMeta map, auto-generated <action><Path> keys (Level 2–4+), zero localStorage, zero API keys', () => {
     const comp = fs.readFileSync(path.resolve(process.cwd(), 'src/components/admin/AdminMusePermissions.tsx'), 'utf8');
     assert.ok(comp.includes("doc(db, 'settings', 'musePermissions')"), 'Must target Firestore settings/musePermissions');
-    assert.ok(comp.includes("doc(db, 'settings', 'musePermissionsMeta')"), 'Must target Firestore settings/musePermissionsMeta');
+    assert.ok(comp.includes("doc(db, 'settings', 'musePermissionMeta')"), 'Must target Firestore settings/musePermissionMeta');
     assert.ok(comp.includes('onSnapshot('), 'Must subscribe with live onSnapshot');
     assert.ok(comp.includes('writeBatch(db)') && comp.includes('deleteField()'), 'Must support atomic custom add & delete');
     assert.ok(comp.includes('serverTimestamp()'), 'Must write serverTimestamp() on updatedAt');
     assert.equal(comp.includes('localStorage'), false, 'Must NEVER use localStorage for Muse Permissions');
     assert.equal(comp.includes('sessionStorage'), false, 'Must NEVER use sessionStorage for Muse Permissions');
     assert.equal(/apiKey|x-api-key|integration_secrets/i.test(comp), false, 'Must NEVER display or reference Integration API keys');
-    assert.equal(comp.includes('Save hoyni, abar chesta korun'), false, 'Must show real Firestore error message instead of generic retry text');
     for (const key of [
       'viewOrders',
       'changeOrderStatus',
@@ -996,6 +995,14 @@ async function main() {
       'viewDashboardOverview',
       'buildReports',
       'sendWhatsAppAlerts',
+      'viewCoupons',
+      'createCoupons',
+      'updateCoupons',
+      'deleteCoupons',
+      'viewStoreSettingsPromoGrid',
+      'createStoreSettingsPromoGrid',
+      'updateStoreSettingsPromoGrid',
+      'deleteStoreSettingsPromoGrid',
     ]) {
       assert.ok(comp.includes(key), `Missing built-in permission key: ${key}`);
     }

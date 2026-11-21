@@ -174,6 +174,14 @@ service cloud.firestore {
         && (!('updatedAt' in data) || data.updatedAt is timestamp);
     }
 
+    // Validated Super-Admin-only Grouped Muse Permissions metadata map (settings/musePermissionMeta)
+    // Stores { "<key>": { "label": "...", "path": ["SYSTEM", "Store Settings", "Promo Grid"] } }
+    function isValidMusePermissionMeta(data) {
+      return data.keys().size() <= 150
+        && (!('updatedBy' in data) || (data.updatedBy is string && data.updatedBy.size() <= 200))
+        && (!('updatedAt' in data) || data.updatedAt is timestamp);
+    }
+
     // Moderators can update operational status/tracking/notes, NOT pricing/items, and cannot cancel Delivered orders
     function isAllowedModeratorOrderUpdate() {
       let changedKeys = incoming().diff(resource.data).affectedKeys();
@@ -297,9 +305,15 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    match /settings/musePermissionMeta {
+      allow read: if isSuperAdmin();
+      allow create, update: if isSuperAdmin() && isValidMusePermissionMeta(incoming());
+      allow delete: if false;
+    }
+
     match /settings/{settingId} {
-      allow read: if settingId != 'musePermissions' && settingId != 'musePermissionsMeta';
-      allow write: if settingId != 'musePermissions' && settingId != 'musePermissionsMeta' && isAdminOrAbove() && isValidId(settingId);
+      allow read: if settingId != 'musePermissions' && settingId != 'musePermissionsMeta' && settingId != 'musePermissionMeta';
+      allow write: if settingId != 'musePermissions' && settingId != 'musePermissionsMeta' && settingId != 'musePermissionMeta' && isAdminOrAbove() && isValidId(settingId);
     }
 
     match /heroBannerVideos/{videoId} {
