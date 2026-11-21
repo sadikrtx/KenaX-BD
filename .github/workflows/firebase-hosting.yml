@@ -1,0 +1,36 @@
+name: Deploy KenaX BD to Firebase Hosting
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build_and_deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Install dependencies and build
+        run: |
+          npm install
+          npm run build
+
+      - name: Authenticate with Google Cloud Service Account
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_GEN_LANG_CLIENT_0077501500 }}
+
+      - name: Deploy to Firebase (Hosting + Firestore rules if present)
+        run: |
+          TARGETS="hosting"
+          if [ -f firestore.rules ]; then TARGETS="$TARGETS,firestore:rules"; fi
+          echo "Deploying: $TARGETS"
+          npx --yes firebase-tools deploy --only "$TARGETS" --project gen-lang-client-0077501500 --non-interactive --force
