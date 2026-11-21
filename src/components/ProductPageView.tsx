@@ -169,22 +169,10 @@ export const ProductPageView: React.FC<ProductPageViewProps> = ({
   const [addedFeedback, setAddedFeedback] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
 
-  // Reviews state with real-time Firestore persistence and local storage cache
-  const [dbReviewsList, setDbReviewsList] = useState<Review[]>(() => {
-    try {
-      const cached = localStorage.getItem('kenax_reviews_cache');
-      let list = cached ? JSON.parse(cached) : [];
-      const customRaw = localStorage.getItem('kenax_custom_reviews_map');
-      if (customRaw) {
-        const customMap = JSON.parse(customRaw);
-        list = list.map((r: Review) => customMap[r.id] ? { ...r, ...customMap[r.id] } : r);
-      }
-      if (Array.isArray(list) && list.length > 0) return list;
-    } catch {}
-    return [];
-  });
+  // Reviews state with real-time Cloud Firestore persistence (no shared localStorage cache)
+  const [dbReviewsList, setDbReviewsList] = useState<Review[]>([]);
 
-  // Track locally submitted review IDs by this user across page reloads & offline
+  // Track locally submitted review IDs by this visitor across page reloads
   const [mySubmittedReviewIds, setMySubmittedReviewIds] = useState<string[]>(() => {
     try {
       const saved = localStorage.getItem('kenax_my_submitted_reviews');
@@ -204,7 +192,6 @@ export const ProductPageView: React.FC<ProductPageViewProps> = ({
       snapshotReceived = true;
       if (isMounted && liveReviews) {
         setDbReviewsList(liveReviews);
-        safeSetLocalStorage('kenax_reviews_cache', JSON.stringify(liveReviews));
       }
     });
 
@@ -214,7 +201,6 @@ export const ProductPageView: React.FC<ProductPageViewProps> = ({
           .then((items) => {
             if (isMounted && items && items.length > 0) {
               setDbReviewsList(items);
-              safeSetLocalStorage('kenax_reviews_cache', JSON.stringify(items));
             }
           })
           .catch(() => {});

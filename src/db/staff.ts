@@ -2,23 +2,58 @@ import fs from 'fs';
 import path from 'path';
 import type { StaffUser } from '../types/index.ts';
 import { normalizeBDPhoneNumber } from '../utils/phoneUtils.ts';
+import {
+  getStaffCredential,
+  setStaffCredential,
+  deleteStaffCredential,
+  revokeStaffTokens,
+  sanitizeStaffForResponse,
+} from '../lib/serverStaffAuth.ts';
 
 const SERVER_STORE_DIR = path.join(process.cwd(), 'data');
 
+// Baseline Super Admin metadata ONLY — NEVER contains plaintext passwords or hashes
 const DEFAULT_STAFF: StaffUser[] = [
   {
     id: 'staff-super-2',
     name: 'Super Admin',
     email: 'super@kenaxbd.com',
-    password: 'sadik@1234',
     phone: '01719143897',
     role: 'super_admin',
     permissions: ['*'],
+    status: 'active',
     isActive: true,
     createdAt: '2025-01-01T00:00:00Z',
     createdBy: 'System Root',
   },
 ];
+
+function migrateAnyInlineSecretToCredentialStore(staff: StaffUser): StaffUser {
+  const anyStaff = staff as any;
+  const rawSecret =
+    (typeof anyStaff.password === 'string' && anyStaff.password.trim()) ||
+    (typeof anyStaff.passwordHash === 'string' && anyStaff.passwordHash.trim()) ||
+    '';
+
+  if (staff.id && rawSecret && !getStaffCredential(staff.id)) {
+    try {
+      setStaffCredential(staff.id, staff.email || '', rawSecret, false);
+    } catch (err) {
+      console.warn('[Server Staff] Failed migrating inline secret to credential store:', err);
+    }
+  }
+  return sanitizeStaffForResponse(staff) as StaffUser;
+}
+
+function ensureBootstrapSuperAdminCredential(): void {
+  const superId = DEFAULT_STAFF[0].id;
+  if (!getStaffCredential(superId)) {
+    const envBootstrapPassword = String(process.env.INITIAL_SUPER_ADMIN_PASSWORD || '').trim();
+    if (envBootstrapPassword) {
+      setStaffCredential(superId, DEFAULT_STAFF[0].email, envBootstrapPassword, false);
+    }
+  }
+}
 
 function readStaffFromFile(filePath: string): StaffUser[] {
   try {
@@ -26,7 +61,7 @@ function readStaffFromFile(filePath: string): StaffUser[] {
       const content = fs.readFileSync(filePath, 'utf-8');
       const parsed = JSON.parse(content);
       if (Array.isArray(parsed) && parsed.length > 0) {
-        return parsed;
+        return parsed.map(migrateAnyInlineSecretToCredentialStore);
       }
     }
   } catch (err) {
@@ -40,9 +75,10 @@ function writeStaffToBothFiles(staffList: StaffUser[]): void {
     if (!fs.existsSync(SERVER_STORE_DIR)) {
       fs.mkdirSync(SERVER_STORE_DIR, { recursive: true });
     }
+    const sanitized = staffList.map((s) => sanitizeStaffForResponse(s));
     const file1 = path.join(SERVER_STORE_DIR, 'server_staff.json');
     const file2 = path.join(SERVER_STORE_DIR, 'preview_server_staff.json');
-    const content = JSON.stringify(staffList, null, 2);
+    const content = JSON.stringify(sanitized, null, 2);
     fs.writeFileSync(file1, content, 'utf-8');
     fs.writeFileSync(file2, content, 'utf-8');
   } catch (err) {
@@ -52,6 +88,7 @@ function writeStaffToBothFiles(staffList: StaffUser[]): void {
 
 export function getAllStaffFromStore(_isEnvPreview?: boolean): StaffUser[] {
   try {
+    ensureBootstrapSuperAdminCredential();
     if (!fs.existsSync(SERVER_STORE_DIR)) {
       fs.mkdirSync(SERVER_STORE_DIR, { recursive: true });
     }
@@ -66,28 +103,23 @@ export function getAllStaffFromStore(_isEnvPreview?: boolean): StaffUser[] {
 
     const mergeEntry = (s: StaffUser) => {
       if (!s || (!s.id && !s.email)) return;
-      const lowerEmail = s.email ? s.email.trim().toLowerCase() : '';
-      const idKey = s.id ? s.id.trim() : '';
+      const clean = sanitizeStaffForResponse(s) as StaffUser;
+      const lowerEmail = clean.email ? clean.email.trim().toLowerCase() : '';
+      const idKey = clean.id ? clean.id.trim() : '';
 
       const existing = (idKey ? staffById.get(idKey) : null) || (lowerEmail ? staffByEmail.get(lowerEmail) : null);
-      // Saved / incoming staff takes full precedence over baseline default
-      const merged: StaffUser = existing ? { ...existing, ...s } : { ...s };
+      const merged: StaffUser = existing ? { ...existing, ...clean } : { ...clean };
 
       if (idKey) staffById.set(idKey, merged);
       if (lowerEmail) staffByEmail.set(lowerEmail, merged);
     };
 
-    // 1. DEFAULT_STAFF baseline (lowest priority)
     for (const s of DEFAULT_STAFF) {
       mergeEntry(s);
     }
-
-    // 2. Merge from preview store
     for (const s of list2) {
       mergeEntry(s);
     }
-
-    // 3. Merge from primary store (highest priority on server)
     for (const s of list1) {
       mergeEntry(s);
     }
@@ -98,53 +130,71 @@ export function getAllStaffFromStore(_isEnvPreview?: boolean): StaffUser[] {
       const key = s.id || (s.email ? s.email.toLowerCase() : '');
       if (key && !seen.has(key)) {
         seen.add(key);
-        mergedList.push(s);
+        mergedList.push(sanitizeStaffForResponse(s) as StaffUser);
       }
     }
 
     if (mergedList.length > 0) {
-      // Sync back to both stores so both are always 100% identical and up-to-date
       writeStaffToBothFiles(mergedList);
       return mergedList;
     }
   } catch (err) {
     console.warn('[Server Staff] Error getting staff:', err);
   }
-  return DEFAULT_STAFF;
+  return DEFAULT_STAFF.map((s) => sanitizeStaffForResponse(s) as StaffUser);
 }
 
 export function saveStaffToStore(staff: StaffUser, _isEnvPreview?: boolean): StaffUser {
   try {
-    const sanitizedStaff: StaffUser = {
+    const rawPassword = typeof staff.password === 'string' && staff.password.trim() ? staff.password.trim() : '';
+    const sanitizedStaff: StaffUser = sanitizeStaffForResponse({
       ...staff,
+      email: String(staff.email || '').trim().toLowerCase(),
       phone: staff.phone && staff.phone !== 'N/A' ? normalizeBDPhoneNumber(staff.phone) : staff.phone,
-    };
+      isActive: staff.isActive !== false && staff.status !== 'suspended',
+      status: staff.isActive === false || staff.status === 'suspended' ? 'suspended' : 'active',
+    }) as StaffUser;
+
     const current = getAllStaffFromStore();
     const idx = current.findIndex(
       (s) => s.id === sanitizedStaff.id || (sanitizedStaff.email && s.email && s.email.toLowerCase() === sanitizedStaff.email.toLowerCase())
     );
+    const prev = idx >= 0 ? current[idx] : null;
+
+    if (rawPassword) {
+      setStaffCredential(sanitizedStaff.id, sanitizedStaff.email, rawPassword, true);
+    } else if (prev && (prev.role !== sanitizedStaff.role || prev.isActive !== sanitizedStaff.isActive || prev.status !== sanitizedStaff.status)) {
+      revokeStaffTokens(sanitizedStaff.id);
+    }
+
     if (idx >= 0) {
       current[idx] = { ...current[idx], ...sanitizedStaff };
     } else {
       current.unshift(sanitizedStaff);
     }
     writeStaffToBothFiles(current);
-    return sanitizedStaff;
+    return sanitizeStaffForResponse(sanitizedStaff) as StaffUser;
   } catch (err) {
     console.error('[Server Staff] Error saving staff:', err);
   }
-  return staff;
+  return sanitizeStaffForResponse(staff) as StaffUser;
 }
 
 export function deleteStaffFromStore(staffId: string, _isEnvPreview?: boolean): boolean {
   try {
     const current = getAllStaffFromStore();
+    const target = current.find(
+      (s) => s.id === staffId || s.email.toLowerCase() === staffId.toLowerCase()
+    );
     const filtered = current.filter(
       (s) => s.id !== staffId && s.email.toLowerCase() !== staffId.toLowerCase()
     );
-    // Ensure Super Admin is never deleted completely
-    if (!filtered.some((s) => s.role === 'super_admin')) {
-      filtered.push(DEFAULT_STAFF[0]);
+    // Ensure at least one active Super Admin remains
+    if (!filtered.some((s) => s.role === 'super_admin' && s.isActive !== false && !s.isRemoved)) {
+      return false;
+    }
+    if (target) {
+      deleteStaffCredential(target.id);
     }
     writeStaffToBothFiles(filtered);
     return true;
@@ -153,4 +203,3 @@ export function deleteStaffFromStore(staffId: string, _isEnvPreview?: boolean): 
     return false;
   }
 }
-

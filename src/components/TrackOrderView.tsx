@@ -28,7 +28,7 @@ import {
 } from 'lucide-react';
 import { SiWhatsapp } from 'react-icons/si';
 import { Order, OrderStatus, CustomerRecord } from '../types';
-import { fetchSingleOrderFromDB, getCustomersFromDB } from '../lib/firebase';
+import { fetchSingleOrderFromDB, trackOrderViaServer } from '../lib/firebase';
 import { CartItemImage } from './CartItemImage';
 import {
   cleanBDPhoneNumber,
@@ -176,14 +176,7 @@ export const TrackOrderView: React.FC<TrackOrderViewProps> = ({
     } catch {}
   };
 
-  // Sync customers from DB & local cache on mount
-  useEffect(() => {
-    getCustomersFromDB().then((list) => {
-      if (list && list.length > 0) {
-        setCustomerRecords(list);
-      }
-    });
-  }, []);
+  // Customer records are strictly provided via authenticated props; never read private `customers` publicly.
 
   useEffect(() => {
     if (customers && customers.length > 0) {
@@ -385,15 +378,7 @@ export const TrackOrderView: React.FC<TrackOrderViewProps> = ({
     setHasSearched(true);
     setIsSearching(true);
 
-    // Refresh latest customer accounts from DB if needed
-    let latestCustomers = customerRecords;
-    try {
-      const freshCusts = await getCustomersFromDB();
-      if (freshCusts && freshCusts.length > 0) {
-        latestCustomers = freshCusts;
-        setCustomerRecords(freshCusts);
-      }
-    } catch {}
+    const latestCustomers = customerRecords;
 
     const cleanQuery = rawOrderId.toUpperCase();
     const queryWithoutPrefix = cleanQuery.replace(/^KB-/, '');
@@ -423,16 +408,20 @@ export const TrackOrderView: React.FC<TrackOrderViewProps> = ({
       }
     }
 
-    // 3. If not found in memory, query Cloud Firestore
+    // 3. If not found in memory, use verified server lookup (requires BOTH Order ID + Phone)
     if (!matchedOrder) {
       try {
-        const cloudOrder = await fetchSingleOrderFromDB(rawOrderId);
-        if (cloudOrder) {
-          // Verify cloud order's phone number as well
-          const isPhoneMatch = isOrderMatchingTrackingPhone(cloudOrder, rawPhone, latestCustomers, currentCustomer);
-
-          if (isPhoneMatch) {
-            matchedOrder = cloudOrder;
+        const verifiedServerOrder = await trackOrderViaServer(rawOrderId, rawPhone);
+        if (verifiedServerOrder) {
+          matchedOrder = verifiedServerOrder;
+        } else {
+          // Authenticated staff/customer fallback via Firestore
+          const cloudOrder = await fetchSingleOrderFromDB(rawOrderId);
+          if (cloudOrder) {
+            const isPhoneMatch = isOrderMatchingTrackingPhone(cloudOrder, rawPhone, latestCustomers, currentCustomer);
+            if (isPhoneMatch) {
+              matchedOrder = cloudOrder;
+            }
           }
         }
       } catch (err) {

@@ -56,7 +56,12 @@ import {
   SaasLineAreaChart,
   SAAS_CHART_COLORS,
 } from './charts/AdminCharts';
-import { computeStoreSalesSummary, getCanonicalOrderBucket } from '../../utils/salesAnalytics';
+import {
+  computeStoreSalesSummary,
+  deduplicateOrdersById,
+  getCanonicalOrderBucket,
+  isNonRevenueOrder,
+} from '../../utils/salesAnalytics';
 
 interface AdminOverviewProps {
   orders: Order[];
@@ -181,8 +186,11 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
     }, 0);
   };
 
+  // Deduplicate orders by ID before all financial/operational aggregations
+  const uniqueOrders = deduplicateOrdersById(orders || []);
+
   // Timeframe Filtered Collections for Financial Performance
-  const finFilteredOrders = (orders || []).filter((o) =>
+  const finFilteredOrders = uniqueOrders.filter((o) =>
     isWithinFinPeriod(o.createdAt || (o as any).date)
   );
   const finFilteredExpenses = (expenses || []).filter((e) =>
@@ -193,8 +201,8 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
     isWithinFinPeriod(p.date || p.createdAt)
   );
 
-  // 1. Delivered Orders (Financial Realization) in selected timeframe
-  const deliveredOrders = finFilteredOrders.filter((o) => o.orderStatus === 'Delivered');
+  // 1. Delivered Orders (Financial Realization — canonical bucket includes both 'Delivered' & 'Completed')
+  const deliveredOrders = finFilteredOrders.filter((o) => getCanonicalOrderBucket(o) === 'delivered');
 
   // Total Money Received: Total collected sales amount from delivered orders
   const totalMoneyReceived = deliveredOrders.reduce((sum, o) => sum + (o.totalAmount || 0), 0);
@@ -250,7 +258,8 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
   const verifiedAdvanceOrders = finFilteredOrders.filter(
     (o) =>
       isAdvanceOrder(o) &&
-      (o.paymentStatus === 'Verified' || (o.advancePaidVerified === true) || o.orderStatus === 'Delivered')
+      !isNonRevenueOrder(o) &&
+      (o.paymentStatus === 'Verified' || o.advancePaidVerified === true || getCanonicalOrderBucket(o) === 'delivered')
   );
 
   const totalVerifiedDeliveryAdvance = verifiedAdvanceOrders.reduce(
@@ -258,10 +267,11 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
     0
   );
 
-  const todayVerifiedAdvanceOrders = (orders || []).filter(
+  const todayVerifiedAdvanceOrders = uniqueOrders.filter(
     (o) =>
       isAdvanceOrder(o) &&
-      (o.paymentStatus === 'Verified' || (o.advancePaidVerified === true) || o.orderStatus === 'Delivered') &&
+      !isNonRevenueOrder(o) &&
+      (o.paymentStatus === 'Verified' || o.advancePaidVerified === true || getCanonicalOrderBucket(o) === 'delivered') &&
       o.createdAt &&
       o.createdAt.startsWith(todayDateStr)
   );
@@ -276,8 +286,8 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
       isAdvanceOrder(o) &&
       o.paymentStatus !== 'Verified' &&
       o.advancePaidVerified !== true &&
-      o.orderStatus !== 'Cancelled' &&
-      o.orderStatus !== 'Delivered'
+      !isNonRevenueOrder(o) &&
+      getCanonicalOrderBucket(o) !== 'delivered'
   );
 
   const totalPendingDeliveryAdvance = pendingAdvanceOrders.reduce(
@@ -297,49 +307,56 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
   const netProfitMarginPercent =
     totalMoneyReceived > 0 ? Math.round((totalNetRevenue / totalMoneyReceived) * 100) : 0;
 
-  // 2. Upcoming / Pipeline Orders (Expected Revenue)
-  const upcomingOrders = finFilteredOrders.filter((o) =>
-    ['Pending', 'Payment Verification', 'Confirmed', 'Processing', 'Packed', 'Shipped', 'Out for Delivery'].includes(
-      o.orderStatus
-    )
-  );
+  // 2. Upcoming / Pipeline Orders (Expected Revenue — canonical active non-delivered buckets)
+  const upcomingOrders = finFilteredOrders.filter((o) => {
+    const b = getCanonicalOrderBucket(o);
+    return (
+      b === 'pending' ||
+      b === 'follow_up' ||
+      b === 'confirmed' ||
+      b === 'processing' ||
+      b === 'ready_to_ship' ||
+      b === 'in_transit' ||
+      b === 'hold'
+    );
+  });
   const upcomingTotalAmount = upcomingOrders.reduce((sum, o) => sum + (o.totalAmount || 0), 0);
   const upcomingTotalCost = upcomingOrders.reduce((sum, o) => sum + getOrderOriginalCost(o), 0);
   const upcomingExpectedProfit = upcomingTotalAmount - upcomingTotalCost;
 
   // Upcoming breakdown by stage
-  const upcomingPendingOrders = upcomingOrders.filter(
-    (o) => o.orderStatus === 'Pending' || o.orderStatus === 'Payment Verification'
-  );
+  const upcomingPendingOrders = upcomingOrders.filter((o) => {
+    const b = getCanonicalOrderBucket(o);
+    return b === 'pending' || b === 'follow_up' || b === 'hold';
+  });
   const upcomingPendingAmount = upcomingPendingOrders.reduce((sum, o) => sum + (o.totalAmount || 0), 0);
 
-  const upcomingProcessingOrders = upcomingOrders.filter(
-    (o) => o.orderStatus === 'Confirmed' || o.orderStatus === 'Processing' || o.orderStatus === 'Packed'
-  );
+  const upcomingProcessingOrders = upcomingOrders.filter((o) => {
+    const b = getCanonicalOrderBucket(o);
+    return b === 'confirmed' || b === 'processing' || b === 'ready_to_ship';
+  });
   const upcomingProcessingAmount = upcomingProcessingOrders.reduce((sum, o) => sum + (o.totalAmount || 0), 0);
 
-  const upcomingShippedOrders = upcomingOrders.filter(
-    (o) => o.orderStatus === 'Shipped' || o.orderStatus === 'Out for Delivery'
-  );
+  const upcomingShippedOrders = upcomingOrders.filter((o) => getCanonicalOrderBucket(o) === 'in_transit');
   const upcomingShippedAmount = upcomingShippedOrders.reduce((sum, o) => sum + (o.totalAmount || 0), 0);
 
   // Shared Single-Source-of-Truth Sales Summary (identical to Report & Analytics and /api/integration/sales-summary)
   const finSalesSummary = computeStoreSalesSummary(finFilteredOrders, products);
-  const allSalesSummary = computeStoreSalesSummary(orders, products);
+  const allSalesSummary = computeStoreSalesSummary(uniqueOrders, products);
 
   // Standard operational counts (exact canonical buckets matching AdminOrders tabs)
   const totalOrdersCount = allSalesSummary.totalOrders;
-  const pendingOrders = orders.filter((o) => getCanonicalOrderBucket(o) === 'pending');
-  const processingOrders = orders.filter((o) => {
+  const pendingOrders = uniqueOrders.filter((o) => getCanonicalOrderBucket(o) === 'pending');
+  const processingOrders = uniqueOrders.filter((o) => {
     const b = getCanonicalOrderBucket(o);
     return b === 'confirmed' || b === 'processing' || b === 'ready_to_ship' || b === 'in_transit';
   });
-  const cancelledOrders = orders.filter((o) => getCanonicalOrderBucket(o) === 'cancelled');
+  const cancelledOrders = uniqueOrders.filter((o) => getCanonicalOrderBucket(o) === 'cancelled');
   const lowStockProducts = products.filter((p) => Number(p.stock || 0) <= lowStockThreshold);
 
   // Today's Delivered & Today's Stats
   const todayStr = new Date().toISOString().split('T')[0];
-  const todayOrders = (orders || []).filter((o) => o.createdAt && o.createdAt.startsWith(todayStr));
+  const todayOrders = uniqueOrders.filter((o) => o.createdAt && o.createdAt.startsWith(todayStr));
   const todayDelivered = deliveredOrders.filter(
     (o) => (o.updatedAt && o.updatedAt.startsWith(todayStr)) || (o.createdAt && o.createdAt.startsWith(todayStr))
   );
@@ -363,10 +380,10 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
   // Average Order Value (AOV) — unified with Reports & Muse Integration API
   const averageOrderValue = finSalesSummary.averageOrderValue;
 
-  // Best selling products based on orders
+  // Best selling products based on non-cancelled, non-spam, non-returned orders
   const productSalesMap = new Map<string, { product: Product; quantity: number; revenue: number }>();
-  (orders || []).forEach((o) => {
-    if (o.orderStatus !== 'Cancelled' && o.items) {
+  uniqueOrders.forEach((o) => {
+    if (!isNonRevenueOrder(o) && o.items) {
       o.items.forEach((item) => {
         const prod = (products || []).find((p) => p.id === item.productId);
         if (prod) {
@@ -400,9 +417,9 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
     .slice(0, 4);
 
   // Recent Orders Sorted: Non-delivered (pending, processing, shipped) on top (latest first), delivered at the bottom
-  const sortedRecentOrders = [...(orders || [])].sort((a, b) => {
-    const aIsDelivered = a.orderStatus === 'Delivered';
-    const bIsDelivered = b.orderStatus === 'Delivered';
+  const sortedRecentOrders = [...uniqueOrders].sort((a, b) => {
+    const aIsDelivered = getCanonicalOrderBucket(a) === 'delivered';
+    const bIsDelivered = getCanonicalOrderBucket(b) === 'delivered';
 
     if (!aIsDelivered && bIsDelivered) return -1;
     if (aIsDelivered && !bIsDelivered) return 1;
@@ -415,21 +432,22 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
     return b.id.localeCompare(a.id);
   });
 
-  // Period Analytics Calculations
+  // Period Analytics Calculations (excludes cancelled, spam, returned, failed_delivery consistently)
   const getPeriodData = () => {
     const now = new Date();
     const periodDataMap: { label: string; fullLabel: string; revenue: number; orders: number }[] = [];
+    const sumValidRevenue = (list: Order[]) =>
+      list.reduce((sum, o) => sum + (!isNonRevenueOrder(o) ? (o.totalAmount || 0) : 0), 0);
 
     if (analyticsPeriod === 'today') {
       const hours = [6, 9, 12, 15, 18, 21, 23];
       hours.forEach((h) => {
         const hLabel = `${h > 12 ? h - 12 : h} ${h >= 12 ? 'PM' : 'AM'}`;
-        const count = orders.filter((o) => {
+        const count = uniqueOrders.filter((o) => {
           const d = new Date(o.createdAt);
           return d.toDateString() === now.toDateString() && d.getHours() <= h && d.getHours() > h - 3;
         });
-        const rev = count.reduce((sum, o) => sum + (o.orderStatus !== 'Cancelled' ? o.totalAmount : 0), 0);
-        periodDataMap.push({ label: hLabel, fullLabel: `Today around ${hLabel}`, revenue: rev, orders: count.length });
+        periodDataMap.push({ label: hLabel, fullLabel: `Today around ${hLabel}`, revenue: sumValidRevenue(count), orders: count.length });
       });
     } else if (analyticsPeriod === 'yesterday') {
       const yesterday = new Date(now);
@@ -437,12 +455,11 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
       const hours = [6, 9, 12, 15, 18, 21, 23];
       hours.forEach((h) => {
         const hLabel = `${h > 12 ? h - 12 : h} ${h >= 12 ? 'PM' : 'AM'}`;
-        const count = orders.filter((o) => {
+        const count = uniqueOrders.filter((o) => {
           const d = new Date(o.createdAt);
           return d.toDateString() === yesterday.toDateString() && d.getHours() <= h && d.getHours() > h - 3;
         });
-        const rev = count.reduce((sum, o) => sum + (o.orderStatus !== 'Cancelled' ? o.totalAmount : 0), 0);
-        periodDataMap.push({ label: hLabel, fullLabel: `Yesterday around ${hLabel}`, revenue: rev, orders: count.length });
+        periodDataMap.push({ label: hLabel, fullLabel: `Yesterday around ${hLabel}`, revenue: sumValidRevenue(count), orders: count.length });
       });
     } else if (analyticsPeriod === '7d') {
       for (let i = 6; i >= 0; i--) {
@@ -450,9 +467,8 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
         d.setDate(now.getDate() - i);
         const dayStr = d.toLocaleDateString('en-US', { weekday: 'short' });
         const fullDateStr = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-        const dayOrders = orders.filter((o) => new Date(o.createdAt).toDateString() === d.toDateString());
-        const rev = dayOrders.reduce((sum, o) => sum + (o.orderStatus !== 'Cancelled' ? o.totalAmount : 0), 0);
-        periodDataMap.push({ label: dayStr, fullLabel: fullDateStr, revenue: rev, orders: dayOrders.length });
+        const dayOrders = uniqueOrders.filter((o) => new Date(o.createdAt).toDateString() === d.toDateString());
+        periodDataMap.push({ label: dayStr, fullLabel: fullDateStr, revenue: sumValidRevenue(dayOrders), orders: dayOrders.length });
       }
     } else if (analyticsPeriod === '30d') {
       for (let i = 4; i >= 0; i--) {
@@ -461,34 +477,31 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({
         const startD = new Date(endD);
         startD.setDate(endD.getDate() - 5);
         const label = `${startD.getDate()}-${endD.getDate()} ${endD.toLocaleDateString('en-US', { month: 'short' })}`;
-        const groupOrders = orders.filter((o) => {
+        const groupOrders = uniqueOrders.filter((o) => {
           const d = new Date(o.createdAt);
           return d >= startD && d <= endD;
         });
-        const rev = groupOrders.reduce((sum, o) => sum + (o.orderStatus !== 'Cancelled' ? o.totalAmount : 0), 0);
-        periodDataMap.push({ label: `${endD.getDate()} ${endD.toLocaleDateString('en-US', { month: 'short' })}`, fullLabel: label, revenue: rev, orders: groupOrders.length });
+        periodDataMap.push({ label: `${endD.getDate()} ${endD.toLocaleDateString('en-US', { month: 'short' })}`, fullLabel: label, revenue: sumValidRevenue(groupOrders), orders: groupOrders.length });
       }
     } else if (analyticsPeriod === 'month') {
       const currentMonth = now.getMonth();
       const currentYear = now.getFullYear();
       for (let w = 1; w <= 4; w++) {
         const label = `Week ${w}`;
-        const weekOrders = orders.filter((o) => {
+        const weekOrders = uniqueOrders.filter((o) => {
           const d = new Date(o.createdAt);
           return d.getMonth() === currentMonth && d.getFullYear() === currentYear && Math.ceil(d.getDate() / 7) === w;
         });
-        const rev = weekOrders.reduce((sum, o) => sum + (o.orderStatus !== 'Cancelled' ? o.totalAmount : 0), 0);
-        periodDataMap.push({ label, fullLabel: `${now.toLocaleDateString('en-US', { month: 'long' })} Week ${w}`, revenue: rev, orders: weekOrders.length });
+        periodDataMap.push({ label, fullLabel: `${now.toLocaleDateString('en-US', { month: 'long' })} Week ${w}`, revenue: sumValidRevenue(weekOrders), orders: weekOrders.length });
       }
     } else {
       const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
       months.forEach((m, idx) => {
-        const count = orders.filter((o) => {
+        const count = uniqueOrders.filter((o) => {
           const d = new Date(o.createdAt);
           return d.getFullYear() === now.getFullYear() && d.getMonth() === idx;
         });
-        const rev = count.reduce((sum, o) => sum + (o.orderStatus !== 'Cancelled' ? o.totalAmount : 0), 0);
-        periodDataMap.push({ label: m, fullLabel: `${m} ${now.getFullYear()}`, revenue: rev, orders: count.length });
+        periodDataMap.push({ label: m, fullLabel: `${m} ${now.getFullYear()}`, revenue: sumValidRevenue(count), orders: count.length });
       });
     }
 

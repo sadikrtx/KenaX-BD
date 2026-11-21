@@ -242,62 +242,32 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
     }
   };
 
-  // 1. Order IDs tracked locally on this device/browser session
-  const [localOrderIds, setLocalOrderIds] = useState<string[]>(() => {
-    try {
-      const raw = localStorage.getItem('kenax_my_orders') || localStorage.getItem('preview_kenax_my_orders');
-      return raw ? JSON.parse(raw) : [];
-    } catch {
-      return [];
-    }
-  });
-
   const [dbSyncedOrders, setDbSyncedOrders] = useState<Order[]>([]);
 
-  // Real-time background synchronization for orders from Firestore & central DB
+  // Scoped Cloud Firestore order fetch for the logged-in customer (no shared localStorage or full-collection order scans)
   useEffect(() => {
+    if (!currentCustomer) {
+      setDbSyncedOrders([]);
+      return;
+    }
     let isMounted = true;
-    let snapshotReceived = false;
-    const syncOrders = async () => {
+    const syncCustomerOrders = async () => {
       try {
-        const fresh = await getOrdersFromDB();
-        if (isMounted && fresh && fresh.length > 0) {
+        const fresh = await fetchCustomerOrdersFromDB(currentCustomer);
+        if (isMounted && Array.isArray(fresh)) {
           setDbSyncedOrders(fresh);
         }
-      } catch (e) {}
-    };
-
-    const handleOrderPlacedOrStorage = () => {
-      try {
-        const raw = localStorage.getItem('kenax_my_orders') || localStorage.getItem('preview_kenax_my_orders');
-        if (raw) setLocalOrderIds(JSON.parse(raw));
       } catch {}
-      syncOrders();
     };
 
-    window.addEventListener('kenax_order_placed', handleOrderPlacedOrStorage);
-    window.addEventListener('storage', handleOrderPlacedOrStorage);
-    const unsub = subscribeToOrders((live) => {
-      snapshotReceived = true;
-      if (isMounted && live && live.length > 0) {
-        setDbSyncedOrders(live);
-      }
-    });
-
-    const fallbackTimer = window.setTimeout(() => {
-      if (isMounted && !snapshotReceived) {
-        syncOrders();
-      }
-    }, 1500);
+    syncCustomerOrders();
+    window.addEventListener('kenax_order_placed', syncCustomerOrders);
 
     return () => {
       isMounted = false;
-      window.clearTimeout(fallbackTimer);
-      window.removeEventListener('kenax_order_placed', handleOrderPlacedOrStorage);
-      window.removeEventListener('storage', handleOrderPlacedOrStorage);
-      if (unsub) unsub();
+      window.removeEventListener('kenax_order_placed', syncCustomerOrders);
     };
-  }, []);
+  }, [currentCustomer?.id, currentCustomer?.email, currentCustomer?.mobile]);
 
   // Track online/offline status
   const [isOnline, setIsOnline] = useState<boolean>(
@@ -323,44 +293,38 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
     return Array.from(map.values());
   }, [orders, dbSyncedOrders]);
 
-  // Filter orders strictly for the logged-in customer or orders placed from this browser
+  // Filter orders strictly for the logged-in customer from Cloud Firestore
   const customerOrders = useMemo(() => {
+    if (!currentCustomer) return [];
     return allOrdersPool.filter((o) => {
       if (!o) return false;
-      const isDeviceOrder = localOrderIds.includes(o.id) || localOrderIds.some((id) => id.toUpperCase() === (o.id || '').toUpperCase());
+      const emailMatch = Boolean(
+        o.customerEmail &&
+        currentCustomer.email &&
+        o.customerEmail.trim().toLowerCase() === currentCustomer.email.trim().toLowerCase()
+      );
 
-      if (currentCustomer) {
-        const emailMatch = Boolean(
-          o.customerEmail &&
-          currentCustomer.email &&
-          o.customerEmail.trim().toLowerCase() === currentCustomer.email.trim().toLowerCase()
-        );
+      const cPhone = normalizePhoneNumber(currentCustomer.mobile);
+      const oPhone = normalizePhoneNumber(o.customerMobile || (o as any).customerPhone || (o as any).phone || (o as any).mobile);
+      const dPhone = normalizePhoneNumber(o.deliveryMobile);
+      const phoneMatch = Boolean(
+        cPhone && (
+          oPhone === cPhone ||
+          dPhone === cPhone ||
+          (cPhone.length >= 10 && (oPhone.endsWith(cPhone.slice(-10)) || dPhone.endsWith(cPhone.slice(-10)))) ||
+          (oPhone.length >= 10 && cPhone.endsWith(oPhone.slice(-10))) ||
+          (dPhone.length >= 10 && cPhone.endsWith(dPhone.slice(-10)))
+        )
+      );
 
-        const cPhone = normalizePhoneNumber(currentCustomer.mobile);
-        const oPhone = normalizePhoneNumber(o.customerMobile || (o as any).customerPhone || (o as any).phone || (o as any).mobile);
-        const dPhone = normalizePhoneNumber(o.deliveryMobile);
-        const phoneMatch = Boolean(
-          cPhone && (
-            oPhone === cPhone ||
-            dPhone === cPhone ||
-            (cPhone.length >= 10 && (oPhone.endsWith(cPhone.slice(-10)) || dPhone.endsWith(cPhone.slice(-10)))) ||
-            (oPhone.length >= 10 && cPhone.endsWith(oPhone.slice(-10))) ||
-            (dPhone.length >= 10 && cPhone.endsWith(dPhone.slice(-10)))
-          )
-        );
+      const idMatch = Boolean(
+        (o.customerId && currentCustomer.id && (o.customerId === currentCustomer.id || o.customerId === `cust-${currentCustomer.id}`)) ||
+        (currentCustomer.orderIds && currentCustomer.orderIds.includes(o.id))
+      );
 
-        const idMatch = Boolean(
-          (o.customerId && currentCustomer.id && (o.customerId === currentCustomer.id || o.customerId === `cust-${currentCustomer.id}`)) ||
-          (currentCustomer.orderIds && currentCustomer.orderIds.includes(o.id))
-        );
-
-        return Boolean(emailMatch || phoneMatch || idMatch || isDeviceOrder);
-      }
-
-      // Unregistered / visitor on this browser: show all orders placed from this device
-      return isDeviceOrder;
+      return Boolean(emailMatch || phoneMatch || idMatch);
     }).sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
-  }, [allOrdersPool, localOrderIds, currentCustomer]);
+  }, [allOrdersPool, currentCustomer]);
 
   // Metrics calculations for this specific customer
   const totalOrdersCount = customerOrders.length;

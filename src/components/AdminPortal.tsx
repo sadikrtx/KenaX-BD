@@ -98,7 +98,6 @@ import {
 } from '../lib/passwordHash';
 
 import {
-  INITIAL_STAFF,
   INITIAL_CUSTOMERS,
   INITIAL_ACTIVITY_LOGS,
   INITIAL_NOTIFICATIONS,
@@ -114,6 +113,8 @@ import {
   getStaffFromDB,
   saveStaffToDB,
   deleteStaffFromDB,
+  changeStaffPasswordInDB,
+  signOutStaffAuth,
   getCustomersFromDB,
   saveCustomerToDB,
   updateCustomerInDB,
@@ -485,14 +486,16 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     }
   }, [externalStaff]);
 
-  // Strict check: Only real Super Admin account gets access to the Quick Role Tester
+  // Strict check: Only an active, non-removed Super Admin account gets Quick Role Tester
   const isSuperAdminAccount =
-    authenticatedStaff?.role === 'super_admin' ||
-    authenticatedStaff?.email === 'super@kenaxbd.com' ||
-    Boolean(authenticatedStaff?.permissions && authenticatedStaff.permissions.includes('*'));
+    authenticatedStaff?.role === 'super_admin' &&
+    authenticatedStaff.isActive !== false &&
+    authenticatedStaff.status !== 'suspended' &&
+    !authenticatedStaff.isRemoved;
 
   // Change Password Modal State
   const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
+  const [currentStaffPassword, setCurrentStaffPassword] = useState('');
   const [newStaffPassword, setNewStaffPassword] = useState('');
   const [confirmStaffPassword, setConfirmStaffPassword] = useState('');
   const [passwordChangeMsg, setPasswordChangeMsg] = useState<string | null>(null);
@@ -500,8 +503,12 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   const handleChangePasswordSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentStaff) return;
-    if (newStaffPassword.length < 4) {
-      setPasswordChangeMsg('Password must be at least 4 characters.');
+    if (!currentStaffPassword) {
+      setPasswordChangeMsg('Please enter your current password.');
+      return;
+    }
+    if (newStaffPassword.length < 6) {
+      setPasswordChangeMsg('New password must be at least 6 characters.');
       return;
     }
     if (newStaffPassword !== confirmStaffPassword) {
@@ -509,25 +516,25 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
       return;
     }
     try {
-      const updatedWithPassword = { ...currentStaff, password: newStaffPassword };
-      await handleUpdateStaff(updatedWithPassword);
+      await changeStaffPasswordInDB(currentStaffPassword, newStaffPassword);
       const safeSession = stripStaffSecrets(currentStaff);
       setCurrentStaff(safeSession);
       saveStaffSession(safeSession);
-      setPasswordChangeMsg('Password updated securely in Cloud Database! All account data preserved.');
+      setPasswordChangeMsg('Password updated securely! All account data preserved.');
       setTimeout(() => {
         setIsChangePasswordOpen(false);
         setPasswordChangeMsg(null);
+        setCurrentStaffPassword('');
         setNewStaffPassword('');
         setConfirmStaffPassword('');
       }, 1500);
     } catch (err: any) {
-      setPasswordChangeMsg(err?.message || 'Failed to update password in Cloud Database.');
+      setPasswordChangeMsg(err?.message || 'Failed to update password.');
     }
   };
 
-  // Effective Role (prioritizes currentStaff role if logged in)
-  const activeRole: UserRole = currentStaff?.role || currentRole || 'super_admin';
+  // Effective Role — NEVER defaults to 'super_admin' when unauthenticated
+  const activeRole: UserRole = currentStaff?.role || currentRole || 'customer';
 
   // Sub-entity states (hydrated from Cloud Firestore, never stale browser localStorage caches)
   const [customers, setCustomers] = useState<CustomerRecord[]>([]);
@@ -686,7 +693,6 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
           .then((validExpenses) => {
             if (isMounted && validExpenses) {
               setExpenses(validExpenses);
-              safeSetLocalStorage('kenax_expenses_cache', JSON.stringify(validExpenses));
             }
           })
           .catch(() => {}),
@@ -700,7 +706,6 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
           .then((validProfits) => {
             if (isMounted && validProfits) {
               setOtherProfits(validProfits);
-              safeSetLocalStorage('kenax_other_profits_cache', JSON.stringify(validProfits));
             }
           })
           .catch(() => {}),
@@ -765,7 +770,6 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
         const validExpenses = freshExpenses.filter((e) => !isDemoExpense(e));
         setExpenses(validExpenses);
         adminDataCache.set(cacheScope, 'expenses', validExpenses, 90_000);
-        safeSetLocalStorage('kenax_expenses_cache', JSON.stringify(validExpenses));
       }
     });
 
@@ -781,7 +785,6 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
           .then((valid) => {
             if (isMounted && valid) {
               setExpenses(valid);
-              safeSetLocalStorage('kenax_expenses_cache', JSON.stringify(valid));
             }
           })
           .catch(() => {});
@@ -810,7 +813,6 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
         const cleanProfits = freshProfits.filter((p) => !isDemoOtherProfit(p));
         setOtherProfits(cleanProfits);
         adminDataCache.set(cacheScope, 'otherProfits', cleanProfits, 90_000);
-        safeSetLocalStorage('kenax_other_profits_cache', JSON.stringify(cleanProfits));
       }
     });
 
@@ -826,7 +828,6 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
           .then((valid) => {
             if (isMounted && valid) {
               setOtherProfits(valid);
-              safeSetLocalStorage('kenax_other_profits_cache', JSON.stringify(valid));
             }
           })
           .catch(() => {});
@@ -854,7 +855,6 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
       if (isMounted && freshSuppliers) {
         setSuppliers(freshSuppliers);
         adminDataCache.set(cacheScope, 'suppliers', freshSuppliers, 120_000);
-        safeSetLocalStorage('kenax_suppliers_cache', JSON.stringify(freshSuppliers));
       }
     });
 
@@ -865,7 +865,6 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
           .then((dbSuppliers) => {
             if (isMounted && dbSuppliers && dbSuppliers.length > 0) {
               setSuppliers(dbSuppliers);
-              safeSetLocalStorage('kenax_suppliers_cache', JSON.stringify(dbSuppliers));
             }
           })
           .catch(() => {});
@@ -893,7 +892,6 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
       if (isMounted && freshLocs) {
         setSourcingLocations(freshLocs);
         adminDataCache.set(cacheScope, 'sourcingLocations', freshLocs, 120_000);
-        safeSetLocalStorage('kenax_sourcing_locations_cache', JSON.stringify(freshLocs));
       }
     });
 
@@ -904,7 +902,6 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
           .then((dbSourcing) => {
             if (isMounted && dbSourcing && dbSourcing.length > 0) {
               setSourcingLocations(dbSourcing);
-              safeSetLocalStorage('kenax_sourcing_locations_cache', JSON.stringify(dbSourcing));
             }
           })
           .catch(() => {});
@@ -932,7 +929,6 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
       if (isMounted && freshReviews && freshReviews.length > 0) {
         setReviews(freshReviews);
         adminDataCache.set(cacheScope, 'reviews', freshReviews, 120_000);
-        safeSetLocalStorage('kenax_reviews_cache', JSON.stringify(freshReviews));
       }
     });
 
@@ -943,7 +939,6 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
           .then((dbReviews) => {
             if (isMounted && dbReviews && dbReviews.length > 0) {
               setReviews(dbReviews);
-              safeSetLocalStorage('kenax_reviews_cache', JSON.stringify(dbReviews));
             }
           })
           .catch(() => {});
@@ -1099,7 +1094,6 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     const next = [expense, ...expenses];
     setExpenses(next);
     adminDataCache.set(cacheScope, 'expenses', next, 90_000);
-    safeSetLocalStorage('kenax_expenses_cache', JSON.stringify(next));
     saveExpenseToDB(expense);
 
     recordAuditLog(
@@ -1114,7 +1108,6 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     const next = expenses.map((e) => (e.id === updated.id ? updated : e));
     setExpenses(next);
     adminDataCache.set(cacheScope, 'expenses', next, 90_000);
-    safeSetLocalStorage('kenax_expenses_cache', JSON.stringify(next));
     saveExpenseToDB(updated);
 
     recordAuditLog(
@@ -1130,7 +1123,6 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     const next = expenses.filter((e) => e.id !== expenseId);
     setExpenses(next);
     adminDataCache.set(cacheScope, 'expenses', next, 90_000);
-    safeSetLocalStorage('kenax_expenses_cache', JSON.stringify(next));
     deleteExpenseFromDB(expenseId);
 
     if (target) {
@@ -1148,7 +1140,6 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     const next = [profit, ...otherProfits];
     setOtherProfits(next);
     adminDataCache.set(cacheScope, 'otherProfits', next, 90_000);
-    safeSetLocalStorage('kenax_other_profits_cache', JSON.stringify(next));
     saveOtherProfitToDB(profit);
 
     recordAuditLog(
@@ -1163,7 +1154,6 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     const next = otherProfits.map((p) => (p.id === updated.id ? updated : p));
     setOtherProfits(next);
     adminDataCache.set(cacheScope, 'otherProfits', next, 90_000);
-    safeSetLocalStorage('kenax_other_profits_cache', JSON.stringify(next));
     saveOtherProfitToDB(updated);
 
     recordAuditLog(
@@ -1179,7 +1169,6 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     const next = otherProfits.filter((p) => p.id !== profitId);
     setOtherProfits(next);
     adminDataCache.set(cacheScope, 'otherProfits', next, 90_000);
-    safeSetLocalStorage('kenax_other_profits_cache', JSON.stringify(next));
     deleteOtherProfitFromDB(profitId);
 
     if (target) {
@@ -1669,12 +1658,11 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     handleUpdateStaff(updated);
   };
 
-  // Dropshipping & Supplier Management
+  // Dropshipping & Supplier Management (Cloud Firestore + in-memory cache only)
   const handleAddSupplier = async (supplier: Supplier) => {
     setSuppliers((prev) => {
       const next = [supplier, ...prev.filter((s) => s.id !== supplier.id)];
       adminDataCache.set(cacheScope, 'suppliers', next, 120_000);
-      safeSetLocalStorage('kenax_suppliers_cache', JSON.stringify(next));
       return next;
     });
     await saveSupplierToDB(supplier);
@@ -1690,7 +1678,6 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     setSuppliers((prev) => {
       const next = prev.map((s) => (s.id === supplier.id ? supplier : s));
       adminDataCache.set(cacheScope, 'suppliers', next, 120_000);
-      safeSetLocalStorage('kenax_suppliers_cache', JSON.stringify(next));
       return next;
     });
     await updateSupplierInDB(supplier);
@@ -1707,7 +1694,6 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     setSuppliers((prev) => {
       const next = prev.filter((s) => s.id !== supplierId);
       adminDataCache.set(cacheScope, 'suppliers', next, 120_000);
-      safeSetLocalStorage('kenax_suppliers_cache', JSON.stringify(next));
       return next;
     });
     await deleteSupplierFromDB(supplierId);
@@ -1726,7 +1712,6 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     setSourcingLocations((prev) => {
       const next = [location, ...prev.filter((l) => l.id !== location.id)];
       adminDataCache.set(cacheScope, 'sourcingLocations', next, 120_000);
-      safeSetLocalStorage('kenax_sourcing_locations_cache', JSON.stringify(next));
       return next;
     });
     await saveSourcingLocationToDB(location);
@@ -1745,7 +1730,6 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
         ? prev.map((l) => (l.id === location.id ? location : l))
         : [location, ...prev];
       adminDataCache.set(cacheScope, 'sourcingLocations', next, 120_000);
-      safeSetLocalStorage('kenax_sourcing_locations_cache', JSON.stringify(next));
       return next;
     });
     await updateSourcingLocationInDB(location);
@@ -1762,7 +1746,6 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     setSourcingLocations((prev) => {
       const next = prev.filter((l) => l.id !== locationId);
       adminDataCache.set(cacheScope, 'sourcingLocations', next, 120_000);
-      safeSetLocalStorage('kenax_sourcing_locations_cache', JSON.stringify(next));
       return next;
     });
     await deleteSourcingLocationFromDB(locationId);
@@ -1891,12 +1874,14 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
 
   const lowStockCount = products.filter((p) => p.stock <= 10).length;
 
-  // Direct Logout Handler - Clears passwordless session and in-memory admin cache completely
+  // Direct Logout Handler - Clears Firebase Auth, session tokens, and in-memory admin cache completely
   const handleDirectLogout = () => {
     adminDataCache.clearAll();
     setCurrentStaff(null);
     setAuthenticatedStaff(null);
-    clearStaffSession();
+    signOutStaffAuth().catch(() => {
+      clearStaffSession();
+    });
     setIsLoginModalOpen(false);
 
     if (onLogout) {
@@ -2778,13 +2763,25 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
               </div>
 
               <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Current Password *</label>
+                <input
+                  type="password"
+                  required
+                  value={currentStaffPassword}
+                  onChange={(e) => setCurrentStaffPassword(e.target.value)}
+                  placeholder="Enter your current password"
+                  className="w-full px-3 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs text-slate-900 dark:text-slate-100 font-mono focus:outline-hidden focus:ring-2 focus:ring-sky-500"
+                />
+              </div>
+
+              <div>
                 <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">New Password *</label>
                 <input
                   type="password"
                   required
                   value={newStaffPassword}
                   onChange={(e) => setNewStaffPassword(e.target.value)}
-                  placeholder="Enter new password (min 4 chars)"
+                  placeholder="Enter new password (min 6 chars)"
                   className="w-full px-3 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs text-slate-900 dark:text-slate-100 font-mono focus:outline-hidden focus:ring-2 focus:ring-sky-500"
                 />
               </div>

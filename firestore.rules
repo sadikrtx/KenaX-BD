@@ -1,24 +1,36 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // ===============================================================
-    // KenaX BD — Shared Cloud Firestore Security Rules
+    // =========================================================================
+    // KenaX BD — Zero-Trust RBAC Cloud Firestore Security Rules
     // Project: gen-lang-client-0077501500
-    // ===============================================================
+    // =========================================================================
     // Security Guarantees:
-    // 1. Default-deny catch-all (no wildcard allow across unknown collections).
-    // 2. Server-only `integration_secrets` strictly denied to all clients.
-    // 3. `staff` collection strictly forbids plaintext `password` fields and
-    //    requires SHA-256 `passwordHash` ("sha256:<64-hex>").
-    // 4. Schema, ID, and numeric bounds validation enforced on core collections.
-    // ===============================================================
+    // 1. Default-deny catch-all (every unlisted path is rejected).
+    // 2. Server-only `integration_secrets` & `staff_credentials` are strictly
+    //    denied to ALL client SDKs (read & write).
+    // 3. Staff authorization requires BOTH a valid Firebase Auth token with
+    //    server-minted Custom Claims (`staffId`, `role`) AND live verification
+    //    against `/staff/{staffId}` (`isActive != false`, `status != 'suspended'`,
+    //    `isRemoved != true`, and matching `firebaseUid` when bound).
+    // 4. `staff` writes are strictly server-only (`allow write: if false`) so
+    //    no client can self-elevate, tamper with Super Admin, or write hashes.
+    // 5. Public visitors CANNOT read staff, customer PII, orders, financials,
+    //    audit logs, or integration secrets.
+    // =========================================================================
 
     // Default deny for any unlisted collection/path
     match /{document=**} {
       allow read, write: if false;
     }
 
-    // Helper functions
+    // -------------------------------------------------------------------------
+    // Helper Functions
+    // -------------------------------------------------------------------------
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
     function isValidId(id) {
       return id is string && id.size() > 0 && id.size() <= 160;
     }
@@ -27,28 +39,44 @@ service cloud.firestore {
       return request.resource.data;
     }
 
-    function hasValidStaffDoc(data) {
-      return !('password' in data)
-        && data.passwordHash is string
-        && data.passwordHash.matches('^sha256:[a-f0-9]{64}$')
-        && data.email is string
-        && data.email.size() > 2
-        && data.email.size() <= 200
-        && data.name is string
-        && data.name.size() > 0
-        && data.name.size() <= 160
-        && data.role in ['super_admin', 'admin', 'manager', 'moderator', 'staff', 'user'];
+    function hasStaffClaim() {
+      return isSignedIn()
+        && request.auth.token.staffId is string
+        && request.auth.token.staffId.size() > 0
+        && request.auth.token.role in ['super_admin', 'admin', 'manager', 'moderator', 'staff'];
     }
 
-    function hasValidOrderDoc(data) {
-      return data.id is string
-        && data.id.size() > 0
-        && data.id.size() <= 120
-        && data.customerName is string
-        && data.customerName.size() <= 200
-        && data.totalAmount is number
-        && data.totalAmount >= 0
-        && data.totalAmount <= 100000000;
+    function staffData() {
+      return get(/databases/$(database)/documents/staff/$(request.auth.token.staffId)).data;
+    }
+
+    function isActiveStaff() {
+      return hasStaffClaim()
+        && exists(/databases/$(database)/documents/staff/$(request.auth.token.staffId))
+        && staffData().isActive != false
+        && staffData().status != 'suspended'
+        && staffData().isRemoved != true
+        && (!('firebaseUid' in staffData()) || staffData().firebaseUid == request.auth.uid);
+    }
+
+    function liveStaffRole() {
+      return staffData().role;
+    }
+
+    function isSuperAdmin() {
+      return isActiveStaff() && liveStaffRole() == 'super_admin';
+    }
+
+    function isAdminOrAbove() {
+      return isActiveStaff() && liveStaffRole() in ['super_admin', 'admin'];
+    }
+
+    function isManagerOrAbove() {
+      return isActiveStaff() && liveStaffRole() in ['super_admin', 'admin', 'manager'];
+    }
+
+    function isModeratorOrAbove() {
+      return isActiveStaff() && liveStaffRole() in ['super_admin', 'admin', 'manager', 'moderator', 'staff'];
     }
 
     function hasValidProductDoc(data) {
@@ -63,266 +91,419 @@ service cloud.firestore {
         && data.price <= 100000000;
     }
 
-    // ---------------------------------------------------------------
-    // Server-only secrets — NEVER readable or writable by any client
-    // ---------------------------------------------------------------
+    function hasValidOrderDoc(data) {
+      return data.id is string
+        && data.id.size() > 0
+        && data.id.size() <= 120
+        && data.customerName is string
+        && data.customerName.size() > 0
+        && data.customerName.size() <= 200
+        && data.totalAmount is number
+        && data.totalAmount >= 0
+        && data.totalAmount <= 100000000;
+    }
+
+    // Public checkout can ONLY submit new unverified orders in initial pending states
+    function isValidPublicOrderCreate(data) {
+      return hasValidOrderDoc(data)
+        && data.keys().size() <= 100
+        && (!('orderStatus' in data) || data.orderStatus in ['Pending', 'Payment Verification', 'Unconfirmed'])
+        && (!('status' in data) || data.status in ['Pending', 'Payment Verification', 'Unconfirmed'])
+        && (!('paymentStatus' in data) || data.paymentStatus in ['Unpaid', 'Pending', 'Partial', 'Awaiting Verification'])
+        && (!('advancePaidVerified' in data) || data.advancePaidVerified == false);
+    }
+
+    // Validated new customer self-registration / guest checkout creation (cannot overwrite existing docs or read PII)
+    function isValidPublicCustomerCreate(data, customerId) {
+      return isValidId(customerId)
+        && data.keys().size() <= 55
+        && data.id is string
+        && data.id == customerId
+        && data.name is string
+        && data.name.size() > 0
+        && data.name.size() <= 200
+        && !('role' in data)
+        && (!('isBlocked' in data) || data.isBlocked == false);
+    }
+
+    // Moderators can update operational status/tracking/notes, NOT pricing/items, and cannot cancel Delivered orders
+    function isAllowedModeratorOrderUpdate() {
+      let changedKeys = incoming().diff(resource.data).affectedKeys();
+      let prevStatus = resource.data.orderStatus;
+      let nextStatus = incoming().orderStatus;
+      return changedKeys.hasOnly([
+          'orderStatus', 'status', 'fulfillmentStatus', 'trackingNumber', 'courierName',
+          'courierTrackingUrl', 'courierConsignmentId', 'courierStatus', 'notes',
+          'staffNotes', 'internalNotes', 'statusHistory', 'updatedAt', 'updatedAtServer',
+          'assignedTo', 'callStatus', 'followUpDate', 'isV2Order'
+        ])
+        && !(prevStatus in ['Delivered', 'Completed'] && nextStatus in ['Cancelled', 'Spam', 'Fake Order']);
+    }
+
+    // -------------------------------------------------------------------------
+    // Server-Only Secrets & Credentials — NEVER accessible to ANY client SDK
+    // -------------------------------------------------------------------------
     match /integration_secrets/{docId} {
       allow read, write: if false;
     }
 
-    // ---------------------------------------------------------------
-    // Core Storefront & Admin Shared Collections
-    // ---------------------------------------------------------------
+    match /staff_credentials/{staffId} {
+      allow read, write: if false;
+    }
+
+    // -------------------------------------------------------------------------
+    // Staff, Roles & Permissions (Strict Super Admin Governance)
+    // -------------------------------------------------------------------------
+    match /staff/{staffId} {
+      allow get: if isSuperAdmin() || (isActiveStaff() && request.auth.token.staffId == staffId);
+      allow list: if isSuperAdmin();
+      // All staff create/update/delete operations MUST go through server-verified /api/staff-auth/*
+      allow create, update, delete: if false;
+    }
+
+    match /deletedStaff/{staffId} {
+      allow read: if isSuperAdmin();
+      allow write: if false;
+    }
+
+    match /roles/{roleId} {
+      allow read: if isActiveStaff();
+      allow write: if isSuperAdmin() && isValidId(roleId);
+    }
+
+    match /permissions/{permissionId} {
+      allow read: if isActiveStaff();
+      allow write: if isSuperAdmin() && isValidId(permissionId);
+    }
+
+    // -------------------------------------------------------------------------
+    // Public Storefront Catalog & Branding (Public Read, Staff RBAC Write)
+    // -------------------------------------------------------------------------
     match /products/{productId} {
       allow read: if true;
-      allow create: if isValidId(productId) && hasValidProductDoc(incoming());
-      allow update: if isValidId(productId) && incoming().keys().size() <= 120;
-      allow delete: if isValidId(productId);
+      allow create: if isManagerOrAbove() && isValidId(productId) && hasValidProductDoc(incoming());
+      allow update: if isManagerOrAbove() && isValidId(productId) && incoming().keys().size() <= 140;
+      allow delete: if isAdminOrAbove() && isValidId(productId);
     }
 
     match /deletedProducts/{productId} {
       allow read: if true;
-      allow write: if isValidId(productId);
+      allow write: if isAdminOrAbove() && isValidId(productId);
     }
 
     match /categories/{categoryId} {
       allow read: if true;
-      allow write: if isValidId(categoryId);
+      allow create, update: if isManagerOrAbove() && isValidId(categoryId);
+      allow delete: if isAdminOrAbove() && isValidId(categoryId);
     }
 
     match /deletedCategories/{categoryId} {
       allow read: if true;
-      allow write: if isValidId(categoryId);
+      allow write: if isAdminOrAbove() && isValidId(categoryId);
     }
 
-    match /orders/{orderId} {
+    match /deliveryZones/{zoneId} {
       allow read: if true;
-      allow create: if isValidId(orderId) && hasValidOrderDoc(incoming());
-      allow update: if isValidId(orderId) && incoming().keys().size() <= 120;
-      allow delete: if isValidId(orderId);
+      allow write: if isAdminOrAbove() && isValidId(zoneId);
     }
 
-    // Staff collection: strictly enforces SHA-256 passwordHash and blocks plaintext password
-    match /staff/{staffId} {
+    match /coupons/{couponId} {
       allow read: if true;
-      allow create, update: if isValidId(staffId) && hasValidStaffDoc(incoming());
-      allow delete: if isValidId(staffId);
+      allow create, update: if isManagerOrAbove() && isValidId(couponId);
+      allow delete: if isAdminOrAbove() && isValidId(couponId);
     }
 
-    match /deletedStaff/{staffId} {
-      allow read: if true;
-      allow write: if isValidId(staffId);
-    }
-
-    match /customers/{customerId} {
-      allow read: if true;
-      allow write: if isValidId(customerId);
-    }
-
-    match /deletedCustomers/{customerId} {
-      allow read: if true;
-      allow write: if isValidId(customerId);
-    }
-
-    // System metadata: atomic orderCounter, seedInfo, one-time migration marker
-    match /system/{docId} {
-      allow read: if true;
-      allow write: if isValidId(docId);
-    }
-
-    // Website & Integration Settings
     match /websiteSettings/{settingId} {
       allow read: if true;
-      allow write: if isValidId(settingId);
-    }
-
-    match /system_settings/{settingId} {
-      allow read: if true;
-      allow write: if isValidId(settingId);
+      allow write: if isAdminOrAbove() && isValidId(settingId);
     }
 
     match /settings/{settingId} {
       allow read: if true;
-      allow write: if isValidId(settingId);
+      allow write: if isAdminOrAbove() && isValidId(settingId);
     }
 
-    // Media chunk storage (product images & hero videos)
     match /heroBannerVideos/{videoId} {
       allow read: if true;
-      allow write: if isValidId(videoId);
+      allow write: if isManagerOrAbove() && isValidId(videoId);
       match /chunks/{chunkId} {
         allow read: if true;
-        allow write: if isValidId(chunkId);
+        allow write: if isManagerOrAbove() && isValidId(chunkId);
       }
     }
 
     match /productImageMedia/{mediaId} {
       allow read: if true;
-      allow write: if isValidId(mediaId);
+      allow write: if isManagerOrAbove() && isValidId(mediaId);
       match /chunks/{chunkId} {
         allow read: if true;
-        allow write: if isValidId(chunkId);
+        allow write: if isManagerOrAbove() && isValidId(chunkId);
       }
-    }
-
-    // Catalog & Sourcing supporting collections
-    match /suppliers/{supplierId} {
-      allow read: if true;
-      allow write: if isValidId(supplierId);
-    }
-
-    match /deletedSuppliers/{supplierId} {
-      allow read: if true;
-      allow write: if isValidId(supplierId);
-    }
-
-    match /sourcingLocations/{locId} {
-      allow read: if true;
-      allow write: if isValidId(locId);
-    }
-
-    match /deletedSourcingLocations/{locId} {
-      allow read: if true;
-      allow write: if isValidId(locId);
-    }
-
-    match /deliveryZones/{zoneId} {
-      allow read: if true;
-      allow write: if isValidId(zoneId);
-    }
-
-    match /coupons/{couponId} {
-      allow read: if true;
-      allow write: if isValidId(couponId);
     }
 
     match /reviews/{reviewId} {
       allow read: if true;
-      allow write: if isValidId(reviewId);
+      allow create: if isValidId(reviewId)
+        && incoming().keys().size() <= 35
+        && incoming().rating is number
+        && incoming().rating >= 1
+        && incoming().rating <= 5;
+      allow update, delete: if isModeratorOrAbove() && isValidId(reviewId);
     }
 
     match /preview_reviews/{reviewId} {
       allow read: if true;
-      allow write: if isValidId(reviewId);
+      allow create: if isValidId(reviewId)
+        && incoming().keys().size() <= 35
+        && incoming().rating is number
+        && incoming().rating >= 1
+        && incoming().rating <= 5;
+      allow update, delete: if isModeratorOrAbove() && isValidId(reviewId);
     }
 
     match /deletedReviews/{reviewId} {
       allow read: if true;
-      allow write: if isValidId(reviewId);
+      allow write: if isModeratorOrAbove() && isValidId(reviewId);
     }
 
     match /preview_deletedReviews/{reviewId} {
       allow read: if true;
-      allow write: if isValidId(reviewId);
+      allow write: if isModeratorOrAbove() && isValidId(reviewId);
     }
 
-    // Operations, Finance, Logs & Analytics
-    match /activityLogs/{logId} {
-      allow read: if true;
-      allow write: if isValidId(logId);
+    // -------------------------------------------------------------------------
+    // Orders (Strictly Private Reads, Validated Public Checkout, Tiered RBAC)
+    // -------------------------------------------------------------------------
+    match /orders/{orderId} {
+      allow get: if isModeratorOrAbove()
+        || (isSignedIn() && resource.data.customerUid == request.auth.uid);
+      allow list: if isModeratorOrAbove()
+        || (isSignedIn() && resource.data.customerUid == request.auth.uid);
+      allow create: if isValidId(orderId)
+        && (
+          (isModeratorOrAbove() && hasValidOrderDoc(incoming()))
+          || isValidPublicOrderCreate(incoming())
+        );
+      allow update: if isValidId(orderId)
+        && incoming().keys().size() <= 140
+        && (
+          isManagerOrAbove()
+          || (isModeratorOrAbove() && isAllowedModeratorOrderUpdate())
+        );
+      allow delete: if isAdminOrAbove() && isValidId(orderId);
     }
 
-    match /auditLogs/{logId} {
-      allow read: if true;
-      allow write: if isValidId(logId);
+    // -------------------------------------------------------------------------
+    // Customers & Users PII (Strictly Private — No Public Reads)
+    // -------------------------------------------------------------------------
+    match /customers/{customerId} {
+      allow get: if isModeratorOrAbove()
+        || (isSignedIn() && (request.auth.uid == customerId || resource.data.uid == request.auth.uid));
+      allow list: if isModeratorOrAbove();
+      allow create: if isValidId(customerId)
+        && (
+          isModeratorOrAbove()
+          || (
+            isSignedIn()
+            && (request.auth.uid == customerId || incoming().uid == request.auth.uid)
+            && !('role' in incoming())
+            && (!('isBlocked' in incoming()) || incoming().isBlocked == false)
+          )
+          || isValidPublicCustomerCreate(incoming(), customerId)
+        );
+      allow update: if isValidId(customerId)
+        && (
+          isManagerOrAbove()
+          || (
+            isSignedIn()
+            && (request.auth.uid == customerId || resource.data.uid == request.auth.uid)
+            && !incoming().diff(resource.data).affectedKeys().hasAny(['role', 'isBlocked', 'totalSpent', 'totalOrders'])
+          )
+        );
+      allow delete: if isAdminOrAbove() && isValidId(customerId);
     }
 
-    match /inventory/{inventoryId} {
-      allow read: if true;
-      allow write: if isValidId(inventoryId);
-    }
-
-    match /inventoryLogs/{logId} {
-      allow read: if true;
-      allow write: if isValidId(logId);
-    }
-
-    match /notifications/{notificationId} {
-      allow read: if true;
-      allow write: if isValidId(notificationId);
-    }
-
-    match /expenses/{expenseId} {
-      allow read: if true;
-      allow write: if isValidId(expenseId);
-    }
-
-    match /other_profits/{profitId} {
-      allow read: if true;
-      allow write: if isValidId(profitId);
-    }
-
-    match /roles/{roleId} {
-      allow read: if true;
-      allow write: if isValidId(roleId);
-    }
-
-    match /permissions/{permissionId} {
-      allow read: if true;
-      allow write: if isValidId(permissionId);
-    }
-
-    // Live Storefront Engagement & Marketing
-    match /cartActivities/{activityId} {
-      allow read: if true;
-      allow write: if isValidId(activityId);
-    }
-
-    match /wishlistActivities/{activityId} {
-      allow read: if true;
-      allow write: if isValidId(activityId);
-    }
-
-    match /newsletter_subscribers/{subscriberId} {
-      allow read: if true;
-      allow write: if isValidId(subscriberId);
+    match /deletedCustomers/{customerId} {
+      allow read: if isModeratorOrAbove();
+      allow write: if isAdminOrAbove() && isValidId(customerId);
     }
 
     match /users/{userId} {
-      allow read: if true;
-      allow write: if isValidId(userId);
+      allow get: if isModeratorOrAbove() || (isSignedIn() && request.auth.uid == userId);
+      allow list: if isModeratorOrAbove();
+      allow create: if isValidId(userId)
+        && (
+          isAdminOrAbove()
+          || (isSignedIn() && request.auth.uid == userId && !('role' in incoming()))
+        );
+      allow update: if isValidId(userId)
+        && (
+          isAdminOrAbove()
+          || (
+            isSignedIn()
+            && request.auth.uid == userId
+            && !incoming().diff(resource.data).affectedKeys().hasAny(['role', 'permissions', 'isActive'])
+          )
+        );
+      allow delete: if isSuperAdmin() && isValidId(userId);
     }
 
-    // Communications & Sync Logs
+    // -------------------------------------------------------------------------
+    // Financials, Sourcing, Inventory & Operations (Staff RBAC Only)
+    // -------------------------------------------------------------------------
+    match /expenses/{expenseId} {
+      allow read: if isManagerOrAbove();
+      allow create, update: if isManagerOrAbove() && isValidId(expenseId);
+      allow delete: if isAdminOrAbove() && isValidId(expenseId);
+    }
+
+    match /other_profits/{profitId} {
+      allow read: if isManagerOrAbove();
+      allow create, update: if isManagerOrAbove() && isValidId(profitId);
+      allow delete: if isAdminOrAbove() && isValidId(profitId);
+    }
+
+    match /suppliers/{supplierId} {
+      allow read, create, update: if isManagerOrAbove() && isValidId(supplierId);
+      allow delete: if isAdminOrAbove() && isValidId(supplierId);
+    }
+
+    match /deletedSuppliers/{supplierId} {
+      allow read, write: if isManagerOrAbove() && isValidId(supplierId);
+    }
+
+    match /sourcingLocations/{locId} {
+      allow read, create, update: if isManagerOrAbove() && isValidId(locId);
+      allow delete: if isAdminOrAbove() && isValidId(locId);
+    }
+
+    match /deletedSourcingLocations/{locId} {
+      allow read, write: if isManagerOrAbove() && isValidId(locId);
+    }
+
+    match /inventory/{inventoryId} {
+      allow read: if isModeratorOrAbove();
+      allow create, update: if isManagerOrAbove() && isValidId(inventoryId);
+      allow delete: if isAdminOrAbove() && isValidId(inventoryId);
+    }
+
+    match /inventoryLogs/{logId} {
+      allow read: if isModeratorOrAbove();
+      allow create: if isManagerOrAbove() && isValidId(logId);
+      allow update, delete: if false;
+    }
+
+    // Immutable append-only audit trails
+    match /activityLogs/{logId} {
+      allow read: if isModeratorOrAbove();
+      allow create: if isModeratorOrAbove() && isValidId(logId);
+      allow update, delete: if false;
+    }
+
+    match /auditLogs/{logId} {
+      allow read: if isModeratorOrAbove();
+      allow create: if isModeratorOrAbove() && isValidId(logId);
+      allow update, delete: if false;
+    }
+
+    match /notifications/{notificationId} {
+      allow read, create, update: if isModeratorOrAbove() && isValidId(notificationId);
+      allow delete: if isAdminOrAbove() && isValidId(notificationId);
+    }
+
+    match /system_settings/{settingId} {
+      allow read: if isModeratorOrAbove();
+      allow write: if isSuperAdmin() && isValidId(settingId);
+    }
+
+    // -------------------------------------------------------------------------
+    // System Counters & One-Time Migration Lock
+    // -------------------------------------------------------------------------
+    match /system/{docId} {
+      allow get: if docId in ['orderCounter', 'incompleteOrderCounter'] || isSuperAdmin();
+      allow list: if isSuperAdmin();
+      allow create: if (
+          docId in ['orderCounter', 'incompleteOrderCounter']
+          && incoming().current is int
+          && incoming().current >= 100000
+        ) || (
+          isSuperAdmin() && docId in ['localStorageMigration', 'seedInfo', 'orderCounter', 'incompleteOrderCounter']
+        );
+      allow update: if (
+          docId in ['orderCounter', 'incompleteOrderCounter']
+          && incoming().current is int
+          && resource.data.current is int
+          && (
+            incoming().current == resource.data.current + 1
+            || (isSuperAdmin() && incoming().current >= resource.data.current)
+          )
+        ) || (
+          isSuperAdmin() && docId in ['localStorageMigration', 'seedInfo']
+        );
+      allow delete: if false;
+    }
+
+    // -------------------------------------------------------------------------
+    // Storefront Engagement & Communications (Protected Reads)
+    // -------------------------------------------------------------------------
+    match /cartActivities/{activityId} {
+      allow read: if isModeratorOrAbove();
+      allow create, update: if isValidId(activityId) && incoming().keys().size() <= 40;
+      allow delete: if isModeratorOrAbove() && isValidId(activityId);
+    }
+
+    match /wishlistActivities/{activityId} {
+      allow read: if isModeratorOrAbove();
+      allow create, update: if isValidId(activityId) && incoming().keys().size() <= 40;
+      allow delete: if isModeratorOrAbove() && isValidId(activityId);
+    }
+
+    match /newsletter_subscribers/{subscriberId} {
+      allow read: if isManagerOrAbove();
+      allow create: if isValidId(subscriberId)
+        && incoming().email is string
+        && incoming().email.size() > 3
+        && incoming().email.size() <= 200;
+      allow update, delete: if isManagerOrAbove() && isValidId(subscriberId);
+    }
+
     match /emailLogs/{logId} {
-      allow read: if true;
-      allow write: if isValidId(logId);
+      allow read, create: if isModeratorOrAbove() && isValidId(logId);
+      allow update, delete: if isAdminOrAbove() && isValidId(logId);
     }
 
     match /sms_logs/{logId} {
-      allow read: if true;
-      allow write: if isValidId(logId);
+      allow read, create: if isModeratorOrAbove() && isValidId(logId);
+      allow update, delete: if isAdminOrAbove() && isValidId(logId);
     }
 
     match /googleSheetsSync/{syncId} {
-      allow read: if true;
-      allow write: if isValidId(syncId);
+      allow read, write: if isManagerOrAbove() && isValidId(syncId);
     }
 
     match /whatsapp_messages/{messageId} {
-      allow read: if true;
-      allow write: if isValidId(messageId);
+      allow read, create, update: if isModeratorOrAbove() && isValidId(messageId);
+      allow delete: if isAdminOrAbove() && isValidId(messageId);
     }
 
     match /whatsapp_webhooks/{webhookId} {
-      allow read: if true;
-      allow write: if isValidId(webhookId);
+      allow read: if isAdminOrAbove();
+      allow write: if false;
     }
 
     match /whatsapp_metadata/{docId} {
-      allow read: if true;
-      allow write: if isValidId(docId);
+      allow read, write: if isModeratorOrAbove() && isValidId(docId);
     }
 
     match /telegram_logs/{logId} {
-      allow read: if true;
-      allow write: if isValidId(logId);
+      allow read, create: if isModeratorOrAbove() && isValidId(logId);
+      allow update, delete: if isAdminOrAbove() && isValidId(logId);
     }
 
-    // Health check document for testConnection()
-    match /test/{docId} {
-      allow read: if true;
-      allow write: if false;
+    // Connectivity health-check document (read-only single doc)
+    match /test/connection {
+      allow get: if true;
+      allow list, write: if false;
     }
   }
 }

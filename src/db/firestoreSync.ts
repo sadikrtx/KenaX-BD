@@ -298,9 +298,12 @@ export async function writeStaffToFirestore(staff: any, _isEnvPreview?: boolean)
   const db = getDb();
   if (!db || quotaExceededLogged || !staff || !staff.id) return;
   try {
+    const sanitized = { ...staff };
+    delete sanitized.password;
+    delete sanitized.passwordHash;
     const results = await Promise.allSettled([
-      setDoc(doc(db, 'staff', staff.id), staff, { merge: true }),
-      setDoc(doc(db, 'preview_staff', staff.id), staff, { merge: true }),
+      setDoc(doc(db, 'staff', sanitized.id), sanitized, { merge: true }),
+      setDoc(doc(db, 'preview_staff', sanitized.id), sanitized, { merge: true }),
     ]);
     for (const r of results) {
       if (r.status === 'rejected' && handleFirestoreUnavailable(r.reason)) return;

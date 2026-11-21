@@ -46,7 +46,7 @@ import {
   ColorVariation,
 } from '../types';
 import { BANGLADESH_LOCATIONS } from '../data/bangladeshData';
-import { saveCustomerToDB, getCustomersFromDB, generateNextOrderId } from '../lib/firebase';
+import { auth, saveCustomerToDB, getCustomersFromDB, generateNextOrderId } from '../lib/firebase';
 import {
   cleanBDPhoneNumber,
   isValidBDMobileNumber,
@@ -983,11 +983,14 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
       const guestEmail = customerEmail.trim().toLowerCase();
       const guestMobileDigits = (customerMobile.trim() || deliveryMobile.trim()).replace(/[^0-9]/g, '');
 
+      // Only query existing customer list when signed in as staff; public guest checkout creates a fresh customer record
       let allCusts: CustomerRecord[] = [];
-      try {
-        allCusts = await getCustomersFromDB();
-      } catch {
-        allCusts = [];
+      if (auth.currentUser) {
+        try {
+          allCusts = await getCustomersFromDB();
+        } catch {
+          allCusts = [];
+        }
       }
 
       const existingMatched = allCusts.find((c) => {
@@ -1040,7 +1043,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
         };
 
         try {
-          await saveCustomerToDB(newCustomer);
+          await saveCustomerToDB(newCustomer, { isNewRegistration: true });
           if (onCustomerCreated) {
             onCustomerCreated(newCustomer);
           }

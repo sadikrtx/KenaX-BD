@@ -222,22 +222,35 @@
     },
     "StaffUser": {
       "title": "StaffUser",
-      "description": "Shared RBAC staff account stored in Cloud Firestore with SHA-256 hashed password (never plaintext)",
+      "description": "Shared RBAC staff profile stored in Cloud Firestore (server-managed; NEVER stores password or passwordHash)",
       "type": "object",
       "properties": {
         "id": { "type": "string" },
+        "firebaseUid": { "type": "string" },
         "name": { "type": "string" },
         "email": { "type": "string" },
         "phone": { "type": "string" },
-        "passwordHash": { "type": "string" },
         "role": { "type": "string" },
         "permissions": { "type": "array" },
         "isActive": { "type": "boolean" },
         "status": { "type": "string" },
+        "isRemoved": { "type": "boolean" },
         "createdAt": { "type": "string" },
         "lastLogin": { "type": "string" }
       },
-      "required": ["id", "name", "email", "passwordHash", "role"]
+      "required": ["id", "name", "email", "role"]
+    },
+    "StaffCredential": {
+      "title": "StaffCredential",
+      "description": "Server-only salted scrypt password hash record (strictly denied to all client SDKs)",
+      "type": "object",
+      "properties": {
+        "staffId": { "type": "string" },
+        "email": { "type": "string" },
+        "passwordHash": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["staffId", "passwordHash"]
     },
     "OrderCounter": {
       "title": "OrderCounter",
@@ -265,7 +278,7 @@
     },
     "/orders/{orderId}": {
       "schema": "Order",
-      "description": "Customer orders with delivery and tracking details"
+      "description": "Customer orders with delivery and tracking details (private to staff and owning customer)"
     },
     "/cartActivities/{activityId}": {
       "schema": "CartActivity",
@@ -273,11 +286,11 @@
     },
     "/customers/{customerId}": {
       "schema": "Customer",
-      "description": "Registered shopper user accounts and persistent profiles"
+      "description": "Registered shopper user accounts and persistent profiles (private PII)"
     },
     "/activityLogs/{logId}": {
       "schema": "ActivityLog",
-      "description": "Permanent admin audit logs across all devices and sessions"
+      "description": "Permanent immutable append-only admin audit logs across all devices"
     },
     "/emailLogs/{logId}": {
       "schema": "EmailLog",
@@ -285,11 +298,11 @@
     },
     "/expenses/{expenseId}": {
       "schema": "Expense",
-      "description": "Delivery, courier, logistics, and operational expenses"
+      "description": "Delivery, courier, logistics, and operational expenses (Manager+ RBAC)"
     },
     "/system_settings/{settingId}": {
       "schema": "RolePermissionMatrix",
-      "description": "WhatsApp, SMS, and dynamic role permission matrix settings"
+      "description": "WhatsApp, SMS, and dynamic role permission matrix settings (Super Admin write)"
     },
     "/sms_logs/{logId}": {
       "schema": "EntityDefinition",
@@ -301,15 +314,19 @@
     },
     "/whatsapp_webhooks/{webhookId}": {
       "schema": "WhatsAppWebhookLog",
-      "description": "Meta WhatsApp Cloud API webhook logs"
+      "description": "Meta WhatsApp Cloud API webhook logs (server-write only)"
     },
     "/staff/{staffId}": {
       "schema": "StaffUser",
-      "description": "Shared RBAC staff accounts across all devices with SHA-256 hashed passwords"
+      "description": "Shared RBAC staff profiles (server-write only, zero password fields)"
+    },
+    "/staff_credentials/{staffId}": {
+      "schema": "StaffCredential",
+      "description": "Server-only salted scrypt password hashes (strictly inaccessible to clients)"
     },
     "/system/{docId}": {
       "schema": "OrderCounter",
-      "description": "Atomic order number counter (orderCounter), seed status, and one-time migration state"
+      "description": "Atomic monotonic order counter (orderCounter), seed status, and transactional migration lock"
     }
   }
 }

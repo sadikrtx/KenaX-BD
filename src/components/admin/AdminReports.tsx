@@ -26,7 +26,12 @@ import {
   SaasLineAreaChart,
   SAAS_CHART_COLORS,
 } from './charts/AdminCharts';
-import { computeStoreSalesSummary, isCancelledOrSpamOrder } from '../../utils/salesAnalytics';
+import {
+  computeStoreSalesSummary,
+  deduplicateOrdersById,
+  isCancelledOrSpamOrder,
+  isNonRevenueOrder,
+} from '../../utils/salesAnalytics';
 
 interface AdminReportsProps {
   orders: Order[];
@@ -44,8 +49,8 @@ export const AdminReports: React.FC<AdminReportsProps> = ({
   const [dateFilter, setDateFilter] = useState<'all' | 'today' | '7d' | '30d' | 'month'>('all');
   const [isPinned, setIsPinned] = useState<boolean>(false);
 
-  // Filter orders by date range
-  const filteredOrders = orders.filter((o) => {
+  // Deduplicate and filter orders by date range
+  const filteredOrders = deduplicateOrdersById(orders).filter((o) => {
     if (dateFilter === 'all') return true;
     if (!o.createdAt) return true;
     const orderDate = new Date(o.createdAt);
@@ -69,7 +74,7 @@ export const AdminReports: React.FC<AdminReportsProps> = ({
   });
 
   const salesSummary = computeStoreSalesSummary(filteredOrders, products);
-  const validOrders = filteredOrders.filter((o) => !isCancelledOrSpamOrder(o));
+  const validOrders = filteredOrders.filter((o) => !isNonRevenueOrder(o));
   const cancelledOrders = filteredOrders.filter((o) => isCancelledOrSpamOrder(o));
 
   // Key Financial Metrics (Single Source of Truth — matches Overview & /api/integration/sales-summary)
@@ -78,7 +83,7 @@ export const AdminReports: React.FC<AdminReportsProps> = ({
   const deliveryCharges = salesSummary.deliveryCollected;
   const discountsGiven = salesSummary.discountsGiven;
   const averageOrderValue = salesSummary.averageOrderValue;
-  const cancelledRevenueLoss = cancelledOrders.reduce((sum, o) => sum + (o.totalAmount || 0), 0);
+  const cancelledRevenueLoss = salesSummary.cancelledRevenueLoss;
 
   // Paid vs Unpaid / Pending COD Collection
   const paidOrders = validOrders.filter((o) => o.paymentStatus === 'Paid');

@@ -136,13 +136,9 @@ export const AboutView: React.FC<AboutViewProps> = ({
   // Active FAQ Accordion State
   const [openFaqIndex, setOpenFaqIndex] = useState<number | null>(0);
 
-  // Real-time dynamic reviews state (auto-updates with any new/future customer reviews)
+  // Real-time dynamic reviews state (hydrated live from Cloud Firestore)
   const [liveReviewsList, setLiveReviewsList] = useState<Review[]>(() => {
     if (reviews && reviews.length > 0) return reviews;
-    try {
-      const cached = localStorage.getItem('kenax_reviews_cache');
-      if (cached) return JSON.parse(cached);
-    } catch {}
     return INITIAL_REVIEWS;
   });
 

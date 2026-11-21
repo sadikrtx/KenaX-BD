@@ -17,6 +17,7 @@ import {
 import { SiteSettings, StaffUser, UserRole } from '../../types';
 import { safeFetchJson } from '../../utils/safeFetchJson';
 import { auth } from '../../lib/firebase';
+import { getStaffAuthBearerToken } from '../../lib/passwordHash';
 
 interface MuseConfigView {
   hasKey: boolean;
@@ -64,21 +65,13 @@ export const AdminIntegrationSettings: React.FC<AdminIntegrationSettingsProps> =
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       Accept: 'application/json',
-      'x-staff-role': currentUserRole || '',
     };
-    if (currentStaff?.id) headers['x-staff-id'] = currentStaff.id;
-    if (currentStaff?.name) headers['x-staff-name'] = currentStaff.name;
-    if (currentStaff?.email) headers['x-staff-email'] = currentStaff.email;
-    try {
-      if (auth?.currentUser) {
-        const idToken = await auth.currentUser.getIdToken();
-        if (idToken) headers['Authorization'] = `Bearer ${idToken}`;
-      }
-    } catch {
-      // Optional Firebase Auth token; staff identity headers still sent
+    const bearer = await getStaffAuthBearerToken(auth);
+    if (bearer) {
+      headers['Authorization'] = `Bearer ${bearer}`;
     }
     return headers;
-  }, [currentUserRole, currentStaff]);
+  }, []);
 
   const loadConfig = useCallback(async () => {
     if (!isStrictSuperAdmin) return;
@@ -135,12 +128,7 @@ export const AdminIntegrationSettings: React.FC<AdminIntegrationSettingsProps> =
       }>('/api/integration/admin/generate-key', {
         method: 'POST',
         headers,
-        body: JSON.stringify({
-          actorId: currentStaff?.id || '',
-          actorRole: currentUserRole,
-          actorName: currentStaff?.name || 'Super Admin',
-          actorEmail: currentStaff?.email || '',
-        }),
+        body: JSON.stringify({}),
       });
       if (!result.ok || !result.data?.ok || !result.data?.apiKey) {
         throw new Error(
@@ -203,10 +191,6 @@ export const AdminIntegrationSettings: React.FC<AdminIntegrationSettingsProps> =
         headers,
         body: JSON.stringify({
           lowStockThreshold: cleanVal,
-          actorId: currentStaff?.id || '',
-          actorRole: currentUserRole,
-          actorName: currentStaff?.name || 'Super Admin',
-          actorEmail: currentStaff?.email || '',
         }),
       });
       if (!result.ok || !result.data?.ok || !result.data?.config) {

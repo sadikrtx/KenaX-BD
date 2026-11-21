@@ -1099,14 +1099,8 @@ export function generateEmailHtml(
   const buttonUrl = template.buttonUrl || '#';
   const footerNote = template.footerNote || 'Need assistance? Contact our 24/7 customer care desk.';
 
-  // Resolve dynamic email footer contacts from active Gmail settings or options
-  let activeSettings = DEFAULT_GMAIL_SETTINGS;
-  try {
-    const cached = localStorage.getItem('kenax_gmail_alerts_settings');
-    if (cached) {
-      activeSettings = { ...DEFAULT_GMAIL_SETTINGS, ...JSON.parse(cached) };
-    }
-  } catch {}
+  // Resolve dynamic email footer contacts from in-memory Firestore-hydrated Gmail settings or options
+  const activeSettings = cachedSettings ? { ...DEFAULT_GMAIL_SETTINGS, ...cachedSettings } : DEFAULT_GMAIL_SETTINGS;
 
   const footerHotline =
     options?.footerHotline !== undefined ? options.footerHotline : (activeSettings.footerHotline ?? '+880 1700-123456 / +880 1911-987654');
@@ -1546,15 +1540,6 @@ export async function getActiveEmailTemplates(): Promise<Record<EmailTemplateTyp
   } catch (err) {
     console.warn('[EmailService] Failed to load templates from DB:', err);
   }
-  // Check local cache
-  try {
-    const cached = localStorage.getItem('kenax_email_templates_cache');
-    if (cached) {
-      const parsed = JSON.parse(cached);
-      cachedTemplates = { ...DEFAULT_EMAIL_TEMPLATES, ...parsed };
-      return cachedTemplates as Record<EmailTemplateType, EmailTemplate>;
-    }
-  } catch {}
   return DEFAULT_EMAIL_TEMPLATES;
 }
 
@@ -1571,13 +1556,6 @@ export async function getActiveGmailSettings(): Promise<GmailAlertSettings> {
     } catch (err) {
       console.warn('[EmailService] Failed to load settings from DB:', err);
     }
-    try {
-      const cached = localStorage.getItem('kenax_gmail_alerts_settings');
-      if (cached) {
-        const parsed = JSON.parse(cached);
-        settings = { ...settings, ...parsed };
-      }
-    } catch {}
   }
 
   // Ensure super admin email is always valid sadikrtx3060@gmail.com and not dummy super@kenaxbd.com

@@ -74,29 +74,11 @@ export function safeSetLocalStorage(key: string, value: string): void {
 }
 
 /**
- * Dedicated safe writer for real-time Cart Activities cache.
- * Strips bulky base64 images and caps items to prevent quota overflow.
+ * Deprecated no-op: Cart Activities are stored strictly in Cloud Firestore (single source of truth).
+ * Retained as an exported no-op for backward compatibility.
  */
-export function safeSetCartActivitiesCache(activities: any[]): void {
-  if (!Array.isArray(activities)) return;
-  try {
-    const cleanList = activities.slice(0, 30).map((act) => {
-      if (!act || typeof act !== 'object') return act;
-      return {
-        ...act,
-        items: Array.isArray(act.items)
-          ? act.items.map((it: any) => ({
-              ...it,
-              // Strip heavy base64 strings, retain clean remote image URLs
-              image: typeof it.image === 'string' && it.image.startsWith('data:') ? '' : it.image,
-            }))
-          : [],
-      };
-    });
-    safeSetLocalStorage('kenax_cart_activities_cache', JSON.stringify(cleanList));
-  } catch (err) {
-    console.warn('[Storage] safeSetCartActivitiesCache error ignored:', err);
-  }
+export function safeSetCartActivitiesCache(_activities: any[]): void {
+  // Intentionally no-op — never store shared cart activity records in localStorage.
 }
 
 // ----------------------------------------------------

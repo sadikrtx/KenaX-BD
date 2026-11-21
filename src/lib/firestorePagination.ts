@@ -18,6 +18,7 @@
 import {
   collection,
   doc,
+  documentId,
   getDoc,
   getDocs,
   getCountFromServer,
@@ -30,7 +31,7 @@ import {
   type QueryConstraint,
 } from 'firebase/firestore';
 import { db, isQuotaExceededFlag, isQuotaExceededError, markQuotaExceeded, normalizeOrderRecord } from './firebase';
-import { adminDataCache } from './adminCache';
+import { adminDataCache, type AdminDataCache } from './adminCache';
 import { getEnvCollectionName } from '../utils/envHelper';
 import type { ActivityLog, StockLog, CustomerRecord, Order, Product } from '../types';
 
@@ -43,6 +44,10 @@ export interface PaginatedResult<T> {
   totalCount: number | null;
   fromCache: boolean;
   source: 'firestore' | 'fallback';
+  /** Indicates whether `totalCount` represents the full collection or a filtered search scope. */
+  countScope?: 'all' | 'filtered';
+  /** True when legacy docs without `orderField` triggered bounded `documentId()` pagination. */
+  usedDocIdFallback?: boolean;
 }
 
 interface CursorStackKeyParams {
@@ -61,10 +66,12 @@ function makeCursorStackKey({ scopeKey, collectionKey, pageSize, filterSig }: Cu
  * Automatically cleared whenever `adminDataCache.invalidateCollection()` or `clearAll()` is called.
  */
 const cursorStacks = new Map<string, Map<number, DocumentSnapshot>>();
+const docIdFallbackFlags = new Map<string, boolean>();
 
 adminDataCache.onInvalidate((scopeKey, collectionKey) => {
   if (!scopeKey && !collectionKey) {
     cursorStacks.clear();
+    docIdFallbackFlags.clear();
     return;
   }
   for (const key of Array.from(cursorStacks.keys())) {
@@ -72,6 +79,7 @@ adminDataCache.onInvalidate((scopeKey, collectionKey) => {
     const matchesCol = !collectionKey || key.includes(`::${collectionKey}::`);
     if (matchesScope && matchesCol) {
       cursorStacks.delete(key);
+      docIdFallbackFlags.delete(key);
     }
   }
 });
@@ -80,6 +88,7 @@ export function resetPaginationCursors(scopeKey: string, collectionKey: string):
   for (const key of Array.from(cursorStacks.keys())) {
     if (key.startsWith(`${scopeKey}::${collectionKey}::`)) {
       cursorStacks.delete(key);
+      docIdFallbackFlags.delete(key);
     }
   }
 }
@@ -228,34 +237,66 @@ export async function fetchFirestoreCursorPage<T>(
 
   try {
     const colRef = collection(db, firestoreCollection);
-    const constraints: QueryConstraint[] = [orderBy(orderField, orderDirection)];
-    if (startCursor) {
-      constraints.push(startAfter(startCursor));
-    }
-    constraints.push(limit(safePageSize + 1));
 
-    const [snapshot, totalCount] = await Promise.all([
-      getDocs(query(colRef, ...constraints)),
+    const runBoundedQuery = async (
+      useDocId: boolean,
+      cursor?: DocumentSnapshot
+    ) => {
+      const constraints: QueryConstraint[] = [
+        useDocId ? orderBy(documentId(), 'desc') : orderBy(orderField, orderDirection),
+      ];
+      if (cursor) {
+        constraints.push(startAfter(cursor));
+      }
+      constraints.push(limit(safePageSize + 1));
+      return getDocs(query(colRef, ...constraints));
+    };
+
+    let useDocIdMode = Boolean(docIdFallbackFlags.get(stackKey));
+
+    // Fetch true collection count AND check if any legacy docs lack `orderField` on page 1
+    const [totalCount, indexedCount] = await Promise.all([
       getCollectionTotalCount(firestoreCollection, cacheCollectionKey, scopeKey, ttlMs),
+      !useDocIdMode && effectivePage === 1
+        ? getCountFromServer(query(colRef, orderBy(orderField, orderDirection)))
+            .then((s) => s.data().count)
+            .catch(() => null)
+        : Promise.resolve(null),
     ]);
 
+    // If legacy documents exist without `orderField`, switch consistently to bounded `documentId()` cursor pagination
+    // so mixed/legacy collections NEVER silently omit older records across Page 1, Page 2+, Next, or Prev.
+    if (
+      !useDocIdMode &&
+      totalCount !== null &&
+      indexedCount !== null &&
+      indexedCount < totalCount
+    ) {
+      useDocIdMode = true;
+      docIdFallbackFlags.set(stackKey, true);
+      pageCursors.clear();
+      startCursor = undefined;
+      effectivePage = 1;
+    }
+
+    let snapshot = await runBoundedQuery(useDocIdMode, startCursor);
     let docs = snapshot.docs;
 
     // Edge case: if cursor was invalidated/deleted mid-pagination causing empty page > 1 while docs exist,
-    // reset cleanly to page 1.
+    // clear stale cursors & cached pages and reset cleanly to page 1.
     if (docs.length === 0 && effectivePage > 1 && (totalCount === null || totalCount > 0)) {
       pageCursors.clear();
       effectivePage = 1;
-      const retrySnap = await getDocs(
-        query(colRef, orderBy(orderField, orderDirection), limit(safePageSize + 1))
-      );
+      const retrySnap = await runBoundedQuery(useDocIdMode, undefined);
       docs = retrySnap.docs;
     }
 
-    // Edge case: legacy collection where docs exist (`totalCount > 0`) but lack `orderField`.
-    // Fall back to bounded unordered query on page 1 so existing data is never hidden.
-    if (docs.length === 0 && effectivePage === 1 && totalCount !== null && totalCount > 0) {
-      const legacySnap = await getDocs(query(colRef, limit(safePageSize + 1)));
+    // Edge case: legacy collection where docs exist (`totalCount > 0`) but none contain `orderField`.
+    if (docs.length === 0 && effectivePage === 1 && !useDocIdMode && totalCount !== null && totalCount > 0) {
+      useDocIdMode = true;
+      docIdFallbackFlags.set(stackKey, true);
+      pageCursors.clear();
+      const legacySnap = await runBoundedQuery(true, undefined);
       docs = legacySnap.docs;
     }
 
@@ -267,7 +308,10 @@ export async function fetchFirestoreCursorPage<T>(
     }
 
     const items: T[] = [];
+    const seenIds = new Set<string>();
     for (const d of pageDocs) {
+      if (seenIds.has(d.id)) continue;
+      seenIds.add(d.id);
       const mapped = mapDoc ? mapDoc(d) : (d.data() as T);
       if (mapped !== null && mapped !== undefined) {
         items.push(mapped);
@@ -283,6 +327,8 @@ export async function fetchFirestoreCursorPage<T>(
       totalCount,
       fromCache: false,
       source: 'firestore',
+      countScope: 'all',
+      usedDocIdFallback: useDocIdMode,
     };
 
     adminDataCache.setPage(scopeKey, cacheCollectionKey, effectivePage, safePageSize, result, ttlMs, filterSig);
@@ -295,6 +341,132 @@ export async function fetchFirestoreCursorPage<T>(
     }
     return buildFallbackResult();
   }
+}
+
+/**
+ * Pure injectable cursor pagination runner used for automated verification of cursor semantics,
+ * deleted-cursor recovery, legacy missing-sort-field coverage, and cache isolation.
+ */
+export interface CursorQueryAdapter<TDoc extends { id: string }> {
+  getTotalCount(): Promise<number>;
+  getIndexedCount(orderField: string): Promise<number>;
+  queryByField(orderField: string, direction: 'asc' | 'desc', afterDoc: TDoc | undefined, max: number): Promise<TDoc[]>;
+  queryByDocId(afterDoc: TDoc | undefined, max: number): Promise<TDoc[]>;
+}
+
+export async function runCursorPaginationWithAdapter<TDoc extends { id: string }>(params: {
+  cache: AdminDataCache;
+  cursorStore: Map<string, Map<number, TDoc>>;
+  fallbackStore: Map<string, boolean>;
+  adapter: CursorQueryAdapter<TDoc>;
+  scopeKey: string;
+  collectionKey: string;
+  orderField: string;
+  direction?: 'asc' | 'desc';
+  page: number;
+  pageSize: number;
+  filterSig?: string;
+  forceRefresh?: boolean;
+}): Promise<PaginatedResult<TDoc>> {
+  const {
+    cache,
+    cursorStore,
+    fallbackStore,
+    adapter,
+    scopeKey,
+    collectionKey,
+    orderField,
+    direction = 'desc',
+    pageSize,
+    filterSig = 'default',
+    forceRefresh = false,
+  } = params;
+  const safePageSize = Math.max(1, Math.min(200, pageSize));
+  const safePage = Math.max(1, params.page);
+
+  if (forceRefresh) {
+    cache.invalidateCollection(scopeKey, collectionKey);
+  } else {
+    const cached = cache.getPage<PaginatedResult<TDoc>>(scopeKey, collectionKey, safePage, safePageSize, filterSig);
+    if (cached && cached.isFresh) {
+      return { ...cached.data, fromCache: true };
+    }
+  }
+
+  const stackKey = makeCursorStackKey({ scopeKey, collectionKey, pageSize: safePageSize, filterSig });
+  let pageCursors = cursorStore.get(stackKey);
+  if (!pageCursors) {
+    pageCursors = new Map<number, TDoc>();
+    cursorStore.set(stackKey, pageCursors);
+  }
+
+  let effectivePage = safePage;
+  let startCursor = effectivePage > 1 ? pageCursors.get(effectivePage - 1) : undefined;
+  if (effectivePage > 1 && !startCursor) {
+    effectivePage = 1;
+  }
+
+  let useDocId = Boolean(fallbackStore.get(stackKey));
+  const totalCount = await adapter.getTotalCount();
+
+  if (!useDocId && effectivePage === 1) {
+    const indexedCount = await adapter.getIndexedCount(orderField);
+    if (indexedCount < totalCount) {
+      useDocId = true;
+      fallbackStore.set(stackKey, true);
+      pageCursors.clear();
+      startCursor = undefined;
+    }
+  }
+
+  let docs = useDocId
+    ? await adapter.queryByDocId(startCursor, safePageSize + 1)
+    : await adapter.queryByField(orderField, direction, startCursor, safePageSize + 1);
+
+  if (docs.length === 0 && effectivePage > 1 && totalCount > 0) {
+    pageCursors.clear();
+    effectivePage = 1;
+    docs = useDocId
+      ? await adapter.queryByDocId(undefined, safePageSize + 1)
+      : await adapter.queryByField(orderField, direction, undefined, safePageSize + 1);
+  }
+
+  if (docs.length === 0 && effectivePage === 1 && !useDocId && totalCount > 0) {
+    useDocId = true;
+    fallbackStore.set(stackKey, true);
+    docs = await adapter.queryByDocId(undefined, safePageSize + 1);
+  }
+
+  const hasNextPage = docs.length > safePageSize;
+  const pageDocs = hasNextPage ? docs.slice(0, safePageSize) : docs;
+  if (pageDocs.length > 0) {
+    pageCursors.set(effectivePage, pageDocs[pageDocs.length - 1]);
+  }
+
+  const seen = new Set<string>();
+  const items: TDoc[] = [];
+  for (const d of pageDocs) {
+    if (!seen.has(d.id)) {
+      seen.add(d.id);
+      items.push(d);
+    }
+  }
+
+  const result: PaginatedResult<TDoc> = {
+    items,
+    page: effectivePage,
+    pageSize: safePageSize,
+    hasNextPage,
+    hasPrevPage: effectivePage > 1,
+    totalCount,
+    fromCache: false,
+    source: 'firestore',
+    countScope: 'all',
+    usedDocIdFallback: useDocId,
+  };
+
+  cache.setPage(scopeKey, collectionKey, effectivePage, safePageSize, result, 60_000, filterSig);
+  return result;
 }
 
 // ---------------------------------------------------------------------------

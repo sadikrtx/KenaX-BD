@@ -118,7 +118,6 @@ import {
   INITIAL_WEBSITE_SETTINGS,
   INITIAL_ORDERS,
   INITIAL_COUPONS,
-  INITIAL_STAFF,
 } from './data/initialSettings';
 import {
   seedAllDataToFirestore,
@@ -141,6 +140,7 @@ import {
   getStaffFromDB,
   saveStaffToDB,
   subscribeToStaff,
+  subscribeToOwnStaffDoc,
   getSettingsFromDB,
   saveSettingsToDB,
   subscribeToSettings,
@@ -154,6 +154,7 @@ import {
   mergeOrdersLists,
   resolveOriginalImageMedia,
   testConnection,
+  signOutStaffAuth,
 } from './lib/firebase';
 import { runOneTimeLocalStorageMigration } from './lib/firestoreMigration';
 import {
@@ -429,13 +430,23 @@ export default function App() {
     };
   }, []);
 
-  // Sync staff list via real-time subscription from Cloud Firestore when staff/admin context is active
+  // Sync staff records via real-time subscription from Cloud Firestore when authenticated as staff.
+  // Super Admin subscribes to the full /staff collection; Admin/Manager/Moderator subscribe only to
+  // their own /staff/{staffId} document to match hardened firestore.rules RBAC.
   useEffect(() => {
-    const shouldSyncStaff = Boolean(currentStaff) || currentView === 'admin-dashboard' || isAdminLoginOpen;
-    if (!shouldSyncStaff) return;
+    if (!currentStaff?.id) return;
 
     let isMounted = true;
     let staffSnapshotReceived = false;
+    const isSuperAdminSession = currentStaff.role === 'super_admin';
+    const activeStaffId = currentStaff.id;
+
+    const handleRevokedSession = () => {
+      signOutStaffAuth().catch(() => clearStaffSession());
+      setIsAdminPortalAuthenticated(false);
+      setCurrentRole('customer');
+      setCurrentStaff(null);
+    };
 
     const applyStaffList = (latestStaff: StaffUser[]) => {
       if (!isMounted || !latestStaff) return;
@@ -448,7 +459,7 @@ export default function App() {
         );
         if (matched) {
           if (matched.isRemoved || matched.isActive === false || matched.status === 'suspended') {
-            clearStaffSession();
+            signOutStaffAuth().catch(() => clearStaffSession());
             setIsAdminPortalAuthenticated(false);
             setCurrentRole('customer');
             return null;
@@ -459,7 +470,7 @@ export default function App() {
         }
         // Account no longer exists in Firestore (permanently deleted by Super Admin)
         if (sanitizedList.length > 0) {
-          clearStaffSession();
+          signOutStaffAuth().catch(() => clearStaffSession());
           setIsAdminPortalAuthenticated(false);
           setCurrentRole('customer');
           return null;
@@ -467,6 +478,30 @@ export default function App() {
         return prev;
       });
     };
+
+    if (!isSuperAdminSession) {
+      // Non-Super-Admin staff: subscribe only to own staff document for live suspension / role changes
+      const unsubscribeOwn = subscribeToOwnStaffDoc(activeStaffId, (ownDoc) => {
+        if (!isMounted) return;
+        if (!ownDoc || ownDoc.isRemoved || ownDoc.isActive === false || ownDoc.status === 'suspended') {
+          handleRevokedSession();
+          return;
+        }
+        const sanitized = stripStaffSecrets(ownDoc);
+        saveStaffSession(sanitized);
+        setCurrentRole(sanitized.role);
+        setCurrentStaff(sanitized);
+        setStaffList((prev) => {
+          const others = prev.filter((s) => s.id !== sanitized.id);
+          return [sanitized, ...others];
+        });
+      });
+
+      return () => {
+        isMounted = false;
+        unsubscribeOwn();
+      };
+    }
 
     const unsubscribe = subscribeToStaff((latestStaff) => {
       staffSnapshotReceived = true;
@@ -486,7 +521,7 @@ export default function App() {
       window.clearTimeout(fallbackTimer);
       unsubscribe();
     };
-  }, [Boolean(currentStaff), currentView === 'admin-dashboard', isAdminLoginOpen]);
+  }, [currentStaff?.id, currentStaff?.role]);
 
   // Cart Activities for Admin / Manager / Moderator Tracking (hydrated live from Firestore)
   const [cartActivities, setCartActivities] = useState<CartActivity[]>([]);
@@ -1440,11 +1475,8 @@ export default function App() {
     let settingsReceived = false;
     let categoriesReceived = false;
 
-    // Verify Firestore connectivity & run safe idempotent one-time legacy localStorage -> Firestore migration
+    // Verify Firestore connectivity on boot (migration only runs for authenticated Super Admin)
     testConnection().catch(() => {});
-    runOneTimeLocalStorageMigration()
-      .then(() => seedAllDataToFirestore().catch(() => {}))
-      .catch(() => {});
 
     let seedTimer: number | null = null;
 
@@ -2186,11 +2218,26 @@ export default function App() {
     setCurrentView('home');
   };
 
+  // Trigger one-time localStorage -> Firestore migration ONLY when an active Super Admin is signed in
+  useEffect(() => {
+    const isActiveSuperAdmin =
+      Boolean(isAdminPortalAuthenticated) &&
+      currentStaff?.role === 'super_admin' &&
+      currentStaff.isActive !== false &&
+      currentStaff.status !== 'suspended' &&
+      !currentStaff.isRemoved;
+
+    if (!isActiveSuperAdmin) return;
+    runOneTimeLocalStorageMigration()
+      .then(() => seedAllDataToFirestore().catch(() => {}))
+      .catch(() => {});
+  }, [isAdminPortalAuthenticated, currentStaff]);
+
   const handleStaffLogout = () => {
     setIsAdminPortalAuthenticated(false);
     setCurrentStaff(null);
     setCurrentRole('customer');
-    clearStaffSession();
+    signOutStaffAuth().catch(() => clearStaffSession());
     localStorage.removeItem('kenax_current_view');
     localStorage.removeItem('kenax_admin_active_tab');
     try {

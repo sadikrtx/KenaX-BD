@@ -24,16 +24,15 @@ import {
   onSnapshot,
   type Unsubscribe,
 } from 'firebase/firestore';
-import { getAuth } from 'firebase/auth';
+import { getAuth, signInWithCustomToken, signOut } from 'firebase/auth';
 import { safeSetLocalStorage, safeSetCartActivitiesCache, getIdbItem, setIdbItem } from './storage.ts';
 import { getEnvCollectionName, getEnvStorageKey, getEnvApiHeaders, isPreviewEnvironment } from '../utils/envHelper.ts';
 import {
-  hashStaffPassword,
-  verifyStaffPassword,
   stripStaffSecrets,
-  isPasswordHash,
   saveStaffSession,
   clearStaffSession,
+  setServerStaffToken,
+  getStaffAuthBearerToken,
 } from './passwordHash.ts';
 import firebaseConfig from '../../firebase-applet-config.json' with { type: 'json' };
 import type { Product, Order, OrderStatus, Category, SubCategoryItem, WebsiteSettings, DeliveryZone, Coupon, OrderItem, HeroBannerItem, Review, Supplier, SourcingLocation } from '../types/index.ts';
@@ -46,7 +45,6 @@ import {
   INITIAL_DELIVERY_ZONES,
   INITIAL_COUPONS,
   INITIAL_ORDERS,
-  INITIAL_STAFF,
   INITIAL_CUSTOMERS,
   INITIAL_ACTIVITY_LOGS,
   INITIAL_NOTIFICATIONS,
@@ -322,6 +320,7 @@ export function normalizeOrderRecord(raw: any, docId?: string): Order {
 /**
  * Generate a globally unique, sequential `KB-######` order number across ALL browsers and devices
  * using an atomic Cloud Firestore transaction on `system/orderCounter`.
+ * Verifies the candidate order doc does not already exist to prevent collisions with migrated IDs.
  */
 export async function generateNextOrderId(prefix: 'KB' | 'INC' = 'KB'): Promise<string> {
   const counterDocId = prefix === 'INC' ? 'incompleteOrderCounter' : 'orderCounter';
@@ -332,8 +331,24 @@ export async function generateNextOrderId(prefix: 'KB' | 'INC' = 'KB'): Promise<
     const nextNum = await runTransaction(db, async (tx) => {
       const snap = await tx.get(counterRef);
       const current = snap.exists() ? Number(snap.data()?.current || baseStart) : baseStart;
-      const safeCurrent = Number.isFinite(current) && current >= baseStart ? current : baseStart;
-      const next = safeCurrent + 1;
+      const safeCurrent = Number.isFinite(current) && current >= baseStart ? Math.floor(current) : baseStart;
+      let next = safeCurrent + 1;
+
+      // Guard against collision with any pre-existing migrated order ID (max 5 probes inside tx)
+      if (prefix === 'KB') {
+        for (let attempt = 0; attempt < 5; attempt++) {
+          const candidateId = `${prefix}-${String(next).padStart(6, '0')}`;
+          try {
+            const existingOrder = await tx.get(doc(db, 'orders', candidateId));
+            if (!existingOrder.exists()) break;
+            next += 1;
+          } catch {
+            // Guests cannot read `orders/{id}` under hardened rules; monotonic counter is already safe
+            break;
+          }
+        }
+      }
+
       tx.set(
         counterRef,
         {
@@ -349,10 +364,17 @@ export async function generateNextOrderId(prefix: 'KB' | 'INC' = 'KB'): Promise<
     return `${prefix}-${String(nextNum).padStart(6, '0')}`;
   } catch (err) {
     console.warn('[KenaX BD] Firestore order counter transaction fallback:', err);
-    // Collision-resistant fallback using timestamp tail + crypto random (never a per-browser localStorage counter)
-    const rand = Math.floor(100 + Math.random() * 900);
-    const timeTail = String(Date.now()).slice(-3);
-    return `${prefix}-${timeTail}${rand}`;
+    // High-entropy 9-digit timestamp+crypto fallback outside sequential 6-digit range (zero collision)
+    let randomPart = Math.floor(1000 + Math.random() * 9000);
+    try {
+      if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+        const arr = new Uint32Array(1);
+        crypto.getRandomValues(arr);
+        randomPart = 1000 + (arr[0] % 9000);
+      }
+    } catch {}
+    const timeTail = String(Date.now()).slice(-5);
+    return `${prefix}-${timeTail}${randomPart}`;
   }
 }
 
@@ -555,15 +577,13 @@ export function mergeCustomersLists(base: CustomerRecord[] = INITIAL_CUSTOMERS, 
 }
 
 // Helper to merge and deduplicate categories safely so all store categories always show
-export function mergeCategoriesLists(baseList: Category[] = INITIAL_CATEGORIES, incomingList: Category[] = []): Category[] {
+export function mergeCategoriesLists(
+  baseList: Category[] = INITIAL_CATEGORIES,
+  incomingList: Category[] = [],
+  explicitDeletedSet?: Set<string>
+): Category[] {
   const map = new Map<string, Category>();
-  let deletedIds = new Set<string>();
-  try {
-    const rawDeleted = localStorage.getItem('kenax_deleted_category_ids');
-    if (rawDeleted) {
-      deletedIds = new Set(JSON.parse(rawDeleted));
-    }
-  } catch {}
+  const deletedIds = new Set<string>(explicitDeletedSet ? Array.from(explicitDeletedSet) : []);
 
   // 1. Add base categories (INITIAL_CATEGORIES) if not explicitly deleted
   (baseList || INITIAL_CATEGORIES || []).forEach((c) => {
@@ -682,18 +702,7 @@ export function mergeProductsLists(
   const defaultBase = INITIAL_PRODUCTS;
   const effectiveBase = baseList !== undefined ? baseList : defaultBase;
   const map = new Map<string, Product>();
-  let deletedIds = new Set<string>();
-  try {
-    const rawDeleted = localStorage.getItem(getEnvStorageKey('kenax_deleted_product_ids'));
-    if (rawDeleted) {
-      const parsed = JSON.parse(rawDeleted);
-      if (Array.isArray(parsed)) parsed.forEach((id) => deletedIds.add(id));
-    }
-  } catch {}
-
-  if (explicitDeletedSet) {
-    explicitDeletedSet.forEach((id) => deletedIds.add(id));
-  }
+  const deletedIds = new Set<string>(explicitDeletedSet ? Array.from(explicitDeletedSet) : []);
 
   const isProduction = !isPreviewEnvironment();
 
@@ -732,31 +741,13 @@ export function mergeProductsLists(
   return Array.from(map.values());
 }
 
-// Automatically and permanently purge demo products from local caches, cart, wishlist, and Firestore
+// Clean any legacy demo items from visitor's per-browser cart/wishlist only (never mutates shared Firestore on anonymous boot)
 export function purgeDemoProducts() {
   if (typeof window === 'undefined' || isPreviewEnvironment()) return;
   try {
     const isDemo = (id: string) => isDemoProductId(id);
 
-    // 1. Record demo IDs in deleted list
-    const rawDel = localStorage.getItem(getEnvStorageKey('kenax_deleted_product_ids'));
-    const delList: string[] = rawDel ? JSON.parse(rawDel) : [];
-    DEMO_PRODUCT_IDS.forEach((id) => {
-      if (!delList.includes(id)) delList.push(id);
-    });
-    safeSetLocalStorage(getEnvStorageKey('kenax_deleted_product_ids'), JSON.stringify(delList));
-
-    // 2. Clean products cache
-    const rawCache = localStorage.getItem(getEnvStorageKey('kenax_products_cache'));
-    if (rawCache) {
-      const parsed: Product[] = JSON.parse(rawCache);
-      if (Array.isArray(parsed)) {
-        const filtered = parsed.filter((p) => p && p.id && !isDemo(p.id));
-        safeSetLocalStorage(getEnvStorageKey('kenax_products_cache'), JSON.stringify(filtered));
-      }
-    }
-
-    // 3. Clean cart
+    // 1. Clean visitor cart
     const rawCart = localStorage.getItem('kenax_cart');
     if (rawCart) {
       const parsed = JSON.parse(rawCart);
@@ -766,7 +757,7 @@ export function purgeDemoProducts() {
       }
     }
 
-    // 4. Clean wishlist
+    // 2. Clean visitor wishlist
     const rawWish = localStorage.getItem('kenax_wishlist');
     if (rawWish) {
       const parsed = JSON.parse(rawWish);
@@ -775,19 +766,6 @@ export function purgeDemoProducts() {
         safeSetLocalStorage('kenax_wishlist', JSON.stringify(filtered));
       }
     }
-
-    // 5. Asynchronously remove demo products from Firestore & server
-    DEMO_PRODUCT_IDS.forEach((id) => {
-      fetch(`/api/products/${encodeURIComponent(id)}`, { method: 'DELETE', headers: getEnvApiHeaders() }).catch(() => {});
-      if (!isQuotaExceededFlag) {
-        deleteDoc(doc(db, getEnvCollectionName('products'), id)).catch((e) => {
-          if (isQuotaExceededError(e)) markQuotaExceeded(e);
-        });
-        setDoc(doc(db, getEnvCollectionName('deletedProducts'), id), { id, deletedAt: new Date().toISOString() }).catch((e) => {
-          if (isQuotaExceededError(e)) markQuotaExceeded(e);
-        });
-      }
-    });
   } catch (err) {
     if (isQuotaExceededError(err)) markQuotaExceeded(err);
   }
@@ -1137,14 +1115,17 @@ export async function getProductsFromDB(): Promise<Product[]> {
     throw err;
   }
 
-  // If Firestore products collection is completely empty and has no deletion tombstones, seed baseline products once
+  // If Firestore products collection is completely empty and has no deletion tombstones, return baseline products
+  // (only write seed docs to Firestore when signed in as staff so visitors never trigger denied catalog writes)
   if (firestoreItems.length === 0 && deletedSet.size === 0) {
     const baseline = INITIAL_PRODUCTS.filter((p) => p && p.id && (!isDemoProductId(p.id) || isPreviewEnvironment()));
-    await Promise.allSettled(
-      baseline.map((p) =>
-        setDoc(doc(db, 'products', p.id), cleanFirestoreData({ ...p, updatedAtServer: serverTimestamp() }), { merge: true })
-      )
-    );
+    if (auth.currentUser) {
+      await Promise.allSettled(
+        baseline.map((p) =>
+          setDoc(doc(db, 'products', p.id), cleanFirestoreData({ ...p, updatedAtServer: serverTimestamp() }), { merge: true })
+        )
+      );
+    }
     const resolvedSeed = await Promise.all(baseline.map((p) => resolveProductOriginalImages(p)));
     return resolvedSeed;
   }
@@ -1355,37 +1336,39 @@ export async function saveOrderToDB(order: Order): Promise<void> {
     }).catch(() => {});
   } catch {}
 
-  // 3. Link Order to Customer Document in Cloud Firestore
-  try {
-    const custEmail = (order.customerEmail || '').trim().toLowerCase();
-    const custPhone = normalizePhoneNumber(order.customerMobile || order.deliveryMobile);
+  // 3. Link Order to Customer Document in Cloud Firestore (only when authenticated so guest checkout never queries private customers list)
+  if (auth.currentUser) {
+    try {
+      const custEmail = (order.customerEmail || '').trim().toLowerCase();
+      const custPhone = normalizePhoneNumber(order.customerMobile || order.deliveryMobile);
 
-    const allCustomers = await getCustomersFromDB();
-    const targetCustomer = allCustomers.find((c) => {
-      if (order.customerId && order.customerId !== 'cust-guest' && c.id === order.customerId) return true;
-      if (custEmail && c.email && c.email.trim().toLowerCase() === custEmail) return true;
-      if (custPhone && c.mobile && normalizePhoneNumber(c.mobile) === custPhone) return true;
-      return false;
-    });
+      const allCustomers = await getCustomersFromDB();
+      const targetCustomer = allCustomers.find((c) => {
+        if (order.customerId && order.customerId !== 'cust-guest' && c.id === order.customerId) return true;
+        if (custEmail && c.email && c.email.trim().toLowerCase() === custEmail) return true;
+        if (custPhone && c.mobile && normalizePhoneNumber(c.mobile) === custPhone) return true;
+        return false;
+      });
 
-    if (targetCustomer) {
-      const existingOrderIds = targetCustomer.orderIds || [];
-      const updatedOrderIds = existingOrderIds.includes(order.id)
-        ? existingOrderIds
-        : [order.id, ...existingOrderIds];
+      if (targetCustomer) {
+        const existingOrderIds = targetCustomer.orderIds || [];
+        const updatedOrderIds = existingOrderIds.includes(order.id)
+          ? existingOrderIds
+          : [order.id, ...existingOrderIds];
 
-      const updatedCustomer: CustomerRecord = {
-        ...targetCustomer,
-        orderIds: updatedOrderIds,
-        totalOrders: (targetCustomer.totalOrders || 0) + 1,
-        ordersCount: ((targetCustomer.ordersCount || targetCustomer.totalOrders) || 0) + 1,
-        totalSpent: (targetCustomer.totalSpent || 0) + (order.totalAmount || 0),
-        lastOrderDate: nowIso,
-      };
-      await saveCustomerToDB(updatedCustomer);
+        const updatedCustomer: CustomerRecord = {
+          ...targetCustomer,
+          orderIds: updatedOrderIds,
+          totalOrders: (targetCustomer.totalOrders || 0) + 1,
+          ordersCount: ((targetCustomer.ordersCount || targetCustomer.totalOrders) || 0) + 1,
+          totalSpent: (targetCustomer.totalSpent || 0) + (order.totalAmount || 0),
+          lastOrderDate: nowIso,
+        };
+        await saveCustomerToDB(updatedCustomer);
+      }
+    } catch (err) {
+      console.warn('[KenaX BD] Linking order to customer record error:', err);
     }
-  } catch (err) {
-    console.warn('[KenaX BD] Linking order to customer record error:', err);
   }
 
   // 4. Dispatch custom event for immediate UI update in same tab
@@ -1643,6 +1626,30 @@ export async function fetchSingleOrderFromDB(orderIdOrQuery: string): Promise<Or
   return null;
 }
 
+/**
+ * Verified public Track Order lookup via server endpoint (requires BOTH Order ID AND matching phone).
+ * Keeps Firestore `orders` collection closed to unauthenticated public reads while allowing guest tracking.
+ */
+export async function trackOrderViaServer(orderId: string, phone: string): Promise<Order | null> {
+  try {
+    const res = await fetch('/api/staff-auth/track-order', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+        ...getEnvApiHeaders(),
+      },
+      body: JSON.stringify({ orderId: orderId.trim(), phone: phone.trim() }),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (data?.ok && data?.order) {
+      return normalizeOrderRecord(data.order, data.order.id || orderId);
+    }
+  } catch {}
+  return null;
+}
+
 // Update Order status and tracking directly in Cloud Firestore with serverTimestamp()
 export async function updateOrderInDB(orderId: string, updates: Partial<Order>): Promise<void> {
   const nowIso = new Date().toISOString();
@@ -1677,59 +1684,43 @@ export async function updateOrderInDB(orderId: string, updates: Partial<Order>):
 }
 
 // ----------------------------------------------------
+// STAFF OPERATIONS (Server-Verified Firebase Auth + RBAC)
 // ----------------------------------------------------
-// STAFF OPERATIONS (Permanent Multi-Device Persistence)
-// ----------------------------------------------------
+async function buildStaffAuthHeaders(extra: Record<string, string> = {}): Promise<Record<string, string>> {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    Accept: 'application/json',
+    ...getEnvApiHeaders(),
+    ...extra,
+  };
+  const token = await getStaffAuthBearerToken(auth);
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+  return headers;
+}
+
 export async function fetchServerStaff(): Promise<StaffUser[]> {
   try {
-    const res = await fetch('/api/staff', { headers: getEnvApiHeaders() });
+    const headers = await buildStaffAuthHeaders();
+    if (!headers['Authorization']) return [];
+    const res = await fetch('/api/staff-auth/staff', { headers });
     if (res.ok) {
       const data = await res.json();
-      if (Array.isArray(data) && data.length > 0) return data;
+      if (data?.ok && Array.isArray(data.staff)) {
+        return data.staff.map((s: any) => stripStaffSecrets(s) as StaffUser);
+      }
     }
-  } catch (err) {}
+  } catch {}
   return [];
 }
 
-// Seed initial Super Admin / default staff accounts into Firestore ONLY if `staff` collection is completely empty
+/**
+ * Staff accounts and credentials are provisioned strictly server-side.
+ * Client code NEVER seeds hardcoded passwords or writes credentials to Firestore.
+ */
 export async function ensureInitialStaffSeeded(): Promise<void> {
-  try {
-    const existingSnap = await getDocs(query(collection(db, 'staff'), limit(1)));
-    if (!existingSnap.empty) return;
-
-    const deletedIds = new Set<string>();
-    const delSnap = await getDocs(collection(db, 'deletedStaff')).catch(() => null);
-    if (delSnap && !delSnap.empty) {
-      delSnap.forEach((d) => deletedIds.add(d.id));
-    }
-
-    for (const rawStaff of INITIAL_STAFF as any[]) {
-      if (!rawStaff?.id || deletedIds.has(rawStaff.id)) continue;
-      const plainPw =
-        rawStaff.password || (rawStaff.role === 'super_admin' ? 'sadik@1234' : '123456');
-      const passwordHash = await hashStaffPassword(plainPw);
-      const docPayload = cleanFirestoreData({
-        id: rawStaff.id,
-        name: rawStaff.name,
-        email: (rawStaff.email || '').trim().toLowerCase(),
-        phone: rawStaff.phone || '',
-        role: rawStaff.role,
-        status: rawStaff.status || 'active',
-        isActive: rawStaff.isActive !== false && rawStaff.status !== 'suspended',
-        permissions: Array.isArray(rawStaff.permissions) ? rawStaff.permissions : [],
-        createdAt: rawStaff.createdAt || new Date().toISOString(),
-        lastLogin: rawStaff.lastLogin || new Date().toISOString(),
-        passwordHash,
-      });
-      await setDoc(
-        doc(db, 'staff', rawStaff.id),
-        { ...docPayload, updatedAtServer: serverTimestamp() },
-        { merge: true }
-      );
-    }
-  } catch (err) {
-    console.warn('[KenaX BD] ensureInitialStaffSeeded warning:', err);
-  }
+  return;
 }
 
 async function fetchRawStaffDocsFromFirestore(): Promise<{
@@ -1757,29 +1748,32 @@ async function fetchRawStaffDocsFromFirestore(): Promise<{
     const emailLower = (raw?.email || '').trim().toLowerCase();
     if (!id) return;
     if (deletedIds.has(id) || (emailLower && deletedEmails.has(emailLower))) return;
-    docs.push({
-      ...raw,
-      id,
-      email: emailLower || raw.email,
-      isActive: raw.isActive !== false && raw.status !== 'suspended',
-      status: raw.status || (raw.isActive === false ? 'suspended' : 'active'),
-      createdAt:
-        normalizeFirestoreTimestampValue((raw as any).createdAtServer) ||
-        normalizeFirestoreTimestampValue(raw.createdAt) ||
-        new Date().toISOString(),
-      lastLogin:
-        normalizeFirestoreTimestampValue((raw as any).lastLoginServer) ||
-        normalizeFirestoreTimestampValue(raw.lastLogin),
-    });
+    docs.push(
+      stripStaffSecrets({
+        ...raw,
+        id,
+        email: emailLower || raw.email,
+        isActive: raw.isActive !== false && raw.status !== 'suspended',
+        status: raw.status || (raw.isActive === false ? 'suspended' : 'active'),
+        createdAt:
+          normalizeFirestoreTimestampValue((raw as any).createdAtServer) ||
+          normalizeFirestoreTimestampValue(raw.createdAt) ||
+          new Date().toISOString(),
+        lastLogin:
+          normalizeFirestoreTimestampValue((raw as any).lastLoginServer) ||
+          normalizeFirestoreTimestampValue(raw.lastLogin),
+      }) as StaffUser
+    );
   });
 
   return { docs, deletedIds, deletedEmails };
 }
 
-// Fetch all Staff directly from Cloud Firestore (Single Source of Truth — strips secrets before returning)
+// Fetch all Staff (Super Admin only — strips secrets, falls back to server API if needed)
 export async function getStaffFromDB(): Promise<StaffUser[]> {
   try {
-    await ensureInitialStaffSeeded();
+    const serverStaff = await fetchServerStaff();
+    if (serverStaff.length > 0) return serverStaff;
     const { docs } = await fetchRawStaffDocsFromFirestore();
     return docs.map((s) => stripStaffSecrets(s) as StaffUser);
   } catch (err) {
@@ -1787,193 +1781,191 @@ export async function getStaffFromDB(): Promise<StaffUser[]> {
   }
 }
 
-// Authenticate Staff credentials directly against Cloud Firestore `staff` collection (NEVER localStorage)
+/**
+ * Authenticate Staff via server-side `/api/staff-auth/login` (salted scrypt + Firebase Custom Token).
+ * NEVER downloads password hashes to the browser or verifies passwords client-side.
+ */
 export async function authenticateStaffFromDB(
   identifier: string,
   plainPassword: string
 ): Promise<{ success: boolean; staff?: StaffUser; error?: string }> {
   const cleanInput = identifier.trim().toLowerCase();
-  const cleanDigits = cleanInput.replace(/[\s\-\+\(\)]/g, '');
-  const normalizedPhone = normalizePhoneNumber(cleanInput);
-
   if (!cleanInput || !plainPassword) {
     return { success: false, error: 'Please enter both Email/Mobile and Password.' };
   }
 
   try {
-    await ensureInitialStaffSeeded();
-    const { docs } = await fetchRawStaffDocsFromFirestore();
-
-    let foundStaff = docs.find((s) => {
-      const sEmail = (s.email || '').trim().toLowerCase();
-      const sPhoneDigits = (s.phone || '').replace(/[\s\-\+\(\)]/g, '').toLowerCase();
-      const sPhoneNorm = normalizePhoneNumber(s.phone);
-      return (
-        (sEmail && sEmail === cleanInput) ||
-        (cleanDigits.length >= 7 && sPhoneDigits && sPhoneDigits === cleanDigits) ||
-        (normalizedPhone.length >= 10 && sPhoneNorm && sPhoneNorm === normalizedPhone)
-      );
+    const res = await fetch('/api/staff-auth/login', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+        ...getEnvApiHeaders(),
+      },
+      body: JSON.stringify({
+        identifier: cleanInput,
+        password: plainPassword,
+      }),
     });
 
-    const isSuperAdminAlias =
-      cleanInput === 'super@kenaxbd.com' ||
-      cleanInput === 'super@gmail.com' ||
-      cleanInput === 'sadikrtx3060@gmail.com' ||
-      cleanInput === 'admin' ||
-      cleanInput === 'superadmin' ||
-      cleanInput === 'super_admin' ||
-      cleanDigits === '01700123456';
+    const data = await res.json().catch(() => null);
 
-    if (!foundStaff && isSuperAdminAlias) {
-      foundStaff = docs.find((s) => s.role === 'super_admin');
-    }
-
-    if (!foundStaff) {
+    if (!res.ok || !data?.ok || !data?.staff) {
       return {
         success: false,
-        error: 'No authorized staff account found for this Email or Mobile Number.',
+        error: data?.message || data?.error || 'Invalid staff credentials. Access denied.',
       };
     }
 
-    if (foundStaff.isRemoved) {
-      return {
-        success: false,
-        error:
-          'এই অ্যাকাউন্টটি সরিয়ে দেওয়া হয়েছে (This account has been removed)। অনুগ্রহ করে সুপার অ্যাডমিনের সাথে যোগাযোগ করুন।',
-      };
+    // Complete Firebase Auth sign-in with Custom Claims when server returns a Firebase Custom Token
+    if (data.customToken && auth) {
+      try {
+        await signInWithCustomToken(auth, data.customToken);
+        await auth.currentUser?.getIdToken(true);
+      } catch (firebaseAuthErr) {
+        console.warn('[KenaX BD] Custom token sign-in notice:', firebaseAuthErr);
+      }
     }
 
-    if (foundStaff.isActive === false || foundStaff.status === 'suspended') {
-      return {
-        success: false,
-        error: 'Your staff account has been suspended by the Super Admin.',
-      };
+    // Store server-signed dev token if provided (local Express mode without IAM)
+    if (data.token) {
+      setServerStaffToken(data.token);
     }
 
-    const { valid, needsMigration } = await verifyStaffPassword(plainPassword, foundStaff);
-    if (!valid) {
-      return { success: false, error: 'Incorrect password. Access denied.' };
-    }
-
-    // Update lastLogin and migrate legacy plaintext password to SHA-256 passwordHash if needed
-    const nowIso = new Date().toISOString();
-    const updatePayload: Record<string, any> = {
-      lastLogin: nowIso,
-      lastLoginServer: serverTimestamp(),
-      updatedAt: nowIso,
-      updatedAtServer: serverTimestamp(),
-    };
-    if (needsMigration) {
-      updatePayload.passwordHash = await hashStaffPassword(plainPassword);
-      updatePayload.password = deleteField();
-    }
-    await setDoc(doc(db, 'staff', foundStaff.id), updatePayload, { merge: true }).catch(() => {});
-
-    const safeStaff = stripStaffSecrets({
-      ...foundStaff,
-      lastLogin: nowIso,
-    }) as StaffUser;
-
+    const safeStaff = stripStaffSecrets(data.staff) as StaffUser;
+    saveStaffSession(safeStaff);
     return { success: true, staff: safeStaff };
   } catch (err: any) {
-    console.error('[KenaX BD] Firestore staff authentication error:', err);
+    console.error('[KenaX BD] Staff authentication error:', err);
     return {
       success: false,
-      error: 'Unable to verify staff credentials with Cloud Firestore. Please check connection and try again.',
+      error: 'Unable to reach authentication server. Please check connection and try again.',
     };
   }
 }
 
-// Create or Update Staff directly in Cloud Firestore (ALWAYS hashes password into SHA-256 `passwordHash`, NEVER stores plaintext)
-export async function saveStaffToDB(staff: StaffUser): Promise<void> {
+export async function signOutStaffAuth(): Promise<void> {
+  clearStaffSession();
+  try {
+    if (auth?.currentUser) {
+      await signOut(auth);
+    }
+  } catch {}
+}
+
+/**
+ * Create or Update Staff via server-verified Super Admin endpoint (`/api/staff-auth/staff`).
+ * Client SDK NEVER writes to `staff` or `staff_credentials` directly.
+ */
+export async function saveStaffToDB(staff: StaffUser, isNew = false): Promise<void> {
   if (!staff || (!staff.id && !staff.email)) return;
 
   const staffId = staff.id || 'staff-' + Date.now();
   const cleanEmail = (staff.email || '').trim().toLowerCase();
-  const nowIso = new Date().toISOString();
-
-  // Preserve existing passwordHash from Firestore if updating role/profile without changing password
-  let resolvedPasswordHash: string | undefined = staff.passwordHash && isPasswordHash(staff.passwordHash)
-    ? staff.passwordHash
-    : undefined;
-
-  if (staff.password && staff.password.trim().length > 0) {
-    resolvedPasswordHash = await hashStaffPassword(staff.password.trim());
+  const headers = await buildStaffAuthHeaders();
+  if (!headers['Authorization']) {
+    throw new Error('Unauthorized: Super Admin authentication token required to manage staff.');
   }
 
-  if (!resolvedPasswordHash) {
-    try {
-      const existingSnap = await getDoc(doc(db, 'staff', staffId));
-      if (existingSnap.exists()) {
-        const existingData = existingSnap.data() as StaffUser;
-        if (existingData.passwordHash && isPasswordHash(existingData.passwordHash)) {
-          resolvedPasswordHash = existingData.passwordHash;
-        } else if (existingData.password) {
-          resolvedPasswordHash = await hashStaffPassword(existingData.password);
-        }
-      }
-    } catch {}
-  }
-
-  if (!resolvedPasswordHash) {
-    resolvedPasswordHash = await hashStaffPassword(
-      staff.role === 'super_admin' ? 'sadik@1234' : '123456'
-    );
-  }
-
-  const sanitizedBase = stripStaffSecrets({
-    ...staff,
+  const payload: Record<string, any> = {
     id: staffId,
+    name: staff.name,
     email: cleanEmail,
+    phone: staff.phone || '',
+    role: staff.role,
+    permissions: Array.isArray(staff.permissions) ? staff.permissions : [],
     status: staff.isActive === false ? 'suspended' : staff.status || 'active',
     isActive: staff.isActive !== false && staff.status !== 'suspended',
-    createdAt: staff.createdAt || nowIso,
-    updatedAt: nowIso,
-  });
-
-  const firestorePayload: Record<string, any> = {
-    ...cleanFirestoreData(sanitizedBase),
-    passwordHash: resolvedPasswordHash,
-    password: deleteField(), // Mathematically ensure plaintext password is NEVER stored in Firestore
-    updatedAtServer: serverTimestamp(),
+    isRemoved: Boolean(staff.isRemoved),
   };
-
-  try {
-    await deleteDoc(doc(db, 'deletedStaff', staffId)).catch(() => {});
-    await setDoc(doc(db, 'staff', staffId), firestorePayload, { merge: true });
-  } catch (err) {
-    handleFirestoreError(err, OperationType.WRITE, `staff/${staffId}`);
+  if (staff.password && staff.password.trim().length > 0) {
+    payload.password = staff.password.trim();
   }
 
-  // Refresh active browser session metadata (WITHOUT any password or passwordHash) if this is the logged-in user
+  let res: Response;
+  if (isNew) {
+    res = await fetch('/api/staff-auth/staff', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(payload),
+    });
+  } else {
+    res = await fetch(`/api/staff-auth/staff/${encodeURIComponent(staffId)}`, {
+      method: 'PATCH',
+      headers,
+      body: JSON.stringify(payload),
+    });
+    if (res.status === 404) {
+      res = await fetch('/api/staff-auth/staff', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(payload),
+      });
+    }
+  }
+
+  const data = await res.json().catch(() => null);
+  if (!res.ok || !data?.ok) {
+    throw new Error(data?.message || data?.error || 'Failed to save staff account on server.');
+  }
+
+  // Refresh active browser session metadata (WITHOUT any secrets) if this is the logged-in user
   try {
     const activeSessionRaw = localStorage.getItem('kenax_staff_session');
-    if (activeSessionRaw) {
+    if (activeSessionRaw && data.staff) {
       const parsed = JSON.parse(activeSessionRaw);
       if (
         parsed?.id === staffId ||
         (parsed?.email && cleanEmail && parsed.email.toLowerCase() === cleanEmail)
       ) {
-        saveStaffSession(sanitizedBase as StaffUser);
+        saveStaffSession(stripStaffSecrets(data.staff) as StaffUser);
       }
     }
   } catch {}
 }
 
-// Delete Staff directly from Cloud Firestore & record tombstone
+/**
+ * Authenticated staff self-service password change (verifies currentPassword on server).
+ */
+export async function changeStaffPasswordInDB(
+  currentPassword: string,
+  newPassword: string
+): Promise<void> {
+  const headers = await buildStaffAuthHeaders();
+  if (!headers['Authorization']) {
+    throw new Error('Unauthorized: Please sign in again to change your password.');
+  }
+  const res = await fetch('/api/staff-auth/change-password', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ currentPassword, newPassword }),
+  });
+  const data = await res.json().catch(() => null);
+  if (!res.ok || !data?.ok) {
+    throw new Error(data?.message || data?.error || 'Failed to update password.');
+  }
+  if (data.token) {
+    setServerStaffToken(data.token);
+  }
+}
+
+/**
+ * Delete Staff via server-verified Super Admin endpoint (`DELETE /api/staff-auth/staff/:staffId`).
+ */
 export async function deleteStaffFromDB(staffId: string, staffEmail?: string): Promise<void> {
   const lowerEmail = staffEmail ? staffEmail.trim().toLowerCase() : '';
+  const headers = await buildStaffAuthHeaders();
+  if (!headers['Authorization']) {
+    throw new Error('Unauthorized: Super Admin authentication token required to delete staff.');
+  }
 
-  try {
-    await deleteDoc(doc(db, 'staff', staffId));
-    await setDoc(doc(db, 'deletedStaff', staffId), {
-      id: staffId,
-      email: lowerEmail,
-      deletedAt: new Date().toISOString(),
-      deletedAtServer: serverTimestamp(),
-    });
-  } catch (err) {
-    handleFirestoreError(err, OperationType.DELETE, `staff/${staffId}`);
+  const res = await fetch(`/api/staff-auth/staff/${encodeURIComponent(staffId)}`, {
+    method: 'DELETE',
+    headers,
+  });
+  const data = await res.json().catch(() => null);
+  if (!res.ok || !data?.ok) {
+    throw new Error(data?.message || data?.error || 'Failed to delete staff account.');
   }
 
   // Clear active browser session if the deleted staff member was signed in on this browser
@@ -1982,7 +1974,7 @@ export async function deleteStaffFromDB(staffId: string, staffEmail?: string): P
     if (activeRaw) {
       const active = JSON.parse(activeRaw);
       if (active && (active.id === staffId || (lowerEmail && active.email?.toLowerCase() === lowerEmail))) {
-        clearStaffSession();
+        await signOutStaffAuth();
       }
     }
   } catch {}
@@ -2044,26 +2036,64 @@ export function subscribeToStaff(callback: (staff: StaffUser[]) => void): () => 
   }
 }
 
+// Real-time Firestore listener for a single staff member's own document (used by Moderator/Manager/Admin)
+export function subscribeToOwnStaffDoc(
+  staffId: string,
+  callback: (staff: StaffUser | null) => void
+): () => void {
+  if (!staffId) return () => {};
+  try {
+    return onSnapshot(
+      doc(db, 'staff', staffId),
+      (docSnap) => {
+        if (!docSnap.exists()) {
+          callback(null);
+          return;
+        }
+        const raw = docSnap.data() as StaffUser;
+        const id = raw?.id || docSnap.id;
+        callback(
+          stripStaffSecrets({
+            ...raw,
+            id,
+            email: (raw?.email || '').trim().toLowerCase() || raw.email,
+            isActive: raw.isActive !== false && raw.status !== 'suspended',
+            status: raw.status || (raw.isActive === false ? 'suspended' : 'active'),
+            createdAt:
+              normalizeFirestoreTimestampValue((raw as any).createdAtServer) ||
+              normalizeFirestoreTimestampValue(raw.createdAt) ||
+              new Date().toISOString(),
+            lastLogin:
+              normalizeFirestoreTimestampValue((raw as any).lastLoginServer) ||
+              normalizeFirestoreTimestampValue(raw.lastLogin),
+          }) as StaffUser
+        );
+      },
+      (err) => {
+        console.warn('[KenaX BD] Own staff doc real-time listener notice:', err);
+      }
+    );
+  } catch {
+    return () => {};
+  }
+}
+
 // ----------------------------------------------------
-// CUSTOMERS OPERATIONS
+// CUSTOMERS OPERATIONS (Cloud Firestore Single Source of Truth)
 // ----------------------------------------------------
-// Fetch single customer record directly from Firestore (for fresh profile sync across devices)
+// Fetch single customer record directly from Cloud Firestore (never localStorage)
 export async function fetchCustomerRecordFromDB(customerId: string): Promise<CustomerRecord | null> {
   if (!customerId) return null;
 
-  // Check if customer was deleted
   try {
-    const cachedDeleted = localStorage.getItem(getEnvStorageKey('kenax_deleted_customers_cache'));
-    if (cachedDeleted) {
-      const deletedIds: string[] = JSON.parse(cachedDeleted);
-      if (Array.isArray(deletedIds) && deletedIds.includes(customerId)) {
-        return null;
-      }
+    const deletedIds = await getCachedDeletedCustomerIds('deletedCustomers');
+    if (deletedIds.includes(customerId)) {
+      return null;
     }
   } catch {}
 
   try {
-    const docRef = doc(db, getEnvCollectionName('customers'), customerId);
+    const docRef = doc(db, 'customers', customerId);
     const snap = await getDoc(docRef);
     if (snap.exists()) {
       const data = snap.data() as CustomerRecord;
@@ -2075,12 +2105,10 @@ export async function fetchCustomerRecordFromDB(customerId: string): Promise<Cus
       }
     }
   } catch (err) {
-    console.warn('[KenaX BD] fetchCustomerRecordFromDB fallback check:', err);
+    console.warn('[KenaX BD] fetchCustomerRecordFromDB notice:', err);
   }
 
-  // Fallback to local cache or all customers scan
-  const allCusts = await getCustomersFromDB();
-  return allCusts.find((c) => c.id === customerId) || null;
+  return null;
 }
 
 // Central Server Customers Helper
@@ -2195,7 +2223,10 @@ export async function deleteCustomerFromDB(customerId: string): Promise<void> {
   }
 }
 
-export async function saveCustomerToDB(customer: CustomerRecord): Promise<void> {
+export async function saveCustomerToDB(
+  customer: CustomerRecord,
+  options?: { isNewRegistration?: boolean }
+): Promise<void> {
   if (!customer || !customer.id) return;
   if (customer.id.startsWith('staff-cust-')) return;
 
@@ -2214,15 +2245,33 @@ export async function saveCustomerToDB(customer: CustomerRecord): Promise<void> 
   }
 
   deletedCustomersCache = null;
-  try {
-    await deleteDoc(doc(db, 'deletedCustomers', customer.id)).catch(() => {});
-    await setDoc(
-      doc(db, 'customers', customer.id),
-      { ...cleaned, updatedAtServer: serverTimestamp() },
-      { merge: true }
-    );
-  } catch (err) {
-    handleFirestoreError(err, OperationType.WRITE, `customers/${customer.id}`);
+
+  // Under zero-trust Firestore rules, direct updates to existing /customers/{id} docs require
+  // Firebase Auth (staff or matching customer UID). Unauthenticated clients can only CREATE
+  // brand-new customer registrations/guest records; background cart/wishlist/address updates
+  // for non-Firebase-authenticated sessions sync via /api/customers instead of triggering a
+  // client-side Firestore permission denial.
+  if (auth.currentUser) {
+    try {
+      await deleteDoc(doc(db, 'deletedCustomers', customer.id)).catch(() => {});
+      await setDoc(
+        doc(db, 'customers', customer.id),
+        { ...cleaned, updatedAtServer: serverTimestamp() },
+        { merge: true }
+      );
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, `customers/${customer.id}`);
+    }
+  } else if (options?.isNewRegistration) {
+    try {
+      await setDoc(doc(db, 'customers', customer.id), {
+        ...cleaned,
+        createdAtServer: serverTimestamp(),
+        updatedAtServer: serverTimestamp(),
+      });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.CREATE, `customers/${customer.id}`);
+    }
   }
 
   fetch('/api/customers', {
@@ -2492,23 +2541,48 @@ export async function logStockAdjustmentToDB(
 }
 
 // ----------------------------------------------------
-// ADMIN NOTIFICATIONS
+// ADMIN NOTIFICATIONS (Cloud Firestore Single Source of Truth)
 // ----------------------------------------------------
-export async function getNotificationsFromDB(): Promise<AdminNotification[]> {
-  const cached = localStorage.getItem('kenax_notifs_cache');
-  if (cached) {
-    try {
-      return JSON.parse(cached);
-    } catch {}
+export async function getNotificationsFromDB(maxLimit: number = 100): Promise<AdminNotification[]> {
+  try {
+    const colRef = collection(db, 'notifications');
+    let snap = await getDocs(query(colRef, orderBy('createdAt', 'desc'), limit(maxLimit)));
+    if (snap.empty) {
+      snap = await getDocs(query(colRef, limit(maxLimit)));
+    }
+    const items: AdminNotification[] = [];
+    snap.forEach((docSnap) => {
+      const raw = docSnap.data() as AdminNotification;
+      if (raw) {
+        items.push({
+          ...raw,
+          id: raw.id || docSnap.id,
+          createdAt:
+            normalizeFirestoreTimestampValue((raw as any).createdAtServer) ||
+            normalizeFirestoreTimestampValue(raw.createdAt) ||
+            new Date().toISOString(),
+        });
+      }
+    });
+    items.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+    return items;
+  } catch (err) {
+    console.warn('[KenaX BD] getNotificationsFromDB error:', err);
+    return [];
   }
-  return INITIAL_NOTIFICATIONS;
 }
 
 export async function markNotificationReadInDB(notifId: string): Promise<void> {
-  const cached = localStorage.getItem('kenax_notifs_cache');
-  let list: AdminNotification[] = cached ? JSON.parse(cached) : INITIAL_NOTIFICATIONS;
-  list = list.map((n) => (n.id === notifId ? { ...n, isRead: true } : n));
-  safeSetLocalStorage('kenax_notifs_cache', JSON.stringify(list));
+  if (!notifId) return;
+  try {
+    await setDoc(
+      doc(db, 'notifications', notifId),
+      { isRead: true, updatedAt: new Date().toISOString(), updatedAtServer: serverTimestamp() },
+      { merge: true }
+    );
+  } catch (err) {
+    console.warn('[KenaX BD] markNotificationReadInDB error:', err);
+  }
 }
 
 export async function addNotificationToDB(
@@ -2516,18 +2590,57 @@ export async function addNotificationToDB(
 ): Promise<AdminNotification> {
   const newNotif: AdminNotification = {
     ...notif,
-    id: `notif-${Date.now()}`,
+    id: `notif-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
     createdAt: new Date().toISOString(),
   };
-  const cached = localStorage.getItem('kenax_notifs_cache');
-  let list: AdminNotification[] = cached ? JSON.parse(cached) : INITIAL_NOTIFICATIONS;
-  list.unshift(newNotif);
-  safeSetLocalStorage('kenax_notifs_cache', JSON.stringify(list));
+  try {
+    await setDoc(doc(db, 'notifications', newNotif.id), {
+      ...cleanFirestoreData(newNotif),
+      createdAtServer: serverTimestamp(),
+    });
+  } catch (err) {
+    console.warn('[KenaX BD] addNotificationToDB error:', err);
+  }
   return newNotif;
 }
 
+export function subscribeToNotifications(
+  onNotificationsChanged: (notifs: AdminNotification[]) => void,
+  maxLimit: number = 100
+): Unsubscribe {
+  try {
+    const q = query(collection(db, 'notifications'), orderBy('createdAt', 'desc'), limit(maxLimit));
+    return onSnapshot(
+      q,
+      (snap) => {
+        const items: AdminNotification[] = [];
+        snap.forEach((docSnap) => {
+          const raw = docSnap.data() as AdminNotification;
+          if (raw) {
+            items.push({
+              ...raw,
+              id: raw.id || docSnap.id,
+              createdAt:
+                normalizeFirestoreTimestampValue((raw as any).createdAtServer) ||
+                normalizeFirestoreTimestampValue(raw.createdAt) ||
+                new Date().toISOString(),
+            });
+          }
+        });
+        items.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+        onNotificationsChanged(items);
+      },
+      (err) => {
+        console.warn('[KenaX BD] subscribeToNotifications error:', err);
+      }
+    );
+  } catch {
+    return () => {};
+  }
+}
+
 // ----------------------------------------------------
-// CART ACTIVITIES (LIVE CART TRACKING)
+// CART ACTIVITIES (LIVE CART TRACKING — Cloud Firestore Single Source of Truth)
 // ----------------------------------------------------
 export async function getCartActivitiesFromDB(maxLimit: number = 100): Promise<import('../types').CartActivity[]> {
   try {
@@ -2536,30 +2649,19 @@ export async function getCartActivitiesFromDB(maxLimit: number = 100): Promise<i
     if (snapshot.empty) {
       snapshot = await getDocs(query(colRef, limit(maxLimit)));
     }
-    if (!snapshot.empty) {
-      const items: import('../types').CartActivity[] = [];
-      snapshot.forEach((docSnap) => {
-        const data = docSnap.data() as import('../types').CartActivity;
-        if (data && data.items && data.items.length > 0) {
-          items.push(data);
-        }
-      });
-      items.sort((a, b) => new Date(b.updatedAt || b.createdAt).getTime() - new Date(a.updatedAt || a.createdAt).getTime());
-      safeSetCartActivitiesCache(items);
-      return items;
-    }
+    const items: import('../types').CartActivity[] = [];
+    snapshot.forEach((docSnap) => {
+      const data = docSnap.data() as import('../types').CartActivity;
+      if (data && data.items && data.items.length > 0) {
+        items.push({ ...data, id: data.id || docSnap.id });
+      }
+    });
+    items.sort((a, b) => new Date(b.updatedAt || b.createdAt).getTime() - new Date(a.updatedAt || a.createdAt).getTime());
+    return items;
   } catch (err) {
-    console.warn('[KenaX BD] Firestore getCartActivitiesFromDB fallback:', err);
+    console.warn('[KenaX BD] Firestore getCartActivitiesFromDB error:', err);
+    return [];
   }
-
-  const cached = localStorage.getItem('kenax_cart_activities_cache');
-  if (cached) {
-    try {
-      const list: import('../types').CartActivity[] = JSON.parse(cached);
-      return list.filter((c) => c && c.items && c.items.length > 0);
-    } catch {}
-  }
-  return [];
 }
 
 export function subscribeToCartActivities(
@@ -2578,7 +2680,7 @@ export function subscribeToCartActivities(
         snapshot.forEach((docSnap) => {
           const data = docSnap.data() as import('../types').CartActivity;
           if (data && data.items && data.items.length > 0) {
-            items.push(data);
+            items.push({ ...data, id: data.id || docSnap.id });
           }
         });
         items.sort(
@@ -2586,7 +2688,6 @@ export function subscribeToCartActivities(
             new Date(b.updatedAt || b.createdAt).getTime() -
             new Date(a.updatedAt || a.createdAt).getTime()
         );
-        safeSetCartActivitiesCache(items);
         onData(items);
       },
       (error) => {
@@ -2605,23 +2706,12 @@ export function subscribeToCartActivities(
 export async function saveCartActivityToDB(cart: import('../types').CartActivity): Promise<void> {
   cart.isV2Activity = true;
   try {
-    await setDoc(doc(db, 'cartActivities', cart.id), cart);
+    await setDoc(doc(db, 'cartActivities', cart.id), {
+      ...cleanFirestoreData(cart),
+      updatedAtServer: serverTimestamp(),
+    });
   } catch (err) {
-    console.warn('[KenaX BD] Firestore saveCartActivityToDB fallback:', err);
-  }
-
-  try {
-    const cached = localStorage.getItem('kenax_cart_activities_cache');
-    let list: import('../types').CartActivity[] = cached ? JSON.parse(cached) : [];
-    const idx = list.findIndex((c) => c.id === cart.id);
-    if (idx >= 0) {
-      list[idx] = cart;
-    } else {
-      list.unshift(cart);
-    }
-    safeSetCartActivitiesCache(list);
-  } catch (e) {
-    console.warn('[KenaX BD] saveCartActivityToDB local cache error:', e);
+    console.warn('[KenaX BD] Firestore saveCartActivityToDB error:', err);
   }
 }
 
@@ -2633,24 +2723,13 @@ export async function updateCartActivityStatusInDB(
   const updateData: any = {
     status,
     updatedAt: new Date().toISOString(),
+    updatedAtServer: serverTimestamp(),
     ...(extra || {}),
   };
   try {
     await updateDoc(doc(db, 'cartActivities', cartId), updateData);
   } catch (err) {
-    console.warn('[KenaX BD] Firestore updateCartActivityStatusInDB fallback:', err);
-  }
-
-  try {
-    const cached = localStorage.getItem('kenax_cart_activities_cache');
-    let list: import('../types').CartActivity[] = cached ? JSON.parse(cached) : [];
-    const idx = list.findIndex((c) => c.id === cartId);
-    if (idx >= 0) {
-      list[idx] = { ...list[idx], ...updateData };
-      safeSetCartActivitiesCache(list);
-    }
-  } catch (e) {
-    console.warn('[KenaX BD] updateCartActivityStatusInDB local cache error:', e);
+    console.warn('[KenaX BD] Firestore updateCartActivityStatusInDB error:', err);
   }
 }
 
@@ -2658,15 +2737,7 @@ export async function deleteCartActivityFromDB(cartId: string): Promise<void> {
   try {
     await deleteDoc(doc(db, 'cartActivities', cartId));
   } catch (err) {
-    console.warn('[KenaX BD] Firestore deleteCartActivityFromDB fallback:', err);
-  }
-
-  const cached = localStorage.getItem('kenax_cart_activities_cache');
-  if (cached) {
-    try {
-      const list: import('../types').CartActivity[] = JSON.parse(cached);
-      safeSetCartActivitiesCache(list.filter((c) => c.id !== cartId));
-    } catch {}
+    console.warn('[KenaX BD] Firestore deleteCartActivityFromDB error:', err);
   }
 }
 
@@ -2904,11 +2975,13 @@ export async function getCategoriesFromDB(): Promise<Category[]> {
   }
 
   if (firestoreItems.length === 0 && deletedSet.size === 0) {
-    await Promise.allSettled(
-      INITIAL_CATEGORIES.map((cat) =>
-        setDoc(doc(db, 'categories', cat.id), cleanFirestoreData(cat), { merge: true })
-      )
-    );
+    if (auth.currentUser) {
+      await Promise.allSettled(
+        INITIAL_CATEGORIES.map((cat) =>
+          setDoc(doc(db, 'categories', cat.id), cleanFirestoreData(cat), { merge: true })
+        )
+      );
+    }
     return INITIAL_CATEGORIES;
   }
 
@@ -3059,7 +3132,6 @@ if (typeof window !== 'undefined') {
 }
 
 export async function getEmailLogsFromDB(maxLimit: number = 150): Promise<EmailLog[]> {
-  // Always flush any pending offline logs first
   await syncPendingEmailLogs().catch(() => {});
 
   try {
@@ -3071,47 +3143,24 @@ export async function getEmailLogsFromDB(maxLimit: number = 150): Promise<EmailL
     const list: EmailLog[] = [];
     snap.forEach((d) => {
       const data = d.data() as EmailLog;
-      if (data && data.id) list.push(data);
+      if (data && (data.id || d.id)) list.push({ ...data, id: data.id || d.id });
     });
     list.sort((a, b) => new Date(b.timestamp || 0).getTime() - new Date(a.timestamp || 0).getTime());
-    safeSetLocalStorage('kenax_email_logs_cache', JSON.stringify(list.slice(0, 300)));
     return list;
   } catch (err) {
-    console.warn('[KenaX BD] getEmailLogsFromDB failed, falling back to cache:', err);
-    try {
-      const cached = localStorage.getItem('kenax_email_logs_cache');
-      return cached ? JSON.parse(cached) : [];
-    } catch {
-      return [];
-    }
+    console.warn('[KenaX BD] getEmailLogsFromDB error:', err);
+    return [];
   }
 }
 
 export async function saveEmailLogToDB(log: EmailLog): Promise<void> {
-  // Always cache locally first so UI updates immediately and offline data is never lost
-  try {
-    const cached = localStorage.getItem('kenax_email_logs_cache');
-    const list: EmailLog[] = cached ? JSON.parse(cached) : [];
-    const updated = [log, ...list.filter((l) => l.id !== log.id)].slice(0, 300);
-    safeSetLocalStorage('kenax_email_logs_cache', JSON.stringify(updated));
-  } catch {}
-
   try {
     const cleaned = cleanFirestoreData(log);
     const docRef = doc(db, 'emailLogs', log.id);
-    await setDoc(docRef, cleaned, { merge: true });
-    // Flush any pending logs as well
+    await setDoc(docRef, { ...cleaned, timestampServer: serverTimestamp() }, { merge: true });
     syncPendingEmailLogs().catch(() => {});
   } catch (err) {
-    console.warn('[KenaX BD] saveEmailLogToDB offline fallback (queued in pending):', err);
-    try {
-      const pendingRaw = localStorage.getItem('kenax_pending_email_logs');
-      const pendingList: EmailLog[] = pendingRaw ? JSON.parse(pendingRaw) : [];
-      if (!pendingList.some((p) => p.id === log.id)) {
-        pendingList.push(log);
-        safeSetLocalStorage('kenax_pending_email_logs', JSON.stringify(pendingList));
-      }
-    } catch {}
+    console.warn('[KenaX BD] saveEmailLogToDB error:', err);
   }
 }
 
@@ -3126,12 +3175,9 @@ export function subscribeToEmailLogs(callback: (logs: EmailLog[]) => void, maxLi
         const list: EmailLog[] = [];
         snap.forEach((d) => {
           const data = d.data() as EmailLog;
-          if (data && data.id) list.push(data);
+          if (data && (data.id || d.id)) list.push({ ...data, id: data.id || d.id });
         });
         list.sort((a, b) => new Date(b.timestamp || 0).getTime() - new Date(a.timestamp || 0).getTime());
-        try {
-          safeSetLocalStorage('kenax_email_logs_cache', JSON.stringify(list.slice(0, 300)));
-        } catch {}
         callback(list);
       },
       (err) => {
@@ -3162,11 +3208,9 @@ export async function getEmailTemplatesFromDB(): Promise<Record<string, EmailTem
 export async function saveEmailTemplatesToDB(templates: Record<string, EmailTemplate>): Promise<void> {
   try {
     const docRef = doc(db, 'websiteSettings', 'emailTemplates');
-    await setDoc(docRef, templates, { merge: true });
-    safeSetLocalStorage('kenax_email_templates_cache', JSON.stringify(templates));
+    await setDoc(docRef, { ...cleanFirestoreData(templates), updatedAtServer: serverTimestamp() }, { merge: true });
   } catch (err) {
-    console.warn('[KenaX BD] saveEmailTemplatesToDB failed:', err);
-    safeSetLocalStorage('kenax_email_templates_cache', JSON.stringify(templates));
+    handleFirestoreError(err, OperationType.WRITE, 'websiteSettings/emailTemplates');
   }
 }
 
@@ -3185,18 +3229,11 @@ export async function getGmailAlertSettingsFromDB(): Promise<GmailAlertSettings 
 }
 
 export async function saveGmailAlertSettingsToDB(settings: GmailAlertSettings): Promise<void> {
-  // 1. Immediately save to LocalStorage so UI is instantaneous and never hangs
-  safeSetLocalStorage('kenax_gmail_alerts_settings', JSON.stringify(settings));
-
-  // 2. Persist to Firestore with a 1.5s timeout race so it never blocks UI or hangs on Netlify
   try {
     const docRef = doc(db, 'websiteSettings', 'gmailAlerts');
-    await Promise.race([
-      setDoc(docRef, settings, { merge: true }),
-      new Promise((resolve) => setTimeout(resolve, 1500)),
-    ]);
+    await setDoc(docRef, { ...cleanFirestoreData(settings), updatedAtServer: serverTimestamp() }, { merge: true });
   } catch (err) {
-    console.warn('[KenaX BD] saveGmailAlertSettingsToDB background sync notice:', err);
+    handleFirestoreError(err, OperationType.WRITE, 'websiteSettings/gmailAlerts');
   }
 }
 
@@ -3351,25 +3388,14 @@ export function subscribeToOtherProfits(onProfitsChanged: (profits: OtherProfitR
 }
 
 // ==========================================
-// SMS Settings & SMS Logs Firestore Helpers
+// SMS Settings & SMS Logs Firestore Helpers (Cloud Firestore Single Source of Truth)
 // ==========================================
 
 export async function getSMSSettingsFromDB(): Promise<SMSSettings | null> {
   try {
-    const cached = localStorage.getItem('kenax_sms_settings_cache');
-    if (cached) {
-      return JSON.parse(cached);
-    }
-  } catch (e) {
-    console.error('[KenaX BD] Failed reading SMS settings cache:', e);
-  }
-
-  try {
     const snap = await getDoc(doc(db, 'settings', 'sms'));
     if (snap.exists()) {
-      const data = snap.data() as SMSSettings;
-      safeSetLocalStorage('kenax_sms_settings_cache', JSON.stringify(data));
-      return data;
+      return snap.data() as SMSSettings;
     }
   } catch (err) {
     console.warn('[KenaX BD] getSMSSettingsFromDB error:', err);
@@ -3379,8 +3405,11 @@ export async function getSMSSettingsFromDB(): Promise<SMSSettings | null> {
 
 export async function saveSMSSettingsToDB(settings: SMSSettings): Promise<boolean> {
   try {
-    safeSetLocalStorage('kenax_sms_settings_cache', JSON.stringify(settings));
-    await setDoc(doc(db, 'settings', 'sms'), settings, { merge: true });
+    await setDoc(
+      doc(db, 'settings', 'sms'),
+      { ...cleanFirestoreData(settings), updatedAtServer: serverTimestamp() },
+      { merge: true }
+    );
     return true;
   } catch (err) {
     console.warn('[KenaX BD] saveSMSSettingsToDB error:', err);
@@ -3390,22 +3419,14 @@ export async function saveSMSSettingsToDB(settings: SMSSettings): Promise<boolea
 
 export async function getSMSLogsFromDB(maxLimit: number = 100): Promise<SMSLog[]> {
   try {
-    const cached = localStorage.getItem('kenax_sms_logs_cache');
-    if (cached) {
-      return JSON.parse(cached);
-    }
-  } catch (e) {}
-
-  try {
     const colRef = collection(db, 'sms_logs');
     let snap = await getDocs(query(colRef, orderBy('timestamp', 'desc'), limit(maxLimit)));
     if (snap.empty) {
       snap = await getDocs(query(colRef, limit(maxLimit)));
     }
     const logs: SMSLog[] = [];
-    snap.forEach((d) => logs.push(d.data() as SMSLog));
-    logs.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-    safeSetLocalStorage('kenax_sms_logs_cache', JSON.stringify(logs.slice(0, 100)));
+    snap.forEach((d) => logs.push({ ...(d.data() as SMSLog), id: d.data()?.id || d.id }));
+    logs.sort((a, b) => new Date(b.timestamp || 0).getTime() - new Date(a.timestamp || 0).getTime());
     return logs;
   } catch (err) {
     console.warn('[KenaX BD] getSMSLogsFromDB error:', err);
@@ -3415,12 +3436,7 @@ export async function getSMSLogsFromDB(maxLimit: number = 100): Promise<SMSLog[]
 
 export async function saveSMSLogToDB(log: SMSLog): Promise<boolean> {
   try {
-    const cached = localStorage.getItem('kenax_sms_logs_cache');
-    const list: SMSLog[] = cached ? JSON.parse(cached) : [];
-    const next = [log, ...list.filter((l) => l.id !== log.id)].slice(0, 100);
-    safeSetLocalStorage('kenax_sms_logs_cache', JSON.stringify(next));
-
-    await setDoc(doc(db, 'sms_logs', log.id), log);
+    await setDoc(doc(db, 'sms_logs', log.id), { ...cleanFirestoreData(log), timestampServer: serverTimestamp() });
     return true;
   } catch (err) {
     console.warn('[KenaX BD] saveSMSLogToDB error:', err);
@@ -3438,10 +3454,9 @@ export function subscribeToSMSLogs(onLogsChanged: (logs: SMSLog[]) => void, maxL
       (snapshot) => {
         const items: SMSLog[] = [];
         snapshot.forEach((docSnap) => {
-          items.push(docSnap.data() as SMSLog);
+          items.push({ ...(docSnap.data() as SMSLog), id: docSnap.data()?.id || docSnap.id });
         });
-        items.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-        safeSetLocalStorage('kenax_sms_logs_cache', JSON.stringify(items.slice(0, 100)));
+        items.sort((a, b) => new Date(b.timestamp || 0).getTime() - new Date(a.timestamp || 0).getTime());
         onLogsChanged(items);
       },
       (error) => {
@@ -3449,145 +3464,25 @@ export function subscribeToSMSLogs(onLogsChanged: (logs: SMSLog[]) => void, maxL
         console.warn('[KenaX BD] subscribeToSMSLogs error:', error);
       }
     );
-  } catch (e) {
+  } catch {
     return () => {};
   }
 }
 
 // ----------------------------------------------------
-// PRODUCT REVIEWS & MODERATION (REAL + DEMO REVIEWS)
-// Multi-Device, Cross-Browser, Permanent Cloud & Netlify Sync
+// PRODUCT REVIEWS & MODERATION (Cloud Firestore Single Source of Truth)
 // ----------------------------------------------------
-const CLOUD_RUN_API_BASE = 'https://ais-pre-nziktgpe56nlsqktopppvl-693170375322.asia-southeast1.run.app';
-
-export async function getReviewsFromDB(): Promise<Review[]> {
-  const items: Review[] = [];
-
-  // 1. Fetch from Cloud Firestore (Primary source of truth across all devices)
+async function getDeletedReviewIdsFromFirestore(): Promise<Set<string>> {
+  const deleted = new Set<string>();
   try {
-    const [snap1, snap2] = await Promise.all([
-      getDocs(collection(db, 'reviews')).catch(() => ({ empty: true, forEach: () => {} } as any)),
-      getDocs(collection(db, 'preview_reviews')).catch(() => ({ empty: true, forEach: () => {} } as any)),
-    ]);
-
-    const seenDocIds = new Set<string>();
-    if (!snap1.empty) {
-      snap1.forEach((docSnap: any) => {
-        const data = docSnap.data() as Review;
-        if (data && data.id && !seenDocIds.has(data.id)) {
-          seenDocIds.add(data.id);
-          items.push(data);
-        }
-      });
-    }
-    if (!snap2.empty) {
-      snap2.forEach((docSnap: any) => {
-        const data = docSnap.data() as Review;
-        if (data && data.id && !seenDocIds.has(data.id)) {
-          seenDocIds.add(data.id);
-          items.push(data);
-        }
-      });
-    }
-  } catch (err) {
-    console.warn('[KenaX BD] Firestore getReviewsFromDB fallback:', err);
-  }
-
-  // 2. Fetch from Local Node Server and Cloud Run Relay API (Essential for Netlify & Vercel deployments)
-  try {
-    const fetchPromises: Promise<any>[] = [
-      fetch('/api/reviews').then((r) => (r.ok ? r.json() : null)).catch(() => null),
-    ];
-
-    if (
-      typeof window !== 'undefined' &&
-      !window.location.hostname.includes('localhost') &&
-      !window.location.hostname.includes('127.0.0.1') &&
-      !window.location.hostname.includes('run.app')
-    ) {
-      // Deployed on Netlify, GitHub Pages, or custom domain -> fetch from cloud relay
-      fetchPromises.push(
-        fetch(`${CLOUD_RUN_API_BASE}/api/reviews`)
-          .then((r) => (r.ok ? r.json() : null))
-          .catch(() => null)
-      );
-    }
-
-    const results = await Promise.all(fetchPromises);
-    results.forEach((srvJson) => {
-      if (srvJson?.success && Array.isArray(srvJson.reviews)) {
-        srvJson.reviews.forEach((sr: Review) => {
-          if (sr && sr.id) {
-            const exIdx = items.findIndex((it) => it.id === sr.id);
-            if (exIdx >= 0) {
-              items[exIdx] = { ...items[exIdx], ...sr };
-            } else {
-              items.push(sr);
-            }
-          }
-        });
-      }
-    });
+    const delSnap = await getDocs(collection(db, 'deletedReviews'));
+    delSnap.forEach((d) => deleted.add(d.id));
   } catch {}
+  return deleted;
+}
 
-  // 3. Fetch from IndexedDB for high-capacity local offline store
-  try {
-    const idbRaw = await getIdbItem('kenax_reviews_idb');
-    if (idbRaw) {
-      const idbList: Review[] = JSON.parse(idbRaw);
-      if (Array.isArray(idbList)) {
-        idbList.forEach((ir) => {
-          if (ir && ir.id && !items.some((it) => it.id === ir.id)) {
-            items.push(ir);
-          }
-        });
-      }
-    }
-  } catch {}
-
-  // 4. Merge with local custom edited reviews dictionary (Guaranteed zero-loss on refresh)
-  let deletedIds: string[] = [];
-  try {
-    const rawDeleted = localStorage.getItem('kenax_deleted_review_ids');
-    if (rawDeleted) deletedIds = JSON.parse(rawDeleted);
-  } catch {}
-
-  const valid = items.filter((r) => !deletedIds.includes(r.id));
-  const existingIds = new Set(valid.map((r) => r.id));
-  const combined = [...valid];
-
-  let customMap: Record<string, Review> = {};
-  if (typeof window !== 'undefined') {
-    try {
-      const customRaw = localStorage.getItem('kenax_custom_reviews_map');
-      if (customRaw) customMap = JSON.parse(customRaw);
-    } catch {}
-  }
-
-  // Apply custom edits over existing items
-  combined.forEach((r, idx) => {
-    if (customMap[r.id]) {
-      combined[idx] = { ...r, ...customMap[r.id] };
-    }
-  });
-
-  // Add any custom reviews that were not in items yet
-  Object.keys(customMap).forEach((cId) => {
-    if (!deletedIds.includes(cId) && !existingIds.has(cId)) {
-      combined.push(customMap[cId]);
-      existingIds.add(cId);
-    }
-  });
-
-  // 5. Fill in initial demo reviews for missing IDs (Only if not customized or deleted)
-  INITIAL_REVIEWS.forEach((initRev) => {
-    if (!existingIds.has(initRev.id) && !deletedIds.includes(initRev.id) && !customMap[initRev.id]) {
-      combined.push(initRev);
-    }
-  });
-
-  // 6. Ensure all photos have high-speed Google Drive direct CDN format
-  combined.forEach((r) => {
+function normalizeReviewPhotos(reviews: Review[]): Review[] {
+  reviews.forEach((r) => {
     if (Array.isArray(r.photos)) {
       r.photos = r.photos.map((p) => {
         if (typeof p === 'string' && p.trim()) {
@@ -3604,10 +3499,38 @@ export async function getReviewsFromDB(): Promise<Review[]> {
       });
     }
   });
+  return reviews;
+}
 
+export async function getReviewsFromDB(): Promise<Review[]> {
+  const items: Review[] = [];
+  const deletedIds = await getDeletedReviewIdsFromFirestore();
+
+  try {
+    const snap = await getDocs(collection(db, 'reviews'));
+    const seenDocIds = new Set<string>();
+    snap.forEach((docSnap) => {
+      const data = docSnap.data() as Review;
+      const id = data?.id || docSnap.id;
+      if (data && id && !deletedIds.has(id) && !seenDocIds.has(id)) {
+        seenDocIds.add(id);
+        items.push({ ...data, id });
+      }
+    });
+  } catch (err) {
+    console.warn('[KenaX BD] Firestore getReviewsFromDB error:', err);
+  }
+
+  const existingIds = new Set(items.map((r) => r.id));
+  const combined = [...items];
+  INITIAL_REVIEWS.forEach((initRev) => {
+    if (!existingIds.has(initRev.id) && !deletedIds.has(initRev.id)) {
+      combined.push(initRev);
+    }
+  });
+
+  normalizeReviewPhotos(combined);
   combined.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
-  safeSetLocalStorage('kenax_reviews_cache', JSON.stringify(combined));
-  setIdbItem('kenax_reviews_idb', JSON.stringify(combined)).catch(() => {});
   return combined;
 }
 
@@ -3619,50 +3542,27 @@ export function subscribeToReviews(
     const colRef = collection(db, 'reviews');
     return onSnapshot(
       colRef,
-      (snapshot) => {
+      async (snapshot) => {
+        const deletedIds = await getDeletedReviewIdsFromFirestore();
         const items: Review[] = [];
         snapshot.forEach((docSnap) => {
           const data = docSnap.data() as Review;
-          if (data && data.id) items.push(data);
-        });
-
-        const rawDeleted = typeof window !== 'undefined' ? localStorage.getItem('kenax_deleted_review_ids') : null;
-        const deletedIds: string[] = rawDeleted ? JSON.parse(rawDeleted) : [];
-        const valid = items.filter((r) => !deletedIds.includes(r.id));
-        const existingIds = new Set(valid.map((r) => r.id));
-        const combined = [...valid];
-
-        let customMap: Record<string, Review> = {};
-        if (typeof window !== 'undefined') {
-          try {
-            const customRaw = localStorage.getItem('kenax_custom_reviews_map');
-            if (customRaw) customMap = JSON.parse(customRaw);
-          } catch {}
-        }
-
-        // Apply custom edits
-        combined.forEach((r, idx) => {
-          if (customMap[r.id]) {
-            combined[idx] = { ...r, ...customMap[r.id] };
+          const id = data?.id || docSnap.id;
+          if (data && id && !deletedIds.has(id)) {
+            items.push({ ...data, id });
           }
         });
 
-        Object.keys(customMap).forEach((cId) => {
-          if (!deletedIds.includes(cId) && !existingIds.has(cId)) {
-            combined.push(customMap[cId]);
-            existingIds.add(cId);
-          }
-        });
-
+        const existingIds = new Set(items.map((r) => r.id));
+        const combined = [...items];
         INITIAL_REVIEWS.forEach((initRev) => {
-          if (!existingIds.has(initRev.id) && !deletedIds.includes(initRev.id) && !customMap[initRev.id]) {
+          if (!existingIds.has(initRev.id) && !deletedIds.has(initRev.id)) {
             combined.push(initRev);
           }
         });
 
+        normalizeReviewPhotos(combined);
         combined.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
-        safeSetLocalStorage('kenax_reviews_cache', JSON.stringify(combined));
-        setIdbItem('kenax_reviews_idb', JSON.stringify(combined)).catch(() => {});
         onReviewsChanged(combined);
       },
       (error) => {
@@ -3731,7 +3631,6 @@ export async function saveReviewToDB(review: Review): Promise<void> {
           const comp = await compressImageToSafeSize(trimmed);
           processedPhotos.push(comp);
         } else {
-          // Clean Google Drive URL to high-speed CDN direct format
           const matchFileD = trimmed.match(/\/file(?:\/u\/\d+)?\/d\/([a-zA-Z0-9_-]+)/i);
           const matchOpenId = trimmed.match(/[?&]id=([a-zA-Z0-9_-]+)/i);
           const matchUc = trimmed.match(/\/uc\?.*id=([a-zA-Z0-9_-]+)/i);
@@ -3750,72 +3649,12 @@ export async function saveReviewToDB(review: Review): Promise<void> {
     safeReview.photos = processedPhotos;
   }
 
-  // Remove from deleted list if exists
-  try {
-    const rawDeleted = localStorage.getItem('kenax_deleted_review_ids');
-    if (rawDeleted) {
-      const deletedIds: string[] = JSON.parse(rawDeleted);
-      const filtered = deletedIds.filter((id) => id !== review.id);
-      safeSetLocalStorage('kenax_deleted_review_ids', JSON.stringify(filtered));
-    }
-  } catch {}
-
   const cleaned = cleanFirestoreData(safeReview);
-  
-  // 1. Direct Cloud Firestore Save (Dual write to reviews & preview_reviews for absolute multi-device permanence)
   try {
-    setDoc(doc(db, 'reviews', review.id), cleaned, { merge: true }).catch((err) => {
-      console.warn('[KenaX BD] Firestore reviews save fallback:', err);
-    });
-    setDoc(doc(db, 'preview_reviews', review.id), cleaned, { merge: true }).catch(() => {});
+    await setDoc(doc(db, 'reviews', review.id), { ...cleaned, updatedAtServer: serverTimestamp() }, { merge: true });
+    await deleteDoc(doc(db, 'deletedReviews', review.id)).catch(() => {});
   } catch (err) {
-    console.warn('[KenaX BD] Firestore saveReviewToDB fallback:', err);
-  }
-
-  // 2. Central API Sync (Cross-server, Netlify, Vercel, Cloud Run relay)
-  try {
-    fetch('/api/reviews', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(cleaned),
-    }).catch(() => {});
-
-    if (
-      typeof window !== 'undefined' &&
-      !window.location.hostname.includes('localhost') &&
-      !window.location.hostname.includes('127.0.0.1') &&
-      !window.location.hostname.includes('run.app')
-    ) {
-      fetch(`${CLOUD_RUN_API_BASE}/api/reviews`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(cleaned),
-      }).catch(() => {});
-    }
-  } catch {}
-
-  // 3. Update Local Storage Custom Reviews Dictionary (Persistent against initial resets)
-  try {
-    const rawMap = localStorage.getItem('kenax_custom_reviews_map');
-    const map = rawMap ? JSON.parse(rawMap) : {};
-    map[review.id] = safeReview;
-    safeSetLocalStorage('kenax_custom_reviews_map', JSON.stringify(map));
-  } catch {}
-
-  // 4. Update Local Storage Cache & IndexedDB
-  try {
-    const cached = localStorage.getItem('kenax_reviews_cache');
-    let list: Review[] = cached ? JSON.parse(cached) : INITIAL_REVIEWS;
-    const idx = list.findIndex((r) => r.id === review.id);
-    if (idx >= 0) {
-      list[idx] = { ...list[idx], ...safeReview };
-    } else {
-      list.unshift(safeReview);
-    }
-    safeSetLocalStorage('kenax_reviews_cache', JSON.stringify(list));
-    setIdbItem('kenax_reviews_idb', JSON.stringify(list)).catch(() => {});
-  } catch (e) {
-    console.warn('[KenaX BD] saveReviewToDB local cache error:', e);
+    handleFirestoreError(err, OperationType.WRITE, `reviews/${review.id}`);
   }
 }
 
@@ -3824,127 +3663,60 @@ export async function updateReviewInDB(review: Review): Promise<void> {
 }
 
 export async function deleteReviewFromDB(reviewId: string): Promise<void> {
-  // 1. Direct Cloud Firestore Delete
   try {
-    deleteDoc(doc(db, 'reviews', reviewId)).catch(() => {});
-    deleteDoc(doc(db, 'preview_reviews', reviewId)).catch(() => {});
-    setDoc(doc(db, 'deletedReviews', reviewId), { id: reviewId, deletedAt: new Date().toISOString() }, { merge: true }).catch(() => {});
+    await deleteDoc(doc(db, 'reviews', reviewId));
+    await setDoc(
+      doc(db, 'deletedReviews', reviewId),
+      { id: reviewId, deletedAt: new Date().toISOString(), deletedAtServer: serverTimestamp() },
+      { merge: true }
+    );
   } catch (err) {
-    console.warn('[KenaX BD] Firestore deleteReviewFromDB fallback:', err);
+    handleFirestoreError(err, OperationType.DELETE, `reviews/${reviewId}`);
   }
-
-  // 2. Central API Delete
-  try {
-    fetch(`/api/reviews/${reviewId}`, { method: 'DELETE' }).catch(() => {});
-
-    if (
-      typeof window !== 'undefined' &&
-      !window.location.hostname.includes('localhost') &&
-      !window.location.hostname.includes('127.0.0.1') &&
-      !window.location.hostname.includes('run.app')
-    ) {
-      fetch(`${CLOUD_RUN_API_BASE}/api/reviews/${reviewId}`, { method: 'DELETE' }).catch(() => {});
-    }
-  } catch {}
-
-  // 3. Mark in deleted IDs and clean local cache & custom map
-  try {
-    const rawDeleted = localStorage.getItem('kenax_deleted_review_ids');
-    const deletedIds: string[] = rawDeleted ? JSON.parse(rawDeleted) : [];
-    if (!deletedIds.includes(reviewId)) {
-      deletedIds.push(reviewId);
-      safeSetLocalStorage('kenax_deleted_review_ids', JSON.stringify(deletedIds));
-    }
-
-    const rawMap = localStorage.getItem('kenax_custom_reviews_map');
-    if (rawMap) {
-      const map = JSON.parse(rawMap);
-      delete map[reviewId];
-      safeSetLocalStorage('kenax_custom_reviews_map', JSON.stringify(map));
-    }
-
-    const cached = localStorage.getItem('kenax_reviews_cache');
-    if (cached) {
-      const list: Review[] = JSON.parse(cached);
-      const filtered = list.filter((r) => r.id !== reviewId);
-      safeSetLocalStorage('kenax_reviews_cache', JSON.stringify(filtered));
-      setIdbItem('kenax_reviews_idb', JSON.stringify(filtered)).catch(() => {});
-    }
-  } catch (e) {}
 }
 
 // ==========================================
-// DROPSHIPPING SUPPLIERS
+// DROPSHIPPING SUPPLIERS (Cloud Firestore Single Source of Truth)
 // ==========================================
+async function getDeletedSupplierIdsFromFirestore(): Promise<Set<string>> {
+  const deleted = new Set<string>();
+  try {
+    const delSnap = await getDocs(collection(db, 'deletedSuppliers'));
+    delSnap.forEach((d) => deleted.add(d.id));
+  } catch {}
+  return deleted;
+}
 
 export async function getSuppliersFromDB(): Promise<Supplier[]> {
   try {
-    const snap = await getDocs(collection(db, 'suppliers'));
-    if (!snap.empty) {
-      const fetched = snap.docs.map((d) => ({ ...d.data(), id: d.id } as Supplier));
+    const [snap, deletedIds] = await Promise.all([
+      getDocs(collection(db, 'suppliers')),
+      getDeletedSupplierIdsFromFirestore(),
+    ]);
+    const fetched = snap.docs
+      .map((d) => ({ ...d.data(), id: d.id } as Supplier))
+      .filter((s) => !deletedIds.has(s.id));
 
-      // Check deleted list
-      const rawDeleted = localStorage.getItem('kenax_deleted_supplier_ids');
-      const deletedIds: string[] = rawDeleted ? JSON.parse(rawDeleted) : [];
-      const valid = fetched.filter((s) => !deletedIds.includes(s.id));
-
-      // Merge with initial if not deleted
-      const existingIds = new Set(valid.map((s) => s.id));
-      INITIAL_SUPPLIERS.forEach((initS) => {
-        if (!existingIds.has(initS.id) && !deletedIds.includes(initS.id)) {
-          valid.push(initS);
-        }
-      });
-
-      safeSetLocalStorage('kenax_suppliers_cache', JSON.stringify(valid));
-      return valid;
-    }
+    const existingIds = new Set(fetched.map((s) => s.id));
+    INITIAL_SUPPLIERS.forEach((initS) => {
+      if (!existingIds.has(initS.id) && !deletedIds.has(initS.id)) {
+        fetched.push(initS);
+      }
+    });
+    return fetched;
   } catch (err) {
-    console.warn('[KenaX BD] getSuppliersFromDB Firestore fallback:', err);
+    console.warn('[KenaX BD] getSuppliersFromDB error:', err);
+    return [];
   }
-
-  // Fallback to cache or initial
-  try {
-    const cached = localStorage.getItem('kenax_suppliers_cache');
-    if (cached) {
-      const list: Supplier[] = JSON.parse(cached);
-      const rawDeleted = localStorage.getItem('kenax_deleted_supplier_ids');
-      const deletedIds: string[] = rawDeleted ? JSON.parse(rawDeleted) : [];
-      return list.filter((s) => !deletedIds.includes(s.id));
-    }
-  } catch (e) {}
-
-  return [...INITIAL_SUPPLIERS];
 }
 
 export async function saveSupplierToDB(supplier: Supplier): Promise<void> {
   const cleaned = cleanFirestoreData(supplier);
   try {
-    await setDoc(doc(db, 'suppliers', supplier.id), cleaned, { merge: true });
-    await deleteDoc(doc(db, 'deletedSuppliers', supplier.id));
+    await setDoc(doc(db, 'suppliers', supplier.id), { ...cleaned, updatedAtServer: serverTimestamp() }, { merge: true });
+    await deleteDoc(doc(db, 'deletedSuppliers', supplier.id)).catch(() => {});
   } catch (err) {
-    console.warn('[KenaX BD] Firestore saveSupplierToDB fallback:', err);
-  }
-
-  try {
-    const rawDeleted = localStorage.getItem('kenax_deleted_supplier_ids');
-    if (rawDeleted) {
-      const deletedList: string[] = JSON.parse(rawDeleted);
-      const filtered = deletedList.filter((id) => id !== supplier.id);
-      safeSetLocalStorage('kenax_deleted_supplier_ids', JSON.stringify(filtered));
-    }
-
-    const cached = localStorage.getItem('kenax_suppliers_cache');
-    let list: Supplier[] = cached ? JSON.parse(cached) : [...INITIAL_SUPPLIERS];
-    const idx = list.findIndex((s) => s.id === supplier.id);
-    if (idx >= 0) {
-      list[idx] = supplier;
-    } else {
-      list.unshift(supplier);
-    }
-    safeSetLocalStorage('kenax_suppliers_cache', JSON.stringify(list));
-  } catch (e) {
-    console.warn('[KenaX BD] saveSupplierToDB local cache error:', e);
+    handleFirestoreError(err, OperationType.WRITE, `suppliers/${supplier.id}`);
   }
 }
 
@@ -3957,26 +3729,11 @@ export async function deleteSupplierFromDB(supplierId: string): Promise<void> {
     await deleteDoc(doc(db, 'suppliers', supplierId));
     await setDoc(doc(db, 'deletedSuppliers', supplierId), {
       deletedAt: new Date().toISOString(),
+      deletedAtServer: serverTimestamp(),
     });
   } catch (err) {
-    console.warn('[KenaX BD] Firestore deleteSupplierFromDB fallback:', err);
+    handleFirestoreError(err, OperationType.DELETE, `suppliers/${supplierId}`);
   }
-
-  try {
-    const rawDeleted = localStorage.getItem('kenax_deleted_supplier_ids');
-    const deletedList: string[] = rawDeleted ? JSON.parse(rawDeleted) : [];
-    if (!deletedList.includes(supplierId)) {
-      deletedList.push(supplierId);
-      safeSetLocalStorage('kenax_deleted_supplier_ids', JSON.stringify(deletedList));
-    }
-
-    const cached = localStorage.getItem('kenax_suppliers_cache');
-    if (cached) {
-      const list: Supplier[] = JSON.parse(cached);
-      const filtered = list.filter((s) => s.id !== supplierId);
-      safeSetLocalStorage('kenax_suppliers_cache', JSON.stringify(filtered));
-    }
-  } catch (e) {}
 }
 
 export function subscribeToSuppliers(callback: (suppliers: Supplier[]) => void): Unsubscribe {
@@ -3984,103 +3741,72 @@ export function subscribeToSuppliers(callback: (suppliers: Supplier[]) => void):
     const q = collection(db, 'suppliers');
     return onSnapshot(
       q,
-      (snap) => {
-        const rawDeleted = localStorage.getItem('kenax_deleted_supplier_ids');
-        const deletedIds: string[] = rawDeleted ? JSON.parse(rawDeleted) : [];
-        const fetched = snap.docs.map((d) => ({ ...d.data(), id: d.id } as Supplier));
-        const valid = fetched.filter((s) => !deletedIds.includes(s.id));
+      async (snap) => {
+        const deletedIds = await getDeletedSupplierIdsFromFirestore();
+        const fetched = snap.docs
+          .map((d) => ({ ...d.data(), id: d.id } as Supplier))
+          .filter((s) => !deletedIds.has(s.id));
 
-        const existingIds = new Set(valid.map((s) => s.id));
+        const existingIds = new Set(fetched.map((s) => s.id));
         INITIAL_SUPPLIERS.forEach((initS) => {
-          if (!existingIds.has(initS.id) && !deletedIds.includes(initS.id)) {
-            valid.push(initS);
+          if (!existingIds.has(initS.id) && !deletedIds.has(initS.id)) {
+            fetched.push(initS);
           }
         });
-
-        safeSetLocalStorage('kenax_suppliers_cache', JSON.stringify(valid));
-        callback(valid);
+        callback(fetched);
       },
       (err) => {
         console.warn('[KenaX BD] subscribeToSuppliers listener warning:', err);
-        getSuppliersFromDB().then(callback);
       }
     );
   } catch (e) {
     console.warn('[KenaX BD] subscribeToSuppliers setup error:', e);
-    getSuppliersFromDB().then(callback);
     return () => {};
   }
 }
 
 // ==========================================
-// SOURCING LOCATIONS & WHOLESALERS (ON STOCK)
+// SOURCING LOCATIONS & WHOLESALERS (Cloud Firestore Single Source of Truth)
 // ==========================================
+async function getDeletedSourcingLocationIdsFromFirestore(): Promise<Set<string>> {
+  const deleted = new Set<string>();
+  try {
+    const delSnap = await getDocs(collection(db, 'deletedSourcingLocations'));
+    delSnap.forEach((d) => deleted.add(d.id));
+  } catch {}
+  return deleted;
+}
+
 export async function getSourcingLocationsFromDB(): Promise<SourcingLocation[]> {
   try {
-    const snap = await getDocs(collection(db, 'sourcingLocations'));
-    if (!snap.empty) {
-      const fetched = snap.docs.map((d) => ({ ...d.data(), id: d.id } as SourcingLocation));
+    const [snap, deletedIds] = await Promise.all([
+      getDocs(collection(db, 'sourcingLocations')),
+      getDeletedSourcingLocationIdsFromFirestore(),
+    ]);
+    const fetched = snap.docs
+      .map((d) => ({ ...d.data(), id: d.id } as SourcingLocation))
+      .filter((s) => !deletedIds.has(s.id));
 
-      const rawDeleted = localStorage.getItem('kenax_deleted_sourcing_location_ids');
-      const deletedIds: string[] = rawDeleted ? JSON.parse(rawDeleted) : [];
-      const valid = fetched.filter((s) => !deletedIds.includes(s.id));
-
-      const existingIds = new Set(valid.map((s) => s.id));
-      INITIAL_SOURCING_LOCATIONS.forEach((initLoc) => {
-        if (!existingIds.has(initLoc.id) && !deletedIds.includes(initLoc.id)) {
-          valid.push(initLoc);
-        }
-      });
-
-      safeSetLocalStorage('kenax_sourcing_locations_cache', JSON.stringify(valid));
-      return valid;
-    }
+    const existingIds = new Set(fetched.map((s) => s.id));
+    INITIAL_SOURCING_LOCATIONS.forEach((initLoc) => {
+      if (!existingIds.has(initLoc.id) && !deletedIds.has(initLoc.id)) {
+        fetched.push(initLoc);
+      }
+    });
+    return fetched;
   } catch (err) {
-    console.warn('[KenaX BD] getSourcingLocationsFromDB Firestore fallback:', err);
+    console.warn('[KenaX BD] getSourcingLocationsFromDB error:', err);
+    return [];
   }
-
-  // Fallback to cache or initial
-  try {
-    const cached = localStorage.getItem('kenax_sourcing_locations_cache');
-    if (cached) {
-      const list: SourcingLocation[] = JSON.parse(cached);
-      const rawDeleted = localStorage.getItem('kenax_deleted_sourcing_location_ids');
-      const deletedIds: string[] = rawDeleted ? JSON.parse(rawDeleted) : [];
-      return list.filter((s) => !deletedIds.includes(s.id));
-    }
-  } catch (e) {}
-
-  return [...INITIAL_SOURCING_LOCATIONS];
 }
 
 export async function saveSourcingLocationToDB(location: SourcingLocation): Promise<void> {
   const cleaned = cleanFirestoreData(location);
   try {
-    await setDoc(doc(db, 'sourcingLocations', location.id), cleaned, { merge: true });
-    await deleteDoc(doc(db, 'deletedSourcingLocations', location.id));
+    await setDoc(doc(db, 'sourcingLocations', location.id), { ...cleaned, updatedAtServer: serverTimestamp() }, { merge: true });
+    await deleteDoc(doc(db, 'deletedSourcingLocations', location.id)).catch(() => {});
   } catch (err) {
-    console.warn('[KenaX BD] Firestore saveSourcingLocationToDB fallback:', err);
-  }
-
-  try {
-    const rawDeleted = localStorage.getItem('kenax_deleted_sourcing_location_ids');
-    if (rawDeleted) {
-      const deletedList: string[] = JSON.parse(rawDeleted);
-      const filtered = deletedList.filter((id) => id !== location.id);
-      safeSetLocalStorage('kenax_deleted_sourcing_location_ids', JSON.stringify(filtered));
-    }
-
-    const cached = localStorage.getItem('kenax_sourcing_locations_cache');
-    let list: SourcingLocation[] = cached ? JSON.parse(cached) : [...INITIAL_SOURCING_LOCATIONS];
-    const idx = list.findIndex((s) => s.id === location.id);
-    if (idx >= 0) {
-      list[idx] = location;
-    } else {
-      list.unshift(location);
-    }
-    safeSetLocalStorage('kenax_sourcing_locations_cache', JSON.stringify(list));
-  } catch (e) {
-    console.warn('[KenaX BD] saveSourcingLocationToDB local cache error:', e);
+    handleFirestoreError(err, OperationType.WRITE, `sourcingLocations/${location.id}`);
   }
 }
 
@@ -4093,26 +3819,11 @@ export async function deleteSourcingLocationFromDB(locationId: string): Promise<
     await deleteDoc(doc(db, 'sourcingLocations', locationId));
     await setDoc(doc(db, 'deletedSourcingLocations', locationId), {
       deletedAt: new Date().toISOString(),
+      deletedAtServer: serverTimestamp(),
     });
   } catch (err) {
-    console.warn('[KenaX BD] Firestore deleteSourcingLocationFromDB fallback:', err);
+    handleFirestoreError(err, OperationType.DELETE, `sourcingLocations/${locationId}`);
   }
-
-  try {
-    const rawDeleted = localStorage.getItem('kenax_deleted_sourcing_location_ids');
-    const deletedList: string[] = rawDeleted ? JSON.parse(rawDeleted) : [];
-    if (!deletedList.includes(locationId)) {
-      deletedList.push(locationId);
-      safeSetLocalStorage('kenax_deleted_sourcing_location_ids', JSON.stringify(deletedList));
-    }
-
-    const cached = localStorage.getItem('kenax_sourcing_locations_cache');
-    if (cached) {
-      const list: SourcingLocation[] = JSON.parse(cached);
-      const filtered = list.filter((s) => s.id !== locationId);
-      safeSetLocalStorage('kenax_sourcing_locations_cache', JSON.stringify(filtered));
-    }
-  } catch (e) {}
 }
 
 export function subscribeToSourcingLocations(callback: (locations: SourcingLocation[]) => void): Unsubscribe {
@@ -4120,40 +3831,33 @@ export function subscribeToSourcingLocations(callback: (locations: SourcingLocat
     const q = collection(db, 'sourcingLocations');
     return onSnapshot(
       q,
-      (snap) => {
-        const rawDeleted = localStorage.getItem('kenax_deleted_sourcing_location_ids');
-        const deletedIds: string[] = rawDeleted ? JSON.parse(rawDeleted) : [];
-        const fetched = snap.docs.map((d) => ({ ...d.data(), id: d.id } as SourcingLocation));
-        const valid = fetched.filter((s) => !deletedIds.includes(s.id));
+      async (snap) => {
+        const deletedIds = await getDeletedSourcingLocationIdsFromFirestore();
+        const fetched = snap.docs
+          .map((d) => ({ ...d.data(), id: d.id } as SourcingLocation))
+          .filter((s) => !deletedIds.has(s.id));
 
-        const existingIds = new Set(valid.map((s) => s.id));
+        const existingIds = new Set(fetched.map((s) => s.id));
         INITIAL_SOURCING_LOCATIONS.forEach((initLoc) => {
-          if (!existingIds.has(initLoc.id) && !deletedIds.includes(initLoc.id)) {
-            valid.push(initLoc);
+          if (!existingIds.has(initLoc.id) && !deletedIds.has(initLoc.id)) {
+            fetched.push(initLoc);
           }
         });
-
-        safeSetLocalStorage('kenax_sourcing_locations_cache', JSON.stringify(valid));
-        callback(valid);
+        callback(fetched);
       },
       (err) => {
         console.warn('[KenaX BD] subscribeToSourcingLocations listener warning:', err);
-        getSourcingLocationsFromDB().then(callback);
       }
     );
   } catch (e) {
     console.warn('[KenaX BD] subscribeToSourcingLocations setup error:', e);
-    getSourcingLocationsFromDB().then(callback);
     return () => {};
   }
 }
 
 // ----------------------------------------------------
-// Newsletter Subscribers (Footer Email Signups)
+// Newsletter Subscribers (Cloud Firestore Single Source of Truth)
 // ----------------------------------------------------
-
-const NEWSLETTER_CACHE_KEY = 'kenax_newsletter_subscribers_cache';
-
 export async function saveNewsletterSubscriber(
   email: string,
   source: string = 'footer'
@@ -4175,61 +3879,38 @@ export async function saveNewsletterSubscriber(
   };
 
   try {
-    const colRef = collection(db, 'newsletter_subscribers');
-    await setDoc(doc(colRef, subId), subscriber);
+    await setDoc(doc(db, 'newsletter_subscribers', subId), {
+      ...subscriber,
+      subscribedAtServer: serverTimestamp(),
+    });
+    return { success: true, message: 'ধন্যবাদ! আপনি সফলভাবে সাবস্ক্রাইব করেছেন।', subscriber };
   } catch (err) {
-    console.warn('[KenaX BD] Firestore saveNewsletterSubscriber error, fallback to cache:', err);
+    console.warn('[KenaX BD] Firestore saveNewsletterSubscriber error:', err);
+    return { success: false, message: 'সাবস্ক্রাইব করতে সমস্যা হয়েছে। আবার চেষ্টা করুন।' };
   }
-
-  // Update local cache
-  try {
-    const raw = localStorage.getItem(NEWSLETTER_CACHE_KEY);
-    const list: NewsletterSubscriber[] = raw ? JSON.parse(raw) : [];
-    const updated = [subscriber, ...list.filter((s) => s.id !== subId)];
-    safeSetLocalStorage(NEWSLETTER_CACHE_KEY, JSON.stringify(updated));
-  } catch {}
-
-  return { success: true, message: 'ধন্যবাদ! আপনি সফলভাবে সাবস্ক্রাইব করেছেন।', subscriber };
 }
 
 export async function deleteNewsletterSubscriber(subscriberId: string): Promise<boolean> {
   try {
-    const docRef = doc(db, 'newsletter_subscribers', subscriberId);
-    await deleteDoc(docRef);
+    await deleteDoc(doc(db, 'newsletter_subscribers', subscriberId));
+    return true;
   } catch (err) {
     console.warn('[KenaX BD] deleteNewsletterSubscriber error:', err);
+    return false;
   }
-
-  try {
-    const raw = localStorage.getItem(NEWSLETTER_CACHE_KEY);
-    if (raw) {
-      const list: NewsletterSubscriber[] = JSON.parse(raw);
-      const updated = list.filter((s) => s.id !== subscriberId);
-      safeSetLocalStorage(NEWSLETTER_CACHE_KEY, JSON.stringify(updated));
-    }
-  } catch {}
-  return true;
 }
 
 export async function getNewsletterSubscribersFromDB(): Promise<NewsletterSubscriber[]> {
   try {
     const colRef = collection(db, 'newsletter_subscribers');
     const snap = await getDocs(colRef);
-    if (!snap.empty) {
-      const items = snap.docs.map((d) => ({ ...d.data(), id: d.id } as NewsletterSubscriber));
-      items.sort((a, b) => new Date(b.subscribedAt || 0).getTime() - new Date(a.subscribedAt || 0).getTime());
-      safeSetLocalStorage(NEWSLETTER_CACHE_KEY, JSON.stringify(items));
-      return items;
-    }
+    const items = snap.docs.map((d) => ({ ...d.data(), id: d.id } as NewsletterSubscriber));
+    items.sort((a, b) => new Date(b.subscribedAt || 0).getTime() - new Date(a.subscribedAt || 0).getTime());
+    return items;
   } catch (err) {
-    console.warn('[KenaX BD] getNewsletterSubscribersFromDB error, fallback to cache:', err);
+    console.warn('[KenaX BD] getNewsletterSubscribersFromDB error:', err);
+    return [];
   }
-
-  try {
-    const raw = localStorage.getItem(NEWSLETTER_CACHE_KEY);
-    if (raw) return JSON.parse(raw);
-  } catch {}
-  return [];
 }
 
 export function subscribeToNewsletterSubscribers(callback: (subs: NewsletterSubscriber[]) => void): Unsubscribe {
@@ -4240,17 +3921,14 @@ export function subscribeToNewsletterSubscribers(callback: (subs: NewsletterSubs
       (snap) => {
         const items = snap.docs.map((d) => ({ ...d.data(), id: d.id } as NewsletterSubscriber));
         items.sort((a, b) => new Date(b.subscribedAt || 0).getTime() - new Date(a.subscribedAt || 0).getTime());
-        safeSetLocalStorage(NEWSLETTER_CACHE_KEY, JSON.stringify(items));
         callback(items);
       },
       (err) => {
         console.warn('[KenaX BD] subscribeToNewsletterSubscribers snapshot error:', err);
-        getNewsletterSubscribersFromDB().then(callback);
       }
     );
   } catch (err) {
     console.warn('[KenaX BD] subscribeToNewsletterSubscribers setup error:', err);
-    getNewsletterSubscribersFromDB().then(callback);
     return () => {};
   }
 }

@@ -18,20 +18,24 @@ const { getAuth } = require("firebase-admin/auth");
 
 const SECRET_COLLECTION = "integration_secrets";
 const SECRET_DOC_ID = "muse_connector";
+const STAFF_CREDENTIALS_COLLECTION = "staff_credentials";
 const DEFAULT_LOW_STOCK_THRESHOLD = 5;
-
-const BUILTIN_SUPER_ADMIN_EMAILS = new Set([
-  "sadikrtx3060@gmail.com",
-  "super@kenaxbd.com",
-  "super@gmail.com",
-]);
+const SCRYPT_PREFIX = "scrypt:";
+const LEGACY_SHA256_PREFIX = "sha256:";
+const LEGACY_SHA256_NAMESPACE = "kenaxbd-staff-v1:";
+const SCRYPT_KEYLEN = 64;
+const SCRYPT_OPTIONS = { N: 16384, r: 8, p: 1 };
+const ALLOWED_STAFF_ROLES = new Set(["super_admin", "admin", "manager", "moderator"]);
 
 function getAdminApp() {
   return getApps().length ? getApp() : initializeApp();
 }
 
+const FIRESTORE_DATABASE_ID =
+  process.env.FIRESTORE_DATABASE_ID || "ai-studio-kenaxbd-db227bcd-db17-47e7-9023-bbf12ea50418";
+
 function getDb() {
-  return getFirestore(getAdminApp());
+  return getFirestore(getAdminApp(), FIRESTORE_DATABASE_ID);
 }
 
 function hashApiKey(rawKey) {
@@ -48,6 +52,97 @@ function safeCompareHashHex(expectedHex, candidateHex) {
   } catch {
     return false;
   }
+}
+
+function isScryptHash(value) {
+  return Boolean(value && /^scrypt:[a-f0-9]{32}:[a-f0-9]{128}$/i.test(String(value).trim()));
+}
+
+function hashPasswordScrypt(plainPassword) {
+  const pwd = String(plainPassword ?? "");
+  if (!pwd) throw new Error("Password cannot be empty.");
+  const salt = crypto.randomBytes(16).toString("hex");
+  const derived = crypto.scryptSync(pwd, salt, SCRYPT_KEYLEN, SCRYPT_OPTIONS).toString("hex");
+  return `${SCRYPT_PREFIX}${salt}:${derived}`;
+}
+
+function verifyStaffPasswordServer(plainPassword, storedHash, legacyPlaintext) {
+  const candidate = String(plainPassword ?? "");
+  if (!candidate) return { valid: false, needsUpgrade: false };
+  const trimmed = String(storedHash || "").trim();
+
+  if (isScryptHash(trimmed)) {
+    const parts = trimmed.slice(SCRYPT_PREFIX.length).split(":");
+    if (parts.length !== 2) return { valid: false, needsUpgrade: false };
+    const [saltHex, expectedKeyHex] = parts;
+    const derivedHex = crypto.scryptSync(candidate, saltHex, SCRYPT_KEYLEN, SCRYPT_OPTIONS).toString("hex");
+    return { valid: safeCompareHashHex(expectedKeyHex, derivedHex), needsUpgrade: false };
+  }
+
+  if (trimmed.toLowerCase().startsWith(LEGACY_SHA256_PREFIX)) {
+    const expectedSha = trimmed.slice(LEGACY_SHA256_PREFIX.length).toLowerCase();
+    const candidateSha = crypto
+      .createHash("sha256")
+      .update(`${LEGACY_SHA256_NAMESPACE}${candidate}`, "utf8")
+      .digest("hex");
+    const valid = safeCompareHashHex(expectedSha, candidateSha);
+    return { valid, needsUpgrade: valid };
+  }
+
+  if (typeof legacyPlaintext === "string" && legacyPlaintext.length > 0) {
+    const a = Buffer.from(legacyPlaintext, "utf8");
+    const b = Buffer.from(candidate, "utf8");
+    const valid = a.length === b.length && crypto.timingSafeEqual(a, b);
+    return { valid, needsUpgrade: valid };
+  }
+
+  return { valid: false, needsUpgrade: false };
+}
+
+function sanitizeStaffDoc(staff) {
+  if (!staff) return null;
+  const copy = { ...staff };
+  delete copy.password;
+  delete copy.passwordHash;
+  return copy;
+}
+
+function normalizePhoneDigits(phone) {
+  const digits = String(phone || "").replace(/\D/g, "");
+  if (digits.startsWith("880") && digits.length === 13) return digits.slice(2);
+  return digits;
+}
+
+function isStaffRecordActive(staff) {
+  if (!staff) return false;
+  if (staff.isRemoved) return false;
+  if (staff.isActive === false) return false;
+  if (String(staff.status || "").toLowerCase() === "suspended") return false;
+  if (!ALLOWED_STAFF_ROLES.has(String(staff.role || "").toLowerCase())) return false;
+  return true;
+}
+
+function deduplicateOrdersById(orders = []) {
+  const map = new Map();
+  for (const order of orders) {
+    if (!order) continue;
+    const id = String(order.id || "").trim();
+    if (!id) {
+      map.set(`__anon_${map.size}`, order);
+      continue;
+    }
+    const existing = map.get(id);
+    if (!existing) {
+      map.set(id, order);
+    } else {
+      const existingTime = Date.parse(existing.updatedAt || existing.createdAt || "") || 0;
+      const incomingTime = Date.parse(order.updatedAt || order.createdAt || "") || 0;
+      if (incomingTime >= existingTime) {
+        map.set(id, order);
+      }
+    }
+  }
+  return Array.from(map.values());
 }
 
 // ============================================================================
@@ -209,7 +304,8 @@ function getOrderPendingCODAmount(order) {
   return Math.max(0, total - paid);
 }
 
-function computeStoreSalesSummary(orders = [], products = []) {
+function computeStoreSalesSummary(rawOrders = [], products = []) {
+  const orders = deduplicateOrdersById(rawOrders);
   const ordersByStatus = {
     all: orders.length,
     pending: 0,
@@ -234,6 +330,7 @@ function computeStoreSalesSummary(orders = [], products = []) {
   let pendingCOD = 0;
   let pendingCODOrdersCount = 0;
   let validOrdersCount = 0;
+  let returnedRevenueLoss = 0;
 
   const salesByPaymentMethod = {};
   const salesByChannel = {};
@@ -244,6 +341,10 @@ function computeStoreSalesSummary(orders = [], products = []) {
     ordersByStatus[bucket] = (ordersByStatus[bucket] || 0) + 1;
 
     if (bucket === "cancelled" || bucket === "spam") {
+      continue;
+    }
+    if (bucket === "returned" || bucket === "failed_delivery") {
+      returnedRevenueLoss += Number(order.totalAmount ?? order.total ?? 0) || 0;
       continue;
     }
 
@@ -315,6 +416,9 @@ function computeStoreSalesSummary(orders = [], products = []) {
     validOrdersCount,
     cancelledOrdersCount: ordersByStatus.cancelled,
     spamOrdersCount: ordersByStatus.spam,
+    returnedOrdersCount: ordersByStatus.returned,
+    failedDeliveryOrdersCount: ordersByStatus.failed_delivery,
+    returnedRevenueLoss,
     grossSales,
     netProductSales,
     deliveryCollected,
@@ -330,7 +434,8 @@ function computeStoreSalesSummary(orders = [], products = []) {
   };
 }
 
-function computeInventoryMetrics(products = [], orders = [], lowStockThreshold = DEFAULT_LOW_STOCK_THRESHOLD) {
+function computeInventoryMetrics(products = [], rawOrders = [], lowStockThreshold = DEFAULT_LOW_STOCK_THRESHOLD) {
+  const orders = deduplicateOrdersById(rawOrders);
   const threshold = Math.max(0, Number.isFinite(lowStockThreshold) ? lowStockThreshold : DEFAULT_LOW_STOCK_THRESHOLD);
   const statsMap = new Map();
 
@@ -546,12 +651,90 @@ function createFirestoreDataAdapter(db) {
       });
       return list;
     },
-    async verifyIdToken(token) {
+    async getStaffCredential(staffId) {
+      const snap = await db.collection(STAFF_CREDENTIALS_COLLECTION).doc(staffId).get();
+      return snap.exists ? snap.data() || null : null;
+    },
+    async saveStaffCredential(staffId, data) {
+      await db.collection(STAFF_CREDENTIALS_COLLECTION).doc(staffId).set(data, { merge: true });
+    },
+    async deleteStaffCredential(staffId) {
+      await db.collection(STAFF_CREDENTIALS_COLLECTION).doc(staffId).delete().catch(() => {});
+    },
+    async saveStaffDoc(staffId, data) {
+      const { FieldValue } = require("firebase-admin/firestore");
+      const clean = sanitizeStaffDoc(data);
+      await db.collection("staff").doc(staffId).set(
+        {
+          ...clean,
+          password: FieldValue.delete(),
+          passwordHash: FieldValue.delete(),
+        },
+        { merge: true }
+      );
+      await db.collection("deletedStaff").doc(staffId).delete().catch(() => {});
+      return clean;
+    },
+    async deleteStaffDoc(staffId, email) {
+      await db.collection("staff").doc(staffId).delete();
+      await db.collection(STAFF_CREDENTIALS_COLLECTION).doc(staffId).delete().catch(() => {});
+      await db.collection("deletedStaff").doc(staffId).set({
+        id: staffId,
+        email: String(email || "").trim().toLowerCase(),
+        deletedAt: new Date().toISOString(),
+      });
+    },
+    async verifyIdToken(token, checkRevoked = true) {
       try {
-        return await getAuth(getAdminApp()).verifyIdToken(token);
+        return await getAuth(getAdminApp()).verifyIdToken(token, checkRevoked);
       } catch {
         return null;
       }
+    },
+    async syncFirebaseStaffUser({ uid, email, displayName, password, disabled, claims }) {
+      const adminAuth = getAuth(getAdminApp());
+      let userRecord = null;
+      if (uid) {
+        try {
+          userRecord = await adminAuth.getUser(uid);
+        } catch {}
+      }
+      if (!userRecord && email) {
+        try {
+          userRecord = await adminAuth.getUserByEmail(email);
+        } catch {}
+      }
+      if (!userRecord) {
+        userRecord = await adminAuth.createUser({
+          email,
+          displayName: displayName || "Staff",
+          emailVerified: true,
+          disabled: Boolean(disabled),
+          ...(password && password.length >= 6 ? { password } : {}),
+        });
+      } else {
+        const updatePayload = {};
+        if (email && userRecord.email !== email) updatePayload.email = email;
+        if (displayName && userRecord.displayName !== displayName) updatePayload.displayName = displayName;
+        if (typeof disabled === "boolean") updatePayload.disabled = disabled;
+        if (password && password.length >= 6) updatePayload.password = password;
+        if (Object.keys(updatePayload).length > 0) {
+          userRecord = await adminAuth.updateUser(userRecord.uid, updatePayload);
+        }
+      }
+      if (claims) {
+        await adminAuth.setCustomUserClaims(userRecord.uid, claims);
+      }
+      return userRecord.uid;
+    },
+    async createCustomToken(uid, claims) {
+      return await getAuth(getAdminApp()).createCustomToken(uid, claims);
+    },
+    async revokeUserRefreshTokens(uid) {
+      if (!uid) return;
+      try {
+        await getAuth(getAdminApp()).revokeRefreshTokens(uid);
+      } catch {}
     },
   };
 }
@@ -635,90 +818,122 @@ function createIntegrationApp(adapterOverride) {
   });
 
   // --------------------------------------------------------------------------
-  // Middleware 1: Strict Super Admin Authentication (for /admin/* endpoints)
+  // Middleware 1: Strict Cryptographic Staff Auth & RBAC (ZERO Client Header Trust)
   // --------------------------------------------------------------------------
-  async function requireSuperAdmin(req, res, next) {
+  async function verifyAuthenticatedStaff(req, res, next) {
     try {
       const adapter = getAdapter();
-      const headerRole = String(req.headers["x-staff-role"] || req.body?.actorRole || "").trim().toLowerCase();
-      let callerEmail = String(req.headers["x-staff-email"] || req.body?.actorEmail || "").trim().toLowerCase();
-      const callerId = String(req.headers["x-staff-id"] || req.body?.actorId || "").trim();
-
-      // If Firebase Auth ID token is supplied, verify it server-side and trust its email
-      const authHeader = String(req.headers.authorization || "");
-      if (authHeader.startsWith("Bearer ")) {
-        const token = authHeader.slice(7).trim();
-        if (token) {
-          const decoded = await adapter.verifyIdToken(token);
-          if (decoded && decoded.email) {
-            callerEmail = String(decoded.email).trim().toLowerCase();
-          }
-        }
-      }
-
-      if (headerRole !== "super_admin") {
-        return res.status(403).json({
-          ok: false,
-          error: "forbidden_super_admin_only",
-          message: "Integration settings are restricted exclusively to Super Admin.",
-          now: new Date().toISOString(),
-        });
-      }
-
-      if (!callerEmail && !callerId) {
+      const authHeader = String(req.headers.authorization || "").trim();
+      if (!authHeader.startsWith("Bearer ")) {
         return res.status(401).json({
           ok: false,
-          error: "unauthenticated_admin",
-          message: "Missing authenticated Super Admin identity.",
+          error: "missing_authorization_token",
+          message: "Authentication required: missing Authorization Bearer ID token.",
           now: new Date().toISOString(),
         });
       }
 
-      // Server-side verification against Firestore `staff` collection
+      const rawToken = authHeader.slice(7).trim();
+      if (!rawToken || rawToken.length < 20) {
+        return res.status(401).json({
+          ok: false,
+          error: "invalid_authorization_token",
+          message: "Authentication failed: invalid Authorization Bearer token.",
+          now: new Date().toISOString(),
+        });
+      }
+
+      const decoded = await adapter.verifyIdToken(rawToken, true);
+      if (!decoded || !decoded.uid) {
+        return res.status(401).json({
+          ok: false,
+          error: "invalid_or_revoked_token",
+          message: "Authentication failed: Firebase ID token is invalid, expired, or revoked.",
+          now: new Date().toISOString(),
+        });
+      }
+
+      const tokenUid = String(decoded.uid || "").trim();
+      const tokenEmail = String(decoded.email || "").trim().toLowerCase();
+      const tokenStaffId = String(decoded.staffId || "").trim();
+
+      // Re-verify caller against live Firestore `staff` collection on every request
       const staffList = await adapter.getAllStaff();
       const matched = staffList.find((s) => {
-        const sEmail = String(s?.email || "").trim().toLowerCase();
         const sId = String(s?.id || "").trim();
-        return (callerEmail && sEmail === callerEmail) || (callerId && sId === callerId);
+        const sUid = String(s?.firebaseUid || "").trim();
+        const sEmail = String(s?.email || "").trim().toLowerCase();
+        return (
+          (tokenStaffId && sId === tokenStaffId) ||
+          (tokenUid && sUid && sUid === tokenUid) ||
+          (tokenEmail && sEmail && sEmail === tokenEmail)
+        );
       });
 
-      if (matched) {
-        const isActiveSuperAdmin =
-          String(matched.role || "").toLowerCase() === "super_admin" &&
-          matched.isActive !== false &&
-          matched.status !== "suspended" &&
-          !matched.isRemoved;
-
-        if (!isActiveSuperAdmin) {
-          return res.status(403).json({
-            ok: false,
-            error: "forbidden_super_admin_only",
-            message: "Account does not have active Super Admin privileges.",
-            now: new Date().toISOString(),
-          });
-        }
-      } else if (!BUILTIN_SUPER_ADMIN_EMAILS.has(callerEmail)) {
+      if (!matched) {
         return res.status(403).json({
           ok: false,
-          error: "forbidden_super_admin_only",
-          message: "Unrecognized Super Admin account.",
+          error: "staff_not_found",
+          message: "Forbidden: authenticated user is not a registered staff member.",
           now: new Date().toISOString(),
         });
       }
 
-      req.superAdminActor = {
-        name: String(req.headers["x-staff-name"] || req.body?.actorName || matched?.name || "Super Admin"),
-        email: callerEmail || matched?.email || "",
+      if (!isStaffRecordActive(matched)) {
+        return res.status(403).json({
+          ok: false,
+          error: "staff_inactive_or_suspended",
+          message: "Forbidden: staff account is inactive, suspended, or removed.",
+          now: new Date().toISOString(),
+        });
+      }
+
+      // If Firebase UID is bound on the staff record, require strict UID match
+      if (matched.firebaseUid && String(matched.firebaseUid).trim() !== tokenUid) {
+        return res.status(403).json({
+          ok: false,
+          error: "staff_uid_mismatch",
+          message: "Forbidden: token identity does not match staff account binding.",
+          now: new Date().toISOString(),
+        });
+      }
+
+      req.verifiedStaff = {
+        id: matched.id,
+        uid: tokenUid,
+        name: matched.name || "Staff",
+        email: String(matched.email || "").trim().toLowerCase(),
+        role: String(matched.role || "").trim().toLowerCase(),
+        permissions: Array.isArray(matched.permissions) ? matched.permissions : [],
       };
       return next();
     } catch (err) {
       return res.status(500).json({
         ok: false,
         error: "admin_auth_error",
-        message: err?.message || "Failed to verify Super Admin privileges.",
+        message: err?.message || "Failed to verify staff authentication.",
         now: new Date().toISOString(),
       });
     }
+  }
+
+  async function requireSuperAdmin(req, res, next) {
+    return verifyAuthenticatedStaff(req, res, () => {
+      if (req.verifiedStaff?.role !== "super_admin") {
+        return res.status(403).json({
+          ok: false,
+          error: "forbidden_super_admin_only",
+          message: "Forbidden: this endpoint is restricted exclusively to active Super Admin accounts.",
+          now: new Date().toISOString(),
+        });
+      }
+      req.superAdminActor = {
+        id: req.verifiedStaff.id,
+        name: req.verifiedStaff.name,
+        email: req.verifiedStaff.email,
+      };
+      return next();
+    });
   }
 
   // --------------------------------------------------------------------------
@@ -1331,6 +1546,618 @@ function createIntegrationApp(adapterOverride) {
     });
   });
 
+  // --------------------------------------------------------------------------
+  // Staff Authentication & Server-Verified RBAC Router (/api/staff-auth/*)
+  // --------------------------------------------------------------------------
+  const staffAuthRouter = express.Router();
+
+  // POST /api/staff-auth/login — Server-side salted scrypt verification + Firebase Custom Token with Custom Claims
+  staffAuthRouter.post("/login", async (req, res) => {
+    try {
+      const adapter = getAdapter();
+      const rawIdentifier = String(req.body?.identifier || "").trim().toLowerCase();
+      const plainPassword = String(req.body?.password || "");
+
+      if (!rawIdentifier || !plainPassword) {
+        return res.status(400).json({
+          ok: false,
+          error: "missing_credentials",
+          message: "Please enter both Email/Mobile and Password.",
+          now: new Date().toISOString(),
+        });
+      }
+
+      const cleanDigits = rawIdentifier.replace(/[\s\-\+\(\)]/g, "");
+      const normPhone = normalizePhoneDigits(rawIdentifier);
+      const staffList = await adapter.getAllStaff();
+
+      const matched = staffList.find((s) => {
+        const sEmail = String(s?.email || "").trim().toLowerCase();
+        const sPhoneDigits = String(s?.phone || "").replace(/[\s\-\+\(\)]/g, "").toLowerCase();
+        const sPhoneNorm = normalizePhoneDigits(s?.phone);
+        return (
+          (sEmail && sEmail === rawIdentifier) ||
+          (cleanDigits.length >= 7 && sPhoneDigits && sPhoneDigits === cleanDigits) ||
+          (normPhone.length >= 10 && sPhoneNorm && sPhoneNorm === normPhone)
+        );
+      });
+
+      if (!matched) {
+        return res.status(401).json({
+          ok: false,
+          error: "invalid_credentials",
+          message: "Invalid staff credentials. Access denied.",
+          now: new Date().toISOString(),
+        });
+      }
+
+      if (matched.isRemoved) {
+        return res.status(403).json({
+          ok: false,
+          error: "staff_removed",
+          message: "This staff account has been removed. Please contact Super Admin.",
+          now: new Date().toISOString(),
+        });
+      }
+
+      if (!isStaffRecordActive(matched)) {
+        return res.status(403).json({
+          ok: false,
+          error: "staff_suspended",
+          message: "Your staff account has been suspended by the Super Admin.",
+          now: new Date().toISOString(),
+        });
+      }
+
+      const credDoc = await adapter.getStaffCredential(matched.id);
+      const storedHash = credDoc?.passwordHash || matched.passwordHash || "";
+      const { valid, needsUpgrade } = verifyStaffPasswordServer(plainPassword, storedHash, matched.password);
+
+      if (!valid) {
+        return res.status(401).json({
+          ok: false,
+          error: "invalid_credentials",
+          message: "Invalid staff credentials. Access denied.",
+          now: new Date().toISOString(),
+        });
+      }
+
+      const nowIso = new Date().toISOString();
+      // Always upgrade legacy SHA-256 / plaintext credentials to salted scrypt in server-only `staff_credentials`
+      if (needsUpgrade || !credDoc?.passwordHash || !isScryptHash(credDoc.passwordHash)) {
+        await adapter.saveStaffCredential(matched.id, {
+          staffId: matched.id,
+          email: String(matched.email || "").trim().toLowerCase(),
+          passwordHash: hashPasswordScrypt(plainPassword),
+          updatedAt: nowIso,
+        });
+      }
+
+      const customClaims = {
+        role: String(matched.role || "").trim().toLowerCase(),
+        staffId: matched.id,
+        staffActive: true,
+      };
+
+      const firebaseUid = await adapter.syncFirebaseStaffUser({
+        uid: matched.firebaseUid,
+        email: String(matched.email || "").trim().toLowerCase(),
+        displayName: matched.name || "Staff",
+        password: plainPassword.length >= 6 ? plainPassword : undefined,
+        disabled: false,
+        claims: customClaims,
+      });
+
+      const updatedStaff = await adapter.saveStaffDoc(matched.id, {
+        ...sanitizeStaffDoc(matched),
+        firebaseUid,
+        lastLogin: nowIso,
+        updatedAt: nowIso,
+      });
+
+      const customToken = await adapter.createCustomToken(firebaseUid, customClaims);
+
+      return res.status(200).json({
+        ok: true,
+        customToken,
+        staff: sanitizeStaffDoc(updatedStaff),
+        now: nowIso,
+      });
+    } catch (err) {
+      return res.status(500).json({
+        ok: false,
+        error: "staff_login_failed",
+        message: err?.message || "Failed to authenticate staff.",
+        now: new Date().toISOString(),
+      });
+    }
+  });
+
+  // GET /api/staff-auth/me — Verify current Bearer ID token against live Firestore staff record
+  staffAuthRouter.get("/me", verifyAuthenticatedStaff, async (req, res) => {
+    try {
+      const adapter = getAdapter();
+      const staffList = await adapter.getAllStaff();
+      const current = staffList.find((s) => s.id === req.verifiedStaff.id);
+      if (!current || !isStaffRecordActive(current)) {
+        return res.status(403).json({
+          ok: false,
+          error: "staff_inactive_or_suspended",
+          message: "Staff account is no longer active.",
+          now: new Date().toISOString(),
+        });
+      }
+      return res.status(200).json({
+        ok: true,
+        staff: sanitizeStaffDoc(current),
+        now: new Date().toISOString(),
+      });
+    } catch (err) {
+      return res.status(500).json({
+        ok: false,
+        error: "session_check_failed",
+        message: err?.message || "Failed to verify staff session.",
+        now: new Date().toISOString(),
+      });
+    }
+  });
+
+  // GET /api/staff-auth/staff — Super Admin ONLY (returns sanitized records, NEVER password hashes)
+  staffAuthRouter.get("/staff", requireSuperAdmin, async (_req, res) => {
+    try {
+      const adapter = getAdapter();
+      const list = (await adapter.getAllStaff()).map(sanitizeStaffDoc);
+      return res.status(200).json({
+        ok: true,
+        staff: list,
+        now: new Date().toISOString(),
+      });
+    } catch (err) {
+      return res.status(500).json({
+        ok: false,
+        error: "staff_list_failed",
+        message: err?.message || "Failed to list staff.",
+        now: new Date().toISOString(),
+      });
+    }
+  });
+
+  // POST /api/staff-auth/staff — Create Staff (Super Admin ONLY)
+  staffAuthRouter.post("/staff", requireSuperAdmin, async (req, res) => {
+    try {
+      const adapter = getAdapter();
+      const payload = req.body || {};
+      const email = String(payload.email || "").trim().toLowerCase();
+      const name = String(payload.name || "").trim();
+      const role = String(payload.role || "moderator").trim().toLowerCase();
+      const plainPassword = String(payload.password || "").trim();
+
+      if (!name || !email) {
+        return res.status(400).json({
+          ok: false,
+          error: "invalid_staff_payload",
+          message: "Staff name and email are required.",
+          now: new Date().toISOString(),
+        });
+      }
+      if (!ALLOWED_STAFF_ROLES.has(role)) {
+        return res.status(400).json({
+          ok: false,
+          error: "invalid_staff_role",
+          message: `Invalid staff role "${role}".`,
+          now: new Date().toISOString(),
+        });
+      }
+      if (plainPassword.length < 6) {
+        return res.status(400).json({
+          ok: false,
+          error: "weak_password",
+          message: "Password must be at least 6 characters.",
+          now: new Date().toISOString(),
+        });
+      }
+
+      const existingStaff = await adapter.getAllStaff();
+      if (existingStaff.some((s) => String(s.email || "").trim().toLowerCase() === email && !s.isRemoved)) {
+        return res.status(409).json({
+          ok: false,
+          error: "staff_email_exists",
+          message: "A staff account with this email already exists.",
+          now: new Date().toISOString(),
+        });
+      }
+
+      const nowIso = new Date().toISOString();
+      const staffId = String(payload.id || `staff-${Date.now()}`).trim();
+      const isActive = payload.isActive !== false && payload.status !== "suspended";
+      const customClaims = { role, staffId, staffActive: isActive };
+
+      const firebaseUid = await adapter.syncFirebaseStaffUser({
+        email,
+        displayName: name,
+        password: plainPassword,
+        disabled: !isActive,
+        claims: customClaims,
+      });
+
+      await adapter.saveStaffCredential(staffId, {
+        staffId,
+        email,
+        passwordHash: hashPasswordScrypt(plainPassword),
+        updatedAt: nowIso,
+      });
+
+      const saved = await adapter.saveStaffDoc(staffId, {
+        id: staffId,
+        firebaseUid,
+        name,
+        email,
+        phone: String(payload.phone || "").trim(),
+        role,
+        permissions: Array.isArray(payload.permissions) ? payload.permissions : [],
+        isActive,
+        status: isActive ? "active" : "suspended",
+        isRemoved: false,
+        createdAt: payload.createdAt || nowIso,
+        updatedAt: nowIso,
+        createdBy: req.superAdminActor?.email || "super_admin",
+      });
+
+      return res.status(201).json({
+        ok: true,
+        staff: sanitizeStaffDoc(saved),
+        now: nowIso,
+      });
+    } catch (err) {
+      return res.status(500).json({
+        ok: false,
+        error: "staff_create_failed",
+        message: err?.message || "Failed to create staff account.",
+        now: new Date().toISOString(),
+      });
+    }
+  });
+
+  // PATCH /api/staff-auth/staff/:staffId — Update Staff Role/Status/Permissions/Password (Super Admin ONLY)
+  staffAuthRouter.patch("/staff/:staffId", requireSuperAdmin, async (req, res) => {
+    try {
+      const adapter = getAdapter();
+      const staffId = String(req.params.staffId || "").trim();
+      const payload = req.body || {};
+      const staffList = await adapter.getAllStaff();
+      const target = staffList.find((s) => s.id === staffId);
+
+      if (!target) {
+        return res.status(404).json({
+          ok: false,
+          error: "staff_not_found",
+          message: `Staff account "${staffId}" not found.`,
+          now: new Date().toISOString(),
+        });
+      }
+
+      const nextRole = payload.role ? String(payload.role).trim().toLowerCase() : String(target.role || "").toLowerCase();
+      if (!ALLOWED_STAFF_ROLES.has(nextRole)) {
+        return res.status(400).json({
+          ok: false,
+          error: "invalid_staff_role",
+          message: `Invalid staff role "${nextRole}".`,
+          now: new Date().toISOString(),
+        });
+      }
+
+      const nextIsActive =
+        typeof payload.isActive === "boolean"
+          ? payload.isActive
+          : payload.status === "suspended"
+          ? false
+          : payload.status === "active"
+          ? true
+          : target.isActive !== false;
+      const nextIsRemoved = typeof payload.isRemoved === "boolean" ? payload.isRemoved : Boolean(target.isRemoved);
+
+      // Prevent locking out the last active Super Admin
+      if (target.role === "super_admin" && (nextRole !== "super_admin" || !nextIsActive || nextIsRemoved)) {
+        const otherActiveSuperAdmins = staffList.filter(
+          (s) => s.id !== target.id && s.role === "super_admin" && isStaffRecordActive(s)
+        );
+        if (otherActiveSuperAdmins.length === 0) {
+          return res.status(409).json({
+            ok: false,
+            error: "cannot_demote_last_super_admin",
+            message: "Cannot suspend, remove, or demote the last active Super Admin.",
+            now: new Date().toISOString(),
+          });
+        }
+      }
+
+      const nowIso = new Date().toISOString();
+      const nextEmail = payload.email ? String(payload.email).trim().toLowerCase() : String(target.email || "").trim().toLowerCase();
+      const nextName = payload.name ? String(payload.name).trim() : target.name;
+      const newPassword = typeof payload.password === "string" && payload.password.trim() ? payload.password.trim() : "";
+
+      if (newPassword && newPassword.length < 6) {
+        return res.status(400).json({
+          ok: false,
+          error: "weak_password",
+          message: "Password must be at least 6 characters.",
+          now: new Date().toISOString(),
+        });
+      }
+
+      const customClaims = { role: nextRole, staffId, staffActive: nextIsActive && !nextIsRemoved };
+      const firebaseUid = await adapter.syncFirebaseStaffUser({
+        uid: target.firebaseUid,
+        email: nextEmail,
+        displayName: nextName,
+        password: newPassword || undefined,
+        disabled: !nextIsActive || nextIsRemoved,
+        claims: customClaims,
+      });
+
+      if (newPassword) {
+        await adapter.saveStaffCredential(staffId, {
+          staffId,
+          email: nextEmail,
+          passwordHash: hashPasswordScrypt(newPassword),
+          updatedAt: nowIso,
+        });
+      }
+
+      // Immediately revoke tokens if suspended, removed, demoted, or password changed
+      if (!nextIsActive || nextIsRemoved || nextRole !== target.role || Boolean(newPassword)) {
+        await adapter.revokeUserRefreshTokens(firebaseUid);
+      }
+
+      const saved = await adapter.saveStaffDoc(staffId, {
+        ...sanitizeStaffDoc(target),
+        id: staffId,
+        firebaseUid,
+        name: nextName,
+        email: nextEmail,
+        phone: payload.phone !== undefined ? String(payload.phone || "").trim() : target.phone,
+        role: nextRole,
+        permissions: Array.isArray(payload.permissions) ? payload.permissions : target.permissions || [],
+        isActive: nextIsActive,
+        status: nextIsActive ? "active" : "suspended",
+        isRemoved: nextIsRemoved,
+        updatedAt: nowIso,
+      });
+
+      return res.status(200).json({
+        ok: true,
+        staff: sanitizeStaffDoc(saved),
+        now: nowIso,
+      });
+    } catch (err) {
+      return res.status(500).json({
+        ok: false,
+        error: "staff_update_failed",
+        message: err?.message || "Failed to update staff account.",
+        now: new Date().toISOString(),
+      });
+    }
+  });
+
+  // DELETE /api/staff-auth/staff/:staffId — Delete Staff & Revoke Tokens (Super Admin ONLY)
+  staffAuthRouter.delete("/staff/:staffId", requireSuperAdmin, async (req, res) => {
+    try {
+      const adapter = getAdapter();
+      const staffId = String(req.params.staffId || "").trim();
+      const staffList = await adapter.getAllStaff();
+      const target = staffList.find((s) => s.id === staffId);
+
+      if (!target) {
+        return res.status(404).json({
+          ok: false,
+          error: "staff_not_found",
+          message: `Staff account "${staffId}" not found.`,
+          now: new Date().toISOString(),
+        });
+      }
+
+      if (target.role === "super_admin") {
+        const otherActiveSuperAdmins = staffList.filter(
+          (s) => s.id !== target.id && s.role === "super_admin" && isStaffRecordActive(s)
+        );
+        if (otherActiveSuperAdmins.length === 0) {
+          return res.status(409).json({
+            ok: false,
+            error: "cannot_delete_last_super_admin",
+            message: "Cannot delete the last active Super Admin account.",
+            now: new Date().toISOString(),
+          });
+        }
+      }
+
+      if (target.firebaseUid) {
+        await adapter.syncFirebaseStaffUser({
+          uid: target.firebaseUid,
+          email: target.email,
+          disabled: true,
+          claims: { role: "revoked", staffId, staffActive: false },
+        }).catch(() => {});
+        await adapter.revokeUserRefreshTokens(target.firebaseUid);
+      }
+
+      await adapter.deleteStaffDoc(staffId, target.email);
+
+      return res.status(200).json({
+        ok: true,
+        deletedId: staffId,
+        now: new Date().toISOString(),
+      });
+    } catch (err) {
+      return res.status(500).json({
+        ok: false,
+        error: "staff_delete_failed",
+        message: err?.message || "Failed to delete staff account.",
+        now: new Date().toISOString(),
+      });
+    }
+  });
+
+  // POST /api/staff-auth/change-password — Authenticated Staff self-change (verifies currentPassword)
+  staffAuthRouter.post("/change-password", verifyAuthenticatedStaff, async (req, res) => {
+    try {
+      const adapter = getAdapter();
+      const currentPassword = String(req.body?.currentPassword || "");
+      const newPassword = String(req.body?.newPassword || "").trim();
+
+      if (newPassword.length < 6) {
+        return res.status(400).json({
+          ok: false,
+          error: "weak_password",
+          message: "New password must be at least 6 characters.",
+          now: new Date().toISOString(),
+        });
+      }
+
+      const staffList = await adapter.getAllStaff();
+      const target = staffList.find((s) => s.id === req.verifiedStaff.id);
+      if (!target || !isStaffRecordActive(target)) {
+        return res.status(403).json({
+          ok: false,
+          error: "staff_inactive_or_suspended",
+          message: "Account is not active.",
+          now: new Date().toISOString(),
+        });
+      }
+
+      const credDoc = await adapter.getStaffCredential(target.id);
+      const storedHash = credDoc?.passwordHash || target.passwordHash || "";
+      const { valid } = verifyStaffPasswordServer(currentPassword, storedHash, target.password);
+      if (!valid) {
+        return res.status(401).json({
+          ok: false,
+          error: "invalid_current_password",
+          message: "Current password is incorrect.",
+          now: new Date().toISOString(),
+        });
+      }
+
+      const nowIso = new Date().toISOString();
+      await adapter.saveStaffCredential(target.id, {
+        staffId: target.id,
+        email: target.email,
+        passwordHash: hashPasswordScrypt(newPassword),
+        updatedAt: nowIso,
+      });
+
+      const firebaseUid = await adapter.syncFirebaseStaffUser({
+        uid: target.firebaseUid || req.verifiedStaff.uid,
+        email: target.email,
+        displayName: target.name,
+        password: newPassword,
+        disabled: false,
+        claims: { role: target.role, staffId: target.id, staffActive: true },
+      });
+      await adapter.revokeUserRefreshTokens(firebaseUid);
+
+      return res.status(200).json({
+        ok: true,
+        message: "Password updated securely.",
+        now: nowIso,
+      });
+    } catch (err) {
+      return res.status(500).json({
+        ok: false,
+        error: "password_change_failed",
+        message: err?.message || "Failed to change password.",
+        now: new Date().toISOString(),
+      });
+    }
+  });
+
+  // POST /api/staff-auth/track-order — Verified guest order lookup (requires BOTH orderId AND matching phone)
+  staffAuthRouter.post("/track-order", async (req, res) => {
+    try {
+      const adapter = getAdapter();
+      const rawOrderId = String(req.body?.orderId || "").trim();
+      const rawPhone = normalizePhoneDigits(req.body?.phone || "");
+      if (!rawOrderId || rawPhone.length < 10) {
+        return res.status(400).json({
+          ok: false,
+          error: "missing_tracking_fields",
+          message: "Both Order ID and a valid mobile number are required.",
+          now: new Date().toISOString(),
+        });
+      }
+
+      const found = await adapter.getOrderById(rawOrderId);
+      if (!found || !found.data) {
+        return res.status(404).json({
+          ok: false,
+          error: "order_not_found",
+          message: "No matching order found for this Tracking ID and mobile number.",
+          now: new Date().toISOString(),
+        });
+      }
+
+      const ord = found.data;
+      const phoneCandidates = [
+        ord.customerMobile,
+        ord.deliveryMobile,
+        ord.customerPhone,
+        ord.phone,
+        ord.mobile,
+      ]
+        .map((p) => normalizePhoneDigits(p))
+        .filter((p) => p.length >= 10);
+
+      const phoneMatched = phoneCandidates.some((p) => p === rawPhone || p.endsWith(rawPhone.slice(-10)));
+      if (!phoneMatched) {
+        return res.status(404).json({
+          ok: false,
+          error: "order_not_found",
+          message: "No matching order found for this Tracking ID and mobile number.",
+          now: new Date().toISOString(),
+        });
+      }
+
+      // Return strictly sanitized tracking view (no internal notes, IPs, or unrelated PII)
+      const sanitizedOrder = {
+        id: ord.id || found.docId,
+        orderStatus: ord.orderStatus || ord.status || "Pending",
+        status: ord.status || ord.orderStatus || "Pending",
+        paymentStatus: ord.paymentStatus || "Unpaid",
+        paymentMethod: ord.paymentMethod || "COD",
+        createdAt: ord.createdAt || null,
+        updatedAt: ord.updatedAt || null,
+        trackingNumber: ord.trackingNumber || null,
+        courierName: ord.courierName || null,
+        courierTrackingUrl: ord.courierTrackingUrl || null,
+        customerName: ord.customerName || "Customer",
+        customerMobile: ord.customerMobile || "",
+        deliveryMobile: ord.deliveryMobile || "",
+        city: ord.city || "",
+        division: ord.division || "",
+        subtotal: Number(ord.subtotal || 0),
+        deliveryFee: Number(ord.deliveryFee || 0),
+        discount: Number(ord.discount || 0),
+        totalAmount: Number(ord.totalAmount || 0),
+        paidAmount: Number(ord.paidAmount || 0),
+        dueAmount: Number(ord.dueAmount || 0),
+        items: Array.isArray(ord.items) ? ord.items : [],
+        statusHistory: Array.isArray(ord.statusHistory) ? ord.statusHistory : [],
+      };
+
+      return res.status(200).json({
+        ok: true,
+        order: sanitizedOrder,
+        now: new Date().toISOString(),
+      });
+    } catch (err) {
+      return res.status(500).json({
+        ok: false,
+        error: "track_order_failed",
+        message: err?.message || "Failed to look up order.",
+        now: new Date().toISOString(),
+      });
+    }
+  });
+
+  app.use("/api/staff-auth", staffAuthRouter);
   app.use("/api/integration", router);
   app.use("/", router);
 
@@ -1363,3 +2190,9 @@ exports.museIntegrationApi = onRequest(
 // Exported for local automated testing without invoking Cloud Functions runtime
 exports._createIntegrationApp = createIntegrationApp;
 exports._hashApiKey = hashApiKey;
+exports._hashPasswordScrypt = hashPasswordScrypt;
+exports._verifyStaffPasswordServer = verifyStaffPasswordServer;
+exports._computeStoreSalesSummary = computeStoreSalesSummary;
+exports._computeInventoryMetrics = computeInventoryMetrics;
+exports._deduplicateOrdersById = deduplicateOrdersById;
+

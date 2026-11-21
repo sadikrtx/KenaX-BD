@@ -28,10 +28,14 @@ export interface StoreSalesSummary {
   validOrdersCount: number;
   cancelledOrdersCount: number;
   spamOrdersCount: number;
+  returnedOrdersCount: number;
+  failedDeliveryOrdersCount: number;
   grossSales: number;
   netProductSales: number;
   deliveryCollected: number;
   discountsGiven: number;
+  cancelledRevenueLoss: number;
+  returnedRevenueLoss: number;
   totalPaidAmount: number;
   pendingCOD: number;
   pendingCODOrdersCount: number;
@@ -85,6 +89,41 @@ export function getCanonicalOrderBucket(order: Order | any): OrderStatusBucket {
 export function isCancelledOrSpamOrder(order: Order | any): boolean {
   const bucket = getCanonicalOrderBucket(order);
   return bucket === 'cancelled' || bucket === 'spam';
+}
+
+export function isNonRevenueOrder(order: Order | any): boolean {
+  const bucket = getCanonicalOrderBucket(order);
+  return bucket === 'cancelled' || bucket === 'spam' || bucket === 'returned' || bucket === 'failed_delivery';
+}
+
+/**
+ * Deduplicate orders by canonical ID (keeping the entry with the most recent `updatedAt` or `createdAt`)
+ * so duplicate imports or concurrent snapshots never double-count revenue or reserved inventory.
+ */
+export function deduplicateOrdersById<T extends { id?: string; updatedAt?: string; createdAt?: string } = Order>(orders: T[] = []): T[] {
+  const map = new Map<string, T>();
+  const anonymous: T[] = [];
+
+  for (const order of orders || []) {
+    if (!order) continue;
+    const id = String(order.id || '').trim();
+    if (!id) {
+      anonymous.push(order);
+      continue;
+    }
+    const existing = map.get(id);
+    if (!existing) {
+      map.set(id, order);
+      continue;
+    }
+    const existingTs = new Date(existing.updatedAt || existing.createdAt || 0).getTime() || 0;
+    const incomingTs = new Date(order.updatedAt || order.createdAt || 0).getTime() || 0;
+    if (incomingTs >= existingTs) {
+      map.set(id, order);
+    }
+  }
+
+  return [...Array.from(map.values()), ...anonymous];
 }
 
 export function resolveOrderSalesChannel(order: Order | any): string {
@@ -204,8 +243,10 @@ export function computeStoreSalesSummary(
   orders: Order[] = [],
   products: Product[] = []
 ): StoreSalesSummary {
+  const uniqueOrders = deduplicateOrdersById(orders);
+
   const ordersByStatus: Record<OrderStatusBucket, number> = {
-    all: orders.length,
+    all: uniqueOrders.length,
     pending: 0,
     follow_up: 0,
     confirmed: 0,
@@ -224,6 +265,8 @@ export function computeStoreSalesSummary(
   let netProductSales = 0;
   let deliveryCollected = 0;
   let discountsGiven = 0;
+  let cancelledRevenueLoss = 0;
+  let returnedRevenueLoss = 0;
   let totalPaidAmount = 0;
   let pendingCOD = 0;
   let pendingCODOrdersCount = 0;
@@ -233,16 +276,23 @@ export function computeStoreSalesSummary(
   const salesByChannel: Record<string, { orders: number; total: number }> = {};
   const sellerMap = new Map<string, TopSellerMetric>();
 
-  for (const order of orders) {
+  for (const order of uniqueOrders) {
     const bucket = getCanonicalOrderBucket(order);
     ordersByStatus[bucket] = (ordersByStatus[bucket] || 0) + 1;
 
+    const total = Number(order.totalAmount ?? (order as any).total ?? 0) || 0;
+
     if (bucket === 'cancelled' || bucket === 'spam') {
+      cancelledRevenueLoss += total;
+      continue;
+    }
+
+    if (bucket === 'returned' || bucket === 'failed_delivery') {
+      returnedRevenueLoss += total;
       continue;
     }
 
     validOrdersCount += 1;
-    const total = Number(order.totalAmount ?? (order as any).total ?? 0) || 0;
     const delivery = Number(order.deliveryCharge ?? 0) || 0;
     const subtotal = getOrderSubtotalAmount(order);
     const discount = Number(order.discountAmount ?? order.discount ?? 0) || 0;
@@ -309,14 +359,18 @@ export function computeStoreSalesSummary(
   const averageOrderValue = validOrdersCount > 0 ? Math.round(grossSales / validOrdersCount) : 0;
 
   return {
-    totalOrders: orders.length,
+    totalOrders: uniqueOrders.length,
     validOrdersCount,
     cancelledOrdersCount: ordersByStatus.cancelled,
     spamOrdersCount: ordersByStatus.spam,
+    returnedOrdersCount: ordersByStatus.returned,
+    failedDeliveryOrdersCount: ordersByStatus.failed_delivery,
     grossSales,
     netProductSales,
     deliveryCollected,
     discountsGiven,
+    cancelledRevenueLoss,
+    returnedRevenueLoss,
     totalPaidAmount,
     pendingCOD,
     pendingCODOrdersCount,
@@ -334,6 +388,7 @@ export function computeInventoryMetrics(
   orders: Order[] = [],
   lowStockThreshold = 5
 ): InventorySkuMetric[] {
+  const uniqueOrders = deduplicateOrdersById(orders);
   const threshold = Math.max(0, Number.isFinite(lowStockThreshold) ? lowStockThreshold : 5);
   const statsMap = new Map<string, { reserved: number; delivered: number; totalSold: number }>();
 
@@ -341,7 +396,7 @@ export function computeInventoryMetrics(
     statsMap.set(p.id, { reserved: 0, delivered: 0, totalSold: 0 });
   }
 
-  for (const order of orders) {
+  for (const order of uniqueOrders) {
     const bucket = getCanonicalOrderBucket(order);
     const isCancelledOrReturned =
       bucket === 'cancelled' || bucket === 'spam' || bucket === 'returned' || bucket === 'failed_delivery';

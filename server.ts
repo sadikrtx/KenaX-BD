@@ -71,6 +71,20 @@ import { getAllOrdersFromStore, saveOrderToStore, updateOrderInStore, getCustome
 import { getAllCustomersFromStore, saveCustomerToStore, findCustomerInStore, deleteCustomerFromStore } from "./src/db/customers.ts";
 import { getAllStaffFromStore, saveStaffToStore, deleteStaffFromStore } from "./src/db/staff.ts";
 import {
+  ALLOWED_STAFF_ROLES,
+  createRequireStaffMiddleware,
+  getStaffCredential,
+  setStaffCredential,
+  deleteStaffCredential,
+  revokeStaffTokens,
+  hashPasswordScrypt,
+  verifyPasswordAgainstHash,
+  signServerStaffToken,
+  sanitizeStaffForResponse,
+  isStaffAccountActive,
+  isScryptHash,
+} from "./src/lib/serverStaffAuth.ts";
+import {
   syncFirestoreWithServerStore,
   writeCustomerToFirestore,
   writeOrderToFirestore,
@@ -257,6 +271,287 @@ async function startServer() {
     if (referer.includes('ais-dev-') || referer.includes('localhost') || referer.includes('127.0.0.1')) return true;
     return false;
   }
+
+  // Zero-trust server-verified staff auth middleware (Bearer token ONLY — never trusts x-staff-* headers)
+  const staffLookupProvider = {
+    getAllStaff: (req?: express.Request) => getAllStaffFromStore(req ? checkIsEnvPreview(req) : false) || [],
+  };
+  const requireAuthenticatedStaff = createRequireStaffMiddleware(staffLookupProvider);
+  const requireSuperAdminStaff = createRequireStaffMiddleware(staffLookupProvider, ['super_admin']);
+
+  // Server-side Staff Authentication & RBAC Management API (/api/staff-auth/*)
+  app.post("/api/staff-auth/login", (req, res) => {
+    try {
+      const isEnvPreview = checkIsEnvPreview(req);
+      const rawIdentifier = String(req.body?.identifier || '').trim().toLowerCase();
+      const plainPassword = String(req.body?.password || '');
+
+      if (!rawIdentifier || !plainPassword) {
+        return res.status(400).json({ ok: false, error: 'missing_credentials', message: 'Please enter both Email/Mobile and Password.' });
+      }
+
+      const cleanDigits = rawIdentifier.replace(/[\s\-\+\(\)]/g, '');
+      const normPhone = normalizePhoneNumber(rawIdentifier);
+      const staffList = getAllStaffFromStore(isEnvPreview) || [];
+
+      const matched = staffList.find((s: any) => {
+        const sEmail = String(s?.email || '').trim().toLowerCase();
+        const sPhoneDigits = String(s?.phone || '').replace(/[\s\-\+\(\)]/g, '').toLowerCase();
+        const sPhoneNorm = normalizePhoneNumber(s?.phone || '');
+        return (
+          (sEmail && sEmail === rawIdentifier) ||
+          (cleanDigits.length >= 7 && sPhoneDigits && sPhoneDigits === cleanDigits) ||
+          (normPhone.length >= 10 && sPhoneNorm && sPhoneNorm === normPhone)
+        );
+      });
+
+      if (!matched) {
+        return res.status(401).json({ ok: false, error: 'invalid_credentials', message: 'Invalid staff credentials. Access denied.' });
+      }
+      if ((matched as any).isRemoved) {
+        return res.status(403).json({ ok: false, error: 'staff_removed', message: 'This staff account has been removed.' });
+      }
+      if (!isStaffAccountActive(matched)) {
+        return res.status(403).json({ ok: false, error: 'staff_suspended', message: 'Your staff account has been suspended by the Super Admin.' });
+      }
+
+      const cred = getStaffCredential(matched.id);
+      const { valid, needsUpgrade } = verifyPasswordAgainstHash(plainPassword, cred?.passwordHash);
+      if (!valid) {
+        return res.status(401).json({ ok: false, error: 'invalid_credentials', message: 'Invalid staff credentials. Access denied.' });
+      }
+
+      const nowIso = new Date().toISOString();
+      let tokenVersion = cred?.tokenVersion || 1;
+      if (needsUpgrade || !cred?.passwordHash || !isScryptHash(cred.passwordHash)) {
+        const updatedCred = setStaffCredential(matched.id, matched.email, hashPasswordScrypt(plainPassword), false);
+        tokenVersion = updatedCred.tokenVersion;
+      }
+
+      const updatedStaff = saveStaffToStore({ ...sanitizeStaffForResponse(matched), lastLogin: nowIso, updatedAt: nowIso }, isEnvPreview);
+      const token = signServerStaffToken(updatedStaff, tokenVersion);
+
+      return res.json({
+        ok: true,
+        token,
+        staff: sanitizeStaffForResponse(updatedStaff),
+        now: nowIso,
+      });
+    } catch (err: any) {
+      return res.status(500).json({ ok: false, error: 'staff_login_failed', message: err?.message || 'Failed to authenticate staff.' });
+    }
+  });
+
+  app.get("/api/staff-auth/me", requireAuthenticatedStaff, (req: any, res) => {
+    const isEnvPreview = checkIsEnvPreview(req);
+    const staffList = getAllStaffFromStore(isEnvPreview) || [];
+    const current = staffList.find((s: any) => s.id === req.verifiedStaff?.staffId);
+    if (!current || !isStaffAccountActive(current)) {
+      return res.status(403).json({ ok: false, error: 'staff_inactive_or_suspended', message: 'Staff account is no longer active.' });
+    }
+    return res.json({ ok: true, staff: sanitizeStaffForResponse(current), now: new Date().toISOString() });
+  });
+
+  app.get("/api/staff-auth/staff", requireSuperAdminStaff, (req, res) => {
+    const isEnvPreview = checkIsEnvPreview(req);
+    const staffList = (getAllStaffFromStore(isEnvPreview) || []).map((s: any) => sanitizeStaffForResponse(s));
+    return res.json({ ok: true, staff: staffList, now: new Date().toISOString() });
+  });
+
+  app.post("/api/staff-auth/staff", requireSuperAdminStaff, (req, res) => {
+    try {
+      const isEnvPreview = checkIsEnvPreview(req);
+      const body = req.body || {};
+      const email = String(body.email || '').trim().toLowerCase();
+      const name = String(body.name || '').trim();
+      const role = String(body.role || 'moderator').trim().toLowerCase();
+      const plainPassword = String(body.password || '').trim();
+      if (!email || !name) {
+        return res.status(400).json({ ok: false, error: 'invalid_staff_payload', message: 'Staff name and email are required.' });
+      }
+      if (!ALLOWED_STAFF_ROLES.has(role)) {
+        return res.status(400).json({ ok: false, error: 'invalid_role', message: 'Invalid staff role.' });
+      }
+      if (plainPassword.length < 6) {
+        return res.status(400).json({ ok: false, error: 'weak_password', message: 'Password must be at least 6 characters.' });
+      }
+      const existing = (getAllStaffFromStore(isEnvPreview) || []).find(
+        (s: any) => String(s?.email || '').trim().toLowerCase() === email && !s.isRemoved
+      );
+      if (existing) {
+        return res.status(409).json({ ok: false, error: 'duplicate_email', message: 'A staff account with this email already exists.' });
+      }
+      const nowIso = new Date().toISOString();
+      const staffId = String(body.id || `staff-${Date.now()}`).trim();
+      const saved = saveStaffToStore(
+        {
+          id: staffId,
+          name,
+          email,
+          phone: String(body.phone || '').trim(),
+          role: role as any,
+          permissions: Array.isArray(body.permissions) ? body.permissions : [],
+          status: 'active',
+          isActive: true,
+          isRemoved: false,
+          password: plainPassword,
+          createdAt: body.createdAt || nowIso,
+          updatedAt: nowIso,
+        },
+        isEnvPreview
+      );
+      writeStaffToFirestore(saved, isEnvPreview).catch(() => {});
+      return res.status(201).json({ ok: true, staff: sanitizeStaffForResponse(saved), now: nowIso });
+    } catch (err: any) {
+      return res.status(500).json({ ok: false, error: 'staff_create_failed', message: err?.message || 'Failed to create staff.' });
+    }
+  });
+
+  app.patch("/api/staff-auth/staff/:staffId", requireSuperAdminStaff, (req, res) => {
+    try {
+      const isEnvPreview = checkIsEnvPreview(req);
+      const staffId = String(req.params.staffId || '').trim();
+      const body = req.body || {};
+      const staffList = getAllStaffFromStore(isEnvPreview) || [];
+      const existing = staffList.find((s: any) => s.id === staffId);
+      if (!existing) {
+        return res.status(404).json({ ok: false, error: 'staff_not_found', message: 'Staff account not found.' });
+      }
+      const nextRole = body.role !== undefined ? String(body.role).trim().toLowerCase() : existing.role;
+      if (!ALLOWED_STAFF_ROLES.has(nextRole)) {
+        return res.status(400).json({ ok: false, error: 'invalid_role', message: 'Invalid staff role.' });
+      }
+      const nextIsActive = body.isActive !== undefined ? Boolean(body.isActive) : body.status !== undefined ? body.status !== 'suspended' : existing.isActive !== false;
+      const nextIsRemoved = body.isRemoved !== undefined ? Boolean(body.isRemoved) : Boolean((existing as any).isRemoved);
+
+      const activeSupers = staffList.filter((s: any) => s.role === 'super_admin' && isStaffAccountActive(s));
+      if (existing.role === 'super_admin' && activeSupers.length <= 1 && (nextRole !== 'super_admin' || !nextIsActive || nextIsRemoved)) {
+        return res.status(400).json({ ok: false, error: 'last_super_admin_protected', message: 'Cannot demote or suspend the last active Super Admin.' });
+      }
+
+      const nowIso = new Date().toISOString();
+      const updated = saveStaffToStore(
+        {
+          ...existing,
+          name: body.name !== undefined ? String(body.name).trim() : existing.name,
+          email: body.email !== undefined ? String(body.email).trim().toLowerCase() : existing.email,
+          phone: body.phone !== undefined ? String(body.phone).trim() : existing.phone,
+          role: nextRole as any,
+          permissions: Array.isArray(body.permissions) ? body.permissions : existing.permissions,
+          isActive: nextIsActive,
+          status: nextIsActive ? 'active' : 'suspended',
+          isRemoved: nextIsRemoved,
+          password: body.password && String(body.password).trim().length >= 6 ? String(body.password).trim() : undefined,
+          updatedAt: nowIso,
+        },
+        isEnvPreview
+      );
+      if (nextRole !== existing.role || !nextIsActive || nextIsRemoved) {
+        revokeStaffTokens(staffId);
+      }
+      writeStaffToFirestore(updated, isEnvPreview).catch(() => {});
+      return res.json({ ok: true, staff: sanitizeStaffForResponse(updated), now: nowIso });
+    } catch (err: any) {
+      return res.status(500).json({ ok: false, error: 'staff_update_failed', message: err?.message || 'Failed to update staff.' });
+    }
+  });
+
+  app.delete("/api/staff-auth/staff/:staffId", requireSuperAdminStaff, (req, res) => {
+    try {
+      const isEnvPreview = checkIsEnvPreview(req);
+      const staffId = String(req.params.staffId || '').trim();
+      deleteStaffFromStore(staffId, isEnvPreview);
+      deleteStaffCredential(staffId);
+      deleteStaffFromFirestore(staffId, isEnvPreview).catch(() => {});
+      return res.json({ ok: true, id: staffId, now: new Date().toISOString() });
+    } catch (err: any) {
+      const status = String(err?.message || '').includes('last active Super Admin') ? 400 : 500;
+      return res.status(status).json({ ok: false, error: 'staff_delete_failed', message: err?.message || 'Failed to delete staff.' });
+    }
+  });
+
+  app.post("/api/staff-auth/change-password", requireAuthenticatedStaff, (req: any, res) => {
+    try {
+      const isEnvPreview = checkIsEnvPreview(req);
+      const currentPassword = String(req.body?.currentPassword || '');
+      const newPassword = String(req.body?.newPassword || '').trim();
+      if (newPassword.length < 6) {
+        return res.status(400).json({ ok: false, error: 'weak_password', message: 'New password must be at least 6 characters.' });
+      }
+      const staffList = getAllStaffFromStore(isEnvPreview) || [];
+      const target = staffList.find((s: any) => s.id === req.verifiedStaff?.staffId);
+      if (!target || !isStaffAccountActive(target)) {
+        return res.status(403).json({ ok: false, error: 'staff_inactive_or_suspended', message: 'Account is not active.' });
+      }
+      const cred = getStaffCredential(target.id);
+      const { valid } = verifyPasswordAgainstHash(currentPassword, cred?.passwordHash);
+      if (!valid) {
+        return res.status(401).json({ ok: false, error: 'invalid_current_password', message: 'Current password is incorrect.' });
+      }
+      const updatedCred = setStaffCredential(target.id, target.email, hashPasswordScrypt(newPassword), true);
+      const token = signServerStaffToken(target, updatedCred.tokenVersion);
+      return res.json({ ok: true, token, message: 'Password updated securely.', now: new Date().toISOString() });
+    } catch (err: any) {
+      return res.status(500).json({ ok: false, error: 'password_change_failed', message: err?.message || 'Failed to change password.' });
+    }
+  });
+
+  app.post("/api/staff-auth/track-order", (req, res) => {
+    try {
+      const isEnvPreview = checkIsEnvPreview(req);
+      const rawOrderId = String(req.body?.orderId || '').trim().toUpperCase();
+      const rawPhone = normalizePhoneNumber(String(req.body?.phone || ''));
+      if (!rawOrderId || rawPhone.length < 10) {
+        return res.status(400).json({ ok: false, error: 'missing_tracking_fields', message: 'Both Order ID and mobile number are required.' });
+      }
+      const orders = getAllOrdersFromStore(isEnvPreview) || [];
+      const noPrefix = rawOrderId.replace(/^KB-/, '');
+      const matched = orders.find((o: any) => {
+        const oid = String(o?.id || '').toUpperCase();
+        const trk = String(o?.trackingNumber || '').toUpperCase();
+        const idHit = oid === rawOrderId || oid === `KB-${rawOrderId}` || oid.replace(/^KB-/, '') === noPrefix || trk === rawOrderId;
+        if (!idHit) return false;
+        const phones = [o.customerMobile, o.deliveryMobile, o.customerPhone, o.phone, o.mobile]
+          .map((p: any) => normalizePhoneNumber(String(p || '')))
+          .filter((p: string) => p.length >= 10);
+        return phones.some((p: string) => p === rawPhone || p.endsWith(rawPhone.slice(-10)));
+      });
+      if (!matched) {
+        return res.status(404).json({ ok: false, error: 'order_not_found', message: 'No matching order found.' });
+      }
+      return res.json({
+        ok: true,
+        order: {
+          id: matched.id,
+          orderStatus: matched.orderStatus || matched.status || 'Pending',
+          status: matched.status || matched.orderStatus || 'Pending',
+          paymentStatus: matched.paymentStatus || 'Unpaid',
+          paymentMethod: matched.paymentMethod || 'COD',
+          createdAt: matched.createdAt || null,
+          updatedAt: matched.updatedAt || null,
+          trackingNumber: matched.trackingNumber || null,
+          courierName: matched.courierName || null,
+          courierTrackingUrl: matched.courierTrackingUrl || null,
+          customerName: matched.customerName || 'Customer',
+          customerMobile: matched.customerMobile || '',
+          deliveryMobile: matched.deliveryMobile || '',
+          city: matched.city || '',
+          division: matched.division || '',
+          subtotal: Number(matched.subtotal || 0),
+          deliveryFee: Number(matched.deliveryFee || 0),
+          discount: Number(matched.discount || 0),
+          totalAmount: Number(matched.totalAmount || 0),
+          paidAmount: Number(matched.paidAmount || 0),
+          dueAmount: Number(matched.dueAmount || 0),
+          items: Array.isArray(matched.items) ? matched.items : [],
+          statusHistory: Array.isArray(matched.statusHistory) ? matched.statusHistory : [],
+        },
+        now: new Date().toISOString(),
+      });
+    } catch (err: any) {
+      return res.status(500).json({ ok: false, error: 'track_order_failed', message: err?.message || 'Failed to track order.' });
+    }
+  });
 
   // Health check endpoint
   app.get("/api/health", (req, res) => {
@@ -855,7 +1150,8 @@ async function startServer() {
     };
   }
 
-  // --- Admin Endpoints ---
+  // --- Admin Endpoints (Protected by Super Admin Bearer Auth) ---
+  app.use("/api/admin/xig-integration", requireSuperAdminStaff);
 
   app.get("/api/admin/xig-integration/config", async (req, res) => {
     try {
@@ -2987,18 +3283,18 @@ async function sendOrderWhatsAppNotification(order: any) {
     }
   });
 
-  // Central Server Staff API (Permanent Cloud Persistence)
-  app.get("/api/staff", (req, res) => {
+  // Central Server Staff API (Protected by Super Admin Bearer Auth — NEVER exposes credentials)
+  app.get("/api/staff", requireSuperAdminStaff, (req, res) => {
     try {
       const isEnvPreview = checkIsEnvPreview(req);
-      const staffList = getAllStaffFromStore(isEnvPreview);
+      const staffList = getAllStaffFromStore(isEnvPreview).map((s: any) => sanitizeStaffForResponse(s));
       res.json(staffList);
     } catch (err: any) {
       res.status(500).json({ error: "Failed to read server staff", details: err.message });
     }
   });
 
-  app.post("/api/staff", (req, res) => {
+  app.post("/api/staff", requireSuperAdminStaff, (req, res) => {
     try {
       const isEnvPreview = checkIsEnvPreview(req);
       const staff = req.body;
@@ -3019,13 +3315,13 @@ async function sendOrderWhatsAppNotification(order: any) {
 
       const saved = saveStaffToStore(staff, isEnvPreview);
       writeStaffToFirestore(saved, isEnvPreview).catch(() => {});
-      res.json({ success: true, staff: saved });
+      res.json({ success: true, staff: sanitizeStaffForResponse(saved) });
     } catch (err: any) {
       res.status(500).json({ error: "Failed to save staff on server", details: err.message });
     }
   });
 
-  app.delete("/api/staff/:id", (req, res) => {
+  app.delete("/api/staff/:id", requireSuperAdminStaff, (req, res) => {
     try {
       const isEnvPreview = checkIsEnvPreview(req);
       const { id } = req.params;
@@ -3033,7 +3329,8 @@ async function sendOrderWhatsAppNotification(order: any) {
       deleteStaffFromFirestore(id, isEnvPreview).catch(() => {});
       res.json({ success: true, id });
     } catch (err: any) {
-      res.status(500).json({ error: "Failed to delete staff on server", details: err.message });
+      const status = String(err?.message || '').includes('last active Super Admin') ? 400 : 500;
+      res.status(status).json({ error: "Failed to delete staff on server", details: err.message });
     }
   });
 
@@ -7622,36 +7919,8 @@ DELIVERY & PRICING:
 
   // =========================================================================
   // MUSE AI CONNECTOR — SUPER ADMIN SETTINGS & PROTECTED INTEGRATION API
+  // Uses server-verified `requireSuperAdminStaff` defined above (ZERO header trust)
   // =========================================================================
-  const requireSuperAdminStaff = (req: express.Request, res: express.Response, next: express.NextFunction) => {
-    const headerRole = String(req.headers["x-staff-role"] || req.body?.actorRole || "").trim().toLowerCase();
-    const headerEmail = String(req.headers["x-staff-email"] || req.body?.actorEmail || "").trim().toLowerCase();
-
-    if (headerRole !== "super_admin") {
-      return res.status(403).json({
-        ok: false,
-        error: "Forbidden: Integration settings are restricted exclusively to Super Admin.",
-      });
-    }
-
-    if (headerEmail) {
-      try {
-        const isEnvPreview = checkIsEnvPreview(req);
-        const staffList = getAllStaffFromStore(isEnvPreview) || [];
-        const matched = staffList.find(
-          (s: any) => String(s?.email || "").trim().toLowerCase() === headerEmail
-        );
-        if (matched && (String(matched.role || "").toLowerCase() !== "super_admin" || matched.status === "suspended" || matched.isRemoved)) {
-          return res.status(403).json({
-            ok: false,
-            error: "Forbidden: Staff account does not have active Super Admin privileges.",
-          });
-        }
-      } catch {}
-    }
-
-    return next();
-  };
 
   // Ensure every /api/integration/* response always returns JSON
   app.use("/api/integration", (_req, res, next) => {
@@ -7668,11 +7937,11 @@ DELIVERY & PRICING:
   app.get("/api/admin/muse-integration/config", requireSuperAdminStaff, handleGetMuseAdminConfig);
 
   // Super Admin ONLY: Generate or Regenerate the store Integration API Key
-  const handleGenerateMuseKey = (req: express.Request, res: express.Response) => {
+  const handleGenerateMuseKey = (req: any, res: express.Response) => {
     try {
       const isEnvPreview = checkIsEnvPreview(req);
-      const actorName = String(req.headers["x-staff-name"] || req.body?.actorName || "Super Admin");
-      const actorEmail = String(req.headers["x-staff-email"] || req.body?.actorEmail || "");
+      const actorName = String(req.verifiedStaff?.name || "Super Admin");
+      const actorEmail = String(req.verifiedStaff?.email || "");
       const { apiKey, view } = generateMuseApiKey(actorName);
 
       try {
@@ -7705,11 +7974,11 @@ DELIVERY & PRICING:
   app.post("/api/admin/muse-integration/generate-key", requireSuperAdminStaff, handleGenerateMuseKey);
 
   // Super Admin ONLY: Update editable Low Stock Threshold (default 5)
-  const handleUpdateMuseSettings = (req: express.Request, res: express.Response) => {
+  const handleUpdateMuseSettings = (req: any, res: express.Response) => {
     try {
       const isEnvPreview = checkIsEnvPreview(req);
-      const actorName = String(req.headers["x-staff-name"] || req.body?.actorName || "Super Admin");
-      const actorEmail = String(req.headers["x-staff-email"] || req.body?.actorEmail || "");
+      const actorName = String(req.verifiedStaff?.name || "Super Admin");
+      const actorEmail = String(req.verifiedStaff?.email || "");
       const rawThreshold = Number(req.body?.lowStockThreshold);
       if (!Number.isFinite(rawThreshold) || rawThreshold < 0 || rawThreshold > 1000) {
         return res.status(400).json({ ok: false, error: "lowStockThreshold must be a valid number between 0 and 1000." });

@@ -24,7 +24,7 @@ import {
   getStaffFromDB,
   mergeCustomersLists,
 } from '../lib/firebase';
-import { INITIAL_STAFF, INITIAL_CUSTOMERS } from '../data/initialSettings';
+import { INITIAL_CUSTOMERS } from '../data/initialSettings';
 import { triggerUserRegistrationWorkflow } from '../lib/emailService';
 import { triggerTelegramUserRegistration } from '../lib/telegramBotService';
 import { triggerWhatsAppEvent } from '../lib/whatsappService';
@@ -86,22 +86,12 @@ export const CustomerAuthModal: React.FC<CustomerAuthModalProps> = ({
       const cleanInput = rawInput.toLowerCase();
       const cleanDigits = normalizePhoneNumber(rawInput);
 
-      // Regular Customer Check (Unified Email OR Mobile Number Login)
-      // Use a timeout protection so customer lookup never hangs if offline
-      const timeoutPromise = new Promise<CustomerRecord[]>((_, reject) =>
-        setTimeout(() => reject(new Error('timeout')), 3000)
-      );
-
+      // Regular Customer Check (Unified Email OR Mobile Number Login) — Cloud Firestore Single Source of Truth
       let allCustomers: CustomerRecord[] = [];
       try {
-        allCustomers = await Promise.race([getCustomersFromDB(), timeoutPromise]);
-      } catch {
-        const cached = localStorage.getItem('kenax_customers_cache');
-        if (cached) {
-          try {
-            allCustomers = JSON.parse(cached);
-          } catch {}
-        }
+        allCustomers = await getCustomersFromDB();
+      } catch (err) {
+        console.warn('[CustomerAuthModal] Customer lookup from Firestore failed:', err);
       }
 
       const existingCustomer = allCustomers.find((c) => {
@@ -194,38 +184,13 @@ export const CustomerAuthModal: React.FC<CustomerAuthModalProps> = ({
     try {
       const cleanEmail = email.trim().toLowerCase();
 
-      // Load customers from DB and Cache (excluding any deleted customer tombstones)
-      const deletedCustomerIds = new Set<string>();
+      // Load customers strictly from Cloud Firestore
+      let allCustomers: CustomerRecord[] = [];
       try {
-        const cachedDeleted = localStorage.getItem('kenax_deleted_customers_cache');
-        if (cachedDeleted) {
-          const parsed = JSON.parse(cachedDeleted);
-          if (Array.isArray(parsed)) parsed.forEach((id) => deletedCustomerIds.add(id));
-        }
-      } catch {}
-
-      let cachedCustomers: CustomerRecord[] = [];
-      try {
-        const cached = localStorage.getItem('kenax_customers_cache');
-        if (cached) {
-          const parsed = JSON.parse(cached);
-          if (Array.isArray(parsed)) cachedCustomers = parsed.filter((c) => c && c.id && !deletedCustomerIds.has(c.id));
-        }
-      } catch {}
-
-      let dbCustomers: CustomerRecord[] = [];
-      try {
-        dbCustomers = await Promise.race([
-          getCustomersFromDB(),
-          new Promise<CustomerRecord[]>((res) => setTimeout(() => res([]), 2000)),
-        ]);
+        allCustomers = await getCustomersFromDB();
       } catch (err) {
-        console.warn('Customer DB fetch during registration check timeout fallback:', err);
+        console.warn('[CustomerAuthModal] Customer DB fetch during registration failed:', err);
       }
-
-      const allCustomers = mergeCustomersLists(cachedCustomers, dbCustomers).filter(
-        (c) => c && c.id && !deletedCustomerIds.has(c.id)
-      );
 
       // 1. Strict Check: Prevent Duplicate Email Registration
       const duplicateEmail = allCustomers.find(
@@ -253,11 +218,10 @@ export const CustomerAuthModal: React.FC<CustomerAuthModalProps> = ({
         return;
       }
 
-      // Inherit existing local cart, wishlist, saved addresses, and order history
+      // Inherit existing visitor cart, wishlist, and saved addresses
       const localCart = (() => { try { const s = localStorage.getItem('kenax_cart'); return s ? JSON.parse(s) : []; } catch { return []; } })();
       const localWishlist = (() => { try { const s = localStorage.getItem('kenax_wishlist'); return s ? JSON.parse(s) : []; } catch { return []; } })();
       const localAddrs = (() => { try { const s = localStorage.getItem('kenax_saved_addresses'); return s ? JSON.parse(s) : []; } catch { return []; } })();
-      const localOrders = (() => { try { const s = localStorage.getItem('kenax_my_orders'); return s ? JSON.parse(s) : []; } catch { return []; } })();
 
       const newCustomer: CustomerRecord = {
         id: `cust-${Date.now()}`,
@@ -269,16 +233,16 @@ export const CustomerAuthModal: React.FC<CustomerAuthModalProps> = ({
         wishlist: localWishlist,
         addresses: localAddrs,
         savedAddresses: localAddrs,
-        orderIds: localOrders,
-        totalOrders: localOrders.length,
+        orderIds: [],
+        totalOrders: 0,
         totalSpent: 0,
         isBlocked: false,
         registeredAt: new Date().toISOString(),
         isV2Account: true,
       };
 
-      // Save customer to DB & Local storage (instant non-blocking)
-      await saveCustomerToDB(newCustomer);
+      // Save new customer registration to Cloud Firestore & local session
+      await saveCustomerToDB(newCustomer, { isNewRegistration: true });
       localStorage.setItem('kenax_current_customer', JSON.stringify(newCustomer));
       
       // Dispatch Welcome Email to Customer & New User Alert to Staff

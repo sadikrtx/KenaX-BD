@@ -35,6 +35,7 @@ import { PluginSlotRenderer } from './PluginSlotRenderer';
 import { SaasDonutChart, SaasBarChart } from './charts/AdminCharts';
 import { fetchStockLogsPage, type PaginatedResult } from '../../lib/firestorePagination';
 import { adminDataCache } from '../../lib/adminCache';
+import { deduplicateOrdersById, getCanonicalOrderBucket, isNonRevenueOrder } from '../../utils/salesAnalytics';
 
 interface AdminInventoryProps {
   products: Product[];
@@ -114,10 +115,12 @@ export const AdminInventory: React.FC<AdminInventoryProps> = ({
     let reservedSum = 0;
     let deliveredSum = 0;
 
-    orders.forEach((order) => {
-      const s = (order.orderStatus || (order as any).status || '').toLowerCase();
-      const isDelivered = s === 'delivered' || s === 'completed';
-      const isCancelledOrReturned = s === 'cancelled' || s === 'rejected' || s === 'fake order' || s === 'returned';
+    const uniqueOrders = deduplicateOrdersById(orders);
+
+    uniqueOrders.forEach((order) => {
+      const bucket = getCanonicalOrderBucket(order);
+      const isDelivered = bucket === 'delivered';
+      const isCancelledOrReturned = isNonRevenueOrder(order);
       const isReserved = !isDelivered && !isCancelledOrReturned;
 
       const items = (order.items && order.items.length > 0)
